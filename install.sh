@@ -1,17 +1,43 @@
 #!/usr/bin/env bash
 # install game_loop into a target project: copy the .game_loop/ payload and wire the Claude Code hooks.
 #
-#   ./install.sh /path/to/your/project
+#   From a clone:   ./install.sh /path/to/your/project
+#   One-liner:      curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
+#
+# The one-liner needs no local clone: the installer fetches the payload tarball from GitHub itself.
+# Override the source with GAME_LOOP_REPO=owner/repo and GAME_LOOP_REF=branch|tag (default: main).
 #
 # Idempotent: re-running updates the scripts and re-merges the hooks without duplicating them. Your
 # state.json, config.json, INVARIANTS.md, verify.yaml and LEDGER.md are NEVER overwritten once they
 # exist — those are yours. Only the bin/ scripts are always refreshed.
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${GAME_LOOP_REPO:-SupposedlySam/game_loop}"
+REF="${GAME_LOOP_REF:-main}"
+
+# Locate the payload. Running from a clone, it sits next to this script. Piped through `curl | bash`
+# there is no checkout — fetch the repo tarball into a temp dir and use that. `--strip-components=1`
+# drops the archive's top folder (game_loop-<ref>/) so we never have to guess its name.
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
+  command -v curl >/dev/null 2>&1 || { echo "curl is required to fetch game_loop." >&2; exit 1; }
+  command -v tar  >/dev/null 2>&1 || { echo "tar is required to unpack game_loop." >&2; exit 1; }
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  echo "Fetching game_loop ($REPO@$REF) from GitHub…"
+  mkdir -p "$TMP/payload"
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
+    | tar -xz -C "$TMP/payload" --strip-components=1
+  SRC="$TMP/payload"
+  if [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
+    echo "Fetched archive did not contain the game_loop payload (looked in $SRC/.game_loop/bin/)." >&2
+    exit 1
+  fi
+fi
+
 TARGET="${1:-}"
 if [ -z "$TARGET" ]; then
-  echo "usage: ./install.sh /path/to/your/project" >&2
+  echo "usage: ./install.sh /path/to/your/project   (or pipe via curl: ... | bash -s -- .)" >&2
   exit 1
 fi
 TARGET="$(cd "$TARGET" && pwd)"

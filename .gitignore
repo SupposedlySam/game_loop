@@ -1,0 +1,14 @@
+# bumper runtime state (dogfooded in this repo)
+.bumper/state.json
+.bumper/log.jsonl
+.bumper/verified.json
+.bumper/probe/
+.bumper/*.pid
+.bumper/.state.*.tmp
+
+# python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

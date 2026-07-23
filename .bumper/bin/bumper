@@ -1,0 +1,774 @@
+#!/usr/bin/env python3
+"""bumper — the guardrails that let a Claude Code session run unattended, safely.
+
+WHAT THIS IS
+    Bumpers on a bowling lane: they don't roll the ball, they keep it out of the gutter. bumper does
+    the same for an autonomous agent. Two forces work together:
+
+      * an AUTONOMY engine (bin/watchdog + the `stopgate` Stop hook) that keeps the session moving
+        so it does not stop the moment there is no human to press "go";
+      * SAFETY bumpers (`claim`, the write guard, the arm->consume primitive) that make running
+        unattended safe rather than reckless.
+
+THE ONE DESIGN RULE (everything follows from it)
+    Enforcement lives in TOOLS and ARTIFACTS, never in instructions to the model. The test for any
+    guard here is: *if the agent ignored every instruction, would this still hold?* If no, it is not
+    enforcement — it is a promise, and a promise is exactly what long sessions and context
+    compaction break.
+
+    That is why the keystone check is always the same shape: **name a real file that exists.** An LLM
+    defeats any check on the mere PRESENCE of a string by writing a plausible string — that is its
+    native skill. "Point at a file on disk" is the one check prose cannot satisfy.
+
+LINEAGE
+    Extracted from two systems that already ran unattended for real: an on-device firmware loop where
+    the expensive gated action was a human button-press, and a trading loop where it was a real-money
+    order. Same arm->gate->consume primitive, same VERIFIED/RULED-OUT/OPEN ledger vocabulary, two
+    unrelated domains. bumper is that pattern with the domain specifics removed. See docs/.
+
+State lives in .bumper/state.json (atomic writes); every event appends to .bumper/log.jsonl.
+Configuration lives in .bumper/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+REPO_ROOT = os.path.dirname(ROOT)
+STATE_F = os.path.join(ROOT, "state.json")
+LOG_F = os.path.join(ROOT, "log.jsonl")
+CONFIG_F = os.path.join(ROOT, "config.json")
+INV_F = os.path.join(ROOT, "INVARIANTS.md")
+
+DEFAULT_CONFIG = {
+    "project_name": os.path.basename(REPO_ROOT) or "project",
+    "read_roots": [],          # extra dirs where `claim --read` may resolve a path
+    "allow_write_roots": [],   # extra dirs the write guard permits (beyond the repo + scratchpad)
+    "deploy_verbs": [],        # extra irreversible verbs the guard blocks anywhere
+    "trans_nudge_every": 12,   # phase transitions between retro nudges
+    "watchdog": {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3},
+}
+
+DEFAULT_STATE = {
+    "version": "1.0",
+    "claim_count": 0,
+    "hardened_count": 0,
+    "trans_since_stepback": 0,
+    "phase": {},
+    "stop_blocks": 0,
+    "mandate": {},
+    "stop_ok": False,
+    "stop_ok_notes": None,
+    "watchdog_rings": 0,
+    "t3_armed": None,
+    "authorized": [],
+}
+
+
+def now():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def config():
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        with open(CONFIG_F) as f:
+            cfg.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+    return cfg
+
+
+def load():
+    """Load state, seeding defaults on first run so a fresh checkout just works."""
+    try:
+        with open(STATE_F) as f:
+            s = dict(DEFAULT_STATE)
+            s.update(json.load(f))
+            return s
+    except (OSError, ValueError):
+        return dict(DEFAULT_STATE)
+
+
+def save(s):
+    # atomic: temp file in the same dir + os.replace() (POSIX-atomic). A crash mid-write must never
+    # truncate state.json and brick `bumper status` — the compaction-recovery path.
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATE_F), prefix=".state.", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(s, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, STATE_F)
+
+
+def logline(rec):
+    with open(LOG_F, "a") as f:
+        f.write(json.dumps({"t": now(), **rec}) + "\n")
+
+
+def die(msg, code=2):
+    print("BUMPER ✗ " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def out(*lines):
+    print("\n".join(lines))
+
+
+def inv_oneline():
+    return ("INV: enforcement-in-tools-not-instructions · READ-a-real-file-before-claiming · "
+            "no-gate-without-an-observed-failure · a-guard-must-never-block-its-own-fix · "
+            "ENCODE-don't-remember · the-outside-view-outranks-my-attachment")
+
+
+# Cost ladder, cheapest -> most expensive. T3 is the only hard-gated rung: it is the human's
+# attention, the one genuinely scarce resource in an unattended run.
+TIER_NAMES = {
+    "T0": "read source (this repo / deps / our own docs)",
+    "T1": "research subagents (free, no human)",
+    "T2": "build & verify (analyze / test / actually run it)",
+    "T3": "the human's attention (a question / decision / a claim that changes their plan)",
+}
+
+
+# ── display ────────────────────────────────────────────────────────────────────────────────────────
+
+def _vw(l):
+    return len(l) + l.count("▸") + l.count("→")
+
+
+def _box(lines):
+    w = max((_vw(l) for l in lines), default=0)
+    top = "╭─" + "─" * (w + 1) + "╮"
+    bot = "╰─" + "─" * (w + 1) + "╯"
+    body = ["│ " + l + " " * (w - _vw(l)) + " │" for l in lines]
+    return "\n".join([top] + body + [bot])
+
+
+def render_banner(s, frm=None):
+    ph = s.get("phase", {})
+    tier = ph.get("tier", "?")
+    arrow = f"{frm} → {tier}" if (frm and frm != tier) else tier
+    doing = ph.get("doing", "")
+    head = f"{ph.get('milestone', '?')} · {doing}".rstrip(" ·") if doing else ph.get("milestone", "?")
+    name = config().get("project_name", "project").upper()
+    return _box([
+        f"{name} ▸ {arrow}",
+        head,
+        f"{TIER_NAMES.get(tier, tier).split(' (')[0]} · claims {s.get('claim_count', 0)} · "
+        f"hardened {s.get('hardened_count', 0)}",
+    ])
+
+
+def retro_nudge(s):
+    n = s.get("trans_since_stepback", 0)
+    every = config().get("trans_nudge_every", 12)
+    if n >= every:
+        return (f"⚠ {n} transitions since the last retro — `bumper stepback --notes ..` is due "
+                "(reflect, harden the chapter's learnings, reset the count).")
+    return None
+
+
+# ── source resolution ───────────────────────────────────────────────────────────────────────────
+
+def resolve_read(p):
+    """Resolve a path as-is, or under any configured read root.
+
+    read_roots are READ roots (dependency source, reference repos). Being resolvable here confers no
+    write permission — writes are blocked separately and mechanically by the write guard, because a
+    rule that lives only here is a rule that lives only in prose.
+    """
+    for cand in [p] + [os.path.join(r, p) for r in config().get("read_roots", [])]:
+        cand = os.path.expanduser(cand)
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            return os.path.realpath(cand)
+    return None
+
+
+# ── verbs ────────────────────────────────────────────────────────────────────────────────────────
+
+def cmd_claim(s, a):
+    """Record an assertion about external reality, with the source that backs it.
+
+    THE gate. Every "X does Y" about a dependency, a harness, or another repo goes through here. It
+    refuses prose and demands a real file. This is the keystone check the module docstring describes:
+    a path, not a paragraph.
+    """
+    if not a.assert_ or not a.read:
+        die("claim needs --assert \"<what you're about to tell the human>\" and --read <path[,path]>.\n"
+            "The read path is the keystone: name the file you ACTUALLY read, not a memory of it.\n"
+            "A claim you cannot source is a guess wearing a citation.")
+    paths = [p.strip() for p in a.read.split(",") if p.strip()]
+    resolved = {p: resolve_read(p) for p in paths}
+    bad = [p for p, r in resolved.items() if r is None]
+    if bad:
+        die("these --read paths don't resolve to a real, non-empty file (under cwd or a read_root): "
+            + ", ".join(bad) + "\nName source you actually read (T0), then claim.")
+    logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
+             "confidence": a.confidence})
+    s["claim_count"] = s.get("claim_count", 0) + 1
+    save(s)
+    msg = ["✓ CLAIM sourced.",
+           f"  assert    : {a.assert_}",
+           f"  read (T0) : {', '.join(paths)}"]
+    if a.confidence:
+        msg.append(f"  confidence: {a.confidence}")
+    out(*msg)
+
+
+def cmd_mandate(s, a):
+    """Bind (or release) an autonomy mandate. While bound, the Stop gate is live.
+
+    Self-binding on purpose. A human says "work autonomously"; that instruction is prose, and prose
+    is what the agent demonstrably ignores. Recording it in state turns it into something a hook can
+    read at the exact moment the session tries to stop early.
+    """
+    m = s.setdefault("mandate", {})
+    if a.clear:
+        if not m.get("active"):
+            out("no mandate was bound; nothing to clear.")
+            return
+        m["active"] = False
+        m["cleared_at"] = now()
+        s["stop_blocks"] = 0
+        save(s)
+        logline({"kind": "mandate_clear", "text": m.get("text"), "notes": a.notes})
+        out("✓ MANDATE released — the Stop gate is inert again.",
+            f"  was  : {m.get('text')}",
+            f"  notes: {a.notes or '(none)'}")
+        return
+    if not a.set:
+        die("mandate needs --set \"<the mandate, in the human's words>\" or --clear [--notes ..]")
+    m.update({"active": True, "text": a.set, "since": now()})
+    s["stop_blocks"] = 0
+    # A new mandate re-arms the watchdog, so it does not inherit an exhausted ring budget from an
+    # earlier session and silently never enforce.
+    s["watchdog_rings"] = 0
+    s["watchdog_last_ring_size"] = 0
+    save(s)
+    logline({"kind": "mandate_set", "text": a.set})
+    out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
+        f"  {a.set}",
+        "→ ending your turn now requires one of:",
+        "    bumper checkpoint --notes \"..\"                report progress and hand back (no question)",
+        "    bumper arm --question .. --read .. --predict .. ask something you genuinely can't derive",
+        "    bumper mandate --clear --notes \"..\"           the work is actually done",
+        "Otherwise the Stop hook sends you back to work. That is the point.")
+
+
+def cmd_checkpoint(s, a):
+    """Declare that this turn-end REPORTS rather than ASKS. Buys exactly one turn-end.
+
+    Cheap on purpose — no evidence required. Reporting progress is legitimate under a mandate; the
+    thing being priced is the INTERRUPTION, not the update. But it is an explicit act, so a stop is
+    always deliberate, and it is consumed, so it cannot silently cover a second one. It does NOT
+    launder a question: the gate checks the closing message first and blocks a question-shaped ending
+    even when checkpointed.
+    """
+    if not a.notes:
+        die("checkpoint needs --notes: one line on what you did and what happens next.")
+    s["stop_ok"] = True
+    s["stop_ok_notes"] = a.notes
+    save(s)
+    out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
+        f"  {a.notes}",
+        "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
+
+
+def cmd_arm(s, a):
+    """Arm ONE T3 spend: one interruption of the human, backed by evidence.
+
+    The keystone is identical to `claim --read`: naming a file that exists is the one check prose
+    cannot satisfy. Here the paths mean the cheap rungs you ALREADY spent that failed to answer the
+    question. If T0 answered it, you don't need T3 — the failure this gate stops is asking a question
+    whose answer was already on disk.
+    """
+    if not a.question or not a.read or not a.predict:
+        die("arm needs --question, --read <path[,path]>, and --predict.\n"
+            "  --question : what you need from the human that you cannot get yourself\n"
+            "  --read     : the source you ALREADY read that failed to answer it (this is the gate)\n"
+            "  --predict  : what you expect them to say — if you can predict it, don't ask\n"
+            "T3 is the most expensive rung on the ladder. Exhaust T0/T1/T2 first.")
+    paths = [p.strip() for p in a.read.split(",") if p.strip()]
+    resolved = {p: resolve_read(p) for p in paths}
+    bad = [p for p, r in resolved.items() if r is None]
+    if bad:
+        die("these --read paths don't resolve to a real, non-empty file: " + ", ".join(bad) +
+            "\nName the source you consulted before deciding to spend the human's attention. "
+            "A question you cannot source is a question you haven't tried to answer.")
+    s["t3_armed"] = {"question": a.question, "read": list(resolved.values()),
+                     "predict": a.predict, "at": now()}
+    s["stop_blocks"] = 0
+    save(s)
+    logline({"kind": "arm", "tier": "T3", "question": a.question,
+             "read": list(resolved.values()), "predict": a.predict})
+    out("✓ ARMED for ONE T3 spend (one interruption).",
+        f"  Q: {a.question}",
+        f"  already read (didn't answer it): {', '.join(paths)}",
+        f"  predict: {a.predict}",
+        "→ the next turn-end passes the gate exactly once, then consumes the arm.",
+        "  If your prediction is confident, reconsider: a predicted answer is not worth a T3.")
+
+
+def cmd_authorize(s, a):
+    """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
+
+    The write guard has no env override, deliberately — an override the agent can set itself is not a
+    guard. But the human IS the escape hatch by design. This mirrors the primitive the whole tool
+    rests on: arm -> gate -> CONSUME. One authorization buys exactly one mutation, and it writes a
+    permanent log entry carrying the human's own words, so every bypass is readable forever.
+
+    Honest about what it is: nothing here can verify the human really said it — the agent is the one
+    typing. It does not make a bypass impossible; it makes a bypass LOUD, NARROW, SINGLE-USE and
+    permanently attributable. That is the most a guard on this side of the keyboard can do.
+    """
+    if not a.path or not a.reason:
+        die("authorize needs --path <prefix> and --reason \"<the human's own words>\".\n"
+            "This is a HUMAN escape hatch, not a convenience. Quote them, don't paraphrase.")
+    real = os.path.realpath(os.path.expanduser(a.path))
+    auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1)}
+    s.setdefault("authorized", []).append(auth)
+    save(s)
+    logline({"kind": "authorize", "path": real, "reason": a.reason, "uses": auth["uses_left"]})
+    out("✓ AUTHORIZED — one mutation outside this repo.",
+        f"  path  : {real}",
+        f"  reason: {a.reason}",
+        f"  uses  : {auth['uses_left']}",
+        "→ the guard will consume this and log the use. It is permanent in log.jsonl.")
+
+
+# ── the Stop gate ────────────────────────────────────────────────────────────────────────────────
+#
+# The gate makes the session stop SAYING the wrong thing at turn-end under a mandate. The watchdog
+# (bin/watchdog) makes it DO the next thing when it goes idle. Together they are the autonomy engine.
+#
+# WHY A GATE AND NOT A REMINDER: the whole thesis is that a rule the agent must REMEMBER is followed
+# only some of the time (long sessions + compaction), while a rule a hook CONSUMES holds every time.
+# CLAUDE.md saying "be autonomous" is the reminder; this is the gate.
+
+# Question-shaped endings aimed at the human. Matched against the agent's OWN last message.
+#
+# Yes, this is string matching — the thing the design rule warns is trivially defeated by writing
+# plausible strings. It is sound HERE, and only here, because of which direction the matching runs: a
+# `claim --read` check is defeated by inventing a convincing path (the model wins by lying). This
+# check is "defeated" by NOT phrasing a question to the human — which IS the compliance. The cheat and
+# the correct behaviour are the same act. Do not copy this pattern to a check where lying wins.
+_ASK_MARKERS = [
+    "want me to", "should i ", "shall i ", "would you like", "do you want",
+    "let me know", "your call", "which would you", "would you rather",
+    "prefer that i", "happy to either", "or should we", "thoughts?",
+]
+
+
+def _asked_the_user(text):
+    if not text:
+        return False
+    t = text.lower()
+    if any(mk in t for mk in _ASK_MARKERS):
+        return True
+    tail = [ln.strip() for ln in t.strip().splitlines() if ln.strip()][-3:]
+    return any(ln.endswith("?") for ln in tail)
+
+
+# Announcing work and then handing back — WORSE than a question, because it is a false statement about
+# the agent's own state: "Continuing now" followed by a turn-end. A question at least honestly hands
+# control back; this claims to be mid-flight WHILE handing control back. Present-tense only: "next up
+# is X" in a report is a plan; "continuing to X now" is a claim to be doing it.
+_CONTINUE_MARKERS = [
+    "continuing to", "continuing with", "continuing now", "i'm continuing", "im continuing",
+    "moving on to", "proceeding to", "proceeding with", "starting on", "starting now",
+    "i'll start", "ill start", "i'll now", "getting to work", "getting started",
+    "i'll continue", "ill continue", "next i'll", "now i'll", "on to the next",
+]
+
+
+def _closing(text, lines=4):
+    """The tail of the message, with quoted spans removed.
+
+    Two things this protects against, both real failure modes:
+      1. SCOPE — the violation is always in the CLOSING, so scanning the whole message flags a
+         mid-prose mention the ending then contradicts.
+      2. QUOTATION — the gate must not fire on the agent QUOTING a marker phrase while writing a
+         postmortem about having said it. A guard that cannot be written about without tripping is a
+         guard that gets switched off, and writing up failures next to the code is this tool's method.
+    """
+    if not text:
+        return ""
+    stripped = re.sub(r'"[^"]*"', " ", text)
+    stripped = re.sub(r"`[^`]*`", " ", stripped)
+    stripped = re.sub(r"\*\*[^*]*\*\*", " ", stripped)
+    tail = [ln for ln in stripped.strip().splitlines() if ln.strip()][-lines:]
+    text_tail = "\n".join(tail).lower()
+    # TENSE — "I said I was continuing and then stopped" is narration ABOUT the failure, not a
+    # commission of it. Drop past-tense sentences before matching. Errs toward letting a retro
+    # through; the circuit breaker catches the rest.
+    keep = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text_tail):
+        if any(p in sentence for p in (" was ", " were ", "said ", " had ", "that was")):
+            continue
+        keep.append(sentence)
+    return " ".join(keep)
+
+
+def _promised_to_continue(text):
+    return any(mk in _closing(text) for mk in _CONTINUE_MARKERS)
+
+
+def _last_assistant_text(payload):
+    """The agent's most recent assistant message.
+
+    Claude Code hands `last_assistant_message` over directly on the Stop payload. The transcript
+    fallback stays because that field is an undocumented internal that may move, and a gate whose
+    input silently vanishes is a gate that silently stops holding.
+
+    Returns (text, why_not). why_not is non-None when we could NOT check — surfaced, never swallowed.
+    """
+    direct = payload.get("last_assistant_message")
+    if isinstance(direct, str) and direct.strip():
+        return direct, None
+    transcript_path = payload.get("transcript_path")
+    if not transcript_path:
+        return None, "no last_assistant_message and no transcript_path in the Stop payload"
+    if not os.path.isfile(transcript_path):
+        return None, f"transcript_path does not exist: {transcript_path}"
+    try:
+        with open(transcript_path) as f:
+            lines = f.readlines()
+    except OSError as e:
+        return None, f"transcript unreadable: {e}"
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("type") != "assistant":
+            continue
+        content = (rec.get("message") or {}).get("content")
+        if isinstance(content, list):
+            parts = [c.get("text", "") for c in content
+                     if isinstance(c, dict) and c.get("type") == "text"]
+            text = "\n".join(p for p in parts if p)
+            if text.strip():
+                return text, None
+        elif isinstance(content, str) and content.strip():
+            return content, None
+    return None, "no assistant text found in transcript"
+
+
+def _stop_verdict(s, payload):
+    """Decide whether this turn-end may proceed. Returns (allow: bool, reason: str, log: dict|None).
+
+    Pure decision, no I/O beyond reading the transcript — so a test suite can drive every branch.
+
+    The pricing is the point. Under a mandate:
+      * REPORTING is cheap    -> `bumper checkpoint --notes ..`   (deliberate + logged, no evidence)
+      * ASKING is expensive   -> `bumper arm --question --read --predict`  (must name what you read)
+      * FINISHING is explicit -> `bumper mandate --clear --notes ..`
+    Blocking every turn-end equally would price a progress report the same as an interruption and
+    decay into a nag that gets ignored. A gate that cries wolf is a gate that gets switched off.
+    """
+    m = s.get("mandate") or {}
+    if not m.get("active"):
+        # With no mandate bound, this gate is INERT. It must never sit between the human and a normal
+        # conversation, or it earns its own removal.
+        return True, "no mandate bound — gate inert", None
+
+    if payload.get("stop_hook_active"):
+        return True, "stop_hook_active — harness is already re-entering; not stacking a block", None
+
+    armed = s.get("t3_armed")
+    text, why_not = _last_assistant_text(payload)
+    asking = _asked_the_user(text)
+
+    if armed:
+        return True, "T3 armed — spending it now", {
+            "kind": "t3_spend", "question": armed.get("question"),
+            "read": armed.get("read"), "predict": armed.get("predict")}
+
+    if asking:
+        return False, (
+            "STOP GATE CLOSED — you are asking the human a question, unarmed, under an autonomy "
+            "mandate.\n\n"
+            f"  MANDATE: {m.get('text')}\n"
+            f"  PHASE  : {(s.get('phase') or {}).get('milestone')} · "
+            f"{(s.get('phase') or {}).get('doing')}\n\n"
+            "Your closing message hands a decision back to the human — the most expensive rung on the\n"
+            "ladder — and you have not shown the cheap rungs couldn't answer it.\n\n"
+            "Do ONE of these:\n"
+            "  1. ANSWER IT YOURSELF AND CARRY ON. Almost always correct. The next step is nearly\n"
+            "     always already written down (your plan / the mandate). Offering a choice between two\n"
+            "     documented options is not a question; it is a decision you are equipped to make.\n"
+            "  2. bumper arm --question \"..\" --read <source that DIDN'T answer it> --predict \"..\"\n"
+            "     Only when the answer is genuinely not derivable — a preference, a priority, a fact\n"
+            "     only the human holds. If you can predict the reply, don't ask.\n"
+            "  3. Rewrite the ending as a statement of what you did and what you are doing next, then\n"
+            "     bumper checkpoint --notes \"..\" to report without asking.\n"
+        ), {"kind": "stop_gate_block", "reason": "asked-the-user", "mandate": m.get("text"),
+            "phase": (s.get("phase") or {}).get("doing")}
+
+    if _promised_to_continue(text):
+        return False, (
+            "STOP GATE CLOSED — you said you are continuing. So continue.\n\n"
+            f"  MANDATE: {m.get('text')}\n"
+            f"  PHASE  : {(s.get('phase') or {}).get('milestone')} · "
+            f"{(s.get('phase') or {}).get('doing')}\n\n"
+            "Your closing message claims you are carrying on with work RIGHT NOW, then ends the turn\n"
+            "and hands control back. Both cannot be true. This is worse than asking a question: a\n"
+            "question honestly gives the human the floor; this claims to be mid-flight while giving\n"
+            "them the floor — dead air until they come back to ask why nothing is happening.\n\n"
+            "Do ONE of these:\n"
+            "  1. ACTUALLY DO IT. You already named the next action. Go run it. This is the answer.\n"
+            "  2. If you are genuinely stopping, rewrite the ending in the past and future tense —\n"
+            "     what you DID and what REMAINS — then bumper checkpoint --notes \"..\".\n"
+            "  3. bumper arm --question .. --read .. --predict ..   if you truly need the human.\n"
+        ), {"kind": "stop_gate_block", "reason": "announced-then-stopped",
+            "mandate": m.get("text"), "phase": (s.get("phase") or {}).get("doing")}
+
+    if s.get("stop_ok"):
+        return True, "checkpoint declared — reporting, not asking", {
+            "kind": "checkpoint", "notes": s.get("stop_ok_notes"),
+            "checked_question": why_not is None, "unchecked_because": why_not}
+
+    # Circuit breaker. A guard that can trap the session forever is worse than the bug it prevents,
+    # and a guard must never block its own fix — including "let me talk to the human about the guard".
+    # Two consecutive blocks and it stands down, LOUDLY (logged), so a gate that keeps giving up is
+    # visible rather than quietly useless.
+    if s.get("stop_blocks", 0) >= 2:
+        return True, "circuit breaker — blocked twice already, standing down", {
+            "kind": "stop_gate_exhausted", "mandate": m.get("text"),
+            "note": "gate stood down after 2 consecutive blocks; it did not hold"}
+
+    return False, (
+        "STOP GATE CLOSED — turn-end under an autonomy mandate, with no checkpoint declared.\n\n"
+        f"  MANDATE: {m.get('text')}\n"
+        f"  PHASE  : {(s.get('phase') or {}).get('milestone')} · "
+        f"{(s.get('phase') or {}).get('doing')}\n\n"
+        + (f"  ⚠ could not inspect your closing message ({why_not}) — running the conservative path;\n"
+           "    it cannot tell a report from a question, so it blocks.\n\n" if why_not else "")
+        + "Ending your turn spends the human's attention. If there is work left in the mandate, go do\n"
+        "it. Otherwise say so explicitly:\n\n"
+        "  bumper checkpoint --notes \"..\"                 report progress and hand back (no question)\n"
+        "  bumper arm --question .. --read .. --predict ..  ask something you genuinely can't derive\n"
+        "  bumper mandate --clear --notes \"..\"            the mandate is actually satisfied\n"
+    ), {"kind": "stop_gate_block", "reason": "no-checkpoint", "mandate": m.get("text"),
+        "unchecked_because": why_not}
+
+
+def cmd_stopgate(s, a):
+    """Stop-hook entrypoint. exit 0 = may stop · exit 2 = blocked, stderr goes back to the model.
+
+    Wired at .claude/settings.json -> hooks.Stop. Exit-2-blocks-and-feeds-stderr is the documented
+    Stop-hook contract: a non-zero exit with stderr is surfaced to the model as feedback.
+    """
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+
+    # Observability over guessing: record the real payload so its schema is READ, not assumed.
+    try:
+        os.makedirs(os.path.join(ROOT, "probe"), exist_ok=True)
+        with open(os.path.join(ROOT, "probe", "stop-payload.json"), "w") as f:
+            json.dump(payload, f, indent=2)
+            f.write("\n")
+    except OSError:
+        pass  # a probe that fails must never take the gate down with it
+
+    allow, reason, rec = _stop_verdict(s, payload)
+    if rec:
+        logline(rec)
+    if allow:
+        if s.get("t3_armed"):
+            s["t3_armed"] = None            # CONSUME: one arm == one interruption
+            s["t3_spend_count"] = s.get("t3_spend_count", 0) + 1
+        s["stop_ok"] = False                # CONSUME: one checkpoint == one turn-end
+        s["stop_ok_notes"] = None
+        s["stop_blocks"] = 0
+        save(s)
+        sys.exit(0)
+    s["stop_blocks"] = s.get("stop_blocks", 0) + 1
+    save(s)
+    print(reason, file=sys.stderr)
+    sys.exit(2)
+
+
+# ── phase / status / notes ───────────────────────────────────────────────────────────────────────
+
+def cmd_trans(s, a):
+    ph = s.setdefault("phase", {})
+    frm = ph.get("tier")
+    if a.tier:
+        ph["tier"] = a.tier
+    if a.milestone:
+        ph["milestone"] = a.milestone
+    if a.doing is not None:
+        ph["doing"] = a.doing
+    ph["since"] = now()
+    # A task-only update (just --doing) refreshes the current task without counting as a phase move,
+    # so naming every task doesn't spam the retro nudge into being ignored.
+    is_move = bool(a.tier or a.milestone)
+    if is_move:
+        s["trans_since_stepback"] = s.get("trans_since_stepback", 0) + 1
+    save(s)
+    logline({"kind": "trans", "from": frm, "to": ph.get("tier"),
+             "milestone": ph.get("milestone"), "doing": ph.get("doing"),
+             "doing_only": not is_move})
+    out(render_banner(s, frm))
+    if is_move and (n := retro_nudge(s)):
+        out(n)
+
+
+def cmd_status(s, a):
+    out(render_banner(s))
+    if (n := retro_nudge(s)):
+        out(n)
+    m = s.get("mandate") or {}
+    mandate_line = f"MANDATE: {m['text']}" if m.get("active") else "MANDATE: none (Stop gate inert)"
+    out("=== bumper (v" + s.get("version", "?") + ") ===",
+        f"claims sourced: {s.get('claim_count', 0)} · hardened: {s.get('hardened_count', 0)}",
+        mandate_line,
+        inv_oneline(),
+        "",
+        "COST LADDER (exhaust cheap rungs first):",
+        *[f"  {k} — {v}" for k, v in TIER_NAMES.items()],
+        "",
+        "→ before asserting external behavior:",
+        '   bumper claim --assert ".." --read <real path> [--confidence ..]',
+        "→ writes outside this repo are blocked by .bumper/bin/guard-writes.sh (PreToolUse)",
+        "knowledge: .bumper/LEDGER.md (reference, NOT a gate) · log: .bumper/log.jsonl")
+
+
+def cmd_note(s, a):
+    if not a.text:
+        die("note needs --text")
+    logline({"kind": "note", "text": a.text})
+    out("noted to log.jsonl.")
+
+
+HARDEN_LADDER = [
+    "1 IMPOSSIBLE — change the code/design so the mistake CANNOT be made (the rule stops existing)",
+    "2 LOUD       — assert/guard AT the point of misuse (fails in 1s, not 3h later, with the reason)",
+    "3 CHECKED    — a build/CI/test check that fails on regression",
+    "4 AUTOMATED  — the tool just does it (no step left to remember)",
+    "5 VISIBLE    — the system REPORTS the fact, so it's read, never guessed",
+    "6 (doc/memo) — LAST resort only; you must say why 1-5 genuinely don't apply",
+]
+
+
+def cmd_harden(s, a):
+    """Record a learning converted into an artifact the system enforces.
+
+    Same keystone as `claim --read`: the ungameable part is naming a REAL file. Prose is a promise to
+    remember, and long sessions + compaction break promises. Docs are the INDEX; the artifact is the
+    ENFORCEMENT.
+    """
+    if not a.learning or not a.artifact or not a.mechanism:
+        die("harden needs --learning, --artifact <path[,path]>, and --mechanism.\n"
+            "A learning you only WRITE DOWN is a promise to remember — sessions break it.\n"
+            "Encode it; take the highest rung that applies:\n  " + "\n  ".join(HARDEN_LADDER))
+    paths = [p.strip() for p in a.artifact.split(",") if p.strip()]
+    resolved = {p: resolve_read(p) for p in paths}
+    bad = [p for p, r in resolved.items() if r is None]
+    if bad:
+        die("these --artifact paths aren't real files: " + ", ".join(bad) + "\n"
+            "Hardening means the artifact EXISTS (code / assert / check / tool), not a plan to write "
+            "one. Write it first, then record it here.")
+    logline({"kind": "harden", "learning": a.learning, "artifact": list(resolved.values()),
+             "mechanism": a.mechanism, "rung": a.rung})
+    s["hardened_count"] = s.get("hardened_count", 0) + 1
+    save(s)
+    out("✓ HARDENED — learning → artifact.",
+        f"  learning : {a.learning}",
+        f"  artifact : {', '.join(paths)}",
+        f"  mechanism: {a.mechanism}",
+        f"  rung     : {a.rung or '(unspecified — which ladder rung?)'}",
+        f"→ enforced by the system now, not by memory. (hardened so far: {s['hardened_count']})")
+
+
+def cmd_stepback(s, a):
+    if not a.notes:
+        die("stepback needs --notes — a REAL retro: what WORKED (repeat it)? where did I DEVIATE? "
+            "did I assert before reading? AND which recurring learning gets ENCODED (harden), not "
+            "written down?")
+    logline({"kind": "stepback", "notes": a.notes})
+    s["trans_since_stepback"] = 0
+    save(s)
+    out("=== STEP-BACK — invariants re-injected ===")
+    try:
+        with open(INV_F) as f:
+            out(f.read().strip())
+    except OSError:
+        out(inv_oneline())
+    out("",
+        "RETRO — ENCODE, DON'T REMEMBER. For EACH learning this chapter, ask the only question that",
+        "matters: **how does the SYSTEM enforce this now?** A learning that lives in prose (a note,",
+        "INVARIANTS.md, CLAUDE.md, memory) is a promise to remember — and long sessions + compaction",
+        "break promises. Climb to the highest rung that applies:",
+        *["  " + r for r in HARDEN_LADDER],
+        "Then record each with a REAL artifact path (the ungameable bit, same as `claim --read`):",
+        '  bumper harden --learning ".." --artifact <real path> --mechanism ".." --rung <1..6>',
+        "Rung 6 (doc/memory) is the LAST resort — if you pick it, say why 1-5 don't apply.")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="bumper")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status")
+
+    cl = sub.add_parser("claim")  # THE gate: assert external reality only with sourced evidence
+    cl.add_argument("--assert", dest="assert_", help="what you're about to tell the human")
+    cl.add_argument("--read", help="real path[,path] to the source that backs it")
+    cl.add_argument("--confidence", help="optional: what would change your mind?")
+
+    n = sub.add_parser("note")
+    n.add_argument("--text")
+
+    hd = sub.add_parser("harden")
+    hd.add_argument("--learning", help="the one-line rule you'd otherwise have to REMEMBER")
+    hd.add_argument("--artifact", help="real path[,path] to the code/assert/check/tool that enforces it")
+    hd.add_argument("--mechanism", help="how it now fails loudly / becomes impossible")
+    hd.add_argument("--rung", help="ladder rung 1..6 (1 IMPOSSIBLE .. 6 doc-last-resort)")
+
+    sb = sub.add_parser("stepback")
+    sb.add_argument("--notes")
+
+    tr = sub.add_parser("trans")
+    tr.add_argument("--tier", help="T0 read · T1 subagents · T2 build · T3 the human's attention")
+    tr.add_argument("--milestone", help="e.g. M2")
+    tr.add_argument("--doing", help="one-line what's happening now")
+
+    az = sub.add_parser("authorize")  # human-authorized, single-use, logged bypass
+    az.add_argument("--path", help="path prefix the human authorized")
+    az.add_argument("--reason", help="the human's own words")
+    az.add_argument("--uses", help="how many mutations (default 1)")
+
+    md = sub.add_parser("mandate")  # bind an autonomy mandate; while bound, the Stop gate is live
+    md.add_argument("--set", help="the mandate, in the human's words")
+    md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
+    md.add_argument("--notes", help="why it's satisfied")
+
+    ar = sub.add_parser("arm")  # arm ONE T3 spend (one interruption of the human)
+    ar.add_argument("--question", help="what you need that you cannot get yourself")
+    ar.add_argument("--read", help="real path[,path] you ALREADY read that didn't answer it")
+    ar.add_argument("--predict", help="what you expect them to say — if you can predict it, don't ask")
+
+    cp = sub.add_parser("checkpoint")  # report + hand back, without asking anything
+    cp.add_argument("--notes", help="what you did and what happens next")
+
+    sub.add_parser("stopgate")  # Stop-hook entrypoint; not for humans
+
+    a = p.parse_args()
+    s = load()
+    {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
+     "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
+     "checkpoint": cmd_checkpoint, "stopgate": cmd_stopgate, "authorize": cmd_authorize}[a.cmd](s, a)
+
+
+if __name__ == "__main__":
+    main()

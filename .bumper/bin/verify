@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""verify — run what a change owes, and record that it was run. `verify --check` refuses if it wasn't.
+
+THE FAILURE THIS PREVENTS: a change with an OUTPUT that is not the thing you edited — a code
+generator, a template, a migration, a schema, a compiled asset — can pass every check you happen to
+run while the real output is broken, because none of those checks compiled/rendered/applied the
+actual artifact. Green signals that answer questions nobody asked.
+
+WHAT THIS IS: a map (`.bumper/verify.yaml`) from "you changed files matching <glob>" to "then these
+commands must pass", plus a record of when each last passed. `verify --check` compares each changed
+file's mtime against the last successful run of its commands and REFUSES if the file is newer. So the
+gate is not "did you remember" — it is "is the evidence newer than the change".
+
+Wired (optionally) into the write guard so `git commit` is refused when owed checks are stale. It is
+entirely opt-in: an empty verify.yaml means nothing owes anything and this is a no-op.
+
+HONEST ABOUT ITS RUNG (CHECKED): it cannot know whether a command is a REAL check or a tautology —
+a test that asserts `1 == 1` would be recorded as verified. That is why the commands in verify.yaml
+should be ones you have confirmed actually fail when the thing is broken. Silence here is a floor,
+not a proof.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from fnmatch import fnmatch
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+REPO = os.path.dirname(ROOT)
+MAP_F = os.path.join(ROOT, "verify.yaml")
+REC_F = os.path.join(ROOT, "verified.json")
+
+
+def load_map():
+    """Tiny YAML subset: '<glob>:' then '  - <command>' lines. No third-party dependency."""
+    out, key = {}, None
+    try:
+        f = open(MAP_F)
+    except OSError:
+        return out
+    with f:
+        for line in f:
+            s = line.rstrip("\n")
+            if not s.strip() or s.lstrip().startswith("#"):
+                continue
+            if not s.startswith(" ") and s.rstrip().endswith(":"):
+                key = s.rstrip()[:-1].strip().strip('"')
+                out[key] = []
+            elif key and s.lstrip().startswith("- "):
+                out[key].append(s.lstrip()[2:].strip().strip('"'))
+    return out
+
+
+def load_rec():
+    try:
+        with open(REC_F) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def changed_files():
+    """Files changed vs HEAD, plus untracked. What a commit would actually carry."""
+    # -uall is load-bearing: plain --porcelain collapses untracked directories to "?? dir/", so we
+    # would read the DIRECTORY's mtime — which does not change when a file inside it is edited.
+    r = subprocess.run(["git", "status", "--porcelain", "-uall"], cwd=REPO,
+                       capture_output=True, text=True)
+    files = []
+    for line in r.stdout.splitlines():
+        p = line[3:].strip()
+        if " -> " in p:
+            p = p.split(" -> ")[1]
+        if p:
+            files.append(p)
+    return files
+
+
+def owed(files, mapping):
+    """{glob: [files]} for every rule a changed file trips."""
+    hits = {}
+    for pattern in mapping:
+        for f in files:
+            if fnmatch(f, pattern) or (pattern.endswith("/**") and f.startswith(pattern[:-3])):
+                hits.setdefault(pattern, []).append(f)
+    return hits
+
+
+def main():
+    mapping = load_map()
+    if not mapping:
+        print("verify: no rules in .bumper/verify.yaml — nothing owes a check.")
+        return 0
+    files = changed_files()
+    hits = owed(files, mapping)
+    check_only = "--check" in sys.argv
+
+    if not hits:
+        print("verify: nothing changed that owes a check.")
+        return 0
+
+    rec = load_rec()
+    stale = []
+    for pattern, changed in hits.items():
+        last = rec.get(pattern, {}).get("at", 0)
+        newest = max((os.path.getmtime(os.path.join(REPO, f))
+                      for f in changed if os.path.exists(os.path.join(REPO, f))), default=0)
+        if newest > last:
+            stale.append((pattern, changed, newest, last))
+
+    if check_only:
+        if not stale:
+            print("verify: every changed file's evidence is newer than the change. ✓")
+            return 0
+        print("VERIFY REFUSED — you changed things whose checks have not run SINCE the change:\n")
+        for pattern, changed, newest, last in stale:
+            print(f"  {pattern}")
+            for f in changed[:4]:
+                print(f"      {f}")
+            print(f"      last verified: {'never' if not last else time.ctime(last)}")
+            for c in mapping[pattern]:
+                print(f"      owes: {c}")
+        print("\nRun:  ./.bumper/bin/verify")
+        print("\nA green check from BEFORE your change is evidence about code that no longer exists.")
+        return 1
+
+    failed = False
+    for pattern, changed, _, _ in stale:
+        for cmd in mapping[pattern]:
+            print(f"\n=== {pattern}: {cmd}")
+            r = subprocess.run(cmd, shell=True, cwd=REPO)
+            if r.returncode != 0:
+                print(f"FAILED: {cmd}")
+                failed = True
+                break
+        else:
+            rec.setdefault(pattern, {})["at"] = time.time()
+            rec[pattern]["cmds"] = mapping[pattern]
+            continue
+        break
+
+    with open(REC_F, "w") as f:
+        json.dump(rec, f, indent=2)
+        f.write("\n")
+    print("\nverify: FAILED" if failed else "\nverify: all owed checks passed ✓")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

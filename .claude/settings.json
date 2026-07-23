@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/guard-writes.sh",
+            "timeout": 10,
+            "statusMessage": "bumper: checking the write stays inside the repo"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/bumper stopgate",
+            "timeout": 10,
+            "statusMessage": "bumper: is this turn-end earned?"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/watchdog",
+            "asyncRewake": true,
+            "timeout": 604800,
+            "statusMessage": "bumper: arming the idle watchdog"
+          }
+        ]
+      }
+    ]
+  }
+}

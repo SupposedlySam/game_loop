@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""watchdog — rings the session back to work when INTENT and REALITY disagree.
+
+THE AUTONOMY ENGINE. The Stop gate (`bumper stopgate`) stops the session SAYING the wrong thing at
+turn-end. It cannot make the session DO the next thing — a blocked turn-end still needs someone to
+press "go". This closes that hole, and it is what lets a run continue with no human present.
+
+THE MISMATCH IT DETECTS:
+  bumper state says : a mandate is bound, work is outstanding, nobody is waiting on the human
+  harness state     : the transcript has not grown in IDLE_SEC — the session is parked
+  => contradiction  => ring (exit 2), which asyncRewake turns into a model wake-up.
+
+HOW IT IS WIRED (.claude/settings.json -> hooks.Stop):
+  * asyncRewake:true + a long timeout — the hook blocks in the BACKGROUND; exit 2 wakes the model,
+    exit 0 is quiet.
+  * one watchdog at a time; the newest supersedes the rest via a pidfile (a superseded one exits 0).
+  * chunked sleep so supersede latency and laptop-sleep drift stay bounded.
+  * a WATCHDOG_TEST_SECONDS escape hatch force-rings quickly to verify the wake path end-to-end.
+
+WHAT IT DOES NOT DO (state the scope of a guard, including what it misses):
+  * It cannot tell "parked" from "thinking hard about one long tool call". Idleness is measured by
+    transcript growth; a long single tool call looks identical to being stopped. Superseding and the
+    ring cap keep that cheap rather than perfectly correct.
+  * It cannot know whether the work it resumes is the RIGHT work. It only knows the session is idle.
+  * If the harness stops honouring asyncRewake, this fails SILENT — nothing here would notice.
+    `bumper status` reports the last ring so the silence is at least visible in the log.
+"""
+import datetime
+import json
+import os
+import sys
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+STATE_F = os.path.join(ROOT, "state.json")
+LOG_F = os.path.join(ROOT, "log.jsonl")
+CONFIG_F = os.path.join(ROOT, "config.json")
+PID_PATH = os.path.join(ROOT, ".watchdog.pid")
+
+
+def _cfg():
+    wd = {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3}
+    try:
+        with open(CONFIG_F) as f:
+            wd.update((json.load(f).get("watchdog") or {}))
+    except (OSError, ValueError):
+        pass
+    return wd
+
+
+_WD = _cfg()
+# Env overrides let the test suite exercise the real DECISION logic in milliseconds.
+IDLE_SEC = int(os.environ.get("WATCHDOG_IDLE_SEC") or _WD["idle_sec"])
+# Let the harness finish flushing the turn to the transcript before taking a baseline. Measuring
+# idleness starting from the busiest instant in the turn guarantees "after > before" and the watchdog
+# would conclude "working, not parked" every time — settle first, THEN measure.
+SETTLE_SEC = int(os.environ.get("WATCHDOG_SETTLE_SEC") or _WD["settle_sec"])
+CHUNK_SEC = 10          # bounds supersede latency
+RING_CAP = int(_WD["ring_cap"])  # consecutive unproductive rings before standing down
+
+
+def load_state():
+    try:
+        with open(STATE_F) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    try:
+        with open(STATE_F, "w") as f:
+            json.dump(st, f, indent=2)
+            f.write("\n")
+    except OSError:
+        pass
+
+
+def logline(rec):
+    try:
+        with open(LOG_F, "a") as f:
+            f.write(json.dumps({"t": datetime.datetime.now().isoformat(timespec="seconds"),
+                                **rec}) + "\n")
+    except OSError:
+        pass
+
+
+def transcript_size(path):
+    try:
+        return os.path.getsize(path)
+    except (OSError, TypeError):
+        return None
+
+
+def quiet(why):
+    """Exit 0: no wake-up — and SAY WHY.
+
+    A watchdog that goes quiet for an unlogged reason is indistinguishable from a watchdog that is
+    broken. Every quiet path records its reasoning so a silent failure is at least readable.
+    """
+    logline({"kind": "watchdog_quiet", "why": why})
+    sys.exit(0)
+
+
+def superseded():
+    try:
+        with open(PID_PATH) as f:
+            return int(f.read().strip()) != os.getpid()
+    except (OSError, ValueError):
+        return False
+
+
+def claim_pidfile():
+    """Newest watchdog wins: kill any previously armed one and record ourselves. False if we can't."""
+    try:
+        with open(PID_PATH) as f:
+            old = int(f.read().strip())
+        if old != os.getpid():
+            os.kill(old, 15)
+    except (OSError, ValueError, ProcessLookupError):
+        pass
+    try:
+        with open(PID_PATH, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except OSError:
+        return False
+
+
+def ring(state, rings):
+    ph = state.get("phase") or {}
+    m = state.get("mandate") or {}
+    logline({"kind": "watchdog_ring", "mandate": m.get("text"),
+             "phase": ph.get("doing"), "ring": rings + 1})
+    st = load_state()
+    st["watchdog_rings"] = rings + 1
+    st["watchdog_last_ring"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    # Remember the transcript size AT the ring. The next check compares against it to answer the only
+    # question the cap cares about: did anything happen because we rang?
+    st["watchdog_last_ring_size"] = transcript_size(state.get("_tpath")) or 0
+    save_state(st)
+
+    print(
+        f"WATCHDOG: {IDLE_SEC}s idle, and your bumper state contradicts your harness state.\n\n"
+        f"  bumper says : mandate bound — {m.get('text')}\n"
+        f"  bumper says : {ph.get('milestone')} · {ph.get('doing')}\n"
+        f"  bumper says : nobody is waiting on you (no T3 armed)\n"
+        f"  harness says: the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
+        "Both cannot be true. You are under an autonomy mandate with work outstanding and you are\n"
+        "doing nothing. The Stop gate can stop you SAYING the wrong thing, but it cannot press go for\n"
+        "you. That is what this is.\n\n"
+        "GO — run the next thing; your plan / the mandate almost always already answers 'what next'.\n"
+        "Do not reply with a plan; run it. If the mandate is genuinely satisfied:\n"
+        "  bumper mandate --clear --notes \"..\"\n"
+        "If you genuinely need the human:  bumper arm --question .. --read .. --predict ..",
+        file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+
+    state = load_state()
+    m = state.get("mandate") or {}
+    tpath = payload.get("transcript_path")
+    state["_tpath"] = tpath
+
+    # No mandate => nothing to keep going. The gate is inert and so is the watchdog: it must never nag
+    # a session that is not under a mandate.
+    if not m.get("active"):
+        quiet("no mandate bound")
+
+    # A live T3 arm means the human is legitimately holding the ball — do not ring.
+    if state.get("t3_armed"):
+        quiet("T3 armed — the human is legitimately holding the ball")
+
+    # RESET BEFORE THE CAP. The cap means CONSECUTIVE UNPRODUCTIVE rings — stand down only if ringing
+    # is not getting the session working. If the transcript has grown since the last ring, the ring
+    # WORKED, so the budget is spent honestly rather than burned once and never recovered.
+    rings = state.get("watchdog_rings", 0)
+    if rings:
+        now_size = transcript_size(tpath) or 0
+        if now_size > state.get("watchdog_last_ring_size", 0):
+            st = load_state()
+            st["watchdog_rings"] = 0
+            save_state(st)
+            logline({"kind": "watchdog_rearm", "was": rings,
+                     "note": "work happened since the last ring; the cap counts CONSECUTIVE "
+                             "unproductive rings, not rings ever"})
+            state["watchdog_rings"] = rings = 0
+
+    if rings >= RING_CAP:
+        logline({"kind": "watchdog_exhausted", "rings": rings,
+                 "note": "stood down after RING_CAP consecutive unproductive rings"})
+        quiet("ring cap reached")
+
+    # newest watchdog wins: supersede any previously armed one.
+    if not claim_pidfile():
+        quiet("cannot write pidfile")
+
+    # Settle before baselining — see SETTLE_SEC. Superseding still wins during the settle.
+    settled = 0
+    while settled < SETTLE_SEC:
+        nap = min(1, SETTLE_SEC - settled)
+        time.sleep(nap)
+        settled += nap
+        if superseded():
+            quiet("superseded during settle")
+    before = transcript_size(tpath)
+
+    test = int(os.environ.get("WATCHDOG_TEST_SECONDS", "0") or 0)
+    delay = test or IDLE_SEC
+
+    slept = 0
+    while slept < delay:
+        nap = min(CHUNK_SEC, delay - slept)
+        time.sleep(nap)
+        slept += nap
+        if superseded():
+            quiet("superseded by a newer watchdog")
+
+    if test:
+        print("WATCHDOG TEST RING: the asyncRewake wake path works end-to-end. Strip "
+              "WATCHDOG_TEST_SECONDS from .claude/settings.json and report it verified.",
+              file=sys.stderr)
+        sys.exit(2)
+
+    # Re-read: the world moved while we slept, and the decision must reflect NOW, not arm-time.
+    state = load_state()
+    m = state.get("mandate") or {}
+    if not m.get("active"):
+        quiet("mandate released while sleeping")
+    if state.get("t3_armed"):
+        quiet("T3 armed while sleeping")
+
+    after = transcript_size(tpath)
+    if before is not None and after is not None and after > before:
+        # Working, not parked. Reset the ring budget so a resumed session is not permanently deaf.
+        st = load_state()
+        if st.get("watchdog_rings"):
+            st["watchdog_rings"] = 0
+            save_state(st)
+        quiet("transcript grew — the session is working, not parked")
+
+    if before is None or after is None:
+        # Could not measure idleness at all. Say so rather than ring on a guess — a watchdog that
+        # fires blind teaches the agent to ignore it.
+        logline({"kind": "watchdog_blind", "transcript_path": tpath,
+                 "note": "could not size the transcript; not ringing on an unmeasured guess"})
+        quiet("cannot measure transcript growth")
+
+    ring(state, state.get("watchdog_rings", 0))
+
+
+if __name__ == "__main__":
+    main()

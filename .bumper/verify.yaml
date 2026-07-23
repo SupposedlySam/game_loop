@@ -1,0 +1,31 @@
+# WHAT MUST BE RUN WHEN A THING CHANGES.
+#
+# The rule this encodes: if a change has an OUTPUT that is not the thing you edited — a code
+# generator, template, migration, schema, serializer, IaC, build script — no verification counts
+# until the output's real consumer has consumed it. A generator's own test comparing emitted text to
+# emitted text, an analyzer configured to exclude the output dir, a downstream that exercises none of
+# the changed code: three green signals, all vacuous, none lying.
+#
+# FORMAT:  <glob>: [<command>, ...]   — commands run from the repo root.
+# A `<glob>/**` entry matches anything under that directory.
+# The commands must FAIL when the change is broken. A command that cannot fail is not a check.
+#
+# This file ships EMPTY: bumper does not know your project. `verify` and the commit gate are no-ops
+# until you add rules. Examples (delete and replace with your own):
+#
+# "src/**":
+#   - "npm test"
+#   - "npm run lint"
+#
+# "schema/*.sql":
+#   - "./scripts/apply-migrations.sh --dry-run"
+
+# bumper_bot dogfoods this: the gates are the product, so a change to any of them owes the test suite.
+".bumper/bin/bumper":
+  - "python3 test/run.py"
+".bumper/bin/watchdog":
+  - "python3 test/run.py"
+".bumper/bin/guard-writes.sh":
+  - "python3 test/run.py"
+".bumper/bin/verify":
+  - "python3 test/run.py"

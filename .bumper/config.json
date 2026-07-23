@@ -1,0 +1,12 @@
+{
+  "project_name": "bumper_bot",
+  "read_roots": [],
+  "allow_write_roots": [],
+  "deploy_verbs": [],
+  "trans_nudge_every": 12,
+  "watchdog": {
+    "idle_sec": 30,
+    "settle_sec": 5,
+    "ring_cap": 3
+  }
+}

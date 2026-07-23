@@ -36,17 +36,21 @@ chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
 echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh, verify, flair.py)"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
+# $2 overrides the source path (defaults to .game_loop/$1) for files that ship from templates/.
 seed() {
-  if [ ! -e "$TARGET/.game_loop/$1" ]; then
-    cp "$SRC/.game_loop/$1" "$TARGET/.game_loop/$1"
-    echo "  seeded  .game_loop/$1"
+  local dest="$1" src="${2:-.game_loop/$1}"
+  if [ ! -e "$TARGET/.game_loop/$dest" ]; then
+    cp "$SRC/$src" "$TARGET/.game_loop/$dest"
+    echo "  seeded  .game_loop/$dest"
   else
-    echo "  kept    .game_loop/$1 (already present)"
+    echo "  kept    .game_loop/$dest (already present)"
   fi
 }
 seed config.json
 seed INVARIANTS.md
-seed verify.yaml
+# verify.yaml ships EMPTY — the target has no test/run.py. This repo's OWN .game_loop/verify.yaml carries
+# game_loop's dogfooding rules, which would (wrongly) fire on the target's first commit; ship the blank one.
+seed verify.yaml templates/verify.yaml
 seed LEDGER.md
 
 # Set project_name in a freshly-seeded config to the target's directory name.

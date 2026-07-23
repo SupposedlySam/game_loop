@@ -21,6 +21,9 @@ if [ "$TARGET" = "$SRC" ]; then
   exit 1
 fi
 
+# Fresh install vs update: decided before we copy anything, so the closing summary can say which.
+if [ -f "$TARGET/.game_loop/bin/game_loop" ]; then FRESH=0; else FRESH=1; fi
+
 echo "Installing game_loop into: $TARGET"
 mkdir -p "$TARGET/.game_loop/bin"
 
@@ -30,6 +33,7 @@ cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
    "$SRC/.game_loop/bin/flair.py" "$TARGET/.game_loop/bin/"
 chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
          "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/verify"
+echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh, verify, flair.py)"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
 seed() {
@@ -128,8 +132,13 @@ EOF
 fi
 
 echo
-echo "Done. Next:"
-echo "  1. Edit  $TARGET/.game_loop/INVARIANTS.md   — your project's north star"
-echo "  2. Edit  $TARGET/.game_loop/config.json     — read_roots / allow_write_roots / deploy_verbs"
-echo "  3. In a Claude Code session in that repo, run:  ./.game_loop/bin/game_loop status"
-echo "  4. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""
+if [ "$FRESH" = 1 ]; then
+  echo "Done — fresh install. Next:"
+  echo "  1. Edit  $TARGET/.game_loop/INVARIANTS.md   — your project's north star"
+  echo "  2. Edit  $TARGET/.game_loop/config.json     — read_roots / allow_write_roots / deploy_verbs"
+  echo "  3. In a Claude Code session in that repo, run:  ./.game_loop/bin/game_loop status"
+  echo "  4. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""
+else
+  echo "Done — updated in place. Scripts refreshed; your config, invariants and notes were kept."
+  echo "  Nothing else to do. Sanity-check with:  ./.game_loop/bin/game_loop status"
+fi

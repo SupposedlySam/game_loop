@@ -8,5 +8,10 @@
     "idle_sec": 30,
     "settle_sec": 5,
     "ring_cap": 3
+  },
+  "flair": {
+    "enabled": true,
+    "support_name": "SupposedlySam",
+    "support_url": "https://buymeacoffee.com/supposedlysam"
   }
 }

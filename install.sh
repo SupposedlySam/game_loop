@@ -24,10 +24,12 @@ fi
 echo "Installing bumper into: $TARGET"
 mkdir -p "$TARGET/.bumper/bin"
 
-# Always refresh the executables — they are the tool.
+# Always refresh the executables — they are the tool. (flair.py is decoration, imported by the others.)
 cp "$SRC/.bumper/bin/bumper" "$SRC/.bumper/bin/watchdog" \
-   "$SRC/.bumper/bin/guard-writes.sh" "$SRC/.bumper/bin/verify" "$TARGET/.bumper/bin/"
-chmod +x "$TARGET/.bumper/bin/"*
+   "$SRC/.bumper/bin/guard-writes.sh" "$SRC/.bumper/bin/verify" \
+   "$SRC/.bumper/bin/flair.py" "$TARGET/.bumper/bin/"
+chmod +x "$TARGET/.bumper/bin/bumper" "$TARGET/.bumper/bin/watchdog" \
+         "$TARGET/.bumper/bin/guard-writes.sh" "$TARGET/.bumper/bin/verify"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
 seed() {

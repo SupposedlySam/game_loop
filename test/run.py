@@ -33,7 +33,7 @@ def make_sandbox():
     proj = tempfile.mkdtemp(prefix="bumper-test-")
     dst = os.path.join(proj, ".bumper")
     os.makedirs(os.path.join(dst, "bin"))
-    for f in ("bumper", "watchdog", "guard-writes.sh", "verify"):
+    for f in ("bumper", "watchdog", "guard-writes.sh", "verify", "flair.py"):
         shutil.copy(os.path.join(SRC_BUMPER, "bin", f), os.path.join(dst, "bin", f))
         os.chmod(os.path.join(dst, "bin", f), 0o755)
     for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
@@ -123,6 +123,21 @@ def main():
         check("blocks a configured deploy verb",
               denied(guard(proj, {"tool_name": "Bash",
                                   "tool_input": {"command": "firebase deploy --only hosting"}})))
+
+        print("flair:")
+        # a claim emits a fun line; a milestone (10 claims) fires the coffee-adjacent shout-out
+        r = bumper(proj, "claim", "--assert", "x", "--read", real)
+        check("a claim prints a flair line", "🎳" in r.stdout)
+        batch = "".join(bumper(proj, "claim", "--assert", "x", "--read", real).stdout
+                        for _ in range(12))            # cross the 10-claim milestone
+        check("10-claim milestone fires exactly once", batch.count("10 claims sourced") == 1)
+        r2 = bumper(proj, "status")
+        check("a fired milestone does not repeat", "10 claims sourced" not in r2.stdout)
+        # flair.enabled=false silences it
+        c = json.load(open(cf)); c["flair"] = {"enabled": False}; json.dump(c, open(cf, "w"))
+        r = bumper(proj, "claim", "--assert", "x", "--read", real)
+        check("flair.enabled=false silences flair", "🎳" not in r.stdout)
+        c = json.load(open(cf)); c.pop("flair", None); json.dump(c, open(cf, "w"))
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

@@ -29,3 +29,5 @@
   - "python3 test/run.py"
 ".bumper/bin/verify":
   - "python3 test/run.py"
+".bumper/bin/flair.py":
+  - "python3 test/run.py"

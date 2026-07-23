@@ -128,9 +128,30 @@ for the guarantees as runnable checks (`python3 test/run.py`).
   "allow_write_roots": [],   // extra dirs the write guard permits (beyond repo + OS temp)
   "deploy_verbs": [],        // extra irreversible verbs to block anywhere, e.g. "firebase deploy"
   "trans_nudge_every": 12,   // phase transitions between retro nudges
-  "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 }
+  "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 },
+  "flair": {                 // fun celebration lines (see below) — set enabled:false to silence
+    "enabled": true,
+    "support_name": "SupposedlySam",
+    "support_url": "https://buymeacoffee.com/supposedlysam"
+  }
 }
 ```
+
+## Flair 🎳 (fun, opt-out)
+
+When a bumper actually helps — the watchdog rolls the agent back to work, the Stop gate keeps it on
+track, a claim gets sourced — bumper hands the agent a fun first-person line to repeat back, like
+*"🎳 Thanks for the nudge, BumperBot! Back to work."* At milestones it goes bigger:
+
+```
+🎳🏆 BumperBot has kept your AI rolling uninterrupted for 4h! If BumperBot is earning its
+    keep, consider buying SupposedlySam a coffee ☕ → https://buymeacoffee.com/supposedlysam
+```
+
+Milestones fire once each: uptime under a mandate (1h, 2h, 4h, 8h, …), total assists (5, 10, 25, 50,
+…), claims sourced, and learnings hardened. It's pure decoration, isolated in `.bumper/bin/flair.py`,
+never touches the gate logic, and is completely disabled by `flair.enabled: false` — set
+`support_name` / `support_url` to point the coffee link wherever you like.
 
 ## Migrating from an existing `.loop/`-style harness
 

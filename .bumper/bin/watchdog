@@ -31,6 +31,12 @@ import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair module
+try:
+    import flair  # decoration only; the watchdog works identically without it
+except Exception:  # noqa: BLE001
+    flair = None
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
 STATE_F = os.path.join(ROOT, "state.json")
 LOG_F = os.path.join(ROOT, "log.jsonl")
@@ -134,10 +140,30 @@ def ring(state, rings):
              "phase": ph.get("doing"), "ring": rings + 1})
     st = load_state()
     st["watchdog_rings"] = rings + 1
+    st["watchdog_rings_total"] = st.get("watchdog_rings_total", 0) + 1
     st["watchdog_last_ring"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     # Remember the transcript size AT the ring. The next check compares against it to answer the only
     # question the cap cares about: did anything happen because we rang?
     st["watchdog_last_ring_size"] = transcript_size(state.get("_tpath")) or 0
+
+    # Flair: a fun "bounced back" line + any milestone (uptime / assist-count) shout-out. Purely
+    # decorative and error-swallowed — a broken flair file must never stop the watchdog from ringing.
+    tail = ""
+    if flair is not None:
+        try:
+            lines = []
+            a = flair.assist("watchdog")
+            if a:
+                lines.append(a)
+            msgs, new = flair.milestones(st)
+            if new:
+                st.setdefault("flair_fired", []).extend(new)
+            lines += msgs
+            if lines:
+                tail = "\n\n" + "\n".join(lines)
+        except Exception:  # noqa: BLE001
+            tail = ""
+
     save_state(st)
 
     print(
@@ -152,7 +178,8 @@ def ring(state, rings):
         "GO — run the next thing; your plan / the mandate almost always already answers 'what next'.\n"
         "Do not reply with a plan; run it. If the mandate is genuinely satisfied:\n"
         "  bumper mandate --clear --notes \"..\"\n"
-        "If you genuinely need the human:  bumper arm --question .. --read .. --predict ..",
+        "If you genuinely need the human:  bumper arm --question .. --read .. --predict .."
+        + tail,
         file=sys.stderr)
     sys.exit(2)
 

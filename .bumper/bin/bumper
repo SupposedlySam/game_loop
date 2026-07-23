@@ -37,6 +37,12 @@ import re
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair module
+try:
+    import flair  # decoration only; bumper works identically without it
+except Exception:  # noqa: BLE001 — a missing/broken flair file must never break a real command
+    flair = None
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
 REPO_ROOT = os.path.dirname(ROOT)
 STATE_F = os.path.join(ROOT, "state.json")
@@ -66,6 +72,9 @@ DEFAULT_STATE = {
     "watchdog_rings": 0,
     "t3_armed": None,
     "authorized": [],
+    "watchdog_rings_total": 0,
+    "stop_gate_blocks_total": 0,
+    "flair_fired": [],
 }
 
 
@@ -116,6 +125,32 @@ def die(msg, code=2):
 
 def out(*lines):
     print("\n".join(lines))
+
+
+def flair_lines(s, event=None):
+    """Return fun assist + milestone lines (and persist any newly-fired milestones). Never raises."""
+    if flair is None:
+        return []
+    lines = []
+    try:
+        if event:
+            line = flair.assist(event)
+            if line:
+                lines.append(line)
+        msgs, new = flair.milestones(s)
+        if new:
+            s.setdefault("flair_fired", []).extend(new)
+            save(s)
+        lines += msgs
+    except Exception:  # noqa: BLE001 — decoration must never break a command
+        return lines
+    return lines
+
+
+def flair_out(s, event=None):
+    """Print flair to stdout after a normal command."""
+    for line in flair_lines(s, event):
+        out(line)
 
 
 def inv_oneline():
@@ -217,6 +252,7 @@ def cmd_claim(s, a):
     if a.confidence:
         msg.append(f"  confidence: {a.confidence}")
     out(*msg)
+    flair_out(s, "claim")
 
 
 def cmd_mandate(s, a):
@@ -239,6 +275,7 @@ def cmd_mandate(s, a):
         out("✓ MANDATE released — the Stop gate is inert again.",
             f"  was  : {m.get('text')}",
             f"  notes: {a.notes or '(none)'}")
+        flair_out(s, "mandate_clear")
         return
     if not a.set:
         die("mandate needs --set \"<the mandate, in the human's words>\" or --clear [--notes ..]")
@@ -257,6 +294,7 @@ def cmd_mandate(s, a):
         "    bumper arm --question .. --read .. --predict .. ask something you genuinely can't derive",
         "    bumper mandate --clear --notes \"..\"           the work is actually done",
         "Otherwise the Stop hook sends you back to work. That is the point.")
+    flair_out(s, "mandate_set")
 
 
 def cmd_checkpoint(s, a):
@@ -276,6 +314,7 @@ def cmd_checkpoint(s, a):
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
         "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
+    flair_out(s, "checkpoint")
 
 
 def cmd_arm(s, a):
@@ -311,6 +350,7 @@ def cmd_arm(s, a):
         f"  predict: {a.predict}",
         "→ the next turn-end passes the gate exactly once, then consumes the arm.",
         "  If your prediction is confident, reconsider: a predicted answer is not worth a T3.")
+    flair_out(s, "arm")
 
 
 def cmd_authorize(s, a):
@@ -593,7 +633,11 @@ def cmd_stopgate(s, a):
         save(s)
         sys.exit(0)
     s["stop_blocks"] = s.get("stop_blocks", 0) + 1
+    s["stop_gate_blocks_total"] = s.get("stop_gate_blocks_total", 0) + 1
+    fl = flair_lines(s, "stopgate")   # a fun "kept me on track" line + any milestone shout-out
     save(s)
+    if fl:
+        reason = reason + "\n\n" + "\n".join(fl)
     print(reason, file=sys.stderr)
     sys.exit(2)
 
@@ -642,6 +686,11 @@ def cmd_status(s, a):
         '   bumper claim --assert ".." --read <real path> [--confidence ..]',
         "→ writes outside this repo are blocked by .bumper/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .bumper/LEDGER.md (reference, NOT a gate) · log: .bumper/log.jsonl")
+    assists = s.get("watchdog_rings_total", 0) + s.get("stop_gate_blocks_total", 0)
+    if assists:
+        out(f"🎳 BumperBot assists so far: {assists} "
+            f"(watchdog {s.get('watchdog_rings_total', 0)} · gate {s.get('stop_gate_blocks_total', 0)})")
+    flair_out(s)  # surface any milestone crossed since last check (e.g. uptime)
 
 
 def cmd_note(s, a):
@@ -689,6 +738,7 @@ def cmd_harden(s, a):
         f"  mechanism: {a.mechanism}",
         f"  rung     : {a.rung or '(unspecified — which ladder rung?)'}",
         f"→ enforced by the system now, not by memory. (hardened so far: {s['hardened_count']})")
+    flair_out(s, "harden")
 
 
 def cmd_stepback(s, a):

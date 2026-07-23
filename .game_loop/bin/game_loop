@@ -153,10 +153,24 @@ def flair_out(s, event=None):
         out(line)
 
 
+_INV_FALLBACK = ("INV: enforcement-in-tools-not-instructions · READ-a-real-file-before-claiming · "
+                 "no-gate-without-an-observed-failure · a-guard-must-never-block-its-own-fix · "
+                 "ENCODE-don't-remember · the-outside-view-outranks-my-attachment")
+
+
 def inv_oneline():
-    return ("INV: enforcement-in-tools-not-instructions · READ-a-real-file-before-claiming · "
-            "no-gate-without-an-observed-failure · a-guard-must-never-block-its-own-fix · "
-            "ENCODE-don't-remember · the-outside-view-outranks-my-attachment")
+    """One-line INV summary for status — sourced from the PROJECT's INVARIANTS.md, not hardcoded.
+
+    Parses the `## INVn — <title>` headings a migrator actually edits, so status reflects their north
+    star the same way stepback does. Falls back to game_loop's built-in creed if the file is missing or
+    has no recognizable headings — status must never break just because INVARIANTS.md was reshaped.
+    """
+    try:
+        with open(INV_F) as f:
+            titles = re.findall(r"^##\s+INV\d+\s*[—–:.-]*\s*(.+?)\s*$", f.read(), re.MULTILINE)
+    except OSError:
+        titles = []
+    return "INV: " + " · ".join(titles) if titles else _INV_FALLBACK
 
 
 # Cost ladder, cheapest -> most expensive. T3 is the only hard-gated rung: it is the human's

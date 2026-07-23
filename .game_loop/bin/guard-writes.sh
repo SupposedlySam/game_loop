@@ -77,6 +77,48 @@ explicitly authorized this path:  game_loop authorize --path <prefix> --reason \
     cmd=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null)
     [ -z "$cmd" ] && exit 0
 
+    # A heredoc/quoted DATA body (e.g. a commit message piped through a here-doc into cat) is DATA, not
+    # executed shell — scanning it for redirects / mutators / deploy verbs false-positives on ordinary
+    # prose. scan_cmd is $cmd with the bodies of here-docs fed to a known DATA SINK (cat/tee) removed.
+    # Bodies of here-docs fed to an interpreter (bash/sh/python/…) are KEPT — they DO run and must stay
+    # guarded. Unknown consumer -> KEPT (fail safe: a false positive, never a silent bypass).
+    #
+    # NB: this Python is embedded in a $(...) here-doc, so it must contain NO backtick, NO dollar-paren,
+    # and NO literal here-doc operator — any of those derails bash's parse of the surrounding $(...).
+    # The here-doc operator is therefore built from chr(60); the consumer is found by a plain word scan.
+    scan_cmd=$(CMD="$cmd" python3 <<'PY'
+import os, re, sys
+cmd = os.environ["CMD"]
+DATA_SINKS = {"cat", "tee"}
+HD = chr(60) + chr(60)                       # the here-doc operator, with no literal one in this file
+opener = re.compile(re.escape(HD) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+lines = cmd.split("\n")
+out, i = [], 0
+while i < len(lines):
+    line = lines[i]
+    out.append(line)
+    found = opener.findall(line)
+    if found:
+        words = re.findall(r"[A-Za-z0-9_./]+", line.split(HD, 1)[0])
+        is_data = (os.path.basename(words[-1]) if words else "") in DATA_SINKS
+        delims = [d for _q, d in found]
+        i += 1
+        di = 0
+        while i < len(lines) and di < len(delims):
+            body = lines[i]
+            if body.strip() == delims[di]:
+                out.append(body)             # keep the delimiter line itself
+                di += 1
+            elif not is_data:
+                out.append(body)             # code here-doc: body executes — keep it in the scan
+            # data here-doc: drop the body line (it is data, not shell)
+            i += 1
+        continue
+    i += 1
+sys.stdout.write("\n".join(out))
+PY
+)
+
     # 0. A commit is when a change becomes real. Refuse one whose owed checks (.game_loop/verify.yaml)
     #    have not run SINCE the change. No-op when verify.yaml is empty, so it costs nothing until you
     #    opt in. --no-verify skips it, out loud and on the record. Gates `git commit` only, not every
@@ -101,7 +143,7 @@ Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record
     fi
 
     # 1. Configured deploy/publish verbs — denied anywhere, no path needed.
-    deploy_hit=$(CONFIG_F="$CONFIG_F" CMD="$cmd" python3 <<'PY'
+    deploy_hit=$(CONFIG_F="$CONFIG_F" CMD="$scan_cmd" python3 <<'PY'
 import json, os, re
 defaults = ["npm publish", "yarn publish", "pnpm publish", "twine upload",
             "gh release create", "docker push"]
@@ -128,11 +170,11 @@ hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)"
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.
-    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" python3 - "$payload" <<'PY'
+    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
 import json, os, re, shlex, sys
 
 payload = json.loads(sys.argv[1])
-cmd = payload.get("tool_input", {}).get("command", "")
+cmd = os.environ.get("SCAN_CMD", "")          # here-doc DATA bodies already stripped (see scan_cmd)
 cwd = payload.get("cwd") or os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
 

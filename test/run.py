@@ -114,6 +114,18 @@ def main():
         check("allows redirecting to a std stream (/dev/stderr)",
               not denied(guard(proj, {"tool_name": "Bash",
                                       "tool_input": {"command": "echo hi >/dev/stderr"}})))
+        # #7: a DATA heredoc body (fed to cat/tee) is not executed shell — redirect-like prose in it
+        # must not be flagged. But a CODE heredoc body (fed to bash/sh/...) DOES run and must stay
+        # guarded, or the fix would open a bypass. Both directions are asserted.
+        check("allows out-of-repo redirect text inside a cat (data) heredoc body",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}})))
+        check("still denies rm of an out-of-repo path inside a bash (code) heredoc body",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash <<'EOF'\nrm -rf ~/outside\nEOF"}})))
+        check("still denies an out-of-repo redirect inside a bash (code) heredoc body",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
         print("write guard (authorize → consume):")
         gl(proj, "authorize", "--path", os.path.expanduser("~/authztest"),

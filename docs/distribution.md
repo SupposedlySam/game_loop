@@ -13,16 +13,17 @@ committing to anything heavier.
 **Pro:** nothing to publish, nothing to maintain, works immediately.
 **Con:** every user needs a local clone; upgrades mean `git pull` + re-run `install.sh`.
 
-## Option A — `curl | bash` one-liner
+## Option A — `curl | bash` one-liner ✅ SHIPPED
 
-A hosted bootstrap script that downloads the payload and installs it, e.g.:
+A hosted bootstrap script that downloads the payload and installs it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
 ```
 
-This needs the installer reworked to *fetch* the `.game_loop/` files (from a release tarball or raw
-GitHub) instead of copying from a local clone. Low effort, big UX win, no package registry.
+`install.sh` now detects when it has no local clone (piped through `curl`) and fetches the repo
+tarball from `codeload.github.com` into a temp dir before installing — no registry, no clone. Point it
+elsewhere with `GAME_LOOP_REPO=owner/repo` / `GAME_LOOP_REF=branch|tag`.
 **Best if:** we want a frictionless human install without publishing to a registry.
 
 ## Option B — Claude Code plugin (the most idiomatic fit)
@@ -63,8 +64,8 @@ Requires a `pyproject.toml`, an entry point, bundling the non-Python files, and 
 
 ## Recommendation
 
-1. **Now:** ship on GitHub as-is and dogfood with real projects (pebble, gents).
-2. **Next, quick win:** add the **Option A** `curl | bash` installer — cheap, removes the clone step.
+1. **Now:** ship on GitHub as-is and dogfood with real projects (pebble, gents). ✅
+2. **Quick win:** the **Option A** `curl | bash` installer. ✅ shipped — `install.sh` self-fetches.
 3. **Then, pick the primary audience:**
    - agent-first / Claude Code users → **Option B (plugin)**;
    - general CLI users → **Option C (PyPI/pipx)**.

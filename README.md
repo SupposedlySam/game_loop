@@ -34,13 +34,21 @@ skill. Pointing at a file on disk is the one check prose can't satisfy.
 
 ## Quickstart for humans
 
+One-liner — no clone needed (the installer fetches the payload from GitHub itself):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
+```
+
+`bash -s -- .` installs into the current directory; pass any path in its place. Or, from a clone:
+
 ```bash
 git clone https://github.com/SupposedlySam/game_loop.git
 cd game_loop
 ./install.sh /path/to/your/project
 ```
 
-`install.sh` copies `.game_loop/` into your project and merges the hooks into its
+Either way, `install.sh` copies `.game_loop/` into your project and merges the hooks into its
 `.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
 
 ```bash

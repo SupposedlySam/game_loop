@@ -149,9 +149,11 @@ track, a claim gets sourced — bumper hands the agent a fun first-person line t
 ```
 
 Milestones fire once each: uptime under a mandate (1h, 2h, 4h, 8h, …), total assists (5, 10, 25, 50,
-…), claims sourced, and learnings hardened. It's pure decoration, isolated in `.bumper/bin/flair.py`,
-never touches the gate logic, and is completely disabled by `flair.enabled: false` — set
-`support_name` / `support_url` to point the coffee link wherever you like.
+…), claims sourced, and learnings hardened. The announcements and the coffee pitch are drawn from
+rotating pools written in a theatrical System-AI / Claptrap register, so the ask never reads like the
+same canned banner twice. It's pure decoration, isolated in `.bumper/bin/flair.py`, never touches the
+gate logic, and is completely disabled by `flair.enabled: false` — set `support_name` / `support_url`
+to point the coffee link wherever you like.
 
 ## Migrating from an existing `.loop/`-style harness
 

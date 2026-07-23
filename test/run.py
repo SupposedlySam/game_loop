@@ -128,11 +128,26 @@ def main():
         # a claim emits a fun line; a milestone (10 claims) fires the coffee-adjacent shout-out
         r = bumper(proj, "claim", "--assert", "x", "--read", real)
         check("a claim prints a flair line", "🎳" in r.stdout)
-        batch = "".join(bumper(proj, "claim", "--assert", "x", "--read", real).stdout
-                        for _ in range(12))            # cross the 10-claim milestone
-        check("10-claim milestone fires exactly once", batch.count("10 claims sourced") == 1)
-        r2 = bumper(proj, "status")
-        check("a fired milestone does not repeat", "10 claims sourced" not in r2.stdout)
+        for _ in range(12):                            # cross the 10-claim milestone
+            bumper(proj, "claim", "--assert", "x", "--read", real)
+
+        def fired(p):
+            return json.load(open(os.path.join(p, ".bumper", "state.json"))).get("flair_fired", [])
+        check("10-claim milestone fires exactly once", fired(proj).count("claim:10") == 1)
+        bumper(proj, "status"); bumper(proj, "status")
+        check("a fired milestone does not repeat", fired(proj).count("claim:10") == 1)
+        # funding CTAs rotate — sample several uptime fires and confirm the wording varies
+        c = json.load(open(cf)); c["mandate"] = None
+        # bind a mandate backdated far enough to cross many uptime milestones at once
+        import datetime as _dt
+        bumper(proj, "mandate", "--set", "long run")
+        st = json.load(open(os.path.join(proj, ".bumper", "state.json")))
+        st["mandate"]["since"] = (_dt.datetime.now() - _dt.timedelta(hours=200)).isoformat(timespec="seconds")
+        json.dump(st, open(os.path.join(proj, ".bumper", "state.json"), "w"))
+        r = bumper(proj, "status")
+        ctas = [ln for ln in r.stdout.splitlines() if "☕" in ln]
+        check("many uptime milestones fire with a coffee CTA", len(ctas) >= 5)
+        check("the funding CTA wording varies (not all identical)", len(set(ctas)) >= 2)
         # flair.enabled=false silences it
         c = json.load(open(cf)); c["flair"] = {"enabled": False}; json.dump(c, open(cf, "w"))
         r = bumper(proj, "claim", "--assert", "x", "--read", real)

@@ -124,7 +124,8 @@ for the guarantees as runnable checks (`python3 test/run.py`).
 ```jsonc
 {
   "project_name": "my_project",
-  "read_roots": [],          // extra dirs where `claim --read` may resolve (deps, reference repos)
+  "read_roots": [],          // extra bases for RELATIVE `claim --read` paths (deps, reference repos);
+                             // absolute paths to real files already pass — the check is existence, not containment
   "allow_write_roots": [],   // extra dirs the write guard permits (beyond repo + OS temp)
   "deploy_verbs": [],        // extra irreversible verbs to block anywhere, e.g. "firebase deploy"
   "trans_nudge_every": 12,   // phase transitions between retro nudges

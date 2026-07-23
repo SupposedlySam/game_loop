@@ -71,8 +71,11 @@ Tune all three knobs in `.game_loop/config.json → watchdog`.
 
 Before asserting anything about external reality (a dependency's behavior, a harness detail, another
 repo), you must name the real file you read: `game_loop claim --assert "X does Y" --read path/to/file`.
-It refuses unless the path resolves to a real, non-empty file — under the repo or a configured
-`read_root`. This is the epistemic guardrail: it stops the confident-but-unsourced assertion, which is
+It refuses unless the path names a real, non-empty file — an absolute path to any real file, or a path
+relative to the repo or a configured `read_root`. The check is *existence*, not containment: citing a
+sibling repo you actually read is exactly the point, so absolute paths outside the repo pass by design
+(`read_roots` only add extra bases for resolving *relative* paths). This is the epistemic guardrail: it
+stops the confident-but-unsourced assertion, which is
 the most expensive mistake an unattended agent makes because nobody is watching to catch it.
 
 ### The write guard — `bin/guard-writes.sh`

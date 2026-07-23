@@ -212,6 +212,10 @@ def retro_nudge(s):
 def resolve_read(p):
     """Resolve a path as-is, or under any configured read root.
 
+    The keystone invariant is that the file EXISTS and was read — not that it is contained in the repo.
+    An absolute path to any real, non-empty file resolves (that is the point: you cite the sibling repo
+    you actually read). read_roots only add extra bases for RELATIVE paths — a convenience, not a fence.
+
     read_roots are READ roots (dependency source, reference repos). Being resolvable here confers no
     write permission — writes are blocked separately and mechanically by the write guard, because a
     rule that lives only here is a rule that lives only in prose.
@@ -240,8 +244,9 @@ def cmd_claim(s, a):
     resolved = {p: resolve_read(p) for p in paths}
     bad = [p for p, r in resolved.items() if r is None]
     if bad:
-        die("these --read paths don't resolve to a real, non-empty file (under cwd or a read_root): "
-            + ", ".join(bad) + "\nName source you actually read (T0), then claim.")
+        die("these --read paths don't resolve to a real, non-empty file "
+            "(absolute, or relative to the repo / a read_root): "
+            + ", ".join(bad) + "\nName a source you actually read (T0), then claim.")
     logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
              "confidence": a.confidence})
     s["claim_count"] = s.get("claim_count", 0) + 1

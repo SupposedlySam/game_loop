@@ -29,8 +29,10 @@ repo — record it with the source that backs it:
 ./.game_loop/bin/game_loop claim --assert "<what you're about to say>" --read <path> --confidence "<what would refute it>"
 ```
 
-It refuses unless `--read` resolves to a real, non-empty file (under the repo or a configured
-`read_root`). A research subagent's citation is not a source: it *found* the file, you must *read* it.
+It refuses unless `--read` names a real, non-empty file — an absolute path to any real file, or a path
+relative to the repo or a configured `read_root`. The keystone is that the file *exists* and you read
+it, not that it lives in this repo: cite the sibling repo you actually opened. A research subagent's
+citation is not a source: it *found* the file, you must *read* it.
 
 ## Working unattended (this is the whole point)
 

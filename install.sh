@@ -81,6 +81,22 @@ def commands(entry):
     return [h.get("command", "") for h in entry.get("hooks", [])]
 
 
+# Warn about pre-existing NON-game_loop hooks on the events we manage. A stray Stop hook (e.g. an old
+# .loop harness) will run ALONGSIDE ours and fight over turn-ends — the merge can't tell them apart, so
+# we surface them and let the human delete the old one by hand. (game_loop's own hooks route through
+# .game_loop/bin/, so that substring is how we recognize ours.)
+foreign = []
+for event in ("Stop", "PreToolUse"):
+    for entry in hooks.get(event, []):
+        for cmd in commands(entry):
+            if cmd and ".game_loop/" not in cmd:
+                foreign.append((event, cmd))
+if foreign:
+    print("  ⚠ found existing non-game_loop hooks on managed events — these run ALONGSIDE game_loop's")
+    print("    and can fight over turn-ends. Delete the stale ones (e.g. an old .loop harness) by hand:")
+    for event, cmd in foreign:
+        print(f"      {event}: {cmd}")
+
 for event, new_entries in block.items():
     arr = hooks.setdefault(event, [])
     existing_cmds = {c for e in arr for c in commands(e)}

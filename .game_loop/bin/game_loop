@@ -185,11 +185,19 @@ def _box(lines):
 
 def render_banner(s, frm=None):
     ph = s.get("phase", {})
-    tier = ph.get("tier", "?")
+    name = config().get("project_name", "project").upper()
+    if not ph.get("tier"):
+        # Fresh state — no phase transition has run yet. A row of "?"s reads as broken to a first-time
+        # integrator, so say plainly that the run just hasn't started rather than that something failed.
+        return _box([
+            f"{name} ▸ T0",
+            "no phase yet — run `game_loop trans` to set one",
+            f"not started · claims {s.get('claim_count', 0)} · hardened {s.get('hardened_count', 0)}",
+        ])
+    tier = ph.get("tier")
     arrow = f"{frm} → {tier}" if (frm and frm != tier) else tier
     doing = ph.get("doing", "")
     head = f"{ph.get('milestone', '?')} · {doing}".rstrip(" ·") if doing else ph.get("milestone", "?")
-    name = config().get("project_name", "project").upper()
     return _box([
         f"{name} ▸ {arrow}",
         head,

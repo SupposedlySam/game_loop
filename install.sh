@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install bumper into a target project: copy the .bumper/ payload and wire the Claude Code hooks.
+# install game_loop into a target project: copy the .game_loop/ payload and wire the Claude Code hooks.
 #
 #   ./install.sh /path/to/your/project
 #
@@ -17,27 +17,27 @@ fi
 TARGET="$(cd "$TARGET" && pwd)"
 
 if [ "$TARGET" = "$SRC" ]; then
-  echo "That is the bumper_bot repo itself — it already dogfoods bumper. Point this at another project." >&2
+  echo "That is the game_loop repo itself — it already dogfoods game_loop. Point this at another project." >&2
   exit 1
 fi
 
-echo "Installing bumper into: $TARGET"
-mkdir -p "$TARGET/.bumper/bin"
+echo "Installing game_loop into: $TARGET"
+mkdir -p "$TARGET/.game_loop/bin"
 
 # Always refresh the executables — they are the tool. (flair.py is decoration, imported by the others.)
-cp "$SRC/.bumper/bin/bumper" "$SRC/.bumper/bin/watchdog" \
-   "$SRC/.bumper/bin/guard-writes.sh" "$SRC/.bumper/bin/verify" \
-   "$SRC/.bumper/bin/flair.py" "$TARGET/.bumper/bin/"
-chmod +x "$TARGET/.bumper/bin/bumper" "$TARGET/.bumper/bin/watchdog" \
-         "$TARGET/.bumper/bin/guard-writes.sh" "$TARGET/.bumper/bin/verify"
+cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
+   "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/verify" \
+   "$SRC/.game_loop/bin/flair.py" "$TARGET/.game_loop/bin/"
+chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
+         "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/verify"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
 seed() {
-  if [ ! -e "$TARGET/.bumper/$1" ]; then
-    cp "$SRC/.bumper/$1" "$TARGET/.bumper/$1"
-    echo "  seeded  .bumper/$1"
+  if [ ! -e "$TARGET/.game_loop/$1" ]; then
+    cp "$SRC/.game_loop/$1" "$TARGET/.game_loop/$1"
+    echo "  seeded  .game_loop/$1"
   else
-    echo "  kept    .bumper/$1 (already present)"
+    echo "  kept    .game_loop/$1 (already present)"
   fi
 }
 seed config.json
@@ -49,13 +49,13 @@ seed LEDGER.md
 python3 - "$TARGET" <<'PY'
 import json, os, sys
 target = sys.argv[1]
-cf = os.path.join(target, ".bumper", "config.json")
+cf = os.path.join(target, ".game_loop", "config.json")
 try:
     with open(cf) as f:
         c = json.load(f)
 except (OSError, ValueError):
     sys.exit(0)
-if c.get("project_name") in (None, "", "bumper_bot"):
+if c.get("project_name") in (None, "", "game_loop"):
     c["project_name"] = os.path.basename(target)
     with open(cf, "w") as f:
         json.dump(c, f, indent=2)
@@ -98,7 +98,7 @@ print("  merged  .claude/settings.json (PreToolUse guard + Stop gate + watchdog)
 PY
 
 # Ignore the runtime files.
-GI="$TARGET/.bumper/.gitignore"
+GI="$TARGET/.game_loop/.gitignore"
 if [ ! -e "$GI" ]; then
   cat > "$GI" <<'EOF'
 state.json
@@ -108,12 +108,12 @@ probe/
 *.pid
 .state.*.tmp
 EOF
-  echo "  wrote   .bumper/.gitignore"
+  echo "  wrote   .game_loop/.gitignore"
 fi
 
 echo
 echo "Done. Next:"
-echo "  1. Edit  $TARGET/.bumper/INVARIANTS.md   — your project's north star"
-echo "  2. Edit  $TARGET/.bumper/config.json     — read_roots / allow_write_roots / deploy_verbs"
-echo "  3. In a Claude Code session in that repo, run:  ./.bumper/bin/bumper status"
-echo "  4. To run unattended: ./.bumper/bin/bumper mandate --set \"<what to work on>\""
+echo "  1. Edit  $TARGET/.game_loop/INVARIANTS.md   — your project's north star"
+echo "  2. Edit  $TARGET/.game_loop/config.json     — read_roots / allow_write_roots / deploy_verbs"
+echo "  3. In a Claude Code session in that repo, run:  ./.game_loop/bin/game_loop status"
+echo "  4. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""

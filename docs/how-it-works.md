@@ -1,10 +1,10 @@
-# How bumper works
+# How game_loop works
 
-bumper is bowling bumpers for a Claude Code session: it doesn't roll the ball, it keeps it out of the
-gutter. Two forces work together.
+game_loop is a dungeon-crawl loop for a Claude Code session: it doesn't play the game for the agent,
+it keeps the run alive and stops it from wiping. Two forces work together.
 
-- **The autonomy engine** keeps the session moving when there is no human to press "go".
-- **The safety bumpers** make running unattended *safe* rather than reckless.
+- **The autonomy engine** keeps the session moving when there is no human to press "continue".
+- **The guardrails** make running unattended *safe* rather than reckless.
 
 Everything is enforced through Claude Code **hooks** — never through instructions to the model. The
 one design rule, from which all of it follows:
@@ -22,17 +22,17 @@ skill. Pointing at a file on disk is the one check prose cannot satisfy.
 
 Two hooks on the `Stop` event, which fires when the session is about to end its turn.
 
-### 1. The Stop gate — `bumper stopgate`
+### 1. The Stop gate — `game_loop stopgate`
 
-When a **mandate** is bound (`bumper mandate --set "..."`), the gate inspects the agent's closing
+When a **mandate** is bound (`game_loop mandate --set "..."`), the gate inspects the agent's closing
 message and blocks turn-ends that shouldn't happen yet:
 
-- **Asking the human a question** while unarmed → blocked. Answer it yourself, or `bumper arm` a real
+- **Asking the human a question** while unarmed → blocked. Answer it yourself, or `game_loop arm` a real
   question backed by a file you already read that didn't answer it.
 - **Announcing "continuing now" and then stopping** → blocked. That is a false statement about the
   agent's own state; either actually continue, or report honestly in past/future tense.
-- **Any bare turn-end** under a mandate → blocked unless you `bumper checkpoint --notes "..."`
-  (report and hand back, no question) or `bumper mandate --clear` (the work is done).
+- **Any bare turn-end** under a mandate → blocked unless you `game_loop checkpoint --notes "..."`
+  (report and hand back, no question) or `game_loop mandate --clear` (the work is done).
 
 Exit 2 from a Stop hook feeds stderr back to the model as feedback, so a blocked turn-end lands as an
 instruction to keep working.
@@ -44,7 +44,7 @@ With **no mandate bound the gate is inert** — it never sits between a human an
 The gate stops the session *saying* the wrong thing. It cannot make it *do* the next thing — a blocked
 turn-end still needs someone to press go. The watchdog is that someone.
 
-It arms as a **backgrounded** Stop hook (`asyncRewake: true`, long timeout). When bumper state says
+It arms as a **backgrounded** Stop hook (`asyncRewake: true`, long timeout). When game_loop state says
 *(mandate bound, work outstanding, nobody waiting on the human)* but the harness says *(the transcript
 hasn't grown in `idle_sec` seconds — the session is parked)*, that is a contradiction. It rings
 (exit 2), and asyncRewake turns the ring into a model wake-up. The session picks the work back up.
@@ -59,20 +59,20 @@ Guardrails on the watchdog itself:
   worked.
 - **Fails visibly** — every quiet exit logs *why*, so a broken watchdog is distinguishable from a
   correctly-silent one. If the harness ever stops honouring asyncRewake, the last-ring record in
-  `bumper status` is where the silence shows.
+  `game_loop status` is where the silence shows.
 
-Tune all three knobs in `.bumper/config.json → watchdog`.
+Tune all three knobs in `.game_loop/config.json → watchdog`.
 
 ---
 
-## The safety bumpers
+## The guardrails
 
-### The claim gate — `bumper claim`
+### The claim gate — `game_loop claim`
 
 Before asserting anything about external reality (a dependency's behavior, a harness detail, another
-repo), you must name the real file you read: `bumper claim --assert "X does Y" --read path/to/file`.
+repo), you must name the real file you read: `game_loop claim --assert "X does Y" --read path/to/file`.
 It refuses unless the path resolves to a real, non-empty file — under the repo or a configured
-`read_root`. This is the epistemic bumper: it stops the confident-but-unsourced assertion, which is
+`read_root`. This is the epistemic guardrail: it stops the confident-but-unsourced assertion, which is
 the most expensive mistake an unattended agent makes because nobody is watching to catch it.
 
 ### The write guard — `bin/guard-writes.sh`
@@ -86,26 +86,26 @@ deploy/publish verbs anywhere. It states what it does *not* catch (MCP tools, in
 paths built from shell variables) right in the file — a guard that overstates its reach is worse than
 one that states its limits.
 
-The only way past it is the human, single-use and logged: `bumper authorize --path <prefix> --reason
+The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
 "<their words>"`.
 
 ### The arm → gate → consume primitive
 
 The shape shared by every expensive action. You **arm** one spend, a hook **gates** on it, and using
-it **consumes** the arm — so one authorization buys exactly one action, always logged. `bumper arm`
-(one interruption of the human) and `bumper authorize` (one out-of-repo write) are both this.
+it **consumes** the arm — so one authorization buys exactly one action, always logged. `game_loop arm`
+(one interruption of the human) and `game_loop authorize` (one out-of-repo write) are both this.
 
 ### verify — `bin/verify`
 
-Optional. A map (`.bumper/verify.yaml`) from "you changed files matching `<glob>`" to "these commands
+Optional. A map (`.game_loop/verify.yaml`) from "you changed files matching `<glob>`" to "these commands
 must pass", plus a record of when each last passed. `verify --check` refuses if a changed file is
 newer than the last successful run of its checks — the gate is "is the evidence newer than the
 change", not "did you remember". The write guard calls it before `git commit`. Ships empty (a no-op)
 until you add rules.
 
-### harden — `bumper harden`
+### harden — `game_loop harden`
 
-The meta-bumper. When you learn something, you don't write it down — you `harden` it into an artifact
+The meta-guard. When you learn something, you don't write it down — you `harden` it into an artifact
 the system enforces, and the command refuses unless you name the real file that now enforces it. Docs
 are the index; the artifact is the enforcement. Take the highest rung that applies (IMPOSSIBLE > LOUD
 > CHECKED > AUTOMATED > VISIBLE > doc-of-last-resort).
@@ -114,20 +114,20 @@ are the index; the artifact is the enforcement. Take the highest rung that appli
 
 ## The files
 
-Everything lives in `.bumper/`:
+Everything lives in `.game_loop/`:
 
 | File | What it is |
 |---|---|
-| `bin/bumper` | the CLI (all the verbs) |
+| `bin/game_loop` | the CLI (all the verbs) |
 | `bin/watchdog` | the autonomy engine (Stop hook) |
 | `bin/guard-writes.sh` | the write guard (PreToolUse hook) |
 | `bin/verify` | the changed-file → owed-checks gate |
 | `config.json` | read roots, allow-write roots, deploy verbs, watchdog knobs |
 | `state.json` | counters, phase, mandate, arms (atomic writes; git-ignored) |
 | `log.jsonl` | append-only event log (git-ignored) |
-| `INVARIANTS.md` | your north star; re-injected by `bumper stepback` |
+| `INVARIANTS.md` | your north star; re-injected by `game_loop stepback` |
 | `verify.yaml` | the change → checks map |
 | `LEDGER.md` | VERIFIED / RULED-OUT / OPEN reference (not a gate) |
 
-Run `bumper status` first thing every session — it rehydrates the cost ladder, invariants, counters,
+Run `game_loop status` first thing every session — it rehydrates the cost ladder, invariants, counters,
 and current phase from disk, which is how the loop survives context compaction.

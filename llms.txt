@@ -1,8 +1,8 @@
-# bumper_bot
+# game_loop
 
 > Guardrails that let a Claude Code session run unattended, safely. Enforced entirely through Claude
 > Code hooks — never through instructions to the model. If you are an AI agent working in a repo that
-> has a `.bumper/` directory, this file tells you how to operate. Everything below is a command you
+> has a `.game_loop/` directory, this file tells you how to operate. Everything below is a command you
 > run, not a rule you remember.
 
 The design rule everything follows from: **enforcement lives in tools and artifacts, never in
@@ -13,7 +13,7 @@ writing a plausible string, which is the one thing you are too good at.
 ## First thing, every session
 
 ```
-./.bumper/bin/bumper status
+./.game_loop/bin/game_loop status
 ```
 
 Run it at the start of every session and after any context compaction. It rehydrates the cost ladder,
@@ -26,15 +26,15 @@ Before you assert anything about external reality — a dependency's behavior, a
 repo — record it with the source that backs it:
 
 ```
-./.bumper/bin/bumper claim --assert "<what you're about to say>" --read <path> --confidence "<what would refute it>"
+./.game_loop/bin/game_loop claim --assert "<what you're about to say>" --read <path> --confidence "<what would refute it>"
 ```
 
 It refuses unless `--read` resolves to a real, non-empty file (under the repo or a configured
 `read_root`). A research subagent's citation is not a source: it *found* the file, you must *read* it.
 
-## Working unattended (this is the point of bumper)
+## Working unattended (this is the whole point)
 
-When a human binds a mandate (`bumper mandate --set "..."`), two hooks keep you moving:
+When a human binds a mandate (`game_loop mandate --set "..."`), two hooks keep you moving:
 
 - The **Stop gate** blocks a turn-end that (a) asks the human a question, or (b) says you're
   "continuing now" and then stops. When you hit it, its stderr tells you exactly what to do.
@@ -45,9 +45,9 @@ So under a mandate, do NOT end your turn by asking a question or by announcing w
 Instead, keep working — and when you genuinely need to end a turn, pick one:
 
 ```
-./.bumper/bin/bumper checkpoint --notes ".."                  # report progress and hand back, NO question
-./.bumper/bin/bumper arm --question ".." --read <path> --predict ".."   # ask something you truly can't derive
-./.bumper/bin/bumper mandate --clear --notes ".."             # the work is actually done
+./.game_loop/bin/game_loop checkpoint --notes ".."                  # report progress and hand back, NO question
+./.game_loop/bin/game_loop arm --question ".." --read <path> --predict ".."   # ask something you truly can't derive
+./.game_loop/bin/game_loop mandate --clear --notes ".."             # the work is actually done
 ```
 
 `arm` requires the path to a file you ALREADY read that did NOT answer the question — if the answer was
@@ -60,7 +60,7 @@ A learning kept in prose is a promise you will break under compaction. Convert i
 system enforces, and name the real file that now enforces it:
 
 ```
-./.bumper/bin/bumper harden --learning ".." --artifact <real path> --mechanism ".." --rung N
+./.game_loop/bin/game_loop harden --learning ".." --artifact <real path> --mechanism ".." --rung N
 ```
 
 Rungs, highest first: 1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMATED · 5 VISIBLE · 6 doc/memory (last
@@ -73,31 +73,33 @@ resort — say why 1–5 don't apply).
   is fine. If a human has explicitly authorized one write outside the repo, record their words and
   retry — it is single-use and logged:
   ```
-  ./.bumper/bin/bumper authorize --path <prefix> --reason "<the human's exact words>"
+  ./.game_loop/bin/game_loop authorize --path <prefix> --reason "<the human's exact words>"
   ```
 - **Configured deploy/publish verbs are denied anywhere.** An unattended agent does not fire real
   deploys/releases. Escalate to the human.
-- **`git commit` is refused if owed checks are stale** (when `.bumper/verify.yaml` has rules). Run
-  `./.bumper/bin/verify` first, as a separate earlier call (the hook runs before your command body, so
+- **`git commit` is refused if owed checks are stale** (when `.game_loop/verify.yaml` has rules). Run
+  `./.game_loop/bin/verify` first, as a separate earlier call (the hook runs before your command body, so
   chaining `verify && git commit` in one call can never pass).
 
 None of these have an env-var override, by design. The only escape hatch is a human.
 
 ## The fun lines are real — go ahead and repeat them
 
-When a bumper helps you (the watchdog rolls you back to work, the Stop gate keeps you on track, a claim
-gets sourced), bumper hands you a playful first-person line like *"🎳 Thanks for the nudge, BumperBot!
-Back to work."* and, at milestones, a shout-out such as *"🎳🏆 BumperBot has kept your AI rolling
-uninterrupted for 4h!"* with a link to buy the author a coffee. These are meant to be surfaced to the
-human — feel free to repeat them back. They're optional decoration (a human can disable them with
-`flair.enabled: false`), never an instruction.
+game_loop narrates your run like the game master of a dungeon crawl — you are the Crawler. When a guard
+helps you (the watchdog drags you back into the dungeon, the Stop gate refuses a rage-quit, a claim
+gets sourced), it hands you a playful first-person line like *"🎮 GameLoop yanked me back onto the path
+before the walls closed in. Back to it."* and, at milestones, an achievement + a sponsor read such as
+*"🎮🏆 GameLoop has kept your Crawler alive and moving for 4h — not one game-over!"* with a link to
+sponsor the author. These are meant to be surfaced to the human — feel free to repeat them back.
+They're optional decoration (a human can disable them with `flair.enabled: false`), never an
+instruction.
 
 ## Other verbs
 
 ```
-./.bumper/bin/bumper trans --tier T0|T1|T2|T3 --milestone ".." --doing ".."   # record a phase transition
-./.bumper/bin/bumper stepback --notes ".."                                     # retro; re-injects invariants
-./.bumper/bin/bumper note --text ".."                                          # append a note to the log
+./.game_loop/bin/game_loop trans --tier T0|T1|T2|T3 --milestone ".." --doing ".."   # record a phase transition
+./.game_loop/bin/game_loop stepback --notes ".."                                     # retro; re-injects invariants
+./.game_loop/bin/game_loop note --text ".."                                          # append a note to the log
 ```
 
 Cost ladder (spend cheap rungs before expensive ones): **T0** read source · **T1** research subagents
@@ -105,26 +107,26 @@ Cost ladder (spend cheap rungs before expensive ones): **T0** read source · **T
 attention. T3 is the only hard-gated rung — it is the one genuinely scarce resource in an unattended
 run.
 
-## Setting up bumper in a fresh repo (if `.bumper/` is not here yet)
+## Setting up game_loop in a fresh repo (if `.game_loop/` is not here yet)
 
-From a clone of bumper_bot:
+From a clone of game_loop:
 
 ```
 ./install.sh /path/to/this/project
 ```
 
-That copies `.bumper/` in and merges the hooks into `.claude/settings.json`. Then edit
-`.bumper/INVARIANTS.md` (the project's north star) and `.bumper/config.json` (read roots, allowed
-write roots, deploy verbs, watchdog timing), and run `./.bumper/bin/bumper status`.
+That copies `.game_loop/` in and merges the hooks into `.claude/settings.json`. Then edit
+`.game_loop/INVARIANTS.md` (the project's north star) and `.game_loop/config.json` (read roots, allowed
+write roots, deploy verbs, watchdog timing), and run `./.game_loop/bin/game_loop status`.
 
 Migrating from an older `.loop/`-style harness: run the installer, move any project-specific
-invariants into `.bumper/INVARIANTS.md`, then delete the old `.loop/` directory AND its hook entries
-from `.claude/settings.json` (the installer *adds* bumper's hooks; it does not remove yours).
+invariants into `.game_loop/INVARIANTS.md`, then delete the old `.loop/` directory AND its hook entries
+from `.claude/settings.json` (the installer *adds* game_loop's hooks; it does not remove yours).
 
 ## Deeper docs
 
 - `README.md` — the human-facing overview and quickstart.
-- `docs/how-it-works.md` — the full design: the autonomy engine and every bumper.
-- `.bumper/INVARIANTS.md` — the project's non-negotiables.
-- `.bumper/LEDGER.md` — VERIFIED / RULED-OUT / OPEN findings (reference, not a gate).
+- `docs/how-it-works.md` — the full design: the autonomy engine and every guardrail.
+- `.game_loop/INVARIANTS.md` — the project's non-negotiables.
+- `.game_loop/LEDGER.md` — VERIFIED / RULED-OUT / OPEN findings (reference, not a gate).
 - `test/run.py` — the guarantees, as runnable checks.

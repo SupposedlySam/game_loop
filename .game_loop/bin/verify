@@ -6,7 +6,7 @@ generator, a template, a migration, a schema, a compiled asset — can pass ever
 run while the real output is broken, because none of those checks compiled/rendered/applied the
 actual artifact. Green signals that answer questions nobody asked.
 
-WHAT THIS IS: a map (`.bumper/verify.yaml`) from "you changed files matching <glob>" to "then these
+WHAT THIS IS: a map (`.game_loop/verify.yaml`) from "you changed files matching <glob>" to "then these
 commands must pass", plus a record of when each last passed. `verify --check` compares each changed
 file's mtime against the last successful run of its commands and REFUSES if the file is newer. So the
 gate is not "did you remember" — it is "is the evidence newer than the change".
@@ -26,7 +26,7 @@ import sys
 import time
 from fnmatch import fnmatch
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
 REPO = os.path.dirname(ROOT)
 MAP_F = os.path.join(ROOT, "verify.yaml")
 REC_F = os.path.join(ROOT, "verified.json")
@@ -89,7 +89,7 @@ def owed(files, mapping):
 def main():
     mapping = load_map()
     if not mapping:
-        print("verify: no rules in .bumper/verify.yaml — nothing owes a check.")
+        print("verify: no rules in .game_loop/verify.yaml — nothing owes a check.")
         return 0
     files = changed_files()
     hits = owed(files, mapping)
@@ -120,7 +120,7 @@ def main():
             print(f"      last verified: {'never' if not last else time.ctime(last)}")
             for c in mapping[pattern]:
                 print(f"      owes: {c}")
-        print("\nRun:  ./.bumper/bin/verify")
+        print("\nRun:  ./.game_loop/bin/verify")
         print("\nA green check from BEFORE your change is evidence about code that no longer exists.")
         return 1
 

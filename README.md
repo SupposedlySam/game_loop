@@ -1,14 +1,14 @@
-# bumper_bot
+# game_loop
 
 **Guardrails that let a Claude Code session run unattended — safely.**
 
-Bumpers on a bowling lane don't roll the ball; they keep it out of the gutter. `bumper` does the same
-for an autonomous agent. It gives a Claude Code session two things it needs to work without a human
-sitting over it:
+Think of it as a dungeon-crawl loop for your AI: `game_loop` doesn't play the game for the agent — it
+keeps the run alive and stops it from wiping. It gives a Claude Code session two things it needs to
+work without a human sitting over it:
 
 - **an autonomy engine** that keeps the session moving instead of stopping the moment there's nobody to
-  press "go"; and
-- **safety bumpers** that make running unattended *safe* rather than reckless.
+  press "continue"; and
+- **guardrails** that make running unattended *safe* rather than reckless.
 
 All of it is enforced through Claude Code **hooks** — never through instructions to the model. The one
 rule everything follows from:
@@ -35,19 +35,19 @@ skill. Pointing at a file on disk is the one check prose can't satisfy.
 ## Quickstart for humans
 
 ```bash
-git clone https://github.com/SupposedlySam/bumper_bot.git
-cd bumper_bot
+git clone https://github.com/SupposedlySam/game_loop.git
+cd game_loop
 ./install.sh /path/to/your/project
 ```
 
-`install.sh` copies `.bumper/` into your project and merges the hooks into its
+`install.sh` copies `.game_loop/` into your project and merges the hooks into its
 `.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
 
 ```bash
 cd /path/to/your/project
-$EDITOR .bumper/INVARIANTS.md      # 1. your project's north star (edit the template)
-$EDITOR .bumper/config.json        # 2. read roots, allowed write roots, deploy verbs, timing
-./.bumper/bin/bumper status        # 3. sanity check — you should see the dashboard
+$EDITOR .game_loop/INVARIANTS.md      # 1. your project's north star (edit the template)
+$EDITOR .game_loop/config.json        # 2. read roots, allowed write roots, deploy verbs, timing
+./.game_loop/bin/game_loop status        # 3. sanity check — you should see the dashboard
 ```
 
 That's it. The gates are inert until you bind a mandate, so day-to-day work is unchanged — the guards
@@ -55,22 +55,22 @@ only ever stop you from writing outside the repo or firing a configured deploy v
 
 ## Quickstart for agents (bots)
 
-If you're a Claude Code agent working in a repo that already has `.bumper/`, your whole operating
+If you're a Claude Code agent working in a repo that already has `.game_loop/`, your whole operating
 manual is [`llms.txt`](llms.txt). The short version:
 
 ```bash
-./.bumper/bin/bumper status                                    # first thing, every session
-./.bumper/bin/bumper claim --assert "X does Y" --read <path>   # before asserting external facts
+./.game_loop/bin/game_loop status                                    # first thing, every session
+./.game_loop/bin/game_loop claim --assert "X does Y" --read <path>   # before asserting external facts
 ```
 
-If `.bumper/` isn't there yet, install it from a clone of this repo: `./install.sh <this-project>`.
+If `.game_loop/` isn't there yet, install it from a clone of this repo: `./install.sh <this-project>`.
 
 ## Run unattended
 
 A human (or the agent, if the human said "work autonomously") binds a mandate:
 
 ```bash
-./.bumper/bin/bumper mandate --set "Finish the timeline feature; pick the highest-value item and keep going."
+./.game_loop/bin/game_loop mandate --set "Finish the timeline feature; pick the highest-value item and keep going."
 ```
 
 While a mandate is bound:
@@ -83,34 +83,34 @@ While a mandate is bound:
 When the work is genuinely done:
 
 ```bash
-./.bumper/bin/bumper mandate --clear --notes "timeline shipped + verified"
+./.game_loop/bin/game_loop mandate --clear --notes "timeline shipped + verified"
 ```
 
-With no mandate bound, every gate is inert — bumper never sits between you and a normal conversation.
+With no mandate bound, every gate is inert — game_loop never sits between you and a normal conversation.
 
 ## The verbs
 
 | Command | What it does |
 |---|---|
-| `bumper status` | Rehydrate the loop after compaction. Run first, every session. |
-| `bumper mandate --set ".."` / `--clear` | Bind / release an autonomy mandate (arms the Stop gate + watchdog). |
-| `bumper checkpoint --notes ".."` | End a turn to *report* progress (no question). One turn-end, consumed. |
-| `bumper arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
-| `bumper claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
-| `bumper harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
-| `bumper authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
-| `bumper trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
-| `bumper stepback --notes ".."` | Retro; re-injects your invariants. |
-| `bumper note --text ".."` | Append a note to the log. |
+| `game_loop status` | Rehydrate the loop after compaction. Run first, every session. |
+| `game_loop mandate --set ".."` / `--clear` | Bind / release an autonomy mandate (arms the Stop gate + watchdog). |
+| `game_loop checkpoint --notes ".."` | End a turn to *report* progress (no question). One turn-end, consumed. |
+| `game_loop arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
+| `game_loop claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
+| `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
+| `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
+| `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
+| `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |
+| `game_loop note --text ".."` | Append a note to the log. |
 
-## The bumpers
+## The guardrails
 
 - **Claim gate** — can't assert about a dependency / harness / other repo without naming the real file
   you read.
 - **Write guard** (`guard-writes.sh`, a `PreToolUse` hook) — an *allowlist*: writes are permitted only
   inside the repo, the OS temp dir, and configured roots. Everything else is read-only. Covers
   `Write`/`Edit` and Bash mutators, blocks configured deploy verbs, and states what it *doesn't* catch.
-  Escape hatch is the human (`bumper authorize`), single-use and logged — never an env var.
+  Escape hatch is the human (`game_loop authorize`), single-use and logged — never an env var.
 - **verify** — optional map from "you changed X" to "these checks must pass"; refuses a `git commit`
   when the evidence is older than the change. Ships empty (a no-op) until you add rules.
 
@@ -119,7 +119,7 @@ for the guarantees as runnable checks (`python3 test/run.py`).
 
 ## Configure
 
-`.bumper/config.json`:
+`.game_loop/config.json`:
 
 ```jsonc
 {
@@ -132,53 +132,56 @@ for the guarantees as runnable checks (`python3 test/run.py`).
   "flair": {                 // fun celebration lines (see below) — set enabled:false to silence
     "enabled": true,
     "support_name": "SupposedlySam",
-    "support_url": "https://buymeacoffee.com/supposedlysam"
+    "support_url": "https://github.com/sponsors/SupposedlySam"
   }
 }
 ```
 
-## Flair 🎳 (fun, opt-out)
+## Flair 🎮 (fun, opt-out)
 
-When a bumper actually helps — the watchdog rolls the agent back to work, the Stop gate keeps it on
-track, a claim gets sourced — bumper hands the agent a fun first-person line to repeat back, like
-*"🎳 Thanks for the nudge, BumperBot! Back to work."* At milestones it goes bigger:
+`game_loop` narrates the run like the game master of a dungeon crawl — your AI is the **Crawler**. When
+a guard helps (the watchdog drags the Crawler back in, the Stop gate refuses a rage-quit, a claim gets
+sourced) it hands the agent a first-person line to repeat back, like *"🎮 GameLoop yanked me back onto
+the path before the walls closed in. Back to it."* At milestones it hands out achievements and, like
+any decent dungeon, runs a sponsor read:
 
 ```
-🎳🏆 BumperBot has kept your AI rolling uninterrupted for 4h! If BumperBot is earning its
-    keep, consider buying SupposedlySam a coffee ☕ → https://buymeacoffee.com/supposedlysam
+🎮🏆 GameLoop has kept your Crawler alive and moving for 4h — not one game-over!
+📺 This floor of the dungeon is sponsored by SupposedlySam. GameLoop encourages
+   tribute → https://github.com/sponsors/SupposedlySam
 ```
 
 Milestones fire once each: uptime under a mandate (1h, 2h, 4h, 8h, …), total assists (5, 10, 25, 50,
-…), claims sourced, and learnings hardened. The announcements and the coffee pitch are drawn from
-rotating pools written in a theatrical System-AI / Claptrap register, so the ask never reads like the
-same canned banner twice. It's pure decoration, isolated in `.bumper/bin/flair.py`, never touches the
-gate logic, and is completely disabled by `flair.enabled: false` — set `support_name` / `support_url`
-to point the coffee link wherever you like.
+…), claims sourced, and learnings hardened. The announcements and the sponsor reads are drawn from
+rotating pools in a Dungeon-Crawler-Carl-style announcer register, so the ask never reads like the
+same canned banner twice. It's pure decoration, isolated in `.game_loop/bin/flair.py`, never touches
+the gate logic, and is completely disabled by `flair.enabled: false` — set `support_name` /
+`support_url` to point the sponsor link wherever you like.
 
 ## Migrating from an existing `.loop/`-style harness
 
-bumper is the generalized descendant of hand-rolled loop harnesses. To switch one over:
+game_loop is the generalized descendant of hand-rolled loop harnesses. To switch one over:
 
-1. `./install.sh /path/to/that/project` — adds `.bumper/` and merges bumper's hooks.
-2. Move any project-specific rules into `.bumper/INVARIANTS.md`, `.bumper/config.json` (read/write
-   roots), and `.bumper/verify.yaml`.
+1. `./install.sh /path/to/that/project` — adds `.game_loop/` and merges game_loop's hooks.
+2. Move any project-specific rules into `.game_loop/INVARIANTS.md`, `.game_loop/config.json` (read/write
+   roots), and `.game_loop/verify.yaml`.
 3. Delete the old `.loop/` directory **and its hook entries** from `.claude/settings.json`. The
-   installer *adds* bumper's hooks; it does not remove yours, so old Stop/PreToolUse hooks must be
-   pulled out by hand or they'll run alongside bumper's.
-4. `./.bumper/bin/bumper status` to confirm.
+   installer *adds* game_loop's hooks; it does not remove yours, so old Stop/PreToolUse hooks must be
+   pulled out by hand or they'll run alongside game_loop's.
+4. `./.game_loop/bin/game_loop status` to confirm.
 
 ## Installing / distribution
 
-Today bumper is distributed as this **GitHub repo**: clone it and run `install.sh` against your
+Today game_loop is distributed as this **GitHub repo**: clone it and run `install.sh` against your
 project. See [docs/distribution.md](docs/distribution.md) for the other channels under consideration
 (a `curl | bash` one-liner, a Claude Code plugin, PyPI/`pipx`) and the tradeoffs.
 
 ## Lineage & credit
 
-bumper is extracted from two harnesses that already ran unattended for real work — one where the
+game_loop is extracted from two harnesses that already ran unattended for real work — one where the
 expensive gated action was a physical device flash (a human button-press), and one where it was a
 real-money trade. Same `arm → gate → consume` primitive, same `VERIFIED / RULED-OUT / OPEN` ledger
-vocabulary, two unrelated domains. bumper_bot is that pattern with the domain specifics removed so
+vocabulary, two unrelated domains. game_loop is that pattern with the domain specifics removed so
 anyone can drop it into any project.
 
 ## License

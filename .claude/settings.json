@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/guard-writes.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/guard-writes.sh",
             "timeout": 10,
-            "statusMessage": "bumper: checking the write stays inside the repo"
+            "statusMessage": "game_loop: checking the write stays inside the repo"
           }
         ]
       }
@@ -18,16 +18,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/bumper stopgate",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/game_loop stopgate",
             "timeout": 10,
-            "statusMessage": "bumper: is this turn-end earned?"
+            "statusMessage": "game_loop: is this turn-end earned?"
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.bumper/bin/watchdog",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/watchdog",
             "asyncRewake": true,
             "timeout": 604800,
-            "statusMessage": "bumper: arming the idle watchdog"
+            "statusMessage": "game_loop: arming the idle watchdog"
           }
         ]
       }

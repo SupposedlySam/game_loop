@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # guard-writes — deny any mutation outside this repo. A PreToolUse hook (LOUD rung: fails at the
-# point of misuse, with a reason). This is the bumper that makes unattended running safe: an agent
+# point of misuse, with a reason). This is the guardrail that makes unattended running safe: an agent
 # left alone all night cannot touch anything outside the project it was pointed at.
 #
 # WHY THIS CANNOT LIVE IN CLAUDE.md: "don't touch other projects" written as an instruction is a
-# promise, and the whole premise of bumper is that promises break under long sessions and compaction.
+# promise, and the whole premise of game_loop is that promises break under long sessions and compaction.
 # A hook holds whether or not the agent remembers it.
 #
 # THE MODEL: an ALLOWLIST, not a denylist. Writes are permitted only under the repo, the OS temp dir,
@@ -25,14 +25,14 @@
 #
 # THE ESCAPE HATCH IS THE HUMAN, deliberately. There is no env-var override — a guard the agent can
 # switch off is not a guard. A single mutation outside the repo is unlocked only by
-# `bumper authorize --path <prefix> --reason "<their words>"`, which is single-use and logged forever.
+# `game_loop authorize --path <prefix> --reason "<their words>"`, which is single-use and logged forever.
 
 set -uo pipefail
 payload=$(cat)
 
-BUMPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"    # .bumper/
-REPO="${CLAUDE_PROJECT_DIR:-$(dirname "$BUMPER_DIR")}"
-CONFIG_F="$BUMPER_DIR/config.json"
+GAMELOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"    # .game_loop/
+REPO="${CLAUDE_PROJECT_DIR:-$(dirname "$GAMELOOP_DIR")}"
+CONFIG_F="$GAMELOOP_DIR/config.json"
 
 REPO_REAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$REPO" 2>/dev/null)
 SLUG=$(python3 -c 'import re,sys; print(re.sub(r"[^a-zA-Z0-9]", "-", sys.argv[1]))' "$REPO_REAL" 2>/dev/null)
@@ -68,22 +68,22 @@ PY
     [ "$allowed" = "yes" ] && exit 0
     deny "BLOCKED: write outside this repo → $fp
 
-Everything outside this project is READ-ONLY by default (this is the bumper that makes unattended
+Everything outside this project is READ-ONLY by default (this is the guardrail that makes unattended
 runs safe). If the repo genuinely needs that content, COPY it in and edit the copy. If the human has
-explicitly authorized this path:  bumper authorize --path <prefix> --reason \"<their words>\""
+explicitly authorized this path:  game_loop authorize --path <prefix> --reason \"<their words>\""
     ;;
 
   Bash)
     cmd=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null)
     [ -z "$cmd" ] && exit 0
 
-    # 0. A commit is when a change becomes real. Refuse one whose owed checks (.bumper/verify.yaml)
+    # 0. A commit is when a change becomes real. Refuse one whose owed checks (.game_loop/verify.yaml)
     #    have not run SINCE the change. No-op when verify.yaml is empty, so it costs nothing until you
     #    opt in. --no-verify skips it, out loud and on the record. Gates `git commit` only, not every
     #    write: a check per keystroke is ceremony that gets switched off.
     if printf '%s' "$cmd" | grep -qE '(^|[[:space:];&|])git[[:space:]]+commit' \
        && ! printf '%s' "$cmd" | grep -q -- '--no-verify'; then
-      if ! "$BUMPER_DIR/bin/verify" --check >/tmp/.bumper_verify 2>&1; then
+      if ! "$GAMELOOP_DIR/bin/verify" --check >/tmp/.game_loop_verify 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
         # `verify` and `git commit` in ONE call can never pass — the check runs before your verify
         # line does. Run them as two separate calls.
@@ -93,10 +93,10 @@ explicitly authorized this path:  bumper authorize --path <prefix> --reason \"<t
 YOU CHAINED verify WITH THIS COMMIT IN ONE COMMAND. That can't work: this gate runs BEFORE the
 command body, so your verify line hasn't executed yet. Run verify as a SEPARATE, EARLIER call."
         fi
-        deny "$(cat /tmp/.bumper_verify)
+        deny "$(cat /tmp/.game_loop_verify)
 
 A green check from BEFORE your change is evidence about code that no longer exists.
-Run ./.bumper/bin/verify, or commit with --no-verify to skip it on the record.$chained_hint"
+Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record.$chained_hint"
       fi
     fi
 
@@ -124,7 +124,7 @@ PY
 
 This is an irreversible, outward-facing action (a real publish/release/deploy). An unattended agent
 does not fire these. If it is genuinely needed, escalate to the human — that is the only escape
-hatch, by design. (Configured in .bumper/config.json -> deploy_verbs.)"
+hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)"
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.
@@ -206,13 +206,13 @@ PY
 )
 
     if [ -n "$offender" ]; then
-      # A human-authorized, single-use exception (`bumper authorize`). Consulted here and CONSUMED,
+      # A human-authorized, single-use exception (`game_loop authorize`). Consulted here and CONSUMED,
       # so one authorization buys one mutation. No env override: it cannot be set without writing a
       # permanent log entry carrying the human's own words.
-      consumed=$(OFFENDER="$offender" BUMPER_DIR="$BUMPER_DIR" python3 <<'PY'
+      consumed=$(OFFENDER="$offender" GAMELOOP_DIR="$GAMELOOP_DIR" python3 <<'PY'
 import json, os, sys, datetime
-state_f = os.path.join(os.environ["BUMPER_DIR"], "state.json")
-log_f = os.path.join(os.environ["BUMPER_DIR"], "log.jsonl")
+state_f = os.path.join(os.environ["GAMELOOP_DIR"], "state.json")
+log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
 off = os.environ["OFFENDER"]
 try:
     with open(state_f) as f:
@@ -246,7 +246,7 @@ Everything outside this project is READ-ONLY by default. READING elsewhere is fi
 OUT of it: \`cp <their path> <repo path>\` is allowed. Copy what you need in and work on the copy.
 
 If the human has explicitly authorized this specific path, record their words and try again:
-  bumper authorize --path <prefix> --reason \"<their exact words>\"
+  game_loop authorize --path <prefix> --reason \"<their exact words>\"
 One authorization, one mutation, logged permanently. That is the only escape hatch, by design."
     fi
     ;;

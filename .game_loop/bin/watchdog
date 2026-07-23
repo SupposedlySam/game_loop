@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """watchdog — rings the session back to work when INTENT and REALITY disagree.
 
-THE AUTONOMY ENGINE. The Stop gate (`bumper stopgate`) stops the session SAYING the wrong thing at
+THE AUTONOMY ENGINE. The Stop gate (`game_loop stopgate`) stops the session SAYING the wrong thing at
 turn-end. It cannot make the session DO the next thing — a blocked turn-end still needs someone to
 press "go". This closes that hole, and it is what lets a run continue with no human present.
 
 THE MISMATCH IT DETECTS:
-  bumper state says : a mandate is bound, work is outstanding, nobody is waiting on the human
+  game_loop state says : a mandate is bound, work is outstanding, nobody is waiting on the human
   harness state     : the transcript has not grown in IDLE_SEC — the session is parked
   => contradiction  => ring (exit 2), which asyncRewake turns into a model wake-up.
 
@@ -23,7 +23,7 @@ WHAT IT DOES NOT DO (state the scope of a guard, including what it misses):
     ring cap keep that cheap rather than perfectly correct.
   * It cannot know whether the work it resumes is the RIGHT work. It only knows the session is idle.
   * If the harness stops honouring asyncRewake, this fails SILENT — nothing here would notice.
-    `bumper status` reports the last ring so the silence is at least visible in the log.
+    `game_loop status` reports the last ring so the silence is at least visible in the log.
 """
 import datetime
 import json
@@ -37,7 +37,7 @@ try:
 except Exception:  # noqa: BLE001
     flair = None
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
 STATE_F = os.path.join(ROOT, "state.json")
 LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
@@ -167,18 +167,18 @@ def ring(state, rings):
     save_state(st)
 
     print(
-        f"WATCHDOG: {IDLE_SEC}s idle, and your bumper state contradicts your harness state.\n\n"
-        f"  bumper says : mandate bound — {m.get('text')}\n"
-        f"  bumper says : {ph.get('milestone')} · {ph.get('doing')}\n"
-        f"  bumper says : nobody is waiting on you (no T3 armed)\n"
-        f"  harness says: the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
+        f"WATCHDOG: {IDLE_SEC}s idle, and your game_loop state contradicts your harness state.\n\n"
+        f"  game_loop says: mandate bound — {m.get('text')}\n"
+        f"  game_loop says: {ph.get('milestone')} · {ph.get('doing')}\n"
+        f"  game_loop says: nobody is waiting on you (no T3 armed)\n"
+        f"  harness says  : the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
         "Both cannot be true. You are under an autonomy mandate with work outstanding and you are\n"
         "doing nothing. The Stop gate can stop you SAYING the wrong thing, but it cannot press go for\n"
         "you. That is what this is.\n\n"
         "GO — run the next thing; your plan / the mandate almost always already answers 'what next'.\n"
         "Do not reply with a plan; run it. If the mandate is genuinely satisfied:\n"
-        "  bumper mandate --clear --notes \"..\"\n"
-        "If you genuinely need the human:  bumper arm --question .. --read .. --predict .."
+        "  game_loop mandate --clear --notes \"..\"\n"
+        "If you genuinely need the human:  game_loop arm --question .. --read .. --predict .."
         + tail,
         file=sys.stderr)
     sys.exit(2)

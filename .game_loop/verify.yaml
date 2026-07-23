@@ -10,7 +10,7 @@
 # A `<glob>/**` entry matches anything under that directory.
 # The commands must FAIL when the change is broken. A command that cannot fail is not a check.
 #
-# This file ships EMPTY: bumper does not know your project. `verify` and the commit gate are no-ops
+# This file ships EMPTY: game_loop does not know your project. `verify` and the commit gate are no-ops
 # until you add rules. Examples (delete and replace with your own):
 #
 # "src/**":
@@ -20,14 +20,14 @@
 # "schema/*.sql":
 #   - "./scripts/apply-migrations.sh --dry-run"
 
-# bumper_bot dogfoods this: the gates are the product, so a change to any of them owes the test suite.
-".bumper/bin/bumper":
+# game_loop dogfoods this: the gates are the product, so a change to any of them owes the test suite.
+".game_loop/bin/game_loop":
   - "python3 test/run.py"
-".bumper/bin/watchdog":
+".game_loop/bin/watchdog":
   - "python3 test/run.py"
-".bumper/bin/guard-writes.sh":
+".game_loop/bin/guard-writes.sh":
   - "python3 test/run.py"
-".bumper/bin/verify":
+".game_loop/bin/verify":
   - "python3 test/run.py"
-".bumper/bin/flair.py":
+".game_loop/bin/flair.py":
   - "python3 test/run.py"

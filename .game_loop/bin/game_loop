@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""bumper — the guardrails that let a Claude Code session run unattended, safely.
+"""game_loop — the guardrails that let a Claude Code session run unattended, safely.
 
 WHAT THIS IS
-    Bumpers on a bowling lane: they don't roll the ball, they keep it out of the gutter. bumper does
-    the same for an autonomous agent. Two forces work together:
+    A dungeon-crawl loop for your AI: game_loop doesn't play for the agent, it keeps the run alive and
+    stops it from wiping. Two forces work together:
 
       * an AUTONOMY engine (bin/watchdog + the `stopgate` Stop hook) that keeps the session moving
-        so it does not stop the moment there is no human to press "go";
-      * SAFETY bumpers (`claim`, the write guard, the arm->consume primitive) that make running
+        so it does not stop the moment there is no human to press "continue";
+      * GUARDRAILS (`claim`, the write guard, the arm->consume primitive) that make running
         unattended safe rather than reckless.
 
 THE ONE DESIGN RULE (everything follows from it)
@@ -24,10 +24,10 @@ LINEAGE
     Extracted from two systems that already ran unattended for real: an on-device firmware loop where
     the expensive gated action was a human button-press, and a trading loop where it was a real-money
     order. Same arm->gate->consume primitive, same VERIFIED/RULED-OUT/OPEN ledger vocabulary, two
-    unrelated domains. bumper is that pattern with the domain specifics removed. See docs/.
+    unrelated domains. game_loop is that pattern with the domain specifics removed. See docs/.
 
-State lives in .bumper/state.json (atomic writes); every event appends to .bumper/log.jsonl.
-Configuration lives in .bumper/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
+State lives in .game_loop/state.json (atomic writes); every event appends to .game_loop/log.jsonl.
+Configuration lives in .game_loop/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
 """
 import argparse
 import datetime
@@ -39,11 +39,11 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair module
 try:
-    import flair  # decoration only; bumper works identically without it
+    import flair  # decoration only; game_loop works identically without it
 except Exception:  # noqa: BLE001 — a missing/broken flair file must never break a real command
     flair = None
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .bumper/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
 REPO_ROOT = os.path.dirname(ROOT)
 STATE_F = os.path.join(ROOT, "state.json")
 LOG_F = os.path.join(ROOT, "log.jsonl")
@@ -105,7 +105,7 @@ def load():
 
 def save(s):
     # atomic: temp file in the same dir + os.replace() (POSIX-atomic). A crash mid-write must never
-    # truncate state.json and brick `bumper status` — the compaction-recovery path.
+    # truncate state.json and brick `game_loop status` — the compaction-recovery path.
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATE_F), prefix=".state.", suffix=".tmp")
     with os.fdopen(fd, "w") as f:
         json.dump(s, f, indent=2)
@@ -119,7 +119,7 @@ def logline(rec):
 
 
 def die(msg, code=2):
-    print("BUMPER ✗ " + msg, file=sys.stderr)
+    print("GAMELOOP ✗ " + msg, file=sys.stderr)
     sys.exit(code)
 
 
@@ -202,7 +202,7 @@ def retro_nudge(s):
     n = s.get("trans_since_stepback", 0)
     every = config().get("trans_nudge_every", 12)
     if n >= every:
-        return (f"⚠ {n} transitions since the last retro — `bumper stepback --notes ..` is due "
+        return (f"⚠ {n} transitions since the last retro — `game_loop stepback --notes ..` is due "
                 "(reflect, harden the chapter's learnings, reset the count).")
     return None
 
@@ -290,9 +290,9 @@ def cmd_mandate(s, a):
     out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
         f"  {a.set}",
         "→ ending your turn now requires one of:",
-        "    bumper checkpoint --notes \"..\"                report progress and hand back (no question)",
-        "    bumper arm --question .. --read .. --predict .. ask something you genuinely can't derive",
-        "    bumper mandate --clear --notes \"..\"           the work is actually done",
+        "    game_loop checkpoint --notes \"..\"                report progress and hand back (no question)",
+        "    game_loop arm --question .. --read .. --predict .. ask something you genuinely can't derive",
+        "    game_loop mandate --clear --notes \"..\"           the work is actually done",
         "Otherwise the Stop hook sends you back to work. That is the point.")
     flair_out(s, "mandate_set")
 
@@ -507,9 +507,9 @@ def _stop_verdict(s, payload):
     Pure decision, no I/O beyond reading the transcript — so a test suite can drive every branch.
 
     The pricing is the point. Under a mandate:
-      * REPORTING is cheap    -> `bumper checkpoint --notes ..`   (deliberate + logged, no evidence)
-      * ASKING is expensive   -> `bumper arm --question --read --predict`  (must name what you read)
-      * FINISHING is explicit -> `bumper mandate --clear --notes ..`
+      * REPORTING is cheap    -> `game_loop checkpoint --notes ..`   (deliberate + logged, no evidence)
+      * ASKING is expensive   -> `game_loop arm --question --read --predict`  (must name what you read)
+      * FINISHING is explicit -> `game_loop mandate --clear --notes ..`
     Blocking every turn-end equally would price a progress report the same as an interruption and
     decay into a nag that gets ignored. A gate that cries wolf is a gate that gets switched off.
     """
@@ -544,11 +544,11 @@ def _stop_verdict(s, payload):
             "  1. ANSWER IT YOURSELF AND CARRY ON. Almost always correct. The next step is nearly\n"
             "     always already written down (your plan / the mandate). Offering a choice between two\n"
             "     documented options is not a question; it is a decision you are equipped to make.\n"
-            "  2. bumper arm --question \"..\" --read <source that DIDN'T answer it> --predict \"..\"\n"
+            "  2. game_loop arm --question \"..\" --read <source that DIDN'T answer it> --predict \"..\"\n"
             "     Only when the answer is genuinely not derivable — a preference, a priority, a fact\n"
             "     only the human holds. If you can predict the reply, don't ask.\n"
             "  3. Rewrite the ending as a statement of what you did and what you are doing next, then\n"
-            "     bumper checkpoint --notes \"..\" to report without asking.\n"
+            "     game_loop checkpoint --notes \"..\" to report without asking.\n"
         ), {"kind": "stop_gate_block", "reason": "asked-the-user", "mandate": m.get("text"),
             "phase": (s.get("phase") or {}).get("doing")}
 
@@ -565,8 +565,8 @@ def _stop_verdict(s, payload):
             "Do ONE of these:\n"
             "  1. ACTUALLY DO IT. You already named the next action. Go run it. This is the answer.\n"
             "  2. If you are genuinely stopping, rewrite the ending in the past and future tense —\n"
-            "     what you DID and what REMAINS — then bumper checkpoint --notes \"..\".\n"
-            "  3. bumper arm --question .. --read .. --predict ..   if you truly need the human.\n"
+            "     what you DID and what REMAINS — then game_loop checkpoint --notes \"..\".\n"
+            "  3. game_loop arm --question .. --read .. --predict ..   if you truly need the human.\n"
         ), {"kind": "stop_gate_block", "reason": "announced-then-stopped",
             "mandate": m.get("text"), "phase": (s.get("phase") or {}).get("doing")}
 
@@ -593,9 +593,9 @@ def _stop_verdict(s, payload):
            "    it cannot tell a report from a question, so it blocks.\n\n" if why_not else "")
         + "Ending your turn spends the human's attention. If there is work left in the mandate, go do\n"
         "it. Otherwise say so explicitly:\n\n"
-        "  bumper checkpoint --notes \"..\"                 report progress and hand back (no question)\n"
-        "  bumper arm --question .. --read .. --predict ..  ask something you genuinely can't derive\n"
-        "  bumper mandate --clear --notes \"..\"            the mandate is actually satisfied\n"
+        "  game_loop checkpoint --notes \"..\"                 report progress and hand back (no question)\n"
+        "  game_loop arm --question .. --read .. --predict ..  ask something you genuinely can't derive\n"
+        "  game_loop mandate --clear --notes \"..\"            the mandate is actually satisfied\n"
     ), {"kind": "stop_gate_block", "reason": "no-checkpoint", "mandate": m.get("text"),
         "unchecked_because": why_not}
 
@@ -674,7 +674,7 @@ def cmd_status(s, a):
         out(n)
     m = s.get("mandate") or {}
     mandate_line = f"MANDATE: {m['text']}" if m.get("active") else "MANDATE: none (Stop gate inert)"
-    out("=== bumper (v" + s.get("version", "?") + ") ===",
+    out("=== game_loop (v" + s.get("version", "?") + ") ===",
         f"claims sourced: {s.get('claim_count', 0)} · hardened: {s.get('hardened_count', 0)}",
         mandate_line,
         inv_oneline(),
@@ -683,12 +683,12 @@ def cmd_status(s, a):
         *[f"  {k} — {v}" for k, v in TIER_NAMES.items()],
         "",
         "→ before asserting external behavior:",
-        '   bumper claim --assert ".." --read <real path> [--confidence ..]',
-        "→ writes outside this repo are blocked by .bumper/bin/guard-writes.sh (PreToolUse)",
-        "knowledge: .bumper/LEDGER.md (reference, NOT a gate) · log: .bumper/log.jsonl")
+        '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
+        "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
+        "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
     assists = s.get("watchdog_rings_total", 0) + s.get("stop_gate_blocks_total", 0)
     if assists:
-        out(f"🎳 BumperBot assists so far: {assists} "
+        out(f"🎮 GameLoop has kept the crawl going {assists} times "
             f"(watchdog {s.get('watchdog_rings_total', 0)} · gate {s.get('stop_gate_blocks_total', 0)})")
     flair_out(s)  # surface any milestone crossed since last check (e.g. uptime)
 
@@ -762,12 +762,12 @@ def cmd_stepback(s, a):
         "break promises. Climb to the highest rung that applies:",
         *["  " + r for r in HARDEN_LADDER],
         "Then record each with a REAL artifact path (the ungameable bit, same as `claim --read`):",
-        '  bumper harden --learning ".." --artifact <real path> --mechanism ".." --rung <1..6>',
+        '  game_loop harden --learning ".." --artifact <real path> --mechanism ".." --rung <1..6>',
         "Rung 6 (doc/memory) is the LAST resort — if you pick it, say why 1-5 don't apply.")
 
 
 def main():
-    p = argparse.ArgumentParser(prog="bumper")
+    p = argparse.ArgumentParser(prog="game_loop")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
 

@@ -1,5 +1,5 @@
 {
-  "project_name": "bumper_bot",
+  "project_name": "game_loop",
   "read_roots": [],
   "allow_write_roots": [],
   "deploy_verbs": [],
@@ -12,6 +12,6 @@
   "flair": {
     "enabled": true,
     "support_name": "SupposedlySam",
-    "support_url": "https://buymeacoffee.com/supposedlysam"
+    "support_url": "https://github.com/sponsors/SupposedlySam"
   }
 }

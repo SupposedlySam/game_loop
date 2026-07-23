@@ -108,6 +108,12 @@ def main():
         check("allows cp OUT of another tree into the repo",
               not denied(guard(proj, {"tool_name": "Bash",
                                       "tool_input": {"command": "cp ~/.bashrc ./copy"}})))
+        check("allows redirecting to /dev/null (a discard device)",
+              not denied(guard(proj, {"tool_name": "Bash",
+                                      "tool_input": {"command": "grep x file.txt 2>/dev/null"}})))
+        check("allows redirecting to a std stream (/dev/stderr)",
+              not denied(guard(proj, {"tool_name": "Bash",
+                                      "tool_input": {"command": "echo hi >/dev/stderr"}})))
 
         print("write guard (authorize → consume):")
         gl(proj, "authorize", "--path", os.path.expanduser("~/authztest"),

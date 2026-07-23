@@ -153,11 +153,20 @@ def under(path, root):
     return path == root or path.startswith(root + os.sep)
 
 
+# Standard character devices: discard sinks and the console/std streams. A redirect to one of these
+# (e.g. `2>/dev/null`, `>/dev/stderr`) never writes a real out-of-repo file, so it must not be flagged.
+# Matched on the LITERAL path — /dev/stdout & friends are symlinks realpath would resolve away.
+STD_DEVICES = {"/dev/null", "/dev/zero", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty",
+               "/dev/random", "/dev/urandom"}
+
+
 def offends(raw, cwd):
     """Return the offending realpath, or None if this path is inside an allow root."""
     p = os.path.expanduser(raw.replace("$HOME", home))
     if not os.path.isabs(p):
         p = os.path.join(cwd, p)
+    if p in STD_DEVICES or p.startswith("/dev/fd/"):
+        return None
     real = os.path.realpath(p)
     return None if any(under(real, a) for a in allow) else real
 

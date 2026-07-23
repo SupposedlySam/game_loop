@@ -33,7 +33,7 @@ def make_sandbox():
     proj = tempfile.mkdtemp(prefix="gameloop-test-")
     dst = os.path.join(proj, ".game_loop")
     os.makedirs(os.path.join(dst, "bin"))
-    for f in ("game_loop", "watchdog", "guard-writes.sh", "verify", "flair.py"):
+    for f in ("game_loop", "watchdog", "guard-writes.sh", "guard-writes-impl.sh", "verify", "flair.py"):
         shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f), os.path.join(dst, "bin", f))
         os.chmod(os.path.join(dst, "bin", f), 0o755)
     for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
@@ -126,6 +126,18 @@ def main():
         check("still denies an out-of-repo redirect inside a bash (code) heredoc body",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+        # #8: a malformed guard must FAIL OPEN, never exit-2 block — otherwise a broken guard blocks
+        # its own repair. The shim `bash -n`s the impl and allows the tool when the impl won't parse.
+        impl_f = os.path.join(proj, ".game_loop", "bin", "guard-writes-impl.sh")
+        with open(impl_f) as f:
+            impl_src = f.read()
+        with open(impl_f, "w") as f:
+            f.write("this is ( not valid bash\n")
+        check("fails OPEN when the guard impl is malformed (can't block its own fix)",
+              not denied(guard(proj, {"tool_name": "Bash",
+                                      "tool_input": {"command": "rm -rf ~/outside"}})))
+        with open(impl_f, "w") as f:                 # restore so later checks use the real guard
+            f.write(impl_src)
 
         print("write guard (authorize → consume):")
         gl(proj, "authorize", "--path", os.path.expanduser("~/authztest"),

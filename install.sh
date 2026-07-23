@@ -55,11 +55,12 @@ mkdir -p "$TARGET/.game_loop/bin"
 
 # Always refresh the executables — they are the tool. (flair.py is decoration, imported by the others.)
 cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
-   "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/verify" \
-   "$SRC/.game_loop/bin/flair.py" "$TARGET/.game_loop/bin/"
+   "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
+   "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$TARGET/.game_loop/bin/"
 chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
-         "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/verify"
-echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh, verify, flair.py)"
+         "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-writes-impl.sh" \
+         "$TARGET/.game_loop/bin/verify"
+echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, verify, flair.py)"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
 # $2 overrides the source path (defaults to .game_loop/$1) for files that ship from templates/.

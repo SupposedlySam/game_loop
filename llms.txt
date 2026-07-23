@@ -1,0 +1,121 @@
+# bumper_bot
+
+> Guardrails that let a Claude Code session run unattended, safely. Enforced entirely through Claude
+> Code hooks — never through instructions to the model. If you are an AI agent working in a repo that
+> has a `.bumper/` directory, this file tells you how to operate. Everything below is a command you
+> run, not a rule you remember.
+
+The design rule everything follows from: **enforcement lives in tools and artifacts, never in
+instructions.** Test any guard by asking — *if I ignored every instruction, would it still hold?* The
+keystone check is always the same shape: **name a real file that exists.** You cannot satisfy it by
+writing a plausible string, which is the one thing you are too good at.
+
+## First thing, every session
+
+```
+./.bumper/bin/bumper status
+```
+
+Run it at the start of every session and after any context compaction. It rehydrates the cost ladder,
+the invariants, your claim/harden counters, the current phase, and whether a mandate is bound — all
+from disk. Surviving compaction is the whole point.
+
+## The one hard rule: cite the file you read
+
+Before you assert anything about external reality — a dependency's behavior, a harness detail, another
+repo — record it with the source that backs it:
+
+```
+./.bumper/bin/bumper claim --assert "<what you're about to say>" --read <path> --confidence "<what would refute it>"
+```
+
+It refuses unless `--read` resolves to a real, non-empty file (under the repo or a configured
+`read_root`). A research subagent's citation is not a source: it *found* the file, you must *read* it.
+
+## Working unattended (this is the point of bumper)
+
+When a human binds a mandate (`bumper mandate --set "..."`), two hooks keep you moving:
+
+- The **Stop gate** blocks a turn-end that (a) asks the human a question, or (b) says you're
+  "continuing now" and then stops. When you hit it, its stderr tells you exactly what to do.
+- The **watchdog** rings you back to work (via an `asyncRewake` Stop hook) if you go idle with work
+  still outstanding.
+
+So under a mandate, do NOT end your turn by asking a question or by announcing work and stopping.
+Instead, keep working — and when you genuinely need to end a turn, pick one:
+
+```
+./.bumper/bin/bumper checkpoint --notes ".."                  # report progress and hand back, NO question
+./.bumper/bin/bumper arm --question ".." --read <path> --predict ".."   # ask something you truly can't derive
+./.bumper/bin/bumper mandate --clear --notes ".."             # the work is actually done
+```
+
+`arm` requires the path to a file you ALREADY read that did NOT answer the question — if the answer was
+on disk, you don't need the human. `checkpoint` and `arm` are each single-use (consumed on the next
+turn-end). If you can predict the human's answer, don't ask; make the call and carry on.
+
+## When you learn something, encode it — don't write it down
+
+A learning kept in prose is a promise you will break under compaction. Convert it into an artifact the
+system enforces, and name the real file that now enforces it:
+
+```
+./.bumper/bin/bumper harden --learning ".." --artifact <real path> --mechanism ".." --rung N
+```
+
+Rungs, highest first: 1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMATED · 5 VISIBLE · 6 doc/memory (last
+resort — say why 1–5 don't apply).
+
+## What the guards will stop you doing (and the escape hatch)
+
+- **Writes outside this repo are denied.** Everything outside the project (other repos, your home dir,
+  system files) is read-only. Reading elsewhere is fine; copying *into* the repo (`cp <there> <here>`)
+  is fine. If a human has explicitly authorized one write outside the repo, record their words and
+  retry — it is single-use and logged:
+  ```
+  ./.bumper/bin/bumper authorize --path <prefix> --reason "<the human's exact words>"
+  ```
+- **Configured deploy/publish verbs are denied anywhere.** An unattended agent does not fire real
+  deploys/releases. Escalate to the human.
+- **`git commit` is refused if owed checks are stale** (when `.bumper/verify.yaml` has rules). Run
+  `./.bumper/bin/verify` first, as a separate earlier call (the hook runs before your command body, so
+  chaining `verify && git commit` in one call can never pass).
+
+None of these have an env-var override, by design. The only escape hatch is a human.
+
+## Other verbs
+
+```
+./.bumper/bin/bumper trans --tier T0|T1|T2|T3 --milestone ".." --doing ".."   # record a phase transition
+./.bumper/bin/bumper stepback --notes ".."                                     # retro; re-injects invariants
+./.bumper/bin/bumper note --text ".."                                          # append a note to the log
+```
+
+Cost ladder (spend cheap rungs before expensive ones): **T0** read source · **T1** research subagents
+(free, no human) · **T2** build & verify (analyze / test / actually run it) · **T3** the human's
+attention. T3 is the only hard-gated rung — it is the one genuinely scarce resource in an unattended
+run.
+
+## Setting up bumper in a fresh repo (if `.bumper/` is not here yet)
+
+From a clone of bumper_bot:
+
+```
+./install.sh /path/to/this/project
+```
+
+That copies `.bumper/` in and merges the hooks into `.claude/settings.json`. Then edit
+`.bumper/INVARIANTS.md` (the project's north star) and `.bumper/config.json` (read roots, allowed
+write roots, deploy verbs, watchdog timing), and run `./.bumper/bin/bumper status`.
+
+Migrating from an older `.loop/`-style harness: run the installer, move any project-specific
+invariants into `.bumper/INVARIANTS.md`, then delete the old `.loop/` directory AND its hook entries
+from `.claude/settings.json` (the installer *adds* bumper's hooks; it does not remove yours).
+
+## Deeper docs
+
+- `README.md` — the human-facing overview and quickstart.
+- `docs/how-it-works.md` — the full design: the autonomy engine and every bumper.
+- `.bumper/INVARIANTS.md` — the project's non-negotiables.
+- `.bumper/LEDGER.md` — VERIFIED / RULED-OUT / OPEN findings (reference, not a gate).
+- `test/run.py` — the guarantees, as runnable checks.

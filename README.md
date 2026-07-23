@@ -21,29 +21,53 @@ That's why the keystone check is always the same shape: **name a real file that 
 defeats any check on the mere *presence* of a string by writing a plausible string — that's its native
 skill. Pointing at a file on disk is the one check prose can't satisfy.
 
+> 🤖 **If you're an AI agent**, read [`llms.txt`](llms.txt) — it's the operational brief: the exact
+> commands to run and the gates you'll hit.
+
 ---
 
-## Install
+## Requirements
 
-Requires Python 3 (stdlib only — no packages) and Claude Code.
+- **Python 3** (standard library only — no packages to install)
+- **[Claude Code](https://claude.com/claude-code)** (the hooks are Claude Code hooks)
+- macOS or Linux (`bash` + POSIX tools)
+
+## Quickstart for humans
 
 ```bash
-git clone https://github.com/<you>/bumper_bot.git
+git clone https://github.com/SupposedlySam/bumper_bot.git
 cd bumper_bot
 ./install.sh /path/to/your/project
 ```
 
-That copies `.bumper/` into your project and wires the hooks into its `.claude/settings.json`. Then,
-in a Claude Code session in that project:
+`install.sh` copies `.bumper/` into your project and merges the hooks into its
+`.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
 
 ```bash
-./.bumper/bin/bumper status          # rehydrate — run this first, every session
+cd /path/to/your/project
+$EDITOR .bumper/INVARIANTS.md      # 1. your project's north star (edit the template)
+$EDITOR .bumper/config.json        # 2. read roots, allowed write roots, deploy verbs, timing
+./.bumper/bin/bumper status        # 3. sanity check — you should see the dashboard
 ```
 
-Re-running `install.sh` upgrades the scripts and re-merges the hooks without duplicating them, and
-never clobbers your `config.json`, `INVARIANTS.md`, `verify.yaml` or notes.
+That's it. The gates are inert until you bind a mandate, so day-to-day work is unchanged — the guards
+only ever stop you from writing outside the repo or firing a configured deploy verb.
+
+## Quickstart for agents (bots)
+
+If you're a Claude Code agent working in a repo that already has `.bumper/`, your whole operating
+manual is [`llms.txt`](llms.txt). The short version:
+
+```bash
+./.bumper/bin/bumper status                                    # first thing, every session
+./.bumper/bin/bumper claim --assert "X does Y" --read <path>   # before asserting external facts
+```
+
+If `.bumper/` isn't there yet, install it from a clone of this repo: `./install.sh <this-project>`.
 
 ## Run unattended
+
+A human (or the agent, if the human said "work autonomously") binds a mandate:
 
 ```bash
 ./.bumper/bin/bumper mandate --set "Finish the timeline feature; pick the highest-value item and keep going."
@@ -51,10 +75,10 @@ never clobbers your `config.json`, `INVARIANTS.md`, `verify.yaml` or notes.
 
 While a mandate is bound:
 
-- The **Stop gate** refuses turn-ends that ask you a question, or that claim "continuing now" and then
+- The **Stop gate** refuses turn-ends that ask a question, or that claim "continuing now" and then
   stop. The session either keeps working or explicitly `checkpoint`s / `arm`s / `clear`s.
 - The **watchdog** notices when the session goes idle with work still outstanding and rings it back to
-  work (via an `asyncRewake` Stop hook) — so it resumes with no human present.
+  work — so it resumes with no human present.
 
 When the work is genuinely done:
 
@@ -90,7 +114,8 @@ With no mandate bound, every gate is inert — bumper never sits between you and
 - **verify** — optional map from "you changed X" to "these checks must pass"; refuses a `git commit`
   when the evidence is older than the change. Ships empty (a no-op) until you add rules.
 
-See **[docs/how-it-works.md](docs/how-it-works.md)** for the full design.
+See **[docs/how-it-works.md](docs/how-it-works.md)** for the full design, and **[`test/run.py`](test/run.py)**
+for the guarantees as runnable checks (`python3 test/run.py`).
 
 ## Configure
 
@@ -106,6 +131,24 @@ See **[docs/how-it-works.md](docs/how-it-works.md)** for the full design.
   "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 }
 }
 ```
+
+## Migrating from an existing `.loop/`-style harness
+
+bumper is the generalized descendant of hand-rolled loop harnesses. To switch one over:
+
+1. `./install.sh /path/to/that/project` — adds `.bumper/` and merges bumper's hooks.
+2. Move any project-specific rules into `.bumper/INVARIANTS.md`, `.bumper/config.json` (read/write
+   roots), and `.bumper/verify.yaml`.
+3. Delete the old `.loop/` directory **and its hook entries** from `.claude/settings.json`. The
+   installer *adds* bumper's hooks; it does not remove yours, so old Stop/PreToolUse hooks must be
+   pulled out by hand or they'll run alongside bumper's.
+4. `./.bumper/bin/bumper status` to confirm.
+
+## Installing / distribution
+
+Today bumper is distributed as this **GitHub repo**: clone it and run `install.sh` against your
+project. See [docs/distribution.md](docs/distribution.md) for the other channels under consideration
+(a `curl | bash` one-liner, a Claude Code plugin, PyPI/`pipx`) and the tradeoffs.
 
 ## Lineage & credit
 

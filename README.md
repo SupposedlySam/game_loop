@@ -51,6 +51,12 @@ cd game_loop
 Either way, `install.sh` copies `.game_loop/` into your project and merges the hooks into its
 `.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
 
+> **Start a new Claude Code session before step 3.** Claude Code reads hook configuration when a
+> session *starts*, and `install.sh` writes `.claude/settings.json` after yours already did — so in
+> the install session every gate is registered on disk and silently never invoked. Nothing errors;
+> the gate is just as quiet as a gate that's running and content. `game_loop status` prints a
+> `HOOKS NOT LIVE` warning until the Stop gate has actually fired once.
+
 ```bash
 cd /path/to/your/project
 $EDITOR .game_loop/INVARIANTS.md      # 1. your project's north star (edit the template)

@@ -695,6 +695,29 @@ def cmd_trans(s, a):
         out(n)
 
 
+def hooks_live_warning():
+    """Are the hooks actually WIRED IN to the running session, not merely on disk?
+
+    Claude Code snapshots hook configuration when a session starts. `install.sh` writes
+    `.claude/settings.json` mid-session, so on the install session — and only that one — every hook
+    is registered on disk and never invoked. Nothing errors. The gate is silent because it is not
+    running, which is indistinguishable from a gate that is running and content.
+
+    That cost a full unattended session: a T3 arm sat unspent for 22 hours across dozens of
+    turn-ends, and the human's read was "you must not be on the game_loop" — which was exactly right.
+
+    The tell is the probe. `cmd_stopgate` writes `probe/stop-payload.json` on EVERY invocation, so
+    its absence is proof the Stop hook has never fired in this checkout. Rung 5 of the harden ladder:
+    the system reports the fact rather than leaving it to be guessed.
+    """
+    if not os.path.isfile(os.path.join(ROOT, "probe", "stop-payload.json")):
+        return ("⚠ HOOKS NOT LIVE — the Stop gate has never fired in this checkout (no "
+                "probe/stop-payload.json).\n"
+                "  Claude Code reads hooks at session START; install.sh wrote .claude/settings.json\n"
+                "  after this one began. Start a new session (or /hooks) or NOTHING here is enforced.")
+    return None
+
+
 def cmd_status(s, a):
     out(render_banner(s))
     if (n := retro_nudge(s)):
@@ -713,6 +736,8 @@ def cmd_status(s, a):
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
+    if (w := hooks_live_warning()):
+        out(w)
     assists = s.get("watchdog_rings_total", 0) + s.get("stop_gate_blocks_total", 0)
     if assists:
         out(f"🎮 GameLoop has kept the crawl going {assists} times "

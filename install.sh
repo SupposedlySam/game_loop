@@ -167,8 +167,11 @@ if [ "$FRESH" = 1 ]; then
   echo "Done — fresh install. Next:"
   echo "  1. Edit  $TARGET/.game_loop/INVARIANTS.md   — your project's north star"
   echo "  2. Edit  $TARGET/.game_loop/config.json     — read_roots / allow_write_roots / deploy_verbs"
-  echo "  3. In a Claude Code session in that repo, run:  ./.game_loop/bin/game_loop status"
-  echo "  4. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""
+  echo "  3. START A NEW CLAUDE CODE SESSION. Hooks are read at session start, so the hooks this"
+  echo "     installer just wrote are NOT active in the session you ran it from — every gate is"
+  echo "     registered on disk and silently never invoked. \`game_loop status\` will warn you."
+  echo "  4. In that new session, run:  ./.game_loop/bin/game_loop status"
+  echo "  5. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""
 else
   echo "Done — updated in place. Scripts refreshed; your config, invariants and notes were kept."
   echo "  Nothing else to do. Sanity-check with:  ./.game_loop/bin/game_loop status"

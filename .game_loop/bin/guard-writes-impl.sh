@@ -37,6 +37,19 @@ CONFIG_F="$GAMELOOP_DIR/config.json"
 REPO_REAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$REPO" 2>/dev/null)
 SLUG=$(python3 -c 'import re,sys; print(re.sub(r"[^a-zA-Z0-9]", "-", sys.argv[1]))' "$REPO_REAL" 2>/dev/null)
 
+# State is per-session: an authorization is granted IN a session and spendable only THERE. The hook
+# payload's session_id is authoritative; env is the fallback; neither → the repo-global legacy file
+# (human terminal, old harness). Mirrors set_session() in bin/game_loop and bin/watchdog.
+SID=$(printf '%s' "$payload" | python3 -c '
+import json, os, re, sys
+sid = json.load(sys.stdin).get("session_id") or os.environ.get("GAME_LOOP_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+print(re.sub(r"[^A-Za-z0-9._-]", "-", sid.strip())[:64])' 2>/dev/null)
+if [ -n "$SID" ]; then
+  STATE_F="$GAMELOOP_DIR/sessions/$SID/state.json"
+else
+  STATE_F="$GAMELOOP_DIR/state.json"
+fi
+
 deny() {
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
     "$(printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
@@ -49,10 +62,11 @@ deny() {
 # Write/Edit and Bash branches so the escape hatch behaves identically on both paths. No env
 # override: it cannot be set without writing a permanent log entry carrying the human's own words.
 consume_authorization() {
-  OFFENDER="$1" GAMELOOP_DIR="$GAMELOOP_DIR" python3 <<'PY'
+  OFFENDER="$1" GAMELOOP_DIR="$GAMELOOP_DIR" STATE_F="$STATE_F" SID="$SID" python3 <<'PY'
 import json, os, sys, datetime
-state_f = os.path.join(os.environ["GAMELOOP_DIR"], "state.json")
+state_f = os.environ["STATE_F"]
 log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
+sid = os.environ.get("SID", "")
 off = os.environ["OFFENDER"]
 try:
     with open(state_f) as f:
@@ -69,10 +83,12 @@ for a in st.get("authorized", []):
             with open(state_f, "w") as f:
                 json.dump(st, f, indent=2); f.write("\n")
             with open(log_f, "a") as f:
-                f.write(json.dumps({
-                    "t": datetime.datetime.now().isoformat(timespec="seconds"),
-                    "kind": "authorized_write", "path": off,
-                    "reason": a.get("reason"), "uses_left": a["uses_left"]}) + "\n")
+                rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+                if sid:
+                    rec["sid"] = sid[:8]
+                rec.update({"kind": "authorized_write", "path": off,
+                            "reason": a.get("reason"), "uses_left": a["uses_left"]})
+                f.write(json.dumps(rec) + "\n")
         except OSError:
             sys.exit(0)
         print("yes")

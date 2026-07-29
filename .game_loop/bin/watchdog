@@ -13,7 +13,9 @@ THE MISMATCH IT DETECTS:
 HOW IT IS WIRED (.claude/settings.json -> hooks.Stop):
   * asyncRewake:true + a long timeout — the hook blocks in the BACKGROUND; exit 2 wakes the model,
     exit 0 is quiet.
-  * one watchdog at a time; the newest supersedes the rest via a pidfile (a superseded one exits 0).
+  * one watchdog per SESSION at a time; the newest supersedes the rest via a per-session pidfile
+    (a superseded one exits 0). Sessions never supersede each other — each watches only its own
+    mandate, in its own .game_loop/sessions/<id>/state.json.
   * chunked sleep so supersede latency and laptop-sleep drift stay bounded.
   * a WATCHDOG_TEST_SECONDS escape hatch force-rings quickly to verify the wake path end-to-end.
 
@@ -38,10 +40,27 @@ except Exception:  # noqa: BLE001
     flair = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
-STATE_F = os.path.join(ROOT, "state.json")
+STATE_F = os.path.join(ROOT, "state.json")          # re-pointed by set_session()
 LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
-PID_PATH = os.path.join(ROOT, ".watchdog.pid")
+PID_PATH = os.path.join(ROOT, ".watchdog.pid")      # re-pointed by set_session()
+
+SESSION = None
+
+
+def set_session(sid):
+    """Scope state AND the pidfile to one session — a watchdog may only watch (and supersede) its own
+    session. A shared pidfile would let session A's Stop hook kill session B's armed watchdog, and a
+    shared state file would let A's mandate ring B out of an idle it had every right to. No id → the
+    repo-global legacy paths, unchanged behavior."""
+    global SESSION, STATE_F, PID_PATH
+    import re
+    sid = re.sub(r"[^A-Za-z0-9._-]", "-", sid.strip())[:64] if isinstance(sid, str) and sid.strip() else None
+    SESSION = sid
+    if sid:
+        sdir = os.path.join(ROOT, "sessions", sid)
+        STATE_F = os.path.join(sdir, "state.json")
+        PID_PATH = os.path.join(sdir, ".watchdog.pid")
 
 
 def _cfg():
@@ -75,6 +94,7 @@ def load_state():
 
 def save_state(st):
     try:
+        os.makedirs(os.path.dirname(STATE_F), exist_ok=True)
         with open(STATE_F, "w") as f:
             json.dump(st, f, indent=2)
             f.write("\n")
@@ -83,10 +103,12 @@ def save_state(st):
 
 
 def logline(rec):
+    stamp = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+    if SESSION:
+        stamp["sid"] = SESSION[:8]
     try:
         with open(LOG_F, "a") as f:
-            f.write(json.dumps({"t": datetime.datetime.now().isoformat(timespec="seconds"),
-                                **rec}) + "\n")
+            f.write(json.dumps({**stamp, **rec}) + "\n")
     except OSError:
         pass
 
@@ -126,6 +148,7 @@ def claim_pidfile():
     except (OSError, ValueError, ProcessLookupError):
         pass
     try:
+        os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
         with open(PID_PATH, "w") as f:
             f.write(str(os.getpid()))
         return True
@@ -189,6 +212,12 @@ def main():
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         payload = {}
+
+    # The payload's session_id is authoritative; env is the fallback for harnesses that omit it.
+    # Resolved BEFORE the first state read — it decides whose mandate this watchdog enforces.
+    set_session(payload.get("session_id")
+                or os.environ.get("GAME_LOOP_SESSION")
+                or os.environ.get("CLAUDE_CODE_SESSION_ID"))
 
     state = load_state()
     m = state.get("mandate") or {}

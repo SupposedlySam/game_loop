@@ -6,6 +6,11 @@
 .game_loop/probe/
 .game_loop/*.pid
 .game_loop/.state.*.tmp
+.game_loop/notify.json
+.game_loop/limits.json
+.game_loop/.limits.*.tmp
+.game_loop/.limits.lock
+.game_loop/HANDOFF.md
 
 # python
 __pycache__/

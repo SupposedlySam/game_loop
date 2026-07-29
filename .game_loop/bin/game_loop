@@ -44,11 +44,15 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair module
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair/notify modules
 try:
     import flair  # decoration only; game_loop works identically without it
 except Exception:  # noqa: BLE001 — a missing/broken flair file must never break a real command
     flair = None
+try:
+    import notify  # paging only; game_loop works identically without it
+except Exception:  # noqa: BLE001 — a missing/broken notify file must never break a real command
+    notify = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
 REPO_ROOT = os.path.dirname(ROOT)
@@ -58,6 +62,7 @@ STATE_F = LEGACY_STATE_F                            # re-pointed by set_session(
 LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
 INV_F = os.path.join(ROOT, "INVARIANTS.md")
+LIMITS_F = os.path.join(ROOT, "limits.json")  # account-scoped, deliberately NOT per-session
 
 SESSION = None  # sanitized id of the session this invocation belongs to, or None
 
@@ -93,6 +98,10 @@ DEFAULT_CONFIG = {
     "deploy_verbs": [],        # extra irreversible verbs the guard blocks anywhere
     "trans_nudge_every": 12,   # phase transitions between retro nudges
     "watchdog": {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3},
+    # Usage-limit survival (statusline tap + limitgate + watchdog park). threshold_pct is where the
+    # handoff gate closes; exhausted_pct is where the watchdog treats the session as rate-limited
+    # and parks until the window resets; handoff_file resolves relative to .game_loop/.
+    "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
 }
 
 DEFAULT_STATE = {
@@ -291,6 +300,290 @@ def resolve_read(p):
     return None
 
 
+# ── usage limits ─────────────────────────────────────────────────────────────────────────────────
+#
+# Claude Code exposes subscription rate limits ONLY through the statusline stdin payload:
+# rate_limits.five_hour / .seven_day, each {used_percentage: 0..100, resets_at: unix epoch}.
+# No hook event, headless flag, or local file carries them (verified 2026-07; see LEDGER.md), so the
+# tap is a statusline command (`game_loop statusline`) that snapshots the payload to limits.json.
+# From that snapshot: `limitgate` (PreToolUse) demands a handoff file once a window crosses
+# threshold_pct, and the watchdog parks an exhausted run and rings it awake when the window resets.
+#
+# WHAT THIS MISSES, stated plainly: the per-model weekly limit is not in the payload — only the 5h
+# and 7d windows are visible. And the snapshot only refreshes while statusline events fire (API
+# responses / a refreshInterval), so a session that never rendered a statusline has no snapshot and
+# every gate here fails OPEN. Absence of limits.json is absence of signal, not evidence of headroom.
+
+WINDOW_LABELS = {"five_hour": "5h", "seven_day": "7d"}
+
+
+def limits_cfg():
+    """config.json -> limits, merged over defaults (config() is a shallow update by design)."""
+    merged = dict(DEFAULT_CONFIG["limits"])
+    lc = config().get("limits")
+    if isinstance(lc, dict):
+        merged.update(lc)
+    return merged
+
+
+def handoff_path():
+    """PER SESSION, like all written state: two sessions sharing a checkout each hand off into their
+    own sessions/<id>/ dir, so one run's dying words can never overwrite another's. No session id
+    (a human terminal) falls back to the repo-global .game_loop/HANDOFF.md, as ever."""
+    name = limits_cfg().get("handoff_file", "HANDOFF.md")
+    if SESSION:
+        return os.path.join(SESSIONS_DIR, SESSION, name)
+    return os.path.join(ROOT, name)
+
+
+def load_limits():
+    try:
+        with open(LIMITS_F) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_limits(snap):
+    fd, tmp = tempfile.mkstemp(dir=ROOT, prefix=".limits.", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(snap, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, LIMITS_F)
+
+
+class limits_lock:
+    """Serialize limits.json read-modify-write across SESSIONS.
+
+    The snapshot is deliberately account-scoped (both sessions burn the same subscription windows),
+    which makes updating it the one place two statuslines write the same file: without a lock,
+    concurrent read-modify-writes can resurrect a consumed `notified` flag and page the human twice,
+    or lose a `crossed_at`. flock on a sidecar lockfile (never the data file — os.replace swaps the
+    data file's inode out from under a held lock). Fails OPEN where flock is unavailable: a missed
+    lock risks a duplicate page, which is cheaper than a statusline that can hang or crash.
+    """
+
+    def __enter__(self):
+        self._fh = None
+        try:
+            import fcntl
+            self._fh = open(os.path.join(ROOT, ".limits.lock"), "w")
+            fcntl.flock(self._fh, fcntl.LOCK_EX)
+        except Exception:  # noqa: BLE001
+            if self._fh:
+                self._fh.close()
+                self._fh = None
+        return self
+
+    def __exit__(self, *exc):
+        if self._fh:
+            try:
+                import fcntl
+                fcntl.flock(self._fh, fcntl.LOCK_UN)
+            except Exception:  # noqa: BLE001
+                pass
+            self._fh.close()
+        return False
+
+
+def binding_windows(snap, pct, now_epoch):
+    """Windows at/over pct whose reset is still ahead: [(name, window), ...].
+
+    A resets_at in the past means the window rolled over since the snapshot — whatever it said no
+    longer binds. That, not snapshot age, is the correct staleness test: used_percentage is monotonic
+    within a window and only ever falls by resetting.
+    """
+    out = []
+    for name, w in ((snap or {}).get("windows") or {}).items():
+        try:
+            if float(w.get("used_percentage", 0)) >= pct and float(w.get("resets_at", 0)) > now_epoch:
+                out.append((name, w))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _fmt_reset(epoch):
+    try:
+        dt = datetime.datetime.fromtimestamp(float(epoch))
+    except (TypeError, ValueError, OverflowError):
+        return "?"
+    fmt = "%H:%M" if 0 <= float(epoch) - time.time() < 86400 else "%a %H:%M"
+    return dt.strftime(fmt)
+
+
+def limits_summary(snap):
+    """One line for status/statusline: '5h 23% ↺14:32 · 7d 41% ↺Mon 09:00', or None."""
+    parts = []
+    for name in ("five_hour", "seven_day"):
+        w = ((snap or {}).get("windows") or {}).get(name)
+        if not w:
+            continue
+        try:
+            parts.append(f"{WINDOW_LABELS[name]} {float(w['used_percentage']):.0f}% "
+                         f"↺{_fmt_reset(w.get('resets_at'))}")
+        except (TypeError, ValueError, KeyError):
+            continue
+    return " · ".join(parts) or None
+
+
+def cmd_statusline(s, a, payload):
+    """The statusline tap: snapshot rate_limits to limits.json, render one row, page on crossing.
+
+    Runs on every statusline refresh, so it must be fast and must NEVER exit non-zero — a broken
+    statusline row is cosmetic, but this tap is what feeds the limitgate and the watchdog's park, so
+    it degrades to printing less rather than failing. crossed_at/notified survive refreshes for the
+    SAME window instance (same resets_at) and reset when the window rolls over.
+    """
+    lc = limits_cfg()
+    now_epoch = time.time()
+    # The whole read-modify-write sits under the cross-session lock: two sessions' statuslines
+    # refresh the same account-scoped snapshot, and crossed_at/notified must be consumed exactly
+    # once between them. (The page itself is sent under the lock too — brief, bounded by the send
+    # timeout, and it is what makes "paged ONCE" true account-wide rather than per-session.)
+    with limits_lock():
+        prev = ((load_limits() or {}).get("windows") or {})
+        windows = {}
+        for name in ("five_hour", "seven_day"):
+            w = ((payload.get("rate_limits") or {}).get(name) or {})
+            try:
+                used = float(w["used_percentage"])
+                resets = float(w["resets_at"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            rec = {"used_percentage": used, "resets_at": resets, "crossed_at": None, "notified": False}
+            p = prev.get(name) or {}
+            if p.get("resets_at") == resets:  # same window instance — carry crossing history forward
+                rec["crossed_at"], rec["notified"] = p.get("crossed_at"), p.get("notified", False)
+                rec["used_percentage"] = max(used, float(p.get("used_percentage") or 0))
+            if rec["used_percentage"] >= float(lc["threshold_pct"]) and resets > now_epoch:
+                if not rec["crossed_at"]:
+                    rec["crossed_at"] = now_epoch
+                    logline({"kind": "limit_threshold", "window": name, "used_percentage": used,
+                             "resets_at": resets, "threshold_pct": lc["threshold_pct"]})
+                if not rec["notified"]:
+                    # One page per window instance, sent whether or not it lands — retrying a failed
+                    # page on every statusline tick would spam the log without reaching anyone new.
+                    rec["notified"] = True
+                    if notify:
+                        notify.send("limit_handoff",
+                                    f"⏳ the {WINDOW_LABELS[name]} usage window is at {used:.0f}% "
+                                    f"(resets {_fmt_reset(resets)}). The limitgate now requires each "
+                                    f"session to write its handoff before other work continues.")
+            windows[name] = rec
+        try:
+            save_limits({"captured_at": now_epoch, "session": SESSION, "windows": windows})
+        except OSError:
+            pass
+    model = ((payload.get("model") or {}).get("display_name")) or ""
+    try:
+        ctx = f"ctx {float((payload.get('context_window') or {}).get('used_percentage')):.0f}%"
+    except (TypeError, ValueError):
+        ctx = None
+    lim = limits_summary({"windows": windows}) or "limits n/a (API key or no response yet)"
+    over = binding_windows({"windows": windows}, float(lc["threshold_pct"]), now_epoch)
+    row = " · ".join(x for x in ["🎮 " + model if model else "🎮", ctx, lim] if x)
+    if over:
+        row += "  ⚠ LIMIT — HANDOFF DUE"
+    print(row)
+
+
+def _limitgate_verdict(s, payload, now_epoch):
+    """Decide whether this tool call may proceed at/over the limit threshold.
+
+    Returns (allow: bool, reason: str|None). Pure decision so tests can drive every branch.
+
+    Fail-OPEN everywhere the signal is missing: no snapshot, unparseable snapshot, or windows that
+    already reset all mean "no evidence of a binding limit", and a gate that blocks on absent
+    evidence blocks its own fix (INV5). The gate closes only on a POSITIVE signal: a window at/over
+    threshold_pct whose reset is still ahead, with no handoff written since it crossed.
+
+    While closed, exactly the handoff work stays allowed: Write/Edit to the handoff file, and any
+    game_loop invocation (checkpoint/arm/mandate/notify are how a dying run reports). Yes, a Bash
+    command merely MENTIONING the handoff file passes — this gate nudges the handoff into existence,
+    it is not a security boundary; the write guard still owns what may be mutated.
+    """
+    snap = load_limits()
+    if not snap:
+        return True, None
+    lc = limits_cfg()
+    over = binding_windows(snap, float(lc["threshold_pct"]), now_epoch)
+    if not over:
+        return True, None
+    hp = handoff_path()
+    crossed = min((w.get("crossed_at") or snap.get("captured_at") or now_epoch) for _, w in over)
+    try:
+        if os.path.getsize(hp) > 0 and os.path.getmtime(hp) >= float(crossed):
+            return True, None
+    except OSError:
+        pass
+    tool = payload.get("tool_name") or ""
+    ti = payload.get("tool_input") or {}
+    if tool in ("Write", "Edit", "NotebookEdit"):
+        fp = ti.get("file_path") or ti.get("notebook_path") or ""
+        if fp and os.path.realpath(os.path.expanduser(fp)) == os.path.realpath(hp):
+            return True, None
+    if tool == "Bash":
+        cmd = ti.get("command") or ""
+        if ".game_loop/bin/" in cmd or "game_loop " in cmd or os.path.basename(hp) in cmd:
+            return True, None
+    detail = "\n".join(
+        f"  {WINDOW_LABELS.get(n, n)} window: {float(w.get('used_percentage', 0)):.0f}% used, "
+        f"resets {_fmt_reset(w.get('resets_at'))}" for n, w in over)
+    ph = s.get("phase") or {}
+    m = s.get("mandate") or {}
+    return False, (
+        "LIMIT GATE CLOSED — a usage window is nearly exhausted and no handoff exists yet.\n\n"
+        + detail + "\n\n"
+        "When this window runs dry the session dies MID-ACTION and everything you know right now —\n"
+        "where you are, what is verified, what you planned next — dies with it. Write it down first.\n\n"
+        f"Write the handoff NOW (the Write tool to exactly this path is allowed):\n  {hp}\n\n"
+        "Include, concretely:\n"
+        f"  * the mandate: {m.get('text') or '(none bound)'}\n"
+        f"  * where you are: {ph.get('milestone') or '?'} · {ph.get('doing') or '?'}\n"
+        "  * what is DONE and VERIFIED (with the file paths that prove it)\n"
+        "  * what you were IN THE MIDDLE OF, and the exact next actions you had planned\n"
+        "  * how to resume (commands, branch, open questions)\n\n"
+        "Once the handoff is written, this gate opens and you may keep working until the window\n"
+        "actually resets — the watchdog will park an exhausted run and ring it awake after the\n"
+        "reset, pointing at your handoff.")
+
+
+def cmd_limitgate(s, a, payload):
+    """PreToolUse entrypoint for the limit gate. Same output protocol as guard-writes.sh: a deny is
+    JSON on stdout with permissionDecision=deny, always exit 0."""
+    allow, reason = _limitgate_verdict(s, payload, time.time())
+    if allow:
+        sys.exit(0)
+    logline({"kind": "limit_gate_block", "tool": payload.get("tool_name")})
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": reason}}))
+    sys.exit(0)
+
+
+def cmd_notify(s, a):
+    """Page the configured channel by hand: a test ping, or a message the run's human should see."""
+    if notify is None:
+        die("notify module missing (.game_loop/bin/notify.py) — reinstall game_loop.")
+    if not a.test and not a.text:
+        die("notify needs --text \"<message>\" (or --test to verify the channel works).")
+    if not notify.configured():
+        out("notify: NOT configured — no page sent.",
+            "  Create .game_loop/notify.json (gitignored). Minimal bot-token form:",
+            '    {"slack": {"bot_token": "xoxb-...", "channel": "C..."}}',
+            "  or send-only: {\"slack\": {\"webhook_url\": \"https://hooks.slack.com/...\"}}",
+            "  Full schema + scopes: .game_loop/bin/notify.py docstring.")
+        return
+    text = a.text or "test page — the notify channel works. (game_loop notify --test)"
+    res = notify.send("manual", text)
+    if res is None:
+        out("✗ page FAILED — see the last notify_error line in .game_loop/log.jsonl.")
+        return
+    logline({"kind": "notify_manual", "text": text})
+    out("✓ paged the channel." + ("" if res is True else f" (thread ts {res})"))
+
+
 # ── verbs ────────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_claim(s, a):
@@ -341,6 +634,9 @@ def cmd_mandate(s, a):
         s["stop_blocks"] = 0
         save(s)
         logline({"kind": "mandate_clear", "text": m.get("text"), "notes": a.notes})
+        if notify:
+            notify.send("mandate_clear",
+                        f"🏁 mandate complete — {m.get('text')}\nnotes: {a.notes or '(none)'}")
         out("✓ MANDATE released — the Stop gate is inert again.",
             f"  was  : {m.get('text')}",
             f"  notes: {a.notes or '(none)'}")
@@ -354,6 +650,7 @@ def cmd_mandate(s, a):
     # earlier session and silently never enforce.
     s["watchdog_rings"] = 0
     s["watchdog_last_ring_size"] = 0
+    s["watchdog_exhausted_paged"] = False
     save(s)
     logline({"kind": "mandate_set", "text": a.set})
     out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
@@ -380,6 +677,8 @@ def cmd_checkpoint(s, a):
     s["stop_ok"] = True
     s["stop_ok_notes"] = a.notes
     save(s)
+    if notify:
+        notify.send("checkpoint", f"📍 checkpoint — {a.notes}")  # default-off event; opt in to page
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
         "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
@@ -413,6 +712,17 @@ def cmd_arm(s, a):
     save(s)
     logline({"kind": "arm", "tier": "T3", "question": a.question,
              "read": list(resolved.values()), "predict": a.predict})
+    if notify:
+        # Page the human where they actually are (their phone), not just the terminal. On the
+        # bot-token path the thread ts is kept so the watchdog can read their reply back into the
+        # run; on the webhook path the page is one-way and the arm waits at the desk as before.
+        tail = ("\nReply in this thread and the watchdog will carry your answer back into the run."
+                if notify.can_read_replies() else "")
+        ts = notify.send("arm", f"🙋 T3 — the Crawler needs you.\nQ: {a.question}\n"
+                                f"predicts: {a.predict}{tail}")
+        if isinstance(ts, str):
+            s["t3_armed"]["slack_ts"] = ts
+            save(s)
     out("✓ ARMED for ONE T3 spend (one interruption).",
         f"  Q: {a.question}",
         f"  already read (didn't answer it): {', '.join(paths)}",
@@ -861,6 +1171,18 @@ def cmd_status(s, a):
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
+    snap = load_limits()
+    if snap:
+        lim = limits_summary(snap) or "snapshot present but empty (API-key auth exposes no limits)"
+        over = binding_windows(snap, float(limits_cfg()["threshold_pct"]), time.time())
+        out("limits: " + lim + ("  ⚠ HANDOFF DUE — the limitgate is closed" if over else ""))
+    else:
+        out("limits: no snapshot — the statusline tap hasn't fired (subscribers only; "
+            "install.sh wires it, then it fills on the first API response)")
+    if notify:
+        out("notify: " + ("Slack configured — replies readable (bot token)" if notify.can_read_replies()
+                          else "Slack configured — send-only (webhook)" if notify.configured()
+                          else "not configured (.game_loop/notify.json; see bin/notify.py)"))
     if (w := hooks_live_warning()):
         out(w)
     if (w := legacy_mandate_warning()):
@@ -990,10 +1312,16 @@ def main():
     cp = sub.add_parser("checkpoint")  # report + hand back, without asking anything
     cp.add_argument("--notes", help="what you did and what happens next")
 
-    sub.add_parser("stopgate")  # Stop-hook entrypoint; not for humans
+    nf = sub.add_parser("notify")  # page the configured Slack channel by hand
+    nf.add_argument("--text", help="the message the run's human should see")
+    nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
+
+    sub.add_parser("stopgate")    # Stop-hook entrypoint; not for humans
+    sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
+    sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
 
     a = p.parse_args()
-    if a.cmd == "stopgate":
+    if a.cmd in ("stopgate", "limitgate", "statusline"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses
         # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
         try:
@@ -1001,13 +1329,14 @@ def main():
         except (json.JSONDecodeError, ValueError):
             payload = {}
         set_session(payload.get("session_id") or env_session())
-        cmd_stopgate(load(), a, payload)
+        {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate,
+         "statusline": cmd_statusline}[a.cmd](load(), a, payload)
         return
     set_session(env_session())
     s = load()
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
-     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize}[a.cmd](s, a)
+     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

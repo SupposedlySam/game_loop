@@ -108,6 +108,62 @@ When the work is genuinely done:
 
 With no mandate bound, every gate is inert — game_loop never sits between you and a normal conversation.
 
+## Page your phone, not your terminal (Slack, optional)
+
+An unattended run is autonomous enough that nobody should babysit it — so when it *does* need you,
+the signal must reach where you actually are. Give game_loop a Slack channel and the tools (never the
+model's memory) page it at exactly the moments that matter:
+
+- **`arm`** — the run has a genuine T3 question, or needs your physical presence
+- **watchdog stand-down** — the ring cap is exhausted; the run is stuck
+- **`mandate --clear`** — the work is done
+- **usage limits** — a window is nearly exhausted (handoff demanded), the run parks, the run resumes
+
+Setup: create `.game_loop/notify.json` (gitignored — credentials never land in git):
+
+```jsonc
+{ "slack": { "bot_token": "xoxb-...", "channel": "C0123456789" } }   // send + read replies
+// or send-only: { "slack": { "webhook_url": "https://hooks.slack.com/services/..." } }
+```
+
+then verify with `./.game_loop/bin/game_loop notify --test`. The bot-token form needs `chat:write` +
+`channels:history` scopes and the bot invited to the channel; full schema and per-event tuning live in
+the [`notify.py`](.game_loop/bin/notify.py) docstring.
+
+**Replies flow back.** On the bot-token path, an `arm` page keeps its Slack thread: while the arm is
+live, the watchdog polls that thread, and when you answer *from your phone*, it clears the arm and
+rings your answer straight into the run. The desk is optional. (Webhooks are write-only, so there the
+page is one-way.) A notification failure never takes down a gate — same contract as flair: Slack being
+down means less decoration, never less enforcement.
+
+## Survive Claude Code usage limits
+
+Subscription usage is gated by rolling windows (a ~5-hour block and a 7-day block). Without help, a
+run that hits one dies **mid-action** — everything it knew evaporates — and nothing restarts it when
+the window resets. game_loop closes both holes, using the one place Claude Code actually exposes the
+numbers: the statusline payload.
+
+1. **The tap** — the installer wires `game_loop statusline` as your status line (only if you have
+   none). Besides rendering a row (`🎮 model · ctx 45% · 5h 23% ↺14:32 · 7d 41% ↺Mon 09:00`), it
+   snapshots `rate_limits` to `.game_loop/limits.json` on every refresh.
+2. **The handoff gate** — a `PreToolUse` hook (`game_loop limitgate`) watches the snapshot. When a
+   window crosses `limits.threshold_pct` (default 98%), ordinary tool calls are refused until the
+   session writes its handoff — where it is, what's verified, what was planned next. The keystone is
+   the usual one: a real file must exist. Handoffs are per session
+   (`.game_loop/sessions/<id>/HANDOFF.md`; the gate's message names the exact path), so concurrent
+   runs sharing a checkout never overwrite each other's, and one session's handoff never opens the
+   gate for a sibling. Then work continues until the wall actually hits.
+3. **The wake-up** — when the snapshot shows a window at `limits.exhausted_pct` (default 99%), the
+   watchdog stops ringing (a ring is an API call into the very wall that killed the run), pages you
+   that it parked, sleeps until `resets_at`, and then rings the session awake pointing at the handoff.
+   The run continues on its own, minutes after the window resets.
+
+Honest limits of the mechanism: the data exists only for Claude.ai subscribers (API-key auth exposes
+nothing — every gate fails open), the per-model weekly limit is not in the payload, and the wake-up
+revives a rate-limited *session*, not a quit app or a closed laptop. `game_loop status` shows the
+current snapshot, and the handoff doubles as a human-readable "where did the run land" note — useful
+even if you never automate the resume.
+
 ## The verbs
 
 | Command | What it does |
@@ -122,6 +178,7 @@ With no mandate bound, every gate is inert — game_loop never sits between you 
 | `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
 | `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |
 | `game_loop note --text ".."` | Append a note to the log. |
+| `game_loop notify --text ".."` / `--test` | Page the configured Slack channel by hand / verify the channel works. |
 
 ## The guardrails
 
@@ -150,6 +207,11 @@ for the guarantees as runnable checks (`python3 test/run.py`).
   "deploy_verbs": [],        // extra irreversible verbs to block anywhere, e.g. "firebase deploy"
   "trans_nudge_every": 12,   // phase transitions between retro nudges
   "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 },
+  "limits": {                // usage-limit survival (see "Survive Claude Code usage limits")
+    "threshold_pct": 98,     // handoff gate closes here
+    "exhausted_pct": 99,     // watchdog parks here and wakes the run at the window reset
+    "handoff_file": "HANDOFF.md"   // resolved relative to .game_loop/
+  },
   "flair": {                 // fun celebration lines (see below) — set enabled:false to silence
     "enabled": true,
     "support_name": "SupposedlySam",

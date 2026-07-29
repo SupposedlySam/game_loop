@@ -34,3 +34,5 @@
   - "python3 test/run.py"
 ".game_loop/bin/flair.py":
   - "python3 test/run.py"
+".game_loop/bin/notify.py":
+  - "python3 test/run.py"

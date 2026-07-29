@@ -1,4 +1,9 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "gl=\"${CLAUDE_PROJECT_DIR:-.}/.game_loop/bin/game_loop\"; if [ -x \"$gl\" ]; then exec \"$gl\" statusline; else cat >/dev/null; fi",
+    "refreshInterval": 60
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +14,17 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/guard-writes.sh",
             "timeout": 10,
             "statusMessage": "game_loop: checking the write stays inside the repo"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/game_loop limitgate",
+            "timeout": 10,
+            "statusMessage": "game_loop: usage-limit handoff gate"
           }
         ]
       }

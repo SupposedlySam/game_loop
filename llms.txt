@@ -56,6 +56,30 @@ Instead, keep working — and when you genuinely need to end a turn, pick one:
 on disk, you don't need the human. `checkpoint` and `arm` are each single-use (consumed on the next
 turn-end). If you can predict the human's answer, don't ask; make the call and carry on.
 
+## Usage limits: the handoff gate and the park
+
+If a tool call is refused with **LIMIT GATE CLOSED**, a Claude Code usage window is nearly exhausted
+and the session will soon die mid-action. Do not argue with it and do not route around it — write the
+handoff file at the exact path the gate names (YOUR session's own, under `.game_loop/sessions/<id>/`):
+the mandate, where you are, what is DONE and VERIFIED (with proving paths), what you were mid-flight
+on, exact next actions, how to resume. The gate opens the moment that file exists, and you keep
+working until the window actually runs dry.
+
+If you are woken with **"the exhausted usage window has reset"**, you are the resumed run: run
+`game_loop status`, read the handoff if it exists, re-absorb it, delete it (a stale handoff misleads
+the next reader), and carry on with the mandate.
+
+If you are woken with **"the human answered your T3 question on Slack"**, the arm was already
+cleared — act on the answer and continue; do not re-ask or wait further.
+
+## Paging the human's phone
+
+`./.game_loop/bin/game_loop notify --text ".."` pages the configured Slack channel (no-op when
+unconfigured; `--test` verifies the wiring). The tools already page automatically on `arm`,
+`mandate --clear`, watchdog stand-down, and limit events — reach for `notify` only when the human
+must see something none of those cover (e.g. "the deploy needs your physical presence at the TV").
+It does not license a turn-end: the Stop gate rules still apply.
+
 ## When you learn something, encode it — don't write it down
 
 A learning kept in prose is a promise you will break under compaction. Convert it into an artifact the

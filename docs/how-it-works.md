@@ -63,6 +63,32 @@ Guardrails on the watchdog itself:
 
 Tune all three knobs in `.game_loop/config.json → watchdog`.
 
+The watchdog carries two more jobs, both riding the same asyncRewake wake mechanism:
+
+- **Usage-limit park.** When `.game_loop/limits.json` (see the statusline tap below) shows a rate-limit
+  window at `limits.exhausted_pct`, ringing is pointless — a wake-up is an API call into the very wall
+  that killed the run — so it would only burn the ring cap against a dead wall. Instead the watchdog
+  parks: it pages the human once, sleeps until the window's `resets_at` (re-checking the snapshot so an
+  early roll-over or plan change ends the park as soon as the evidence does), then rings the session
+  awake pointing at the handoff the limit gate demanded. What it misses, stated plainly: it revives a
+  rate-limited *session*; if the human quit Claude Code there is no process left to wake.
+- **Slack reply forwarding.** A T3 arm normally means "the human holds the ball — stay quiet". But when
+  the arm was paged to Slack with a thread ts (bot-token setups), the ball can come back from a phone:
+  the watchdog polls the thread while the arm is live, and on a human reply it clears the arm and rings
+  the answer into the run. The trust scope is stated in `notify.py`: a reply is taken as the human's
+  words — anyone in the channel can answer, so scope the channel accordingly.
+
+### The statusline tap — `game_loop statusline`
+
+Claude Code exposes subscription rate limits in exactly one place: the JSON it pipes to a configured
+status line (`rate_limits.five_hour` / `.seven_day`, each `{used_percentage, resets_at}`) — no hook
+event, headless flag, or state file carries them (sources in `LEDGER.md`). So the tap is a status
+line command: on every refresh it snapshots those numbers to `.game_loop/limits.json` and renders a
+one-row display. `install.sh` wires it only when no statusLine exists — a status line is the user's
+front yard — and prints chaining instructions otherwise. Everything downstream (the limit gate, the
+watchdog's park) reads the snapshot; a session that never rendered a status line has no snapshot, and
+every consumer treats that as *absence of signal, not evidence of headroom*, and fails open.
+
 ---
 
 ## The guardrails
@@ -91,6 +117,20 @@ one that states its limits.
 
 The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
 "<their words>"`.
+
+### The limit gate — `game_loop limitgate`
+
+A second `PreToolUse` hook, watching `.game_loop/limits.json`. When a rate-limit window crosses
+`limits.threshold_pct` (default 98%), the session is minutes from dying mid-action with everything it
+knows still in its head — so the gate refuses ordinary tool calls until a handoff file exists
+(per session: `.game_loop/sessions/<id>/HANDOFF.md`, so concurrent runs never overwrite each other's
+and one session's handoff never opens a sibling's gate): where the run is, what is verified, what was
+planned next. The keystone is
+the usual shape — a real, non-empty file, written after the crossing. While closed, exactly the
+handoff work stays allowed: `Write`/`Edit` to the handoff path and `game_loop` verbs. It fails OPEN on
+any missing signal (no snapshot, a window that already reset) because a gate that blocks on absent
+evidence blocks its own fix — and it says what it is not: a nudge that the handoff exist, not a
+security boundary (the write guard still owns what may be mutated).
 
 ### The arm → gate → consume primitive
 
@@ -121,11 +161,15 @@ Everything lives in `.game_loop/`:
 
 | File | What it is |
 |---|---|
-| `bin/game_loop` | the CLI (all the verbs) |
-| `bin/watchdog` | the autonomy engine (Stop hook) |
+| `bin/game_loop` | the CLI (all the verbs, plus the stopgate/limitgate/statusline hook entrypoints) |
+| `bin/watchdog` | the autonomy engine (Stop hook): idle rings, limit park, Slack reply forwarding |
 | `bin/guard-writes.sh` | the write guard (PreToolUse hook) |
 | `bin/verify` | the changed-file → owed-checks gate |
-| `config.json` | read roots, allow-write roots, deploy verbs, watchdog knobs |
+| `bin/notify.py` | optional Slack paging (never enforcement; a Slack outage never breaks a gate) |
+| `config.json` | read roots, allow-write roots, deploy verbs, watchdog + limits knobs |
+| `notify.json` | Slack credentials + per-event paging config (git-ignored) |
+| `limits.json` | the statusline tap's rate-limit snapshot (git-ignored; deliberately account-scoped — sessions share the subscription windows — with cross-session flock + monotonic merge on update) |
+| `sessions/<id>/HANDOFF.md` | the limit gate's demanded handoff, PER SESSION (git-ignored; delete after re-absorbing it) |
 | `sessions/<id>/state.json` | counters, phase, mandate, arms — PER Claude Code session (atomic writes; git-ignored) |
 | `state.json` | the no-session fallback state (a human terminal, an older harness) |
 | `log.jsonl` | append-only event log, shared across sessions; each line carries the writing session's `sid` (git-ignored) |

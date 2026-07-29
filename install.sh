@@ -53,14 +53,16 @@ if [ -f "$TARGET/.game_loop/bin/game_loop" ]; then FRESH=0; else FRESH=1; fi
 echo "Installing game_loop into: $TARGET"
 mkdir -p "$TARGET/.game_loop/bin"
 
-# Always refresh the executables — they are the tool. (flair.py is decoration, imported by the others.)
+# Always refresh the executables — they are the tool. (flair.py is decoration and notify.py is
+# paging; both are imported by the others and both degrade to no-ops.)
 cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
    "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
-   "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$TARGET/.game_loop/bin/"
+   "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$SRC/.game_loop/bin/notify.py" \
+   "$TARGET/.game_loop/bin/"
 chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
          "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-writes-impl.sh" \
          "$TARGET/.game_loop/bin/verify"
-echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, verify, flair.py)"
+echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, verify, flair.py, notify.py)"
 
 # Seed the user-owned files only if absent — never clobber their config or notes.
 # $2 overrides the source path (defaults to .game_loop/$1) for files that ship from templates/.
@@ -145,7 +147,25 @@ for event, new_entries in block.items():
 with open(settings_f, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
-print("  merged  .claude/settings.json (PreToolUse guard + Stop gate + watchdog)")
+print("  merged  .claude/settings.json (PreToolUse guard + limitgate + Stop gate + watchdog)")
+
+# The statusline is the ONLY place Claude Code exposes subscription rate limits, so it is the tap
+# that feeds the limitgate and the watchdog's limit-park. Set it only when the project has none —
+# a statusline is the user's front yard, and clobbering theirs to install a tap earns a rip-out.
+GL_STATUSLINE = ('gl="${CLAUDE_PROJECT_DIR:-.}/.game_loop/bin/game_loop"; '
+                 'if [ -x "$gl" ]; then exec "$gl" statusline; else cat >/dev/null; fi')
+sl = settings.get("statusLine")
+if not sl:
+    settings["statusLine"] = {"type": "command", "command": GL_STATUSLINE, "refreshInterval": 60}
+    with open(settings_f, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    print("  set     statusLine (usage-limit tap → .game_loop/limits.json + one-row display)")
+elif ".game_loop/bin/game_loop" not in json.dumps(sl):
+    print("  ⚠ statusLine already configured and left alone — the usage-limit features need its")
+    print("    data tap. Chain it from your own script (append this line, passing stdin through):")
+    print('      tee >("${CLAUDE_PROJECT_DIR:-.}"/.game_loop/bin/game_loop statusline >/dev/null) | <your script>')
+    print("    or replace your statusLine command with: " + GL_STATUSLINE)
 PY
 
 # Ignore the runtime files.
@@ -159,11 +179,23 @@ verified.json
 probe/
 *.pid
 .state.*.tmp
+notify.json
+limits.json
+.limits.*.tmp
+.limits.lock
+HANDOFF.md
 EOF
   echo "  wrote   .game_loop/.gitignore"
-elif ! grep -q '^sessions/$' "$GI"; then
-  echo "sessions/" >> "$GI"
-  echo "  updated .game_loop/.gitignore (+ sessions/ — per-session state)"
+else
+  if ! grep -q '^sessions/$' "$GI"; then
+    echo "sessions/" >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ sessions/ — per-session state)"
+  fi
+  # notify.json holds a Slack credential — it must be ignored BEFORE anyone writes it.
+  if ! grep -q '^notify.json$' "$GI"; then
+    printf 'notify.json\nlimits.json\n.limits.*.tmp\n.limits.lock\nHANDOFF.md\n' >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ notify.json, limits.json, HANDOFF.md)"
+  fi
 fi
 
 # Per-session migration honesty: an active mandate in the OLD repo-global state.json gates nobody
@@ -195,6 +227,9 @@ if [ "$FRESH" = 1 ]; then
   echo "     registered on disk and silently never invoked. \`game_loop status\` will warn you."
   echo "  4. In that new session, run:  ./.game_loop/bin/game_loop status"
   echo "  5. To run unattended: ./.game_loop/bin/game_loop mandate --set \"<what to work on>\""
+  echo "  6. OPTIONAL — Slack paging (arm questions, stuck runs, limit parks, phone replies):"
+  echo "     create $TARGET/.game_loop/notify.json (gitignored; schema in .game_loop/bin/notify.py),"
+  echo "     then verify with:  ./.game_loop/bin/game_loop notify --test"
 else
   echo "Done — updated in place. Scripts refreshed; your config, invariants and notes were kept."
   echo "  Nothing else to do. Sanity-check with:  ./.game_loop/bin/game_loop status"

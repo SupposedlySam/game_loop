@@ -145,6 +145,18 @@ def main():
         p = {"tool_name": "Bash", "tool_input": {"command": "touch ~/authztest/x"}}
         check("authorized path allowed once", not denied(guard(proj, p)))
         check("authorization is single-use (spent → denied)", denied(guard(proj, p)))
+        # #1: the escape hatch must work for the Write/Edit tools too, not just Bash mutators —
+        # the deny message points at `authorize`, so `authorize` has to unblock this path.
+        gl(proj, "authorize", "--path", os.path.expanduser("~/authztest-write"),
+               "--reason", "user said ok")
+        pw = {"tool_name": "Write",
+              "tool_input": {"file_path": os.path.expanduser("~/authztest-write/x.md")}}
+        check("authorized path allowed once via Write", not denied(guard(proj, pw)))
+        check("Write authorization is single-use (spent → denied)", denied(guard(proj, pw)))
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("a Write spend is logged as authorized_write",
+              '"authorized_write"' in log and "authztest-write" in log)
 
         print("deploy verbs:")
         cf = os.path.join(proj, ".game_loop", "config.json")

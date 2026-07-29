@@ -205,14 +205,25 @@ PY
     #    commit made in some other repository (a clone in a scratch root, a sibling project) owes that
     #    repo's checks, not ours. The target is resolved per segment — `cd` tracked, `git -C` honored —
     #    the same way the mutation scanner resolves paths.
-    commit_here=$(REPO_REAL="$REPO_REAL" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
+    #    The scan also collects every OTHER segment chained into the command. A denial here means the
+    #    WHOLE body never ran — including edits/deletions chained before the commit — and the natural
+    #    retry (just the commit) silently drops them, with a commit message still describing work that
+    #    never happened. The denial must therefore name what else was in the command (issue #9).
+    #    First output line: "yes"/"" (a repo-targeting commit is present); each further line: one
+    #    chained non-commit segment, truncated for display.
+    commit_scan=$(REPO_REAL="$REPO_REAL" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
 import json, os, re, shlex, sys
 payload = json.loads(sys.argv[1])
 cmd = os.environ.get("SCAN_CMD", "")
 repo = os.environ["REPO_REAL"]
 cwd = payload.get("cwd") or repo
 home = os.path.expanduser("~")
+found = False
+others = []
 for seg in re.split(r"&&|\|\||;|\||\n", cmd):
+    seg = seg.strip()
+    if not seg:
+        continue
     try:
         argv = shlex.split(seg)
     except ValueError:
@@ -224,19 +235,24 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
     if verb == "cd" and args:
         nxt = os.path.expanduser(args[0].replace("$HOME", home))
         cwd = nxt if os.path.isabs(nxt) else os.path.join(cwd, nxt)
-        continue
-    if verb != "git" or "commit" not in args or "--no-verify" in args:
-        continue
-    tgt = cwd
-    if "-C" in args and args.index("-C") + 1 < len(args):
-        c = os.path.expanduser(args[args.index("-C") + 1].replace("$HOME", home))
-        tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
-    tgt = os.path.realpath(tgt)
-    if tgt == repo or tgt.startswith(repo + os.sep):
-        print("yes")
-        break
+        continue   # a bare cd is navigation, not lost work — track it, don't report it
+    if verb == "git" and "commit" in args and "--no-verify" not in args:
+        tgt = cwd
+        if "-C" in args and args.index("-C") + 1 < len(args):
+            c = os.path.expanduser(args[args.index("-C") + 1].replace("$HOME", home))
+            tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
+        if os.path.realpath(tgt).startswith(os.path.realpath(repo).rstrip(os.sep) + os.sep) \
+                or os.path.realpath(tgt) == os.path.realpath(repo):
+            found = True
+            continue
+    others.append(seg if len(seg) <= 70 else seg[:67] + "...")
+print("yes" if found else "")
+for o in others:
+    print(o)
 PY
 )
+    commit_here=$(printf '%s\n' "$commit_scan" | head -1)
+    chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +2 | grep -v '^$' || true)
     if [ "$commit_here" = "yes" ]; then
       if ! "$GAMELOOP_DIR/bin/verify" --check >/tmp/.game_loop_verify 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
@@ -247,6 +263,18 @@ PY
           chained_hint="
 YOU CHAINED verify WITH THIS COMMIT IN ONE COMMAND. That can't work: this gate runs BEFORE the
 command body, so your verify line hasn't executed yet. Run verify as a SEPARATE, EARLIER call."
+        fi
+        # Issue #9: every other denial here is safe to retry naively; this one is not. Re-running
+        # just the commit after a denial silently drops the chained edits the commit message still
+        # describes. Name the chained work, so the retry that loses it can't happen quietly.
+        if [ -n "$chained_segs" ]; then
+          seg_count=$(printf '%s\n' "$chained_segs" | wc -l | tr -d ' ')
+          chained_hint="$chained_hint
+THIS COMMAND CHAINS $seg_count OTHER OPERATION(S) WITH THE COMMIT:
+$(printf '%s\n' "$chained_segs" | sed 's/^/    /')
+This gate runs BEFORE the command body, so NONE of them executed. When you retry, re-run the
+WHOLE command — retrying only the commit silently loses the rest, while the commit message
+still describes it."
         fi
         deny "$(cat /tmp/.game_loop_verify)
 

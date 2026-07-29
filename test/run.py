@@ -286,6 +286,26 @@ def main():
                                       "cwd": elsewhere})))
         finally:
             shutil.rmtree(elsewhere, ignore_errors=True)
+
+        # #9: a denied commit that was CHAINED with other work must name that work — the deny stops
+        # the WHOLE command body, and retrying just the commit silently drops the chained edits.
+        print("write guard (denied commit names chained work):")
+        r = guard(proj, {"tool_name": "Bash", "cwd": proj,
+                         "tool_input": {"command": "rm -f scratch.txt && git commit -m x"}})
+        check("a chained denial lists the segment that never ran",
+              denied(r) and "rm -f scratch.txt" in r.stdout and "NONE of them executed" in r.stdout)
+        r = guard(proj, {"tool_name": "Bash", "cwd": proj,
+                         "tool_input": {"command": "git commit -m x && rm -f after.txt"}})
+        check("segments AFTER the commit are lost too, and listed",
+              denied(r) and "rm -f after.txt" in r.stdout)
+        r = guard(proj, {"tool_name": "Bash", "cwd": proj,
+                         "tool_input": {"command": "git commit -m x"}})
+        check("a bare denied commit adds no chained-work warning",
+              denied(r) and "OTHER OPERATION" not in r.stdout)
+        r = guard(proj, {"tool_name": "Bash", "cwd": proj,
+                         "tool_input": {"command": "cd . && git commit -m x"}})
+        check("a bare cd is navigation, not reported as lost work",
+              denied(r) and "OTHER OPERATION" not in r.stdout)
         with open(vy, "w") as f:
             f.write(vy_src)
 

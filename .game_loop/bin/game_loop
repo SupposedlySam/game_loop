@@ -39,8 +39,10 @@ import datetime
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair module
 try:
@@ -755,6 +757,43 @@ def hooks_live_warning():
     return None
 
 
+SESSION_TTL_DAYS = 30
+
+
+def _prune_stale_sessions():
+    """Opportunistic GC, run from `status` (the verb every session runs first). A session dir whose
+    state hasn't been touched in SESSION_TTL_DAYS and holds no active mandate is a finished run's
+    residue — prune it. An ACTIVE mandate is never pruned, however old: age is not evidence the work
+    was abandoned, and deleting a live mandate would silently disarm its session's gates."""
+    cutoff = time.time() - SESSION_TTL_DAYS * 86400
+    pruned = 0
+    try:
+        entries = os.listdir(SESSIONS_DIR)
+    except OSError:
+        return
+    for d in entries:
+        if d == SESSION:
+            continue
+        sdir = os.path.join(SESSIONS_DIR, d)
+        sf = os.path.join(sdir, "state.json")
+        try:
+            if os.path.getmtime(sf) > cutoff:
+                continue
+            with open(sf) as f:
+                if (json.load(f).get("mandate") or {}).get("active"):
+                    continue
+        except (OSError, ValueError):
+            try:
+                if os.path.getmtime(sdir) > cutoff:   # stateless/unreadable: prune on dir age alone
+                    continue
+            except OSError:
+                continue
+        shutil.rmtree(sdir, ignore_errors=True)
+        pruned += 1
+    if pruned:
+        logline({"kind": "sessions_pruned", "count": pruned, "ttl_days": SESSION_TTL_DAYS})
+
+
 def _sibling_sessions():
     """(other-session count, how many of those hold an active mandate) — visibility, not enforcement."""
     others = active = 0
@@ -798,6 +837,7 @@ def legacy_mandate_warning():
 
 
 def cmd_status(s, a):
+    _prune_stale_sessions()
     out(render_banner(s))
     if (n := retro_nudge(s)):
         out(n)

@@ -237,6 +237,80 @@ def main():
         check("shared log lines carry the writing session's sid", '"sid": "sess-aaa"' in log)
         gl(proj, "mandate", "--clear", "--notes", "done", sid="sess-aaa")
 
+        # #5: quoted DATA is not shell. Redirect chars and deploy verbs inside a message-flag string
+        # or a sed script must not deny; a QUOTED target of a real redirect must still deny (the old
+        # regex let it through). Interpreter args are not message flags and stay guarded.
+        print("write guard (quoted text is data):")
+        check("allows a redirect mentioned inside a commit -m message",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'git commit -m "note: echo x > ~/outside.txt"'}})))
+        check("allows a deploy verb mentioned inside a commit -m message",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'git commit -m "docs: describe the npm publish flow"'}})))
+        check("allows a redirect char inside a sed script",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}})))
+        check("still denies a real redirect to a QUOTED out-of-repo target",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'echo x > "$HOME/gl_outside.txt"'}})))
+        check("still denies a deploy verb inside an interpreter arg (bash -c executes)",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash -c 'npm publish'"}})))
+        check("allows a data heredoc whose opener also has a redirect (consumer is cat, not the target)",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat > out.md <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}})))
+
+        # #4: the commit gate applies only to commits that TARGET this repo — verify.yaml describes
+        # THIS repo's owed checks; a commit in some other repository owes that repo's checks, not ours.
+        print("write guard (commit gate is repo-scoped):")
+        subprocess.run(["git", "init", "-q", proj], capture_output=True)
+        vy = os.path.join(proj, ".game_loop", "verify.yaml")
+        with open(vy) as f:
+            vy_src = f.read()
+        with open(vy, "w") as f:
+            f.write('"*.txt":\n  - "false"\n')
+        with open(os.path.join(proj, "note.txt"), "w") as f:
+            f.write("x\n")
+        commit = {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}, "cwd": proj}
+        check("blocks an in-repo commit whose owed checks are stale", denied(guard(proj, commit)))
+        elsewhere = tempfile.mkdtemp(prefix="gameloop-other-")
+        try:
+            check("allows a commit made in a DIFFERENT repo (cwd elsewhere)",
+                  not denied(guard(proj, {"tool_name": "Bash",
+                                          "tool_input": {"command": "git commit -m x"},
+                                          "cwd": elsewhere})))
+            check("still blocks a commit targeting this repo via git -C from elsewhere",
+                  denied(guard(proj, {"tool_name": "Bash",
+                                      "tool_input": {"command": f"git -C {proj} commit -m x"},
+                                      "cwd": elsewhere})))
+        finally:
+            shutil.rmtree(elsewhere, ignore_errors=True)
+        with open(vy, "w") as f:
+            f.write(vy_src)
+
+        # #6: stale sessions are pruned on `status` — old + no active mandate goes, an active mandate
+        # stays regardless of age, and fresh dirs stay.
+        print("session GC:")
+        sess_root = os.path.join(proj, ".game_loop", "sessions")
+        old = 40 * 86400
+        import time as _time
+        for name, mandate_active in (("sess-old-idle", False), ("sess-old-live", True)):
+            d = os.path.join(sess_root, name)
+            os.makedirs(d, exist_ok=True)
+            sf = os.path.join(d, "state.json")
+            with open(sf, "w") as f:
+                json.dump({"mandate": {"active": mandate_active, "text": "x"}}, f)
+            os.utime(sf, (_time.time() - old, _time.time() - old))
+            os.utime(d, (_time.time() - old, _time.time() - old))
+        gl(proj, "status", sid="sess-gc")
+        check("prunes an old session with no active mandate",
+              not os.path.exists(os.path.join(sess_root, "sess-old-idle")))
+        check("never prunes an old session holding an ACTIVE mandate",
+              os.path.exists(os.path.join(sess_root, "sess-old-live")))
+        check("keeps fresh sessions", os.path.exists(os.path.join(sess_root, "sess-aaa")))
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            check("logs the prune", '"sessions_pruned"' in f.read())
+
         print("flair:")
         # a claim emits a fun line; a milestone (10 claims) fires a shout-out
         r = gl(proj, "claim", "--assert", "x", "--read", real)

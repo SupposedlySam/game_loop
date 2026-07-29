@@ -138,9 +138,13 @@ explicitly authorized this path:  game_loop authorize --path <prefix> --reason \
 
     # A heredoc/quoted DATA body (e.g. a commit message piped through a here-doc into cat) is DATA, not
     # executed shell — scanning it for redirects / mutators / deploy verbs false-positives on ordinary
-    # prose. scan_cmd is $cmd with the bodies of here-docs fed to a known DATA SINK (cat/tee) removed.
-    # Bodies of here-docs fed to an interpreter (bash/sh/python/…) are KEPT — they DO run and must stay
-    # guarded. Unknown consumer -> KEPT (fail safe: a false positive, never a silent bypass).
+    # prose. scan_cmd is $cmd with the bodies of here-docs fed to a known DATA SINK (cat/tee) removed,
+    # and the quoted arguments of known MESSAGE-BEARING flags (-m/--notes/--reason/…) blanked: those
+    # strings are prose their commands never execute, and scanning them denies commit messages that
+    # merely mention a redirect or a deploy verb. Bodies of here-docs fed to an interpreter
+    # (bash/sh/python/…) are KEPT — they DO run and must stay guarded, and so are all other quoted
+    # strings (bash -c '…' executes). Unknown consumer -> KEPT (fail safe: a false positive, never a
+    # silent bypass).
     #
     # NB: this Python is embedded in a $(...) here-doc, so it must contain NO backtick, NO dollar-paren,
     # and NO literal here-doc operator — any of those derails bash's parse of the surrounding $(...).
@@ -158,7 +162,11 @@ while i < len(lines):
     out.append(line)
     found = opener.findall(line)
     if found:
-        words = re.findall(r"[A-Za-z0-9_./]+", line.split(HD, 1)[0])
+        # The consumer is the last command word BEFORE the here-doc operator — after dropping
+        # redirect clauses, or the redirect TARGET would be mistaken for the consumer
+        # (in a line like: cat with a redirect, then the operator, the consumer is cat).
+        pre = re.sub(r">>?\s*[^\s;&|<>]*", " ", line.split(HD, 1)[0])
+        words = re.findall(r"[A-Za-z0-9_./]+", pre)
         is_data = (os.path.basename(words[-1]) if words else "") in DATA_SINKS
         delims = [d for _q, d in found]
         i += 1
@@ -174,7 +182,18 @@ while i < len(lines):
             i += 1
         continue
     i += 1
-sys.stdout.write("\n".join(out))
+
+# Blank the quoted argument of message-bearing flags. These strings are DATA to their command
+# (a commit message, a note, a reason) — never executed — so redirects or deploy verbs mentioned
+# inside them must not be flagged. Quoted strings NOT behind one of these flags are kept: an
+# interpreter argument (a -c script) executes and must stay guarded.
+MSG_FLAGS = ("-m|--message|--notes|--reason|--body|--title|--assert|--learning|--question"
+             "|--predict|--doing|--milestone|--set")
+QSTR = "\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'"
+text = "\n".join(out)
+text = re.sub("(?:^|(?<=\\s))(" + MSG_FLAGS + ")(=|\\s+)(" + QSTR + ")",
+              lambda m: m.group(1) + m.group(2) + "\"\"", text)
+sys.stdout.write(text)
 PY
 )
 
@@ -182,8 +201,43 @@ PY
     #    have not run SINCE the change. No-op when verify.yaml is empty, so it costs nothing until you
     #    opt in. --no-verify skips it, out loud and on the record. Gates `git commit` only, not every
     #    write: a check per keystroke is ceremony that gets switched off.
-    if printf '%s' "$cmd" | grep -qE '(^|[[:space:];&|])git[[:space:]]+commit' \
-       && ! printf '%s' "$cmd" | grep -q -- '--no-verify'; then
+    #    Gates only commits that TARGET THIS repo: verify.yaml describes THIS repo's owed checks, and a
+    #    commit made in some other repository (a clone in a scratch root, a sibling project) owes that
+    #    repo's checks, not ours. The target is resolved per segment — `cd` tracked, `git -C` honored —
+    #    the same way the mutation scanner resolves paths.
+    commit_here=$(REPO_REAL="$REPO_REAL" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
+import json, os, re, shlex, sys
+payload = json.loads(sys.argv[1])
+cmd = os.environ.get("SCAN_CMD", "")
+repo = os.environ["REPO_REAL"]
+cwd = payload.get("cwd") or repo
+home = os.path.expanduser("~")
+for seg in re.split(r"&&|\|\||;|\||\n", cmd):
+    try:
+        argv = shlex.split(seg)
+    except ValueError:
+        argv = seg.split()
+    if not argv:
+        continue
+    verb = os.path.basename(argv[0])
+    args = argv[1:]
+    if verb == "cd" and args:
+        nxt = os.path.expanduser(args[0].replace("$HOME", home))
+        cwd = nxt if os.path.isabs(nxt) else os.path.join(cwd, nxt)
+        continue
+    if verb != "git" or "commit" not in args or "--no-verify" in args:
+        continue
+    tgt = cwd
+    if "-C" in args and args.index("-C") + 1 < len(args):
+        c = os.path.expanduser(args[args.index("-C") + 1].replace("$HOME", home))
+        tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
+    tgt = os.path.realpath(tgt)
+    if tgt == repo or tgt.startswith(repo + os.sep):
+        print("yes")
+        break
+PY
+)
+    if [ "$commit_here" = "yes" ]; then
       if ! "$GAMELOOP_DIR/bin/verify" --check >/tmp/.game_loop_verify 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
         # `verify` and `git commit` in ONE call can never pass — the check runs before your verify
@@ -214,7 +268,9 @@ except (OSError, ValueError):
     pass
 cmd = os.environ["CMD"]
 for v in verbs:
-    pat = r"(^|[\s;&|])" + r"\s+".join(re.escape(w) for w in v.split())
+    # The boundary class includes quote chars: a deploy verb at the start of an interpreter arg
+    # (a -c script) executes just the same, and message-flag strings were already blanked upstream.
+    pat = r"(^|[\s;&|'\"])" + r"\s+".join(re.escape(w) for w in v.split())
     if re.search(pat, cmd):
         print(v)
         break
@@ -272,6 +328,41 @@ def offends(raw, cwd):
     return None if any(under(real, a) for a in allow) else real
 
 
+def redirect_targets(seg):
+    """Redirect targets in one segment, QUOTE-AWARE in both directions: a redirect character inside
+    quotes is data (a sed script, prose in a message) and must not be flagged, while a QUOTED target
+    after a real, unquoted redirect is a genuine write and must be — the naive regex missed those,
+    because a captured token starting with a quote char never resolves to an absolute path."""
+    targets, i, n, q = [], 0, len(seg), None
+    while i < n:
+        c = seg[i]
+        if q:
+            if c == q:
+                q = None
+        elif c in "'\"":
+            q = c
+        elif c == ">":
+            j = i + 1
+            if j < n and seg[j] == ">":
+                j += 1
+            while j < n and seg[j] in " \t":
+                j += 1
+            if j < n and seg[j] in "'\"":
+                k = seg.find(seg[j], j + 1)
+                if k != -1:
+                    targets.append(seg[j + 1:k])
+                    i = k
+            else:
+                k = j
+                while k < n and seg[k] not in " \t;&|<>":
+                    k += 1
+                if k > j:
+                    targets.append(seg[j:k])
+                    i = k - 1
+        i += 1
+    return targets
+
+
 offenders = []
 # Split on shell separators AND newlines. Omitting \n would collapse a multi-line command into one
 # segment whose verb is its first token, so a mutating later line would never be checked.
@@ -302,8 +393,7 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
         check = pathish
     elif verb == "git" and any(a in GIT_WRITES for a in args):
         check = pathish                            # catches `git -C <path> commit`
-    for m in re.finditer(r">>?\s*([^\s;&|<>]+)", seg):
-        check.append(m.group(1))                   # redirects mutate regardless of the verb
+    check.extend(redirect_targets(seg))            # redirects mutate regardless of the verb
 
     for raw in check:
         bad = offends(raw, cwd)

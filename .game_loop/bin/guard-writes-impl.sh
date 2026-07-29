@@ -43,13 +43,52 @@ deny() {
   exit 0
 }
 
+# A human-authorized, single-use exception (`game_loop authorize`). Takes the offending realpath;
+# prints "yes" iff a live authorization covers it, in which case the authorization is CONSUMED and
+# the spend logged — one authorization buys one mutation, whichever tool performs it. Shared by the
+# Write/Edit and Bash branches so the escape hatch behaves identically on both paths. No env
+# override: it cannot be set without writing a permanent log entry carrying the human's own words.
+consume_authorization() {
+  OFFENDER="$1" GAMELOOP_DIR="$GAMELOOP_DIR" python3 <<'PY'
+import json, os, sys, datetime
+state_f = os.path.join(os.environ["GAMELOOP_DIR"], "state.json")
+log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
+off = os.environ["OFFENDER"]
+try:
+    with open(state_f) as f:
+        st = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+for a in st.get("authorized", []):
+    if a.get("uses_left", 0) <= 0:
+        continue
+    root = a.get("path", "")
+    if off == root or off.startswith(root + os.sep):
+        a["uses_left"] -= 1
+        try:
+            with open(state_f, "w") as f:
+                json.dump(st, f, indent=2); f.write("\n")
+            with open(log_f, "a") as f:
+                f.write(json.dumps({
+                    "t": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "kind": "authorized_write", "path": off,
+                    "reason": a.get("reason"), "uses_left": a["uses_left"]}) + "\n")
+        except OSError:
+            sys.exit(0)
+        print("yes")
+        break
+PY
+}
+
 tool=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name",""))' 2>/dev/null)
 
 case "$tool" in
   Write|Edit|NotebookEdit)
     fp=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))' 2>/dev/null)
     [ -z "$fp" ] && exit 0
-    allowed=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" FP="$fp" python3 <<'PY'
+    # Prints "yes" when the target is inside an allow root, else the resolved realpath — which is
+    # what an authorization is matched against (authorize records real prefixes, not raw tool input).
+    verdict=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" FP="$fp" python3 <<'PY'
 import json, os
 repo = os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
@@ -62,10 +101,14 @@ except (OSError, ValueError):
     pass
 allow = [os.path.realpath(p) for p in allow]
 real = os.path.realpath(os.environ["FP"])
-print("yes" if any(real == a or real.startswith(a + os.sep) for a in allow) else "no")
+print("yes" if any(real == a or real.startswith(a + os.sep) for a in allow) else real)
 PY
 )
-    [ "$allowed" = "yes" ] && exit 0
+    [ "$verdict" = "yes" ] && exit 0
+    if [ -n "$verdict" ]; then
+      consumed=$(consume_authorization "$verdict")
+      [ "$consumed" = "yes" ] && exit 0
+    fi
     deny "BLOCKED: write outside this repo → $fp
 
 Everything outside this project is READ-ONLY by default (this is the guardrail that makes unattended
@@ -257,39 +300,7 @@ PY
 )
 
     if [ -n "$offender" ]; then
-      # A human-authorized, single-use exception (`game_loop authorize`). Consulted here and CONSUMED,
-      # so one authorization buys one mutation. No env override: it cannot be set without writing a
-      # permanent log entry carrying the human's own words.
-      consumed=$(OFFENDER="$offender" GAMELOOP_DIR="$GAMELOOP_DIR" python3 <<'PY'
-import json, os, sys, datetime
-state_f = os.path.join(os.environ["GAMELOOP_DIR"], "state.json")
-log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
-off = os.environ["OFFENDER"]
-try:
-    with open(state_f) as f:
-        st = json.load(f)
-except (OSError, ValueError):
-    sys.exit(0)
-for a in st.get("authorized", []):
-    if a.get("uses_left", 0) <= 0:
-        continue
-    root = a.get("path", "")
-    if off == root or off.startswith(root + os.sep):
-        a["uses_left"] -= 1
-        try:
-            with open(state_f, "w") as f:
-                json.dump(st, f, indent=2); f.write("\n")
-            with open(log_f, "a") as f:
-                f.write(json.dumps({
-                    "t": datetime.datetime.now().isoformat(timespec="seconds"),
-                    "kind": "authorized_write", "path": off,
-                    "reason": a.get("reason"), "uses_left": a["uses_left"]}) + "\n")
-        except OSError:
-            sys.exit(0)
-        print("yes")
-        break
-PY
-)
+      consumed=$(consume_authorization "$offender")
       [ "$consumed" = "yes" ] && exit 0
       deny "BLOCKED: mutating command targets a path outside this repo → $offender
 

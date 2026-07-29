@@ -94,6 +94,12 @@ While a mandate is bound:
 - The **watchdog** notices when the session goes idle with work still outstanding and rings it back to
   work — so it resumes with no human present.
 
+A mandate binds **the session that set it** — state lives per Claude Code session
+(`.game_loop/sessions/<id>/state.json`), so two sessions sharing one checkout never see each other's
+mandate, checkpoint, arm, or authorizations. Your other session opening the same repo will not be
+conscripted into this one's work. Outside any session (your own terminal), state falls back to the
+repo-global `.game_loop/state.json`.
+
 When the work is genuinely done:
 
 ```bash

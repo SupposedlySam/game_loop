@@ -41,15 +41,30 @@ def make_sandbox():
     return proj
 
 
-def gl(proj, *args, stdin=None):
+def _env(proj=None, sid=None, **extra):
+    """A controlled environment: the suite itself may run inside a Claude session, and its
+    CLAUDE_CODE_SESSION_ID leaking into the scripts under test would silently session-scope
+    every 'legacy' check. Scrub, then set exactly what the test names."""
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("GAME_LOOP_SESSION", None)
+    if proj:
+        env["CLAUDE_PROJECT_DIR"] = proj
+    if sid:
+        env["GAME_LOOP_SESSION"] = sid
+    env.update(extra)
+    return env
+
+
+def gl(proj, *args, stdin=None, sid=None):
     return subprocess.run([os.path.join(proj, ".game_loop", "bin", "game_loop"), *args],
-                          input=stdin, capture_output=True, text=True)
+                          input=stdin, capture_output=True, text=True, env=_env(sid=sid))
 
 
-def guard(proj, payload):
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=proj)
+def guard(proj, payload, sid=None):
     return subprocess.run([os.path.join(proj, ".game_loop", "bin", "guard-writes.sh")],
-                          input=json.dumps(payload), capture_output=True, text=True, env=env)
+                          input=json.dumps(payload), capture_output=True, text=True,
+                          env=_env(proj, sid))
 
 
 def denied(res):
@@ -165,6 +180,62 @@ def main():
         check("blocks a configured deploy verb",
               denied(guard(proj, {"tool_name": "Bash",
                                   "tool_input": {"command": "firebase deploy --only hosting"}})))
+
+        # #2: state is compartmentalized per Claude Code session. A mandate one session binds must
+        # never gate another session (or a no-session invocation) sharing the same checkout — that
+        # cross-talk sent an unrelated session off to "resume" work it was never asked to do.
+        print("per-session state (isolation):")
+        gl(proj, "mandate", "--set", "session A work", sid="sess-aaa")
+        r = gl(proj, "stopgate",
+               stdin='{"session_id":"sess-aaa","last_assistant_message":"Should I continue?"}')
+        check("A's stopgate enforces A's mandate", r.returncode == 2)
+        r = gl(proj, "stopgate",
+               stdin='{"session_id":"sess-bbb","last_assistant_message":"Should I continue?"}')
+        check("A's mandate does not gate session B", r.returncode == 0)
+        r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Should I continue?"}')
+        check("A's mandate does not gate a no-session stop", r.returncode == 0)
+        gl(proj, "checkpoint", "--notes", "B reporting", sid="sess-bbb")
+        r = gl(proj, "stopgate",
+               stdin='{"session_id":"sess-aaa","last_assistant_message":"Status update."}')
+        check("B's checkpoint does not license A's turn-end", r.returncode == 2)
+        gl(proj, "checkpoint", "--notes", "A reporting", sid="sess-aaa")
+        r = gl(proj, "stopgate",
+               stdin='{"session_id":"sess-aaa","last_assistant_message":"Status update."}')
+        check("A's own checkpoint licenses A", r.returncode == 0)
+        # authorizations are granted IN a session and spendable only there
+        gl(proj, "authorize", "--path", os.path.expanduser("~/sessauth"),
+           "--reason", "user said ok", sid="sess-aaa")
+        pb = {"tool_name": "Bash", "tool_input": {"command": "touch ~/sessauth/x"},
+              "session_id": "sess-bbb"}
+        check("A's authorization is not spendable in session B", denied(guard(proj, pb)))
+        pb["session_id"] = "sess-aaa"
+        check("A's authorization spends in session A", not denied(guard(proj, pb)))
+
+        print("watchdog (per-session):")
+        tpath = os.path.join(proj, "transcript.jsonl")
+        with open(tpath, "w") as f:
+            f.write("x\n")
+        wd_bin = os.path.join(proj, ".game_loop", "bin", "watchdog")
+
+        def watchdog(sid_payload):
+            payload = {"transcript_path": tpath}
+            if sid_payload:
+                payload["session_id"] = sid_payload
+            return subprocess.run([wd_bin], input=json.dumps(payload), capture_output=True,
+                                  text=True, env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        check("watchdog rings for its own session's idle mandate (A)",
+              watchdog("sess-aaa").returncode == 2)
+        check("watchdog stays quiet for a session with no mandate (C)",
+              watchdog("sess-ccc").returncode == 0)
+        check("watchdog pidfile is per-session, not repo-global",
+              os.path.exists(os.path.join(proj, ".game_loop", "sessions", "sess-aaa",
+                                          ".watchdog.pid"))
+              and not os.path.exists(os.path.join(proj, ".game_loop", ".watchdog.pid")))
+        # shared log carries per-session attribution
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("shared log lines carry the writing session's sid", '"sid": "sess-aaa"' in log)
+        gl(proj, "mandate", "--clear", "--notes", "done", sid="sess-aaa")
 
         print("flair:")
         # a claim emits a fun line; a milestone (10 claims) fires a shout-out

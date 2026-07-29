@@ -126,11 +126,25 @@ Everything lives in `.game_loop/`:
 | `bin/guard-writes.sh` | the write guard (PreToolUse hook) |
 | `bin/verify` | the changed-file → owed-checks gate |
 | `config.json` | read roots, allow-write roots, deploy verbs, watchdog knobs |
-| `state.json` | counters, phase, mandate, arms (atomic writes; git-ignored) |
-| `log.jsonl` | append-only event log (git-ignored) |
+| `sessions/<id>/state.json` | counters, phase, mandate, arms — PER Claude Code session (atomic writes; git-ignored) |
+| `state.json` | the no-session fallback state (a human terminal, an older harness) |
+| `log.jsonl` | append-only event log, shared across sessions; each line carries the writing session's `sid` (git-ignored) |
 | `INVARIANTS.md` | your north star; re-injected by `game_loop stepback` |
 | `verify.yaml` | the change → checks map |
 | `LEDGER.md` | VERIFIED / RULED-OUT / OPEN reference (not a gate) |
 
 Run `game_loop status` first thing every session — it rehydrates the cost ladder, invariants, counters,
 and current phase from disk, which is how the loop survives context compaction.
+
+### Why state is per-session
+
+Two Claude Code sessions routinely share one checkout (a main session plus a side quest, a human plus
+an unattended run). With one shared state file, a mandate bound by session A closes session B's Stop
+gate and rings B's watchdog — and B, told "you are under a mandate with work outstanding", will go off
+and *do A's work*. That happened. So every gate resolves the session first — hooks from the
+`session_id` on their stdin payload, CLI verbs from `CLAUDE_CODE_SESSION_ID` (exported to the agent's
+shell) — and reads only that session's `sessions/<id>/state.json`. No id at all (your own terminal, an
+older harness) falls back to the repo-global `state.json`, which behaves exactly as before.
+`GAME_LOOP_SESSION` overrides the id; set-but-empty (`GAME_LOOP_SESSION=`) deliberately targets the
+repo-global file — that is how a leftover pre-per-session mandate gets cleared. Authorizations
+(`game_loop authorize`) are session-scoped too: granted in a session, spendable only there.

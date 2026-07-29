@@ -153,6 +153,7 @@ GI="$TARGET/.game_loop/.gitignore"
 if [ ! -e "$GI" ]; then
   cat > "$GI" <<'EOF'
 state.json
+sessions/
 log.jsonl
 verified.json
 probe/
@@ -160,6 +161,28 @@ probe/
 .state.*.tmp
 EOF
   echo "  wrote   .game_loop/.gitignore"
+elif ! grep -q '^sessions/$' "$GI"; then
+  echo "sessions/" >> "$GI"
+  echo "  updated .game_loop/.gitignore (+ sessions/ — per-session state)"
+fi
+
+# Per-session migration honesty: an active mandate in the OLD repo-global state.json gates nobody
+# once state is per-session. Its owning session would just go quiet — say so out loud instead.
+if python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        m = (json.load(f).get("mandate") or {})
+    sys.exit(0 if m.get("active") else 1)
+except Exception:
+    sys.exit(1)' "$TARGET/.game_loop/state.json" 2>/dev/null; then
+  echo
+  echo "  ⚠ MIGRATION: .game_loop/state.json holds an ACTIVE mandate from before per-session state."
+  echo "    State is now per Claude Code session (.game_loop/sessions/<id>/), so that mandate no"
+  echo "    longer gates any session. In the session that owns that work, re-bind it:"
+  echo "      ./.game_loop/bin/game_loop mandate --set \"<the mandate>\""
+  echo "    then retire the old one:"
+  echo "      GAME_LOOP_SESSION= ./.game_loop/bin/game_loop mandate --clear --notes \"migrated to per-session state\""
 fi
 
 echo

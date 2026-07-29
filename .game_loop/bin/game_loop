@@ -26,7 +26,12 @@ LINEAGE
     order. Same arm->gate->consume primitive, same VERIFIED/RULED-OUT/OPEN ledger vocabulary, two
     unrelated domains. game_loop is that pattern with the domain specifics removed. See docs/.
 
-State lives in .game_loop/state.json (atomic writes); every event appends to .game_loop/log.jsonl.
+State is PER SESSION: each Claude Code session gets .game_loop/sessions/<session_id>/state.json
+(atomic writes), so two sessions sharing one checkout cannot see — or trip over — each other's
+mandate, checkpoint, arm, or authorizations. A mandate one session binds must never gate another:
+that cross-talk sent an unrelated session off to "resume" work it was never asked to do. Outside any
+session (a human terminal, an older harness) state falls back to the repo-global .game_loop/state.json.
+Every event appends to the shared .game_loop/log.jsonl, stamped with the session that wrote it.
 Configuration lives in .game_loop/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
 """
 import argparse
@@ -45,10 +50,39 @@ except Exception:  # noqa: BLE001 — a missing/broken flair file must never bre
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .game_loop/
 REPO_ROOT = os.path.dirname(ROOT)
-STATE_F = os.path.join(ROOT, "state.json")
+SESSIONS_DIR = os.path.join(ROOT, "sessions")
+LEGACY_STATE_F = os.path.join(ROOT, "state.json")   # no-session fallback (human terminal, old harness)
+STATE_F = LEGACY_STATE_F                            # re-pointed by set_session()
 LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
 INV_F = os.path.join(ROOT, "INVARIANTS.md")
+
+SESSION = None  # sanitized id of the session this invocation belongs to, or None
+
+
+def sanitize_session(sid):
+    """A session id becomes a directory name — keep it to safe characters, bounded length."""
+    if not isinstance(sid, str) or not sid.strip():
+        return None
+    return re.sub(r"[^A-Za-z0-9._-]", "-", sid.strip())[:64]
+
+
+def env_session():
+    """The session id visible to a CLI invocation (agent-run Bash exports it).
+
+    GAME_LOOP_SESSION set-but-empty is a deliberate opt-out: it targets the repo-global legacy
+    state even inside a Claude session (how a leftover pre-per-session mandate gets cleared).
+    """
+    if "GAME_LOOP_SESSION" in os.environ:
+        return os.environ["GAME_LOOP_SESSION"]
+    return os.environ.get("CLAUDE_CODE_SESSION_ID")
+
+
+def set_session(sid):
+    """Scope all state to one session. No id → the repo-global legacy file, unchanged behavior."""
+    global SESSION, STATE_F
+    SESSION = sanitize_session(sid)
+    STATE_F = os.path.join(SESSIONS_DIR, SESSION, "state.json") if SESSION else LEGACY_STATE_F
 
 DEFAULT_CONFIG = {
     "project_name": os.path.basename(REPO_ROOT) or "project",
@@ -106,6 +140,7 @@ def load():
 def save(s):
     # atomic: temp file in the same dir + os.replace() (POSIX-atomic). A crash mid-write must never
     # truncate state.json and brick `game_loop status` — the compaction-recovery path.
+    os.makedirs(os.path.dirname(STATE_F), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATE_F), prefix=".state.", suffix=".tmp")
     with os.fdopen(fd, "w") as f:
         json.dump(s, f, indent=2)
@@ -114,8 +149,13 @@ def save(s):
 
 
 def logline(rec):
+    # The log is SHARED across sessions (one chronological story per checkout); the sid field says
+    # which session wrote each line, so attribution survives the sharing.
+    stamp = {"t": now()}
+    if SESSION:
+        stamp["sid"] = SESSION[:8]
     with open(LOG_F, "a") as f:
-        f.write(json.dumps({"t": now(), **rec}) + "\n")
+        f.write(json.dumps({**stamp, **rec}) + "\n")
 
 
 def die(msg, code=2):
@@ -627,17 +667,14 @@ def _stop_verdict(s, payload):
         "unchecked_because": why_not}
 
 
-def cmd_stopgate(s, a):
+def cmd_stopgate(s, a, payload):
     """Stop-hook entrypoint. exit 0 = may stop · exit 2 = blocked, stderr goes back to the model.
 
     Wired at .claude/settings.json -> hooks.Stop. Exit-2-blocks-and-feeds-stderr is the documented
-    Stop-hook contract: a non-zero exit with stderr is surfaced to the model as feedback.
+    Stop-hook contract: a non-zero exit with stderr is surfaced to the model as feedback. The payload
+    is parsed in main() — its session_id decides WHICH session's state this gate reads, so it must be
+    known before load().
     """
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        payload = {}
-
     # Observability over guessing: record the real payload so its schema is READ, not assumed.
     try:
         os.makedirs(os.path.join(ROOT, "probe"), exist_ok=True)
@@ -718,13 +755,61 @@ def hooks_live_warning():
     return None
 
 
+def _sibling_sessions():
+    """(other-session count, how many of those hold an active mandate) — visibility, not enforcement."""
+    others = active = 0
+    try:
+        for d in os.listdir(SESSIONS_DIR):
+            if d == SESSION:
+                continue
+            try:
+                with open(os.path.join(SESSIONS_DIR, d, "state.json")) as f:
+                    st = json.load(f)
+            except (OSError, ValueError):
+                continue
+            others += 1
+            if (st.get("mandate") or {}).get("active"):
+                active += 1
+    except OSError:
+        pass
+    return others, active
+
+
+def legacy_mandate_warning():
+    """An active mandate left in the repo-global state.json gates NOBODY once state is per-session.
+
+    That is a silent behavior change for a session that bound its mandate before the upgrade — its
+    stop gate and watchdog just go quiet. Silence is the one failure mode this tool never accepts,
+    so say it everywhere status is read until the owning session re-binds (or clears the old file).
+    """
+    if not SESSION:
+        return None
+    try:
+        with open(LEGACY_STATE_F) as f:
+            legacy = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not (legacy.get("mandate") or {}).get("active"):
+        return None
+    return ("⚠ LEGACY MANDATE — .game_loop/state.json (repo-global, pre-per-session) still holds an\n"
+            "  active mandate. It no longer gates ANY session. The session that owns that work must\n"
+            "  re-bind it:  game_loop mandate --set \"..\"  — then clear the old file's mandate with\n"
+            "  GAME_LOOP_SESSION= game_loop mandate --clear --notes \"migrated to per-session state\"")
+
+
 def cmd_status(s, a):
     out(render_banner(s))
     if (n := retro_nudge(s)):
         out(n)
     m = s.get("mandate") or {}
     mandate_line = f"MANDATE: {m['text']}" if m.get("active") else "MANDATE: none (Stop gate inert)"
+    session_line = (f"session: {SESSION[:8]} (state: .game_loop/sessions/…)" if SESSION
+                    else "session: none detected — repo-global state (.game_loop/state.json)")
+    others, active = _sibling_sessions()
+    if others:
+        session_line += f" · other sessions here: {others} ({active} with an active mandate)"
     out("=== game_loop (v" + s.get("version", "?") + ") ===",
+        session_line,
         f"claims sourced: {s.get('claim_count', 0)} · hardened: {s.get('hardened_count', 0)}",
         mandate_line,
         inv_oneline(),
@@ -737,6 +822,8 @@ def cmd_status(s, a):
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
     if (w := hooks_live_warning()):
+        out(w)
+    if (w := legacy_mandate_warning()):
         out(w)
     assists = s.get("watchdog_rings_total", 0) + s.get("stop_gate_blocks_total", 0)
     if assists:
@@ -866,10 +953,21 @@ def main():
     sub.add_parser("stopgate")  # Stop-hook entrypoint; not for humans
 
     a = p.parse_args()
+    if a.cmd == "stopgate":
+        # The hook payload is the authoritative session source — the env is a fallback for harnesses
+        # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
+        try:
+            payload = json.load(sys.stdin)
+        except (json.JSONDecodeError, ValueError):
+            payload = {}
+        set_session(payload.get("session_id") or env_session())
+        cmd_stopgate(load(), a, payload)
+        return
+    set_session(env_session())
     s = load()
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
-     "checkpoint": cmd_checkpoint, "stopgate": cmd_stopgate, "authorize": cmd_authorize}[a.cmd](s, a)
+     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

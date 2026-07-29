@@ -36,8 +36,9 @@ plus commands/skills — via a marketplace:
 /plugin install game_loop
 ```
 
-The plugin would ship the `game_loop` CLI and register the hooks; the per-project `.game_loop/state.json`
-and `config.json` stay local (created by a `/game_loop init` command or first run). This is the natural
+The plugin would ship the `game_loop` CLI and register the hooks; the per-project `.game_loop/` state
+(per-session `sessions/<id>/state.json`) and `config.json` stay local (created by a `/game_loop init`
+command or first run). This is the natural
 channel for the **agent-first** audience — it's how Claude Code users already discover and install
 tooling.
 **Best if:** the primary users are Claude Code sessions/humans in Claude Code. Requires restructuring

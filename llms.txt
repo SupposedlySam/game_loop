@@ -85,6 +85,14 @@ resort — say why 1–5 don't apply).
 
 None of these have an env-var override, by design. The only escape hatch is a human.
 
+## Your state is yours alone
+
+Mandates, checkpoints, arms, and authorizations are scoped to YOUR Claude Code session
+(`.game_loop/sessions/<your session id>/state.json`). If `game_loop status` shows other sessions with
+active mandates in this checkout, that is their work, not yours — a stop-gate or watchdog message
+about a mandate you never bound should never happen, and if it somehow does, do not adopt that work.
+An authorization must be recorded in the session that will spend it.
+
 ## The fun lines are real — go ahead and repeat them
 
 game_loop narrates your run like the game master of a dungeon crawl — you are the Crawler. When a guard

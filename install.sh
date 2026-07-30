@@ -230,6 +230,9 @@ if [ "$FRESH" = 1 ]; then
   echo "  6. OPTIONAL — Slack paging (arm questions, stuck runs, limit parks, phone replies):"
   echo "     create $TARGET/.game_loop/notify.json (gitignored; schema in .game_loop/bin/notify.py),"
   echo "     then verify with:  ./.game_loop/bin/game_loop notify --test"
+  echo
+  echo "  TIP: game_loop is the project-local binary ./.game_loop/bin/game_loop — NOT a global command."
+  echo "       For bare 'game_loop ...' from anywhere in the repo, add the shell function in the README."
 else
   echo "Done — updated in place. Scripts refreshed; your config, invariants and notes were kept."
   echo "  Nothing else to do. Sanity-check with:  ./.game_loop/bin/game_loop status"

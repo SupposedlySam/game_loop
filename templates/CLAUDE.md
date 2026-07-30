@@ -13,6 +13,12 @@ and if you catch yourself *asking* someone to remember a rule, it belongs in a g
 Rehydrates from disk: the cost ladder, the invariants one-liner, claim/harden counters, the current
 phase, and whether a mandate is bound. **Surviving compaction is the point.**
 
+> **`game_loop` is NOT a global command.** It is the project-local binary `./.game_loop/bin/game_loop`.
+> Every `game_loop …` example below is shorthand for that path — call it with the path. If a shell
+> reports `game_loop: command not found`, you reached for a global that does not exist; prefix it with
+> `./.game_loop/bin/`. (To make bare `game_loop` resolve to it, add the shell function from the
+> game_loop README to your profile.)
+
 ## The one hard rule
 
 Before you assert anything about external reality — a dependency, a harness, another repo — name the

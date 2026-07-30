@@ -79,6 +79,25 @@ manual is [`llms.txt`](llms.txt). The short version:
 
 If `.game_loop/` isn't there yet, install it from a clone of this repo: `./install.sh <this-project>`.
 
+### Optional: let bare `game_loop` resolve without the path
+
+The binary is intentionally **project-local** (`./.game_loop/bin/game_loop`) — there is no global
+install, so an agent that assumes `game_loop` is on `PATH` (e.g. one arriving through a global slash
+command that never loaded the project's `CLAUDE.md`) hits `command not found`. If you'd like bare
+`game_loop …` to work from anywhere inside a game_loop repo, add this to your shell profile
+(`~/.zshrc` / `~/.bashrc`):
+
+```bash
+game_loop() {
+  if [ -x "./.game_loop/bin/game_loop" ]; then ./.game_loop/bin/game_loop "$@"
+  else command game_loop "$@"; fi
+}
+```
+
+It resolves to the **local** binary whenever you're in a game_loop repo, so it stays project-scoped —
+no global binary that could point at the wrong project. This is opt-in on purpose: game_loop never
+writes to your shell profile or puts anything on `PATH` for you.
+
 ## Run unattended
 
 A human (or the agent, if the human said "work autonomously") binds a mandate:

@@ -20,6 +20,12 @@ Run it at the start of every session and after any context compaction. It rehydr
 the invariants, your claim/harden counters, the current phase, and whether a mandate is bound — all
 from disk. Surviving compaction is the whole point.
 
+`game_loop` is **not a global command** — it is the project-local binary shown above,
+`./.game_loop/bin/game_loop`. Call it by that path every time (this file already does). If you ever see
+`game_loop: command not found`, you dropped the path and reached for a global that does not exist — add
+`./.game_loop/bin/` back. This matters most when you arrive through a global slash command that did not
+load the project's `CLAUDE.md`: there is no `game_loop` on your PATH, only the one in this repo.
+
 ## The one hard rule: cite the file you read
 
 Before you assert anything about external reality — a dependency's behavior, a harness detail, another

@@ -57,12 +57,14 @@ mkdir -p "$TARGET/.game_loop/bin"
 # paging; both are imported by the others and both degrade to no-ops.)
 cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
    "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
+   "$SRC/.game_loop/bin/guard-mcp.sh" "$SRC/.game_loop/bin/guard-mcp-impl.sh" \
    "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$SRC/.game_loop/bin/notify.py" \
    "$TARGET/.game_loop/bin/"
 chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
          "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-writes-impl.sh" \
+         "$TARGET/.game_loop/bin/guard-mcp.sh" "$TARGET/.game_loop/bin/guard-mcp-impl.sh" \
          "$TARGET/.game_loop/bin/verify"
-echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, verify, flair.py, notify.py)"
+echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, guard-mcp.sh + -impl, verify, flair.py, notify.py)"
 
 # Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
 # clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.

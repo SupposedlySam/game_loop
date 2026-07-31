@@ -33,8 +33,8 @@ def make_sandbox():
     proj = tempfile.mkdtemp(prefix="gameloop-test-")
     dst = os.path.join(proj, ".game_loop")
     os.makedirs(os.path.join(dst, "bin"))
-    for f in ("game_loop", "watchdog", "guard-writes.sh", "guard-writes-impl.sh", "verify",
-              "flair.py", "notify.py"):
+    for f in ("game_loop", "watchdog", "guard-writes.sh", "guard-writes-impl.sh",
+              "guard-mcp.sh", "guard-mcp-impl.sh", "verify", "flair.py", "notify.py"):
         shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f), os.path.join(dst, "bin", f))
         os.chmod(os.path.join(dst, "bin", f), 0o755)
     for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
@@ -1334,6 +1334,146 @@ def main():
               "the harness refused 1 tool call" in r.stdout and "deny_rule ×1" in r.stdout)
         check("the denial readout names how it was read — field, not grep",
               "read as a field in the decoded record, never grepped" in r.stdout)
+        # #23: the write guard reads Bash. An MCP server can perform the SAME irreversible act with
+        # no shell command at all — a `DELETE FROM` through a database tool, a send through a mail
+        # tool, a force-op through a git-host tool — and guard-writes-impl.sh has said in prose since
+        # it was written that it "DOES NOT: catch mutations made via MCP tools". A gap stated in
+        # prose is a gap that gets walked through (INV1). guard-mcp.sh is that prose made executable:
+        # matched on `mcp__.*`, it classifies BEFORE the call runs and fails CLOSED on ambiguity.
+        print("MCP guard (#23):")
+
+        def mcpguard(payload, sid=None):
+            return subprocess.run([os.path.join(proj, ".game_loop", "bin", "guard-mcp.sh")],
+                                  input=json.dumps(payload), capture_output=True, text=True,
+                                  env=_env(proj, sid))
+
+        def why(res):
+            """The deny reason as text — assertions are on the MESSAGE, not merely on non-zero."""
+            try:
+                return json.loads(res.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+            except (ValueError, KeyError, TypeError):
+                return ""
+
+        # The must-ALLOW / must-DENY fixture pair the issue asks for: the SAME read-named tool on the
+        # SAME server, separated only by the argument it carries.
+        ro = {"tool_name": "mcp__db__query", "tool_input": {"sql": "SELECT id FROM users LIMIT 5"}}
+        check("a read-only MCP call passes (SELECT through a query tool)",
+              not denied(mcpguard(ro)))
+        rw = {"tool_name": "mcp__db__query",
+              "tool_input": {"sql": "DELETE FROM users WHERE id = 1"}}
+        r = mcpguard(rw)
+        check("the same tool carrying a destructive SQL argument is blocked",
+              denied(r) and "classified as MUTATING" in why(r)
+              and "a mutating SQL statement in argument /sql" in why(r))
+        # The name alone is enough when the verb is unmistakable — no argument needed.
+        r = mcpguard({"tool_name": "mcp__mail__deleteMessage", "tool_input": {"id": "abc"}})
+        check("a delete verb in the tool name is blocked",
+              denied(r) and "irreversible verb: 'delete'" in why(r))
+        r = mcpguard({"tool_name": "mcp__chat__sendMessage",
+                      "tool_input": {"channel": "#general", "text": "hi"}})
+        check("a send verb in the tool name is blocked (a send is not undoable)",
+              denied(r) and "NAME's verb mutates: 'send'" in why(r))
+        r = mcpguard({"tool_name": "mcp__git__syncBranch", "tool_input": {"force": True}})
+        check("a truthy force flag is blocked even under a mild verb",
+              denied(r) and "a destructive flag set true: /force" in why(r))
+        # Nested arguments: a mutation three levels down is still a mutation.
+        r = mcpguard({"tool_name": "mcp__api__call",
+                      "tool_input": {"request": {"opts": {"method": "DELETE"}}}})
+        check("a mutating request method nested in the arguments is blocked",
+              denied(r) and "/request/opts/method" in why(r))
+        # THE fail-closed case, and the opposite default from the Bash write guard.
+        r = mcpguard({"tool_name": "mcp__vendor__frobnicate", "tool_input": {"x": 1}})
+        check("an unrecognised verb fails CLOSED (ambiguous is refused, not allowed)",
+              denied(r) and "could not be classified" in why(r)
+              and "FAILS CLOSED" in why(r))
+        # Real servers often repeat their own name in the tool name. If that prefix is not stripped,
+        # the VERB never reaches the verb slot and every tool on such a server reads as
+        # unclassifiable — fail-closed degrades into fail-useless, which is how a guard gets removed.
+        r = mcpguard({"tool_name": "mcp__pebble__pebble_run_command", "tool_input": {"cmd": "x"}})
+        check("a server that repeats its own name still lands the verb (deny side)",
+              denied(r) and "NAME's verb mutates: 'run'" in why(r))
+        check("a server that repeats its own name still lands the verb (allow side)",
+              not denied(mcpguard({"tool_name": "mcp__db__db_list_tables", "tool_input": {}})))
+        # Scoped to MCP: a repo with no MCP servers must behave exactly as before.
+        check("a non-MCP tool is not this guard's business (passes through untouched)",
+              not denied(mcpguard({"tool_name": "Bash",
+                                   "tool_input": {"command": "rm -rf ~/outside"}})))
+
+        print("MCP guard (fail-closed shim, and INV5):")
+        mcp_impl_f = os.path.join(proj, ".game_loop", "bin", "guard-mcp-impl.sh")
+        with open(mcp_impl_f) as f:
+            mcp_impl_src = f.read()
+        with open(mcp_impl_f, "w") as f:
+            f.write("this is ( not valid bash\n")
+        r = mcpguard(ro)
+        check("a malformed MCP impl DENIES (fails closed, unlike the write guard)",
+              denied(r) and "the MCP guard cannot run" in why(r))
+        # WHY failing closed here is safe where it would be fatal in guard-writes: this hook is
+        # matched on `mcp__.*` only, so a broken MCP guard never blocks the Write/Edit/Bash call that
+        # would REPAIR it. INV5 holds because of the SCOPE, not because of the default.
+        check("a malformed MCP impl still leaves the write path open (INV5: its own fix)",
+              not denied(guard(proj, {"tool_name": "Write",
+                                      "tool_input": {"file_path": os.path.join(proj, "fix.sh")}})))
+        with open(mcp_impl_f, "w") as f:                 # restore before the authorize checks
+            f.write(mcp_impl_src)
+
+        print("MCP guard (authorize → consume):")
+        gl(proj, "authorize", "--path", "mcp__mail__deleteMessage", "--reason", "user said ok")
+        pm = {"tool_name": "mcp__mail__deleteMessage", "tool_input": {"id": "abc"}}
+        check("an authorized MCP tool is allowed once", not denied(mcpguard(pm)))
+        check("the MCP authorization is single-use (spent → denied)", denied(mcpguard(pm)))
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("an MCP spend is logged as authorized_mcp naming the tool",
+              '"authorized_mcp"' in log and '"tool": "mcp__mail__deleteMessage"' in log)
+        # The two escape hatches must not be interchangeable in EITHER direction, or one authorized
+        # act would quietly buy a different one.
+        gl(proj, "authorize", "--path", os.path.expanduser("~/mcp-crosstalk"),
+           "--reason", "user said ok")
+        check("a filesystem authorization cannot be spent by an MCP call",
+              denied(mcpguard({"tool_name": "mcp__mail__deleteMessage",
+                               "tool_input": {"id": "z"}})))
+        gl(proj, "authorize", "--path", "mcp__db__dropTable", "--reason", "user said ok")
+        check("an MCP authorization cannot be spent by a filesystem write",
+              denied(guard(proj, {"tool_name": "Write",
+                                  "tool_input": {"file_path": os.path.expanduser("~/xtalk.txt")}})))
+
+        print("MCP guard (teaching it, without opening a bypass):")
+        c = json.load(open(cf)); c["mcp_read_only_tools"] = ["mcp__vendor__"]
+        json.dump(c, open(cf, "w"))
+        check("a configured read-only server resolves the ambiguous case",
+              not denied(mcpguard({"tool_name": "mcp__vendor__frobnicate",
+                                   "tool_input": {"x": 1}})))
+        r = mcpguard({"tool_name": "mcp__vendor__frobnicate",
+                      "tool_input": {"sql": "DROP TABLE users"}})
+        check("the read-only list can never silence a mutating ARGUMENT",
+              denied(r) and "classified as MUTATING" in why(r))
+        r = mcpguard({"tool_name": "mcp__vendor__deleteEverything", "tool_input": {}})
+        check("the read-only list can never silence a mutating VERB",
+              denied(r) and "irreversible verb: 'delete'" in why(r))
+
+        # #19: a guard that exists but is never wired in is not a guard. Assert the registration
+        # itself — in THIS repo and in the template every install merges — and that install.sh
+        # actually ships the files, and that the new bin file owes a check (#25).
+        print("MCP guard (wired in, not just written):")
+        for label, path in (("this repo's .claude/settings.json",
+                             os.path.join(REPO, ".claude", "settings.json")),
+                            ("the shipped templates/settings.hooks.json",
+                             os.path.join(REPO, "templates", "settings.hooks.json"))):
+            with open(path) as f:
+                entries = json.load(f)["hooks"]["PreToolUse"]
+            wired = [e for e in entries if e.get("matcher") == "mcp__.*"
+                     and any("guard-mcp.sh" in h.get("command", "") for h in e.get("hooks", []))]
+            check(f"the mcp__.* hook is registered in {label}", len(wired) == 1)
+        with open(os.path.join(REPO, "install.sh")) as f:
+            inst = f.read()
+        check("install.sh copies AND chmods both MCP guard files",
+              inst.count("guard-mcp.sh") >= 2 and inst.count("guard-mcp-impl.sh") >= 2)
+        with open(os.path.join(SRC_GAME_LOOP, "verify.yaml")) as f:
+            vy = f.read()
+        check("both MCP guard files owe the test suite in verify.yaml (#25)",
+              '".game_loop/bin/guard-mcp.sh":' in vy
+              and '".game_loop/bin/guard-mcp-impl.sh":' in vy)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

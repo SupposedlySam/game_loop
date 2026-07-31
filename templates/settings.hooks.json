@@ -22,6 +22,17 @@
             "statusMessage": "game_loop: usage-limit handoff gate"
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/guard-mcp.sh",
+            "timeout": 10,
+            "statusMessage": "game_loop: does this MCP call mutate?"
+          }
+        ]
       }
     ],
     "Stop": [

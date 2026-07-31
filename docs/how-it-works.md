@@ -158,9 +158,9 @@ dir, this project's agent-memory dir, and anything in `config.json → allow_wri
 else — other projects, your home directory, system files — is read-only by default. It covers
 `Write`/`Edit`/`NotebookEdit` and Bash mutators (`rm`, `mv`, redirects, `git` writes, `sed -i`, …),
 resolving paths with realpath and tracking `cd` across a command. It also blocks configured
-deploy/publish verbs anywhere. It states what it does *not* catch (MCP tools, interpreter one-liners,
-paths built from shell variables) right in the file — a guard that overstates its reach is worse than
-one that states its limits.
+deploy/publish verbs anywhere. It states what it does *not* catch (interpreter one-liners, paths built
+from shell variables) right in the file — a guard that overstates its reach is worse than one that
+states its limits.
 
 The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
 "<their words>"`.
@@ -186,6 +186,39 @@ written through Bash (a heredoc, `sed -i`, a script), by a sibling session, or b
 started is not in the set and gets named as excess. With no recorded edits it says nothing, and it
 reads the index — `git commit -a`, an explicit pathspec and `--no-verify` all pass unexamined.
 Silence from it is not evidence that a commit is tight.
+### The MCP guard — `bin/guard-mcp.sh`
+
+The write guard reads **Bash**. But a session with MCP servers connected can take an irreversible
+action with no shell command at all — a `DELETE FROM …` through a database server, a send or a delete
+through a mail/chat server, a force-operation through a git-host server. None of those arrive as Bash,
+so a guard that only reads Bash never sees them; MCP tools are a first-class effector, on par with the
+shell. That gap was *written down* in the write guard's scope notes for a long time, which is exactly
+the failure this project exists to prevent: **a gap stated in prose is a gap that gets walked
+through**, because the note doesn't stop anything (INV1).
+
+So a second `PreToolUse` hook, matched on `mcp__.*`, classifies the call **before** it runs. Nothing
+tells a client which of a server's tools mutate, so it matches the two things that *are* observable —
+the tool **name** and the **argument shape**: read-only verbs (`get`, `list`, `query`, …) pass;
+mutating or irreversible verbs (`delete`, `send`, `push`, `merge`, `deploy`, `force`, …) are refused,
+and so is any call whose arguments carry a mutating SQL statement, a destructive flag (`--force`, a
+truthy `force:`), or a mutating request method. **The argument always wins**, so a read-named `query`
+tool carrying `DELETE FROM` is still blocked. Same escape hatch as the shell mutators, spelled with
+the tool name: `game_loop authorize --path mcp__<server>__<tool> --reason "<their words>"`.
+
+Anything it cannot classify is **refused** — it fails **closed**, the opposite default from the write
+guard, and the reason for the difference is scope. The write guard is matched on
+`Write|Edit|NotebookEdit|Bash`, so a broken write guard blocks the very edit that would repair it and
+the session can only be rescued from outside (INV5); it must fail open. This one is matched on
+`mcp__.*` only. A refusal here never blocks its own fix, and what is on the other side of an
+unclassifiable MCP call is a delete, a send, or a publish. Where failing closed is free, a guard that
+guesses "probably fine" is not a guard. A project can teach it the ambiguous tools of a server it
+trusts (`config.json → mcp_read_only_tools`) — a list that can only resolve ambiguity, never silence a
+mutating verb or a mutating argument.
+
+What it still cannot see is stated in the file: what a server actually *does* behind a read-only name,
+effects downstream of a call it allowed, a mutation hidden in an opaque blob or a stored-procedure
+handle, and any MCP call made where this hook is not installed. Silence from it is not evidence of
+safety.
 
 ### The limit gate — `game_loop limitgate`
 

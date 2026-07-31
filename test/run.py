@@ -596,6 +596,56 @@ def main():
         r = gl(proj, "claim", "--assert", "x", "--read", real)
         check("flair.enabled=false silences flair", "🎮" not in r.stdout)
         c = json.load(open(cf)); c.pop("flair", None); json.dump(c, open(cf, "w"))
+
+        # Update check: status compares .game_loop/VERSION (installed sha) against the latest sha on the
+        # source repo's main, served here by a fake GitHub. Network is real (urllib), workspace is not.
+        print("update check (fake github):")
+
+        class FakeGH(http.server.BaseHTTPRequestHandler):
+            sha = "a" * 40
+            def do_GET(self):
+                body = json.dumps({"sha": FakeGH.sha}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, *a):
+                pass
+
+        ghsrv = http.server.HTTPServer(("127.0.0.1", 0), FakeGH)
+        threading.Thread(target=ghsrv.serve_forever, daemon=True).start()
+        ghbase = f"http://127.0.0.1:{ghsrv.server_address[1]}"
+        ver_f = os.path.join(proj, ".game_loop", "VERSION")
+        cache_f = os.path.join(proj, ".game_loop", ".update_cache.json")
+        cf_orig = open(cf).read()
+
+        def set_cfg(**extra):
+            base = {"project_name": "t", "update_repo": "me/gl", "update_api_base": ghbase}
+            base.update(extra)
+            json.dump(base, open(cf, "w"))
+
+        def fresh_status():
+            if os.path.exists(cache_f):
+                os.remove(cache_f)                 # force a live lookup, don't ride a stale cache
+            return gl(proj, "status").stdout
+
+        set_cfg()
+        open(ver_f, "w").write("b" * 40 + "\n")
+        check("status flags an available update when installed sha != latest",
+              "update available" in fresh_status() and "aaaaaaaa" in fresh_status())
+        open(ver_f, "w").write(FakeGH.sha + "\n")
+        check("status is silent when installed sha == latest",
+              "update available" not in fresh_status())
+        set_cfg(update_check=False)
+        open(ver_f, "w").write("c" * 40 + "\n")
+        check("update_check:false silences the notice",
+              "update available" not in fresh_status())
+        set_cfg(update_api_base="http://127.0.0.1:9")   # dead port — must never be reached
+        os.remove(ver_f)
+        check("no VERSION file → update check stays silent (and hits no network)",
+              "update available" not in fresh_status())
+        ghsrv.shutdown()
+        open(cf, "w").write(cf_orig)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

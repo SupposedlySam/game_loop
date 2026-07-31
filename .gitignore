@@ -11,6 +11,7 @@
 .game_loop/.limits.*.tmp
 .game_loop/.limits.lock
 .game_loop/HANDOFF.md
+.game_loop/.update_cache.json
 
 # python
 __pycache__/

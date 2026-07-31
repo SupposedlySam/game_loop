@@ -63,6 +63,8 @@ LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
 INV_F = os.path.join(ROOT, "INVARIANTS.md")
 LIMITS_F = os.path.join(ROOT, "limits.json")  # account-scoped, deliberately NOT per-session
+VERSION_F = os.path.join(ROOT, "VERSION")     # the game_loop commit sha install.sh copied in
+UPDATE_CACHE_F = os.path.join(ROOT, ".update_cache.json")  # cached latest-sha lookup (gitignored)
 
 SESSION = None  # sanitized id of the session this invocation belongs to, or None
 
@@ -102,6 +104,12 @@ DEFAULT_CONFIG = {
     # handoff gate closes; exhausted_pct is where the watchdog treats the session as rate-limited
     # and parks until the window resets; handoff_file resolves relative to .game_loop/.
     "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
+    # Update check: on `status`, compare the installed game_loop commit (.game_loop/VERSION, written by
+    # install.sh) against the latest on the source repo's main, and note when a re-install is due. Best
+    # effort, cached, network-silent-on-failure. Set update_check:false to disable.
+    "update_check": True,
+    "update_repo": "SupposedlySam/game_loop",
+    "update_api_base": "https://api.github.com",   # override for tests
 }
 
 DEFAULT_STATE = {
@@ -1154,6 +1162,73 @@ def legacy_mandate_warning():
             "  GAME_LOOP_SESSION= game_loop mandate --clear --notes \"migrated to per-session state\"")
 
 
+UPDATE_CACHE_TTL = 21600   # 6h — how long a latest-sha lookup is trusted before re-checking
+
+
+def installed_version():
+    """The game_loop commit sha this .game_loop/ was installed from, or None if unknown.
+
+    install.sh writes it; its absence means an old install (or the game_loop source repo itself, which
+    doesn't ship a VERSION — you read git there). No VERSION => the update check simply stays silent."""
+    try:
+        with open(VERSION_F) as f:
+            v = f.read().strip()
+        return v or None
+    except OSError:
+        return None
+
+
+def _latest_version(repo, api_base):
+    """Latest sha on the source repo's main, cached in .update_cache.json for UPDATE_CACHE_TTL. Best
+    effort: on any network/parse failure return the last cached value if we have one, else None. This
+    must never raise or stall status — it is a courtesy line, not a gate."""
+    try:
+        with open(UPDATE_CACHE_F) as f:
+            cache = json.load(f)
+        if (cache.get("repo") == repo and cache.get("latest")
+                and time.time() - float(cache.get("checked_at", 0)) < UPDATE_CACHE_TTL):
+            return cache["latest"]
+    except (OSError, ValueError):
+        cache = {}
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{api_base.rstrip('/')}/repos/{repo}/commits/main",
+            headers={"User-Agent": "game_loop-update-check",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            sha = (json.loads(resp.read().decode() or "{}") or {}).get("sha")
+        if sha:
+            try:
+                with open(UPDATE_CACHE_F, "w") as f:
+                    json.dump({"repo": repo, "latest": sha, "checked_at": time.time()}, f)
+            except OSError:
+                pass
+            return sha
+    except Exception:  # noqa: BLE001 — offline / rate-limited / parse error: fall back, never crash
+        pass
+    return cache.get("latest")   # stale-but-better-than-nothing, or None
+
+
+def update_notice():
+    """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
+    installed sha (VERSION) and the latest sha are known and they differ."""
+    cfg = config()
+    if not cfg.get("update_check", True):
+        return None
+    inst = installed_version()
+    if not inst:
+        return None
+    latest = _latest_version(cfg.get("update_repo", "SupposedlySam/game_loop"),
+                             cfg.get("update_api_base", "https://api.github.com"))
+    if not latest or inst.startswith(latest) or latest.startswith(inst):
+        return None
+    return (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
+            f"  Re-install to update (bin/ is refreshed; no session restart):\n"
+            f"    curl -fsSL https://raw.githubusercontent.com/{cfg.get('update_repo', 'SupposedlySam/game_loop')}"
+            f"/main/install.sh | bash -s -- .")
+
+
 def cmd_status(s, a):
     _prune_stale_sessions()
     out(render_banner(s))
@@ -1195,6 +1270,11 @@ def cmd_status(s, a):
         out(w)
     if (w := legacy_mandate_warning()):
         out(w)
+    try:
+        if (w := update_notice()):   # courtesy line, never allowed to break status
+            out(w)
+    except Exception:  # noqa: BLE001
+        pass
     assists = s.get("watchdog_rings_total", 0) + s.get("stop_gate_blocks_total", 0)
     if assists:
         out(f"🎮 GameLoop has kept the crawl going {assists} times "

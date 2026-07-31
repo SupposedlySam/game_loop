@@ -64,6 +64,20 @@ chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
          "$TARGET/.game_loop/bin/verify"
 echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, verify, flair.py, notify.py)"
 
+# Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
+# clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.
+GL_SHA=""
+if git -C "$SRC" rev-parse HEAD >/dev/null 2>&1; then
+  GL_SHA="$(git -C "$SRC" rev-parse HEAD)"
+elif command -v curl >/dev/null 2>&1; then
+  GL_SHA="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null \
+            | python3 -c 'import json,sys; print((json.load(sys.stdin) or {}).get("sha",""))' 2>/dev/null || true)"
+fi
+if [ -n "$GL_SHA" ]; then
+  printf '%s\n' "$GL_SHA" > "$TARGET/.game_loop/VERSION"
+  echo "  stamped .game_loop/VERSION ($(printf '%s' "$GL_SHA" | cut -c1-8)) — status flags when a re-install is due"
+fi
+
 # Seed the user-owned files only if absent — never clobber their config or notes.
 # $2 overrides the source path (defaults to .game_loop/$1) for files that ship from templates/.
 seed() {
@@ -184,6 +198,7 @@ limits.json
 .limits.*.tmp
 .limits.lock
 HANDOFF.md
+.update_cache.json
 EOF
   echo "  wrote   .game_loop/.gitignore"
 else
@@ -195,6 +210,10 @@ else
   if ! grep -q '^notify.json$' "$GI"; then
     printf 'notify.json\nlimits.json\n.limits.*.tmp\n.limits.lock\nHANDOFF.md\n' >> "$GI"
     echo "  updated .game_loop/.gitignore (+ notify.json, limits.json, HANDOFF.md)"
+  fi
+  if ! grep -q '^.update_cache.json$' "$GI"; then
+    echo ".update_cache.json" >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ .update_cache.json — update-check cache)"
   fi
 fi
 

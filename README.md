@@ -231,6 +231,8 @@ for the guarantees as runnable checks (`python3 test/run.py`).
     "exhausted_pct": 99,     // watchdog parks here and wakes the run at the window reset
     "handoff_file": "HANDOFF.md"   // resolved relative to .game_loop/
   },
+  "update_check": true,      // status flags when the installed game_loop is behind main (re-install due)
+  "update_repo": "SupposedlySam/game_loop",   // source repo the check compares against
   "flair": {                 // fun celebration lines (see below) — set enabled:false to silence
     "enabled": true,
     "support_name": "SupposedlySam",

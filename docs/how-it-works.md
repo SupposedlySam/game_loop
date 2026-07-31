@@ -146,6 +146,33 @@ newer than the last successful run of its checks — the gate is "is the evidenc
 change", not "did you remember". The write guard calls it before `git commit`. Ships empty (a no-op)
 until you add rules.
 
+### pins — `game_loop pin`
+
+Environment state the build depends on is invisible to the harness, so a run cannot tell a stale
+leftover from a load-bearing one. A dependency checkout gets moved to a non-default commit because
+the work needs an API only present there; a later tidy-up restores it to its default branch and the
+build dies on a symbol that "does not exist". Reverting unexplained local state is *good hygiene* —
+that is exactly what makes the trap work, and nothing warns the tidying instinct off.
+
+A pin puts the fact in resume state **with the reason it is load-bearing**, so `status` re-prints it
+after every compaction and releasing it becomes a stated decision:
+
+```
+game_loop pin --fact "vendor/dep is at abc123 (not main)" \
+              --reason "the merge API only exists on that commit" \
+              --path vendor/dep/.git/HEAD --expect abc123 \
+              --restore "git -C vendor/dep checkout abc123"
+game_loop pin --list
+game_loop pin --release p1 --notes "the API landed on main"
+```
+
+`--path` is the usual keystone and is mandatory — a file *or* a directory, since a pin's subject is
+routinely a checkout or an SDK root. `--expect` is what raises a pin from *displayed* to *checked*:
+status re-reads the anchor and prints `DRIFTED` when the text is gone. It must already hold at
+registration, because a check born red is a check nobody believes later. What a pin **misses**,
+stated in the code: with no `--expect` it only proves the anchor still exists, and the failure above
+leaves a perfectly real directory behind — so an unchecked pin prints `UNCHECKED`, never `✓`.
+
 ### harden — `game_loop harden`
 
 The meta-guard. When you learn something, you don't write it down — you `harden` it into an artifact

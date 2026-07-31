@@ -193,6 +193,7 @@ even if you never automate the resume.
 | `game_loop arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
 | `game_loop claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
 | `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
+| `game_loop pin --fact .. --reason .. --path <path> [--expect ..]` | Carry a load-bearing environment fact (a pinned dep commit, a toolchain, an SDK path) in resume state, so a later tidy-up can't silently revert it. `--list` / `--release <id> --notes ".."`. |
 | `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
 | `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
 | `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |

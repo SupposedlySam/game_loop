@@ -131,6 +131,7 @@ DEFAULT_STATE = {
     "flair_fired": [],
     "pins": [],        # load-bearing environment facts, carried so `status` re-shows them post-compaction
     "pin_seq": 0,      # monotonic id source — a released pin's id is never handed out again
+    "instruments": [], # metrics admitted as evidence: declared harm + null/positive controls + readings
 }
 
 
@@ -725,6 +726,13 @@ def cmd_claim(s, a):
     wrong. A retraction costs exactly one real path, the same as any other claim: retracting already
     LOOKED like failure while costing what progress costs, and that asymmetry is what taught the
     quiet move-on. `game_loop status` reads the standing RULED-OUT list back out of the shared log.
+
+    EVIDENCE THAT IS A NUMBER. `--read` is unchanged and remains THE keystone for a claim backed by
+    a document. `--metric` adds a second kind of evidence for the claims a path cannot source —
+    "the number shows Y" — because "name a real file" is not merely insufficient there, it is
+    satisfiable while being completely wrong: every instrument incident was run by an agent who
+    could have cited a real file the whole time. Its keystone is a controlled instrument plus a
+    two-endpoint reading (see admit_metric).
     """
     outcome = (a.outcome or "resolved").lower()
     if outcome not in CLAIM_OUTCOMES:
@@ -736,14 +744,19 @@ def cmd_claim(s, a):
         die("a refuted claim needs --evidence <path[,path]>: the control, log, or output that\n"
             "DISPROVED it. A retraction without its evidence is a deletion — the next session just\n"
             "re-walks the dead path. Name the file that killed it; that is the whole value here.")
+    # A metric is admitted through its own gate (controls + a two-endpoint reading), so it stands in
+    # for --read the way a refutation's evidence does — the keystone changes shape, never softens.
+    metric = admit_metric(s, a.metric, a.recheck) if a.metric else None
     # For a refutation the evidence IS a source you read, so it stands in for --read. Retracting must
     # cost no more than claiming, or the cheapest move stays "say nothing and move on".
     read_arg = a.read or (a.evidence if outcome == "refuted" else None)
-    if not a.assert_ or not read_arg:
+    if not a.assert_ or not (read_arg or metric):
         die("claim needs --assert \"<what you're about to tell the human>\" and --read <path[,path]>.\n"
             "The read path is the keystone: name the file you ACTUALLY read, not a memory of it.\n"
-            "A claim you cannot source is a guess wearing a citation.")
-    paths = [p.strip() for p in read_arg.split(",") if p.strip()]
+            "A claim you cannot source is a guess wearing a citation.\n"
+            "When the evidence is a MEASUREMENT rather than a document, cite the instrument instead:\n"
+            '  game_loop claim --assert ".." --metric <name>   (see `game_loop instrument`)')
+    paths = [p.strip() for p in (read_arg or "").split(",") if p.strip()]
     resolved = {p: resolve_read(p) for p in paths}
     bad = [p for p, r in resolved.items() if r is None]
     if bad:
@@ -757,15 +770,34 @@ def cmd_claim(s, a):
         die("these --evidence paths don't resolve to a real, non-empty file: " + ", ".join(ev_bad) +
             "\nThe disproving evidence is the point of a retraction — name the real control, log, or "
             "output that killed the claim, not a description of one.")
-    logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
-             "outcome": outcome, "evidence": list(ev_resolved.values()),
-             "confidence": a.confidence})
+    rec = {"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
+           "outcome": outcome, "evidence": list(ev_resolved.values()),
+           "confidence": a.confidence}
+    if metric:
+        inst, reading, mv = metric
+        rec.update({"metric": inst["name"], "measures": inst.get("measures"),
+                    "reading": {k: reading[k] for k in ("before", "after", "delta")}})
+        if mv and a.recheck:
+            # The re-check is recorded ON the instrument and counted against the readings it was
+            # made at, so a LATER movement demands a fresh one instead of resting on this answer.
+            rec["recheck"] = a.recheck
+            inst["recheck"] = {"text": a.recheck, "at": now(), "pct": round(mv["pct"], 1)}
+            inst["recheck_n"] = len(inst.get("readings") or [])
+    logline(rec)
     s["claim_count"] = s.get("claim_count", 0) + 1
     save(s)
     msg = [CLAIM_OUTCOMES[outcome],
            f"  assert    : {a.assert_}",
-           f"  outcome   : {outcome}",
-           f"  read (T0) : {', '.join(paths)}"]
+           f"  outcome   : {outcome}"]
+    if paths:
+        msg.append(f"  read (T0) : {', '.join(paths)}")
+    if metric:
+        inst, reading, mv = metric
+        msg.append(f"  metric    : {inst['name']} — {_num(reading['before'])} → "
+                   f"{_num(reading['after'])} (Δ {_num(reading['delta'])}, computed by the tool)")
+        msg.append(f"  stands for: {inst.get('measures')}")
+        if a.recheck:
+            msg.append(f"  re-checked: {a.recheck}")
     if ev_paths:
         msg.append(f"  killed by : {', '.join(ev_paths)}")
     if a.confidence:
@@ -773,6 +805,8 @@ def cmd_claim(s, a):
     if outcome == "refuted":
         msg.append("→ it now stands in the RULED-OUT list on `game_loop status`, so the next run "
                    "inherits it instead of re-walking it.")
+    if metric:
+        msg.append("  " + "\n  ".join(INSTRUMENT_MISSES))
     out(*msg)
     flair_out(s, "claim")
 
@@ -1164,6 +1198,348 @@ def cmd_pin(s, a):
         *([f"  restore: {a.restore}"] if a.restore else []),
         "→ this is now a visible fact, so reverting it is a decision: "
         'game_loop pin --release ' + pin["id"] + ' --notes ".."')
+
+
+# ── instruments ──────────────────────────────────────────────────────────────────────────────────
+#
+# An instrument is A TEST WHOSE SUBJECT IS REALITY. This project already holds that a test which
+# cannot fail certifies the defect instead of catching it; a number admitted as evidence without
+# controls is that same failure one layer out — and it does not fail quietly, it MANUFACTURES
+# findings. `claim --read` cannot help here: every one of these incidents was run by an agent who
+# could have cited a real file the whole time. Three refusals, three logged failures:
+#
+#   #14  A reading is a DELTA scoped to the interaction, never a lifetime total. A snapshot said 90%
+#        of one component's operations returned short (157839 of 176001) — read as a rate that is a
+#        catastrophic root cause, and it became the leading hypothesis. Deltas across the actual
+#        interaction, same build, minutes later: ZERO in thirty trials. Every one of those had
+#        accrued while idle, where returning short is correct. Two endpoints is the STRUCTURAL rule,
+#        because demanding them is what makes the other two enforceable rather than advisory.
+#   #11  A metric needs a NULL control (sample it while the phenomenon is ABSENT — non-zero means it
+#        measures something else: 4053 units of "damage" per 4000 units of deliberately doing
+#        nothing) and a POSITIVE control (a metric that only ever reads zero is equally
+#        untrustworthy; it earns trust by CATCHING a known-real event, not by reading clean). That
+#        one flaw produced three separate false findings, one presented as 8-for-8 deterministic.
+#   #13  An optimized proxy must declare the user-visible harm it stands for AND how it connects to
+#        it, because a 43% reduction at p=0.037, n=250 was real, reproducible, correctly computed —
+#        and measured on a counter that had decoupled from user-visible harm in exactly the regime
+#        the fix created. So when the number moves, the connection is RE-CHECKED, not assumed.
+#
+# WHERE A GATE NEEDS A COMPUTATION, THE TOOL DOES IT. The caller names the numbers they saw; deltas
+# and percentages are computed here. Arithmetic handed to the caller is a defect generator — the
+# author of the sibling issue that says so got a coordinate conversion wrong on the very next run.
+#
+# STATE IS PER SESSION, like pins and deliberately unlike the ruled-out list. A refutation is
+# durable knowledge about the CHECKOUT, so it lives in the shared log; a control is a MEASUREMENT
+# taken in one run's regime, and a control inherited by a later session is precisely the "assumed to
+# have survived the change" failure #13 is about. The READINGS still go to the shared log, where
+# anyone can reproduce them — that is #14's own stated side benefit.
+
+# INV6, printed by the guard itself: silence from a guard is not evidence of safety.
+INSTRUMENT_MISSES = [
+    "what these controls do NOT catch: whether this is the RIGHT metric. They say the chosen",
+    "number is CONTROLLED — none of them can say it is the number that matters. #13's counter was",
+    "structurally blind to a second fault mechanism, so the whole investigation searched one way.",
+]
+
+
+def _num(x):
+    """Format a reading for humans: an integral value prints as an integer, never as 4053.0."""
+    return str(int(x)) if float(x).is_integer() else f"{x:g}"
+
+
+def _scalar(x):
+    """Normalize a parsed number for state and the log, so a counter reads back the way it read."""
+    return int(x) if float(x).is_integer() else float(x)
+
+
+def parse_number(label, text):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        die(f"{label} must be a number, not {text!r} — paste what the counter actually read.")
+
+
+def control_reading(flag, text):
+    """A control is a reading too: `before,after`, with the subtraction done HERE.
+
+    #14 applies to CONTROLS as hard as to the measurement. A control handed over as one absolute
+    value is a lifetime total wearing the costume of a control, and it would smuggle the exact
+    confound the control exists to catch back in through the gate.
+    """
+    parts = [p.strip() for p in (text or "").split(",") if p.strip()]
+    if len(parts) != 2:
+        die(f"{flag} takes TWO endpoint readings — before,after — not one absolute value: {text!r}\n"
+            "A reading is a delta scoped to the sample, and that holds for a control too:\n"
+            f"  {flag} 0,0   the counter before and after, sampled while the phenomenon was ABSENT\n"
+            "The tool subtracts them. Never hand a gate a number you worked out yourself.")
+    b, a = (parse_number(flag, p) for p in parts)
+    return {"before": _scalar(b), "after": _scalar(a), "delta": _scalar(a - b)}
+
+
+def instrument_by_name(s, name):
+    return next((i for i in (s.get("instruments") or []) if i.get("name") == name), None)
+
+
+def die_unadmitted(name):
+    """One refusal for every verb that needs an admitted instrument, so the route in is always the
+    same sentence."""
+    die(f"instrument {name!r} was never admitted in this session.\n"
+        "A number is not evidence until it is CONTROLLED: sampled while the phenomenon is ABSENT,\n"
+        "sampled while a KNOWN-REAL event happens, and pointed at the harm a user would notice.\n"
+        f'  game_loop instrument --register {name} --measures ".." --connects ".." \\\n'
+        "                       --null <before,after> --positive <before,after>\n"
+        "  " + "\n  ".join(INSTRUMENT_MISSES))
+
+
+def metric_movement(inst):
+    """Has the metric MOVED since its first reading here, and by how much — computed by the tool.
+
+    "Moved" means the magnitude of the delta SHRANK. That is the direction a run optimizing the
+    number is pushing it, and it is exactly when a proxy quietly stops standing for the harm: #13's
+    counter tracked the harm in the regime it was validated in and stopped tracking it in the regime
+    the fix created. The percentage is computed here for the same reason the delta is — a gate that
+    asks the caller for a ratio is a gate that will eventually be handed a wrong one.
+    """
+    rs = inst.get("readings") or []
+    if len(rs) < 2:
+        return None
+    first, latest = abs(rs[0].get("delta", 0)), abs(rs[-1].get("delta", 0))
+    if not first or latest >= first:
+        return None
+    return {"pct": 100.0 * (first - latest) / first, "first": rs[0], "latest": rs[-1]}
+
+
+def admit_metric(s, name, recheck):
+    """The admission gate for evidence that is a MEASUREMENT rather than a document.
+
+    `claim --read` demands a real file because that is the check prose cannot satisfy for a
+    document. For a number the equivalent is not one check but four, and each of them was
+    satisfiable-while-completely-wrong in a real incident: the instrument is admitted (#11), it
+    declared the harm it stands for (#13), it has been READ across an interaction rather than
+    snapshotted (#14), and if the number has since moved, the connection to the harm has been
+    re-checked (#13).
+
+    Admission itself is enforced at REGISTRATION, the way a pin's --expect must already hold: a
+    control that is not green when it is recorded is a check nobody believes later. So by the time a
+    claim reaches here, a registered instrument is a controlled one.
+    """
+    inst = instrument_by_name(s, name)
+    if inst is None:
+        die_unadmitted(name)
+    rs = inst.get("readings") or []
+    if not rs:
+        die(f"instrument {name!r} is admitted but has never been READ across an interaction.\n"
+            "A snapshot answers 'since process start', which is almost never the question. Read it\n"
+            "around the thing you actually did, and cite that:\n"
+            f"  game_loop measure --instrument {name} --before <n> --after <n>")
+    mv = metric_movement(inst)
+    # A re-check is counted against the readings it was made at, so it answers for THIS movement
+    # only: the next reading that moves the number demands a fresh one. That is the difference
+    # between re-checking the connection and having once said something about it.
+    if mv and not recheck and inst.get("recheck_n") != len(rs):
+        die("the metric MOVED, and its connection to the harm has not been re-checked.\n"
+            f"  instrument : {name}\n"
+            f"  first read : Δ {_num(mv['first']['delta'])}\n"
+            f"  latest read: Δ {_num(mv['latest']['delta'])}  — {mv['pct']:.1f}% smaller "
+            "(computed here; you were never asked for that ratio)\n"
+            f"  stands for : {inst.get('measures')}\n"
+            f"  connects by: {inst.get('connects')}\n"
+            "A proxy tracks the harm in the regime it was VALIDATED in and can stop tracking it in "
+            "the regime\nthe fix created — which is the regime the work just moved into. A real 43% "
+            "reduction at\np=0.037, n=250 was reported on a counter that had already decoupled from "
+            "what a user notices.\nSo re-state the connection for THIS regime instead of assuming it "
+            "survived:\n"
+            f'  game_loop claim --assert ".." --metric {name} --recheck "what would a user notice, '
+            'and did you measure THAT or something correlated with it?"')
+    return inst, rs[-1], mv
+
+
+def instruments_report(s):
+    """The instruments block for `status`.
+
+    The declared harm has to OUTLIVE the context that declared it, or "re-check the connection when
+    the number moves" is a promise rather than a check — and promises are what compaction breaks.
+    """
+    insts = s.get("instruments") or []
+    if not insts:
+        return ['instruments: none admitted — `game_loop instrument --register <name> --measures '
+                '".." --connects ".." --null <b,a> --positive <b,a>` before a number is evidence']
+    lines = ["", "INSTRUMENTS — a number is evidence only once it is controlled:"]
+    for i in insts:
+        rs = i.get("readings") or []
+        nul, pos = i.get("null") or {}, i.get("positive") or {}
+        lines.append(f"  ✓ [{i.get('name')}] stands for: {i.get('measures')}")
+        lines.append(f"      connects  : {i.get('connects')}")
+        lines.append(f"      controls  : null Δ {_num(nul.get('delta', 0))} (phenomenon absent) · "
+                     f"positive Δ {_num(pos.get('delta', 0))} (known-real event)")
+        if rs:
+            last = rs[-1]
+            lines.append(f"      readings  : {len(rs)} · latest {_num(last['before'])} → "
+                         f"{_num(last['after'])} (Δ {_num(last['delta'])})")
+        else:
+            lines.append("      readings  : none yet — game_loop measure --instrument "
+                         f"{i.get('name')} --before <n> --after <n>")
+        mv = metric_movement(i)
+        if mv and i.get("recheck_n") != len(rs):
+            lines.append(f"      ⚠ MOVED {mv['pct']:.1f}% since the first reading — the connection "
+                         "to the harm is UNCHECKED in this regime")
+        elif i.get("recheck"):
+            lines.append(f"      re-checked: {i['recheck']['text']}")
+    lines.append("  → " + INSTRUMENT_MISSES[0])
+    lines += ["    " + l for l in INSTRUMENT_MISSES[1:]]
+    return lines
+
+
+def cmd_instrument(s, a):
+    """Admit (or list, or retire) a metric as evidence, WITH the controls that make it one.
+
+    The controls are not paperwork, they are the payload. "the damage counter dropped 43%" invites a
+    conclusion; "the damage counter reads 4053 while nothing is happening" ends one. Both controls
+    are read as deltas, like every other reading, and this command does the subtraction.
+
+    A name is admitted ONCE. Re-registering silently would let a run that just had a claim refused
+    re-control the same number until the gate opened — so re-controlling goes through --release, and
+    is on the record.
+    """
+    insts = list(s.get("instruments") or [])   # copy: never mutate the module-level DEFAULT_STATE
+
+    if a.list:
+        if not insts:
+            out("no instruments admitted.")
+            return
+        out(*instruments_report(s)[1:])
+        return
+
+    if a.release:
+        hit = instrument_by_name(s, a.release)
+        if hit is None:
+            die_unadmitted(a.release)
+        if not a.notes:
+            die("instrument --release needs --notes: say why this number is no longer trusted.\n"
+                f"  retiring : [{hit['name']}] {hit.get('measures')}\n"
+                "An instrument is retired because a control went bad, the harm moved, or a corrected "
+                "one\nreplaced it — and the next run needs to know which. An unexplained retirement "
+                "is the\ndecoupled proxy all over again, minus the evidence.")
+        insts.remove(hit)
+        s["instruments"] = insts
+        save(s)
+        logline({"kind": "instrument_release", "name": hit["name"],
+                 "measures": hit.get("measures"), "notes": a.notes})
+        out("✓ INSTRUMENT RETIRED — it no longer backs a claim.",
+            f"  was      : [{hit['name']}] {hit.get('measures')}",
+            f"  notes    : {a.notes}",
+            "→ its readings stay in the log; what changed is that they no longer admit a claim.")
+        return
+
+    if not a.register:
+        die("instrument needs --register <name> (or --list / --release <name>).\n"
+            "The name is what a claim later cites: game_loop claim --assert \"..\" --metric <name>")
+    if not a.measures:
+        die("--measures is required: the USER-VISIBLE harm this number stands for.\n"
+            "A proxy that never states its referent cannot be checked against it later — and a\n"
+            "statistically significant improvement on an unstated proxy is more dangerous than a\n"
+            "null result, because it feels like progress and closes the investigation.\n"
+            '  --measures "dropouts the listener actually hears", not "underrun events"')
+    if not a.connects:
+        die("--connects is required: HOW the number reaches that harm.\n"
+            "Stating the mechanism is what makes it RE-CHECKABLE when the number moves. Without it,\n"
+            "'the metric still tracks the harm' has nothing to be false about.\n"
+            '  --connects "each underrun empties the buffer, and an empty buffer plays as silence"')
+    if not a.null:
+        die("this instrument has no null control (--null <before,after>).\n"
+            "Sample the metric while the phenomenon is NOT happening. Non-zero means it is not\n"
+            "measuring what you think: one counter read 4053 units of 'damage' per 4000 units of\n"
+            "deliberately doing nothing, and that single flaw produced three false findings.")
+    if not a.positive:
+        die("this instrument has no positive control (--positive <before,after>).\n"
+            "A metric that only ever reads zero is exactly as untrustworthy as one that reads high.\n"
+            "It earns trust by CATCHING a known-real event, not by reading clean. Cause the thing\n"
+            "on purpose, read the counter around it, and record what it saw.")
+    if instrument_by_name(s, a.register):
+        die(f"instrument {a.register!r} is already admitted in this session.\n"
+            "Re-registering would let a refused claim quietly re-control the number until the gate\n"
+            "opened. Retire it first, with the reason:\n"
+            f'  game_loop instrument --release {a.register} --notes ".."')
+    nul = control_reading("--null", a.null)
+    pos = control_reading("--positive", a.positive)
+    if nul["delta"] != 0:
+        die(f"the null control is NOT zero: Δ {_num(nul['delta'])} "
+            f"({_num(nul['before'])} → {_num(nul['after'])}) while the phenomenon was ABSENT.\n"
+            "Non-zero is the exact tell that this metric measures something other than the thing\n"
+            "you are asking about, and it is NOT a detail to pass silently: a counter reading 4053\n"
+            "per 4000 units of doing nothing produced three separate false findings, one of them\n"
+            "presented as 8-for-8 deterministic.\n"
+            "Fix the instrument (scope it to the activity, subtract the idle baseline, or pick a\n"
+            "different counter) and register the corrected one. Do not proceed on this number.")
+    if pos["delta"] == 0:
+        die(f"the positive control never moved: Δ 0 "
+            f"({_num(pos['before'])} → {_num(pos['after'])}) across a KNOWN-REAL event.\n"
+            "A metric that only ever reads zero certifies whatever it is pointed at. It has not\n"
+            "shown it can see the thing, so a clean reading from it means nothing. Cause the event\n"
+            "for real, confirm the counter notices, then register it.")
+    inst = {"name": a.register, "measures": a.measures, "connects": a.connects,
+            "null": nul, "positive": pos, "readings": [], "at": now()}
+    insts.append(inst)
+    s["instruments"] = insts
+    save(s)
+    logline({"kind": "instrument", "name": inst["name"], "measures": inst["measures"],
+             "connects": inst["connects"], "null": nul, "positive": pos})
+    out(f"✓ INSTRUMENT ADMITTED [{inst['name']}] — controlled, so its readings can back a claim.",
+        f"  stands for : {inst['measures']}",
+        f"  connects by: {inst['connects']}",
+        f"  null       : {_num(nul['before'])} → {_num(nul['after'])} (Δ 0 — reads nothing while "
+        "the phenomenon is absent)",
+        f"  positive   : {_num(pos['before'])} → {_num(pos['after'])} (Δ {_num(pos['delta'])} — it "
+        "caught a known-real event)",
+        f'→ read it as a DELTA: game_loop measure --instrument {inst["name"]} --before <n> --after <n>',
+        "  " + "\n  ".join(INSTRUMENT_MISSES))
+
+
+def cmd_measure(s, a):
+    """Record ONE reading of an admitted instrument: two endpoints, delta computed here.
+
+    Two endpoints rather than one absolute value is the whole verb. A lifetime counter answers
+    "since process start", which is almost never the question, and it will be dominated by whichever
+    regime the process spent its wall clock in — usually idle, for anything being interactively
+    driven. It also has the side benefit the issue names: the measurement becomes reproducible by
+    anyone reading the log later, because both endpoints are in it.
+    """
+    if not a.instrument:
+        die("measure needs --instrument <name> --before <n> --after <n>.")
+    inst = instrument_by_name(s, a.instrument)
+    if inst is None:
+        die_unadmitted(a.instrument)
+    if a.before is None or a.after is None:
+        die("a reading is TWO endpoints, not one absolute value — --before AND --after.\n"
+            "A lifetime total blends the regime under test with every idle second before it. One\n"
+            "read 157839 of 176001 operations short (90%, and an obvious root cause); deltas across\n"
+            "the actual interaction showed ZERO in thirty trials, because the rest had accrued while\n"
+            "idle, where the behaviour is correct.\n"
+            f"  game_loop measure --instrument {a.instrument} --before <n> --after <n>")
+    b = parse_number("--before", a.before)
+    af = parse_number("--after", a.after)
+    reading = {"before": _scalar(b), "after": _scalar(af), "delta": _scalar(af - b),
+               "notes": a.notes, "at": now()}
+    insts = list(s.get("instruments") or [])   # copy: never mutate the module-level DEFAULT_STATE
+    inst = dict(inst, readings=[*(inst.get("readings") or []), reading])
+    insts[[i.get("name") for i in insts].index(inst["name"])] = inst
+    s["instruments"] = insts
+    save(s)
+    logline({"kind": "measure", "instrument": inst["name"], "measures": inst.get("measures"),
+             "before": reading["before"], "after": reading["after"], "delta": reading["delta"],
+             "notes": a.notes})
+    msg = [f"✓ READING recorded [{inst['name']}] — a delta scoped to the interaction, not a total.",
+           f"  before  : {_num(reading['before'])}",
+           f"  after   : {_num(reading['after'])}",
+           f"  Δ {_num(reading['delta'])}   ← computed here, from your two endpoints"]
+    if a.notes:
+        msg.append(f"  over    : {a.notes}")
+    mv = metric_movement(inst)
+    if mv:
+        msg.append(f"⚠ the metric MOVED {mv['pct']:.1f}% since its first reading here. Before citing "
+                   "it,\n  re-check that it still stands for: " + str(inst.get("measures")) +
+                   '\n  game_loop claim --assert ".." --metric ' + inst["name"] + ' --recheck ".."')
+    out(*msg)
 
 
 # ── the Stop gate ────────────────────────────────────────────────────────────────────────────────
@@ -1746,9 +2122,14 @@ def cmd_status(s, a):
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
         "→ when local state becomes load-bearing (a pinned dep commit, a toolchain, an SDK path):",
         '   game_loop pin --fact ".." --reason ".." --path <real path> [--expect ..] [--restore ..]',
+        "→ before a NUMBER backs anything (it is a test whose subject is reality — control it first):",
+        '   game_loop instrument --register <name> --measures ".." --connects ".." '
+        "--null <b,a> --positive <b,a>",
+        "   game_loop measure --instrument <name> --before <n> --after <n>   (a delta, never a total)",
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
     out(*pins_report(s))   # load-bearing env facts, re-shown every session: this is what survives
+    out(*instruments_report(s))   # the declared harm must outlive the context that declared it
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.
@@ -1872,6 +2253,8 @@ def main():
     cl.add_argument("--confidence", help="optional: what would change your mind?")
     cl.add_argument("--outcome", help="how it landed: resolved (default) · refuted · inconclusive")
     cl.add_argument("--evidence", help="real path[,path] that DISPROVED it — required for refuted")
+    cl.add_argument("--metric", help="admitted instrument whose READING backs it (not a document)")
+    cl.add_argument("--recheck", help="for a metric that MOVED: what a user would notice now")
 
     n = sub.add_parser("note")
     n.add_argument("--text")
@@ -1923,6 +2306,22 @@ def main():
     pn.add_argument("--release", help="pin id to release (requires --notes)")
     pn.add_argument("--notes", help="why a released pin is no longer load-bearing")
 
+    im = sub.add_parser("instrument")  # admit a METRIC as evidence: declared harm + both controls
+    im.add_argument("--register", metavar="NAME", help="name a claim will later cite with --metric")
+    im.add_argument("--measures", help="the USER-VISIBLE harm this number stands for")
+    im.add_argument("--connects", help="HOW the number reaches that harm (what makes it re-checkable)")
+    im.add_argument("--null", help="before,after sampled while the phenomenon is ABSENT (must be Δ0)")
+    im.add_argument("--positive", help="before,after across a KNOWN-REAL event (must not be Δ0)")
+    im.add_argument("--list", action="store_true", help="show this session's admitted instruments")
+    im.add_argument("--release", metavar="NAME", help="retire an instrument (requires --notes)")
+    im.add_argument("--notes", help="why a retired instrument is no longer trusted")
+
+    ms = sub.add_parser("measure")  # ONE reading of an instrument: two endpoints, delta computed here
+    ms.add_argument("--instrument", help="the admitted instrument being read")
+    ms.add_argument("--before", help="the reading BEFORE the interaction")
+    ms.add_argument("--after", help="the reading AFTER it")
+    ms.add_argument("--notes", help="what the interaction was (this is what the delta is scoped to)")
+
     nf = sub.add_parser("notify")  # page the configured Slack channel by hand
     nf.add_argument("--text", help="the message the run's human should see")
     nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
@@ -1948,7 +2347,7 @@ def main():
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
-     "pin": cmd_pin}[a.cmd](s, a)
+     "pin": cmd_pin, "instrument": cmd_instrument, "measure": cmd_measure}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

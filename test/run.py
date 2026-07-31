@@ -898,6 +898,121 @@ def main():
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
               '"outcome": "refuted"' in log)
+
+        # #14 #11 #13: an instrument is A TEST WHOSE SUBJECT IS REALITY — and this project already
+        # holds that a test which cannot fail certifies the defect instead of catching it. These are
+        # that idea one layer out. Three ways the same number lies, one admission gate: a reading is
+        # a DELTA scoped to the interaction and never a lifetime total (#14, the structural one — two
+        # endpoints is what makes the other two enforceable rather than advisory); a metric earns
+        # evidence status only with a null AND a positive control (#11); an optimized proxy must
+        # declare the user-visible harm it stands for, so the connection is RE-CHECKED when the
+        # number moves instead of assumed to have survived (#13). Every rejection below asserts
+        # game_loop's own message text, never a bare non-zero exit: argparse's "invalid choice" also
+        # exits non-zero, and a test that passes for THAT reason is a test that cannot fail.
+        print("instruments (a number is evidence only once it is controlled, #14 #11 #13):")
+        HARM = "audible dropouts the listener actually hears"
+        CONN = "each underrun empties the ring buffer, and an empty buffer plays as silence"
+        reg = ["instrument", "--register", "underruns", "--measures", HARM, "--connects", CONN,
+               "--null", "0,0", "--positive", "0,12"]
+
+        def without(flag):    # the same registration minus one flag and its value
+            i = reg.index(flag)
+            return reg[:i] + reg[i + 2:]
+
+        r = gl(proj, *without("--measures"))
+        check("refuses an instrument that declares no user-visible harm (#13)",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--measures" in r.stderr)
+        r = gl(proj, *without("--connects"))
+        check("refuses an instrument that never says HOW the number reaches that harm (#13)",
+              r.returncode != 0 and "--connects" in r.stderr)
+        r = gl(proj, *without("--null"))
+        check("refuses an instrument with no null control (#11)",
+              r.returncode != 0 and "no null control" in r.stderr)
+        r = gl(proj, *without("--positive"))
+        check("refuses an instrument with no positive control (#11)",
+              r.returncode != 0 and "no positive control" in r.stderr)
+        r = gl(proj, *(without("--null") + ["--null", "4053"]))
+        check("refuses a control given as ONE absolute value — a control is a delta too (#14)",
+              r.returncode != 0 and "TWO endpoint" in r.stderr)
+        r = gl(proj, *(without("--null") + ["--null", "0,4053"]))
+        check("a NON-ZERO null control is refused, and the refusal NAMES it (#11)",
+              r.returncode != 0 and "null control is NOT zero" in r.stderr and "4053" in r.stderr)
+        r = gl(proj, *(without("--positive") + ["--positive", "7,7"]))
+        check("refuses an instrument whose positive control never caught anything (#11)",
+              r.returncode != 0 and "positive control never moved" in r.stderr)
+        r = gl(proj, *reg)
+        check("admits an instrument with a declared harm and both controls",
+              r.returncode == 0 and "INSTRUMENT ADMITTED" in r.stdout)
+        r = gl(proj, *reg)
+        check("refuses to silently re-register an admitted instrument (re-controlling is logged)",
+              r.returncode != 0 and "already admitted" in r.stderr)
+        # #14's incident, in the refusal: 157839 of 176001 read as a 90% failure rate; deltas across
+        # the interaction showed zero in thirty trials, because the rest accrued while idle.
+        r = gl(proj, "measure", "--instrument", "underruns", "--before", "176001")
+        check("refuses a single absolute reading — a reading is two endpoints (#14)",
+              r.returncode != 0 and "TWO endpoints" in r.stderr and "157839" in r.stderr)
+        r = gl(proj, "measure", "--instrument", "no-such-counter", "--before", "0", "--after", "1")
+        check("refuses a reading of an instrument that was never admitted",
+              r.returncode != 0 and "never admitted" in r.stderr)
+        # 40 → 290 is Δ250: the delta appears NOWHERE in the arguments, so only the tool can print it.
+        r = gl(proj, "measure", "--instrument", "underruns", "--before", "40", "--after", "290",
+               "--notes", "thirty trials, active playback only")
+        check("accepts a two-endpoint reading and computes the delta ITSELF (#14)",
+              r.returncode == 0 and "Δ 250" in r.stdout)
+        r = gl(proj, "claim", "--assert", "underruns dropped", "--metric", "no-such-counter")
+        check("a claim citing an unregistered instrument is refused (#11)",
+              r.returncode != 0 and "never admitted" in r.stderr
+              and "instrument --register" in r.stderr)
+        r = gl(proj, "claim", "--assert", "the fix cut underruns", "--metric", "underruns")
+        check("a claim backed by an admitted instrument's reading is accepted",
+              r.returncode == 0 and "Δ 250" in r.stdout)
+        # 250 → 143 is the #13 incident's 43% reduction: real, correctly computed, on a counter that
+        # had decoupled from the harm in exactly the regime the fix created. The tool does that
+        # arithmetic; the caller is never asked for a ratio.
+        gl(proj, "measure", "--instrument", "underruns", "--before", "300", "--after", "443")
+        r = gl(proj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns")
+        check("once the metric MOVES, the claim is refused until the connection is re-checked (#13)",
+              r.returncode != 0 and "--recheck" in r.stderr and "42.8%" in r.stderr)
+        check("the re-check refusal names the harm the proxy stands for, not just the number (#13)",
+              HARM in r.stderr)
+        r = gl(proj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns",
+               "--recheck", "listened to 20 clips: no dropout reached the ear, the count still tracks")
+        check("a re-checked connection admits the moved metric", r.returncode == 0)
+        r = gl(proj, "status")
+        check("the declared harm survives into status, so it can be re-checked later (#13)",
+              HARM in r.stdout and CONN in r.stdout)
+        check("status states what these controls do NOT catch — the RIGHT metric (INV6)",
+              "RIGHT metric" in r.stdout)
+        check("instrument --list shows the admitted instrument",
+              "underruns" in gl(proj, "instrument", "--list").stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("the log carries both endpoints and the delta, so the reading is reproducible later",
+              '"kind": "measure"' in log and '"before": 40' in log and '"after": 290' in log
+              and '"delta": 250' in log)
+        check("the declared harm and both controls are permanent in the log (#11 #13)",
+              '"kind": "instrument"' in log and HARM in log and '"null"' in log
+              and '"positive"' in log)
+        check("the re-check is on the record, attached to the reading that moved (#13)",
+              '"recheck"' in log and "no dropout reached the ear" in log)
+        # instruments are per-session state like pins: a control is a MEASUREMENT taken in one run's
+        # regime, and a control inherited by a later run is exactly the "assumed to have survived"
+        # failure #13 describes. (The reading itself is in the shared log, where it is reproducible.)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "underruns", sid="sess-instr-b")
+        check("an instrument admitted in one session is not evidence in another",
+              r.returncode != 0 and "never admitted" in r.stderr)
+        r = gl(proj, "instrument", "--release", "underruns")
+        check("refuses to retire an instrument without --notes (retiring is a stated decision)",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
+        r = gl(proj, "instrument", "--release", "underruns", "--notes", "corrected instrument lands")
+        check("retires an instrument by name", r.returncode == 0 and "RETIRED" in r.stdout)
+        r = gl(proj, "claim", "--assert", "z", "--metric", "underruns")
+        check("a retired instrument no longer backs a claim",
+              r.returncode != 0 and "never admitted" in r.stderr)
+        # REGRESSION GUARD, and it passes in BOTH states by construction: --metric ADDS a kind of
+        # evidence, it must not touch the document path that INV2 rests on.
+        check("the document path is unchanged — --read alone still sources a claim",
+              gl(proj, "claim", "--assert", "y", "--read", real).returncode == 0)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

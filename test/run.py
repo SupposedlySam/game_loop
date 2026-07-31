@@ -309,6 +309,35 @@ def main():
         with open(vy, "w") as f:
             f.write(vy_src)
 
+        # #16: a redirect token must stop at a shell metacharacter. A redirect inside a command
+        # substitution used to swallow the closing paren — `2>/dev/null)` is not the sink
+        # `/dev/null`, so the discard device denied as if it were an out-of-repo file, and the
+        # denial for a genuinely suspicious path named the wrong target. Both directions matter:
+        # the sinks must pass, and a real out-of-repo write in the same position must still deny,
+        # with a CLEAN path in the message.
+        print("write guard (redirect targets stop at shell metacharacters):")
+        check("allows the live case: 2>/dev/null inside a $(...) loop header",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'for source in $(find /a /b -type f -name "*.rs" 2>/dev/null); '
+                             'do echo $source; done'}})))
+        check("allows >/dev/stdout inside a command substitution",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo $(cat file.txt >/dev/stdout)"}})))
+        check("allows 2>/dev/tty inside a command substitution",
+              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo $(grep -c x file.txt 2>/dev/tty)"}})))
+        r = guard(proj, {"tool_name": "Bash", "tool_input": {
+            "command": "echo $(cat file.txt > ~/gl_paren_outside.txt)"}})
+        check("still denies a real out-of-repo redirect inside a command substitution",
+              denied(r) and "gl_paren_outside.txt" in r.stdout)
+        check("the denied target carries no trailing paren (the offender is a usable path)",
+              "gl_paren_outside.txt)" not in r.stdout)
+        # #5 must not regress: a QUOTED target after a real redirect is still a genuine write,
+        # command substitution or not.
+        check("still denies a QUOTED out-of-repo redirect target inside a command substitution",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'echo $(cat file.txt > "$HOME/gl_qparen_outside.txt")'}})))
+
         # #6: stale sessions are pruned on `status` — old + no active mandate goes, an active mandate
         # stays regardless of age, and fresh dirs stay.
         print("session GC:")

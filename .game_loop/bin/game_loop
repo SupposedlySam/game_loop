@@ -40,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -613,6 +614,89 @@ def cmd_notify(s, a):
                     "back.", *(["  " + tip] if tip else []))
 
 
+# ── unpushed work ────────────────────────────────────────────────────────────────────────────────
+#
+# Agents commit constantly and push rarely. Committed-but-unpushed work is invisible to everyone
+# except the agent that wrote it — and the agent reports it as DONE, because locally it is. That cost
+# a real session: 14 commits sat on main for hours while the Crawler told the human a collaborator's
+# deploy was missing a schema change, framed as a fact about the collaborator's build. He could not
+# pull what had never been pushed. Every symptom pointed outward; none pointed at the branch.
+#
+# So the handback — checkpoint and mandate --clear, the exact moments the human forms a picture of
+# what exists — says how far ahead of its upstream HEAD is. A WARNING, never a block: there are good
+# reasons to hold commits back, and a gate that blocks them would be wrong on purpose.
+#
+# WHAT THIS MISSES, stated plainly: it compares HEAD to ITS upstream and nothing else. Uncommitted
+# work, stashes, and commits sitting on other local branches are all invisible to it. A branch with
+# no upstream is silent by design — nobody was ever promised that branch. And "pushed" is not
+# "merged": a pushed branch nobody has merged is still absent from anyone else's build. Silence here
+# means only that this one branch's upstream is current.
+
+GIT_TIMEOUT = 3   # a courtesy check at turn-end must never stall the handback
+
+
+def _git(*args):
+    """git stdout (stripped), or None on any failure. Never raises: no git, no repo, no upstream, a
+    hung index lock — every one of them degrades to silence, because this is a courtesy line."""
+    try:
+        r = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True,
+                           timeout=GIT_TIMEOUT)
+    except Exception:  # noqa: BLE001 — missing binary, timeout, decode error: all mean "stay quiet"
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def ahead_of_upstream():
+    """(commits ahead, branch, upstream) — or (0, None, None) when there is nothing honest to say.
+
+    Nothing to say covers: no git, not a repo, an unborn or detached HEAD, and the important one —
+    a branch with NO upstream. An untracked branch was never promised to anyone, so warning about it
+    would be noise, and a guard that cries wolf is a guard that gets tuned out.
+    """
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    if not branch or branch == "HEAD":
+        return 0, None, None
+    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    if not upstream:
+        return 0, None, None
+    try:
+        n = int(_git("rev-list", "--count", "@{upstream}..HEAD") or 0)
+    except ValueError:
+        return 0, None, None
+    return (n, branch, upstream) if n > 0 else (0, None, None)
+
+
+# Handback notes that make unpushed work someone else's problem: work called finished, a deploy, a
+# handoff, another person. Deliberately generous — over-firing costs one louder paragraph, while
+# under-firing costs the afternoon this whole check exists to prevent.
+_HANDBACK_ESCALATORS = re.compile(
+    r"\b(done|finish\w*|complete\w*|ship(?:ped|ping)?|land(?:ed|ing)|merg\w*|deploy\w*|releas\w*|"
+    r"hand(?:ed|ing)?[- ]?(?:off|over|back)|handoff|handover|"
+    r"teammate|collaborator|colleague|reviewer|review|team|CI|pull request|PR)\b", re.I)
+
+
+def unpushed_warning(notes=None):
+    """The handback line for work that exists only on this machine, or None. Logs when it fires, so
+    how often commits sit local is a fact in log.jsonl rather than a hunch (INV4 wants the entry
+    before anyone argues this should become a block)."""
+    n, branch, upstream = ahead_of_upstream()
+    if not n:
+        return None
+    loud = bool(notes and _HANDBACK_ESCALATORS.search(notes))
+    logline({"kind": "unpushed", "ahead": n, "branch": branch, "upstream": upstream, "loud": loud})
+    plural = "s" if n != 1 else ""
+    lines = [f"⚠ UNPUSHED — {n} commit{plural} on {branch} exist{'' if n != 1 else 's'} only on this "
+             f"machine (ahead of {upstream})."]
+    if loud:
+        lines.append("  ‼ Your notes read like a handback of finished work. Nobody — a teammate, CI, "
+                     "a review,\n    a deploy — can pull what was never pushed, and every symptom "
+                     "will point somewhere else.")
+    lines.append("  Not a block; holding commits back is sometimes right. But if you are not doing "
+                 "that on\n  purpose: `git push`. If you are, say so in the handback, in as many "
+                 "words.")
+    return "\n".join(lines)
+
+
 # ── verbs ────────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_claim(s, a):
@@ -669,6 +753,9 @@ def cmd_mandate(s, a):
         out("✓ MANDATE released — the Stop gate is inert again.",
             f"  was  : {m.get('text')}",
             f"  notes: {a.notes or '(none)'}")
+        # The work is being declared done — say whether anyone but this machine can see it.
+        if (w := unpushed_warning(a.notes)):
+            out(w)
         flair_out(s, "mandate_clear")
         return
     if not a.set:
@@ -711,6 +798,10 @@ def cmd_checkpoint(s, a):
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
         "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
+    # The handback is where the human forms their picture of what exists; "14 commits that only exist
+    # here" belongs in that picture.
+    if (w := unpushed_warning(a.notes)):
+        out(w)
     flair_out(s, "checkpoint")
 
 

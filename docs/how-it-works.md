@@ -132,6 +132,18 @@ any missing signal (no snapshot, a window that already reset) because a gate tha
 evidence blocks its own fix — and it says what it is not: a nudge that the handoff exist, not a
 security boundary (the write guard still owns what may be mutated).
 
+### The unpushed check — `checkpoint` / `mandate --clear`
+
+Agents commit constantly and push rarely, and committed-but-unpushed work is invisible to everyone
+except the agent that wrote it — which reports it as done, because locally it *is* done. So at the two
+handbacks (`checkpoint`, `mandate --clear`) — the moments the human forms their picture of what
+exists — game_loop says how far ahead of its upstream `HEAD` is, and by how many commits. It escalates
+the wording when the notes describe finished work, a deploy, another person, or a handoff: those are
+the cases where unpushed silently becomes someone else's confusing afternoon. It is a **warning, never
+a block** (holding commits back is sometimes right), and a branch with **no upstream stays quiet** —
+nobody was ever promised that branch. What it misses is stated in the code: uncommitted work, stashes,
+other local branches, and the fact that "pushed" is not "merged".
+
 ### The arm → gate → consume primitive
 
 The shape shared by every expensive action. You **arm** one spend, a hook **gates** on it, and using

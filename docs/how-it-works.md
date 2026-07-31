@@ -286,6 +286,17 @@ newer than the last successful run of its checks — the gate is "is the evidenc
 change", not "did you remember". The write guard calls it before `git commit`. Ships empty (a no-op)
 until you add rules.
 
+A record belongs to a **working tree**, so the gate follows the tree the commit lands in. Run several
+agents in parallel `git worktree`s and each is checked against its own `.game_loop/verified.json` and
+its own files — never against the checkout the hook happens to live in. That is not a convenience:
+checking a *different* tree's record answers a question about files the commit does not contain, and
+reports confidence either way. A commit landing in a tree that carries no `.game_loop/` is refused
+with that reason rather than borrowing somebody else's record.
+
+Session state is scoped the other way on purpose. An authorization, and the set of files this session
+wrote, live with the **session** — one session is one session however many trees it works in, and a
+human's `game_loop authorize` must still be spendable in the worktree where the write happens.
+
 ### pins — `game_loop pin`
 
 Environment state the build depends on is invisible to the harness, so a run cannot tell a stale

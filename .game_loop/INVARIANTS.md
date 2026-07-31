@@ -1,8 +1,9 @@
 # INVARIANTS
 
 The non-negotiables `game_loop stepback` re-injects. This is the template that ships with game_loop —
-**edit it to your project's north star.** Keep the six general ones; add your own as observed failures
-demand (INV5). Each should earn its place from a real mistake, not from wanting a tidy list.
+**edit it to your project's north star.** Keep the general ones (INV1–INV6); add your own as observed
+failures demand. Each should earn its place from a real mistake, not from wanting a tidy list — INV7 is
+the worked example: it exists because one session shipped three false findings off one event.
 
 ---
 
@@ -46,6 +47,19 @@ sentence: `game_loop harden --learning ".." --artifact <real path> --mechanism "
 highest rung that applies — **1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMATED · 5 VISIBLE · 6
 doc/memory** (last resort). And a guard that overstates its reach buys false confidence: say what it
 does *not* catch, in the guard itself. Silence from a guard is not evidence of safety.
+
+## INV7 — A sum is not a distribution
+
+An aggregate hides its own shape, and a run optimizing against one will read structure into a single
+outlier. Before stating an effect derived from a **total, a mean, or a percentage**, show the per-event
+values — and when one event carries most of the total, explain it or exclude it *with the reason on the
+record*, because an exclusion nobody wrote down gets rediscovered.
+
+The failure: 1066.7 units of damage against 0.0 read as a total elimination and was written up as a
+finding. One event of thirty carried 96% of it, and it was an artifact already identified and dismissed
+earlier in the same session. Corrected: 1.5 per event against 0 — no effect at that sample size. Nothing
+about the totals revealed this; only printing the per-event values did, and the same event produced
+three findings before anyone did. Enforced by `claim --metric --aggregate`, not by this paragraph.
 
 ---
 

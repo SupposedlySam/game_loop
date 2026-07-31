@@ -1248,6 +1248,164 @@ def main():
             check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)
         finally:
             shutil.rmtree(br, ignore_errors=True)
+
+        # #12: A SUM IS NOT A DISTRIBUTION. An aggregate hides its own shape, and a run optimizing
+        # against one reads structure into a single outlier — this happened three times in ONE
+        # session off the same event before anyone caught it. The fixture below IS that incident:
+        # 1066.7 units of damage against 0.0 looked like a total elimination, and one event of
+        # thirty carried 96% of it. Its own session, so nothing above leaks into it.
+        # THE ARITHMETIC IS THE POINT. The endpoints are 100 → 1166.7 and the events are pasted
+        # verbatim, so the total (1066.7), the dominating share (96.0%) and the per-event remainder
+        # (1.5) appear NOWHERE in any argument — the same trick as `Δ 250` above. If the tool did
+        # not compute them, these checks cannot pass. Every rejection asserts game_loop's own message
+        # text, never a bare non-zero exit: argparse's "unrecognized arguments" also exits non-zero.
+        print("distributions (a sum is not a distribution, #12):")
+        SD = "sess-dist"
+        DHARM = "damage the player actually takes"
+        DCONN = "each unit is a hitpoint off the health bar the player is watching"
+        EVENTS = ",".join(["1024.0"] + ["0"] * 28 + ["42.7"])   # the issue's thirty events
+        REASON = "first event after a known state transition; artifact already ruled out this session"
+        gl(proj, "instrument", "--register", "damage", "--measures", DHARM, "--connects", DCONN,
+           "--null", "0,0", "--positive", "0,12", sid=SD)
+        r = gl(proj, "measure", "--instrument", "damage", "--before", "0", "--after", "5",
+               "--events", "5", sid=SD)
+        check("refuses a one-value distribution — that is the total wearing a different hat",
+              r.returncode != 0 and "at least two of them" in r.stderr)
+        r = gl(proj, "measure", "--instrument", "damage", "--before", "0", "--after", "5",
+               "--events", "1, two, 3", sid=SD)
+        check("garbage in a distribution is a REFUSAL naming the bad event, never a traceback",
+              r.returncode != 0 and "event 2 of --events is not a finite number" in r.stderr
+              and "Traceback" not in r.stderr)
+        r = gl(proj, "measure", "--instrument", "damage", "--before", "0", "--after", "5",
+               "--events", "nan,inf,1", sid=SD)
+        check("nan and inf are refused too — they parse as floats and poison every comparison",
+              r.returncode != 0 and "not a finite number" in r.stderr)
+        # A reading with no --events at all: the shape is optional at `measure`, because measure
+        # RECORDS what was read. The refusal belongs to `claim`, where an effect gets stated.
+        # DECLARED: this one passes in BOTH states by construction — it is a regression guard on the
+        # unchanged path, not evidence of the new gate, and it is here because the fixture needs a
+        # shapeless reading anyway.
+        r = gl(proj, "measure", "--instrument", "damage", "--before", "100", "--after", "1166.7",
+               sid=SD)
+        check("a reading with no distribution is still recorded — measure records, claim refuses",
+              r.returncode == 0 and "Δ 1066.7" in r.stdout and "shape" not in r.stdout)
+        r = gl(proj, "claim", "--assert", "arm B eliminated the damage", "--metric", "damage",
+               "--aggregate", "sum", sid=SD)
+        check("a claim derived from a SUM with no distribution supplied is refused (#12)",
+              r.returncode != 0 and "no per-event breakdown" in r.stderr
+              and "A SUM IS NOT A DISTRIBUTION" in r.stderr)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "damage", "--aggregate", "median",
+               sid=SD)
+        check("--aggregate takes sum · mean · pct and names the set when it does not",
+              r.returncode != 0 and "--aggregate must be one of: sum · mean · pct" in r.stderr)
+        # Now the incident's own distribution, attached to the reading it decomposes.
+        r = gl(proj, "measure", "--instrument", "damage", "--before", "100", "--after", "1166.7",
+               "--events", EVENTS, "--notes", "thirty events, arm A", sid=SD)
+        check("measure PRINTS the shape and the share it computed — the step nobody took (#12)",
+              r.returncode == 0 and "event 1 carries 96.0% of 1066.7" in r.stdout
+              and "ONE EVENT CARRIES 96.0% OF THIS TOTAL" in r.stdout)
+        check("measure states the corrected reading the incident never printed: 1.5 per event",
+              "42.7 across 29 events (1.5 per event, 1 non-zero)" in r.stdout)
+        r = gl(proj, "claim", "--assert", "arm B eliminated the damage entirely", "--metric",
+               "damage", "--aggregate", "sum", sid=SD)
+        check("one event over half the total REFUSES the claim (#12)",
+              r.returncode != 0 and "ONE EVENT CARRIES THE AGGREGATE" in r.stderr)
+        check("the refusal NAMES the dominating event and the share the tool computed (#12)",
+              "event 1 read 1024 — 96.0% of the total" in r.stderr
+              and "you were never asked for that share" in r.stderr)
+        check("the refusal states what the effect looks like WITHOUT that event",
+              "42.7 across 29 events — 1.5 per event, 1 non-zero" in r.stderr)
+        check("the dominance refusal fires with no --aggregate too: a supplied shape is checked",
+              gl(proj, "claim", "--assert", "arm B was clean", "--metric", "damage",
+                 sid=SD).returncode != 0)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "damage", "--exclude", "1", sid=SD)
+        check("excluding the outlier without a stated reason is refused (#12)",
+              r.returncode != 0 and "--exclude 1 needs --because" in r.stderr
+              and "An unrecorded exclusion is rediscovered" in r.stderr)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "damage", "--exclude", "7",
+               "--because", REASON, sid=SD)
+        check("excluding a DIFFERENT event still refuses, and says which one you dropped",
+              r.returncode != 0 and "you dropped: event 7" in r.stderr
+              and "event 1 read 1024" in r.stderr)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "damage", "--exclude", "31",
+               "--because", REASON, sid=SD)
+        check("an out-of-range --exclude is refused against the reading's own event count",
+              r.returncode != 0 and "not one of this reading's 30 events" in r.stderr)
+        r = gl(proj, "claim", "--assert", "x", "--metric", "damage", "--exclude", "one", sid=SD)
+        check("a non-numeric --exclude refuses rather than throwing",
+              r.returncode != 0 and "takes the event NUMBER" in r.stderr
+              and "Traceback" not in r.stderr)
+        r = gl(proj, "claim", "--assert", "no damage effect at this sample size", "--metric",
+               "damage", "--aggregate", "sum", "--exclude", "1", "--because", REASON, sid=SD)
+        check("the SAME distribution with a stated exclusion reason is accepted (#12)",
+              r.returncode == 0 and "CLAIM sourced" in r.stdout
+              and f"excluded  : event 1 (1024) — {REASON}" in r.stdout)
+        check("the accepted claim prints the shape that remains — 1.5 per event, not 1066.7",
+              "without it: 42.7 across 29 events — 1.5 per event, 1 non-zero" in r.stdout)
+        check("the shape check states what it does NOT catch (INV6)",
+              "whether what remains is an effect at all" in r.stdout)
+        # A flat distribution owes nothing: no refusal, no exclusion, no ceremony — and the positive
+        # assertion (the computed 27.5%) is what keeps this from passing against a check that never ran.
+        gl(proj, "instrument", "--register", "stalls", "--measures", "freezes the player feels",
+           "--connects", "a stall is a frame the player waits on", "--null", "0,0",
+           "--positive", "0,4", sid=SD)
+        gl(proj, "measure", "--instrument", "stalls", "--before", "0", "--after", "40",
+           "--events", "9,10,11,10", sid=SD)
+        r = gl(proj, "claim", "--assert", "the fix removed the stalls", "--metric", "stalls",
+               "--aggregate", "sum", sid=SD)
+        check("an evenly spread distribution passes untouched, with the top share still computed",
+              r.returncode == 0 and "event 3 carries 27.5%" in r.stdout
+              and "ONE EVENT CARRIES" not in r.stdout)
+        r = gl(proj, "status", sid=SD)
+        check("the shape and the recorded exclusion survive into status, past compaction (#12)",
+              "event 1 carries 96.0%" in r.stdout and f"excluded  : event 1 (1024) — {REASON}"
+              in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            dlog = f.read()
+        check("the per-event values and the computed share are permanent in the log",
+              '"dominance"' in dlog and '"share_pct": 96.0' in dlog and '"top_event": 1' in dlog)
+        check("the exclusion AND its reason are on the record — that is what stops a fourth "
+              "rediscovery (#12)",
+              '"excluded": {"event": 1' in dlog and REASON in dlog)
+        # An all-zero distribution has no share to dominate, and dividing into one is how a gate
+        # produces a traceback instead of a refusal.
+        gl(proj, "instrument", "--register", "crashes", "--measures", "runs the player loses",
+           "--connects", "a crash ends the run", "--null", "0,0", "--positive", "0,3", sid=SD)
+        gl(proj, "measure", "--instrument", "crashes", "--before", "0", "--after", "0",
+           "--events", "0,0,0,0", sid=SD)
+        r = gl(proj, "claim", "--assert", "four clean runs", "--metric", "crashes",
+               "--aggregate", "sum", sid=SD)
+        check("an all-zero distribution divides into nothing and is admitted, not crashed",
+              r.returncode == 0 and "4 events, every one of them zero" in r.stdout)
+        # Wording only, exactly like the scope nudge: loud, never blocking, and it says so itself.
+        # Both checks run against a SHAPELESS reading — a reading that already carries its events
+        # suppresses the nudge on its own, and running the negative case against one of those would
+        # be a check that passes for a reason unrelated to the wording it claims to be testing.
+        # DECLARED: the negative case cannot go red against pre-change code — a nudge that does not
+        # exist yet is trivially absent. It earns its place in the GREEN state, where it is the only
+        # thing standing between the tell and an ordinary observation, and it asserts the claim was
+        # accepted rather than merely silent.
+        gl(proj, "instrument", "--register", "latency", "--measures", "waits the player notices",
+           "--connects", "a long frame is a visible hitch", "--null", "0,0", "--positive", "0,8",
+           sid=SD)
+        gl(proj, "measure", "--instrument", "latency", "--before", "10", "--after", "40", sid=SD)
+        r = gl(proj, "claim", "--assert", "latency fell 30% in total", "--metric", "latency", sid=SD)
+        check("an aggregate-shaped sentence with no shape behind it is made LOUD, never refused",
+              r.returncode == 0 and 'reads aggregate-shaped ("30%")' in r.stdout
+              and "Wording only" in r.stdout)
+        r = gl(proj, "claim", "--assert", "the counter read 40 on this build", "--metric",
+               "latency", sid=SD)
+        check("a plain observation claim gets no aggregate nudge — the tell stays quiet",
+              r.returncode == 0 and "CLAIM sourced" in r.stdout
+              and "reads aggregate-shaped" not in r.stdout)
+        # REGRESSION GUARDS, passing in BOTH states by construction: the shape check ADDS a rung to
+        # the metric path; it must not touch the document keystone INV2 rests on, or the reading
+        # shape #14 built.
+        check("the document path is untouched — --read alone still sources a claim",
+              gl(proj, "claim", "--assert", "y", "--read", real, sid=SD).returncode == 0)
+        r = gl(proj, "measure", "--instrument", "crashes", "--before", "3", sid=SD)
+        check("a single absolute reading is still refused — #14's gate is intact",
+              r.returncode != 0 and "TWO endpoints" in r.stderr)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

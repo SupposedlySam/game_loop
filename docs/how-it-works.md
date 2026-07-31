@@ -286,6 +286,30 @@ newer than the last successful run of its checks — the gate is "is the evidenc
 change", not "did you remember". The write guard calls it before `git commit`. Ships empty (a no-op)
 until you add rules.
 
+**What a map of listed paths cannot say.** It answers "is anything listed here stale?", never "is
+anything unverified?" — a path matching no glob owes nothing and passes `--check` in silence. That is
+how a whole new package gets built, hand-tested and committed with the gate reporting clean: the
+manifest enumerated the paths to check and the new package was not among them. A denylist defaults to
+*allow*; a list of checked paths defaults to *owes-nothing*; either way the rail goes quiet exactly
+where it is blind, and quiet reads as safe.
+
+So coverage is computed the other way round. Every changed path counts as **unchecked** until a rule
+claims it or the manifest excludes it out loud under the reserved `unchecked-ok:` key (whose entries
+are globs, not commands). `./.game_loop/bin/verify --coverage` prints the three sets, `game_loop
+status` re-prints the count and the paths every session, and the write guard names the staged
+unchecked set at `git commit`.
+
+**Default-deny for visibility, default-allow for blocking** — deliberately. The manifest ships empty,
+so "unlisted ⇒ refused" would refuse a fresh install's first commit with the fix, writing the rules,
+sitting behind the gate that is blocking it (INV5, and the regression this repo already fixed once).
+Making the gap loud closes the failure without buying that one back: you can still commit an
+unchecked file, but never while believing the gate looked at it. A project that wants the strict
+version opts in with a catch-all rule — `"*": ["<command>"]`.
+
+What coverage misses, stated in the report itself: whether a listed command is a real check or a
+tautology, whether an exclusion was honest, and anything at all about paths that have not changed —
+an untouched module nobody ever checked is invisible to it.
+
 ### pins — `game_loop pin`
 
 Environment state the build depends on is invisible to the harness, so a run cannot tell a stale

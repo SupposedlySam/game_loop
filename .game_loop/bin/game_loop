@@ -116,6 +116,12 @@ DEFAULT_CONFIG = {
     "update_api_base": "https://api.github.com",   # override for tests
 }
 
+# The irreversible verbs the write guard blocks with no path needed. A copy for reporting only —
+# bin/guard-writes-impl.sh owns the enforcing list, and a test asserts the two still agree, because
+# a status line that understates a rail's reach is worse than no status line.
+DEPLOY_VERB_DEFAULTS = ["npm publish", "yarn publish", "pnpm publish", "twine upload",
+                        "gh release create", "docker push"]
+
 DEFAULT_STATE = {
     "version": "1.0",
     "claim_count": 0,
@@ -3197,6 +3203,85 @@ def _short(p):
     return p if rel.startswith("..") else rel
 
 
+COVERAGE_SHOWN = 5
+
+
+def coverage_report(s):
+    """The COVERAGE block for `status` — what these rails are NOT looking at (issue #25).
+
+    Two rails failed the same way in one project: a write guard armed with a denylist of ~10 repo
+    names on a machine holding ~44, and an owed-checks manifest that only checked listed paths while
+    a whole new package was built and committed. Both looked comprehensive, because the cases a
+    denylist covers work perfectly — which is exactly what makes the omissions invisible.
+
+    A denylist defaults to ALLOW; an allowlist defaults to DENY. The write guard is already an
+    allowlist (bin/guard-writes-impl.sh), so it needs no fixing — but it still has one genuine
+    denylist inside it (configured deploy verbs), and the manifest is still a list of paths. Where a
+    denylist is unavoidable the gap has to be LOUD, because silence from a rail reads as safety and
+    is not. So this block states the reach of each rail every session, whether or not anything is
+    wrong, and names what none of them can see.
+    """
+    cfg = config()
+    cov, cov_err = None, None
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "verify"),
+                            "--coverage", "--porcelain"],
+                           cwd=REPO_ROOT, capture_output=True, text=True, timeout=30)
+        cov = json.loads(r.stdout) if r.returncode == 0 else None
+        cov_err = (r.stderr or "").strip().splitlines()[-1:] or None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        cov = None
+
+    lines = ["", "COVERAGE — what these rails are NOT checking (a rail goes quiet exactly where it "
+             "is blind):"]
+    if cov is None:
+        # UNKNOWN, said as UNKNOWN. Degrading to a clean-looking line here would recreate the very
+        # failure this block exists to report.
+        lines.append("  checks : UNREADABLE — `./.game_loop/bin/verify --coverage` did not answer"
+                     + (f" ({cov_err[0][:70]})" if cov_err else "")
+                     + ". Treat coverage as UNKNOWN, not clean.")
+    elif not cov.get("rules"):
+        lines.append(f"  checks : NO RULES in .game_loop/verify.yaml — nothing in this project is "
+                     f"checked at commit.")
+        lines.append(f"           {cov.get('scanned', 0)} changed path(s), "
+                     f"{len(cov.get('unchecked') or [])} of them owing nothing at all. That is the "
+                     "shipped")
+        lines.append("           default, and it is not the same thing as safe. Add a rule that "
+                     "FAILS when the thing breaks.")
+    else:
+        unchecked = cov.get("unchecked") or []
+        lines.append(f"  checks : {cov['rules']} rule(s) · {cov.get('scanned', 0)} changed path(s) "
+                     f"— checked {cov.get('checked', 0)} · excluded {cov.get('excluded', 0)} · "
+                     f"UNCHECKED {len(unchecked)}")
+        for f in unchecked[:COVERAGE_SHOWN]:
+            lines.append(f"             {f}")
+        if len(unchecked) > COVERAGE_SHOWN:
+            lines.append(f"             … {len(unchecked) - COVERAGE_SHOWN} more")
+        if unchecked:
+            lines.append('           → add a rule, or list it under "unchecked-ok" in '
+                         ".game_loop/verify.yaml")
+    lines.append("  writes : ALLOWLIST — only this repo, the temp dir, agent memory and "
+                 f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
+    lines.append("           written. Everything else is denied WITHOUT being named, so nothing "
+                 "goes unprotected for")
+    lines.append("           want of remembering it.")
+    extra = cfg.get("deploy_verbs") or []
+    shown = ", ".join(DEPLOY_VERB_DEFAULTS[:2]) + f", +{len(DEPLOY_VERB_DEFAULTS) - 2} built-in"
+    lines.append(f"  deploy : DENYLIST — {len(DEPLOY_VERB_DEFAULTS) + len(extra)} verb(s) blocked "
+                 f"({shown}"
+                 + (f", {len(extra)} from config.json" if extra else ", 0 from config.json") + ").")
+    lines.append("           A deploy verb nobody listed is NOT blocked — this is the one rail here "
+                 "that defaults to")
+    lines.append('           ALLOW. Add yours: config.json → "deploy_verbs".')
+    lines.append("  → NONE of this sees: a mutation made through an MCP tool, an interpreter "
+                 "one-liner, or a path")
+    lines.append("    built from a shell variable; nor whether a listed check is real or a "
+                 "tautology; nor any path")
+    lines.append("    that has not CHANGED — an untouched module nobody ever checked is invisible "
+                 "here.")
+    return lines
+
+
 def cmd_status(s, a):
     _prune_stale_sessions()
     out(render_banner(s))
@@ -3255,6 +3340,7 @@ def cmd_status(s, a):
     out(*effectors_report(s))   # which verbs are proved to actually act — findings lean only on these
     out(*instruments_report(s))   # the declared harm must outlive the context that declared it
     out(*fixes_report(s))   # which fixes were exercised through their OWN output — not their repro
+    out(*coverage_report(s))   # what the rails are NOT looking at — silence from a rail is not safety
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.

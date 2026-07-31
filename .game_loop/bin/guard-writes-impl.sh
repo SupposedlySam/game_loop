@@ -442,6 +442,54 @@ except OSError:
 sys.stdout.write("\n".join(lines))
 PY
 )
+
+      # The gate above asks whether the LISTED checks are stale. It cannot ask about a path nobody
+      # listed: verify.yaml maps globs to commands, so a file matching no glob owes nothing and the
+      # gate passes it in silence. That is issue #25 — a whole package built, hand-tested and
+      # committed while `verify --check` reported clean, because green meant "nothing LISTED here is
+      # stale", not "nothing is unverified". So name the staged paths no rule claims.
+      # STATED, NEVER BLOCKED, and for the same reason the manifest ships empty: on a fresh install
+      # every path is unchecked, and refusing there would block the first commit with the fix —
+      # writing the rules — sitting behind the gate (INV5).
+      cov_json=$("$GAMELOOP_DIR/bin/verify" --coverage --staged --porcelain 2>/dev/null || true)
+      cov_note=$(COV="$cov_json" python3 <<'PY'
+import json, os
+try:
+    cov = json.loads(os.environ.get("COV") or "")
+except ValueError:
+    raise SystemExit(0)              # no answer is not an accusation — degrade to silence
+unchecked = cov.get("unchecked") or []
+if not unchecked:
+    raise SystemExit(0)
+n = len(unchecked)
+if not cov.get("rules"):
+    lines = ["NOTHING IN THIS COMMIT IS CHECKED — .game_loop/verify.yaml has no rules, so the owed-"
+             "checks",
+             "gate passed by having nothing to say about %d staged file%s." % (n, "" if n == 1 else "s")]
+else:
+    lines = ["THIS COMMIT CARRIES %d STAGED FILE%s NO RULE CHECKS"
+             % (n, "" if n == 1 else "S")]
+    lines += ["    " + p for p in unchecked[:10]]
+    if n > 10:
+        lines.append("    ... %d more" % (n - 10))
+lines += [
+    "",
+    "A green verify means 'nothing LISTED is stale' — never 'nothing is unverified'. A path no glob",
+    "matches owes nothing and passes in silence, which is how a whole new package gets built, tested",
+    "by hand and committed with the gate reporting clean.",
+    "Add a rule in .game_loop/verify.yaml that FAILS when the thing breaks, or say out loud that it",
+    "needs none:",
+    '    "unchecked-ok":',
+    '      - "<glob>"',
+    "",
+    "STATED, NEVER BLOCKED — the manifest ships empty, so refusing here would block a fresh install's",
+    "first commit. It reads the INDEX, so `git commit -a`, a pathspec commit and --no-verify pass it",
+    "unexamined, and it says nothing about paths that did not change. Silence here is not evidence",
+    "that a commit was checked.",
+]
+print("\n".join(lines))
+PY
+)
     fi
 
     # 1. Configured deploy/publish verbs — denied anywhere, no path needed.
@@ -621,10 +669,17 @@ If the human has explicitly authorized this specific path, record their words an
 One authorization, one mutation, logged permanently. That is the only escape hatch, by design."
     fi
 
-    # LAST, deliberately: the blast-radius warning is the only non-blocking output here, so it is
-    # emitted after every check that can deny. A denial means the command never ran, and a warning
-    # about a commit that did not happen is noise.
-    [ -n "${blast_note:-}" ] && note "$blast_note"
+    # LAST, deliberately: these warnings are the only non-blocking output here, so they are emitted
+    # after every check that can deny. A denial means the command never ran, and a warning about a
+    # commit that did not happen is noise. `note` exits, so the two are joined into one body — a
+    # commit can be both widened past the work AND carrying paths nothing checks.
+    commit_note="${blast_note:-}"
+    if [ -n "${cov_note:-}" ]; then
+      [ -n "$commit_note" ] && commit_note="$commit_note
+"
+      commit_note="$commit_note$cov_note"
+    fi
+    [ -n "$commit_note" ] && note "$commit_note"
     ;;
 esac
 

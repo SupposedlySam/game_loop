@@ -10,6 +10,24 @@
 # A `<glob>/**` entry matches anything under that directory.
 # The commands must FAIL when the change is broken. A command that cannot fail is not a check.
 #
+# COVERAGE — a map of listed paths defaults to OWES-NOTHING, and a path nobody listed passes
+# `verify --check` in perfect silence (issue #25: a whole package built, hand-tested and committed
+# while the gate reported clean). So coverage is computed the other way round: every changed path is
+# UNCHECKED until a rule claims it or this file excludes it out loud. Ask at any time:
+#
+#     ./.game_loop/bin/verify --coverage        (and `game_loop status` re-prints it every session)
+#
+# The one reserved key. Its entries are GLOBS, not commands — paths that genuinely need no check:
+#
+# "unchecked-ok":
+#   - "docs/**"
+#
+# Excluding is a stated decision that stays visible here and is counted in every report. Leaving
+# something UNCHECKED is fine too — it just says so out loud on every commit that touches it.
+# Being unchecked never BLOCKS a commit: this file ships empty, so "unlisted ⇒ refused" would
+# refuse a fresh install's first commit with the fix sitting behind the gate (INV5). A project that
+# wants the hard version opts in with a catch-all rule:  "*": ["<command>"].
+#
 # What INSTALLS into your project ships EMPTY (see templates/verify.yaml): game_loop does not know your
 # project, so `verify` and the commit gate are no-ops until you add rules. Examples (delete and replace):
 #
@@ -40,3 +58,24 @@
   - "python3 test/run.py"
 ".game_loop/bin/notify.py":
   - "python3 test/run.py"
+# The suite IS the guarantee, and the manifest decides what a change owes: both are gates, so both
+# owe the suite. Named because `verify --coverage` reported them unchecked — the report working.
+"test/run.py":
+  - "python3 test/run.py"
+".game_loop/verify.yaml":
+  - "python3 test/run.py"
+
+# Deliberately unchecked, and it stays visible here. Prose, licence text, editor config and the
+# payload copied verbatim into other projects: no command exists that fails when they are "broken".
+# NOT listed: install.sh — nothing checks it, and that gap should keep saying so out loud.
+"unchecked-ok":
+  - "*.md"
+  - "docs/**"
+  - "templates/**"
+  - "llms.txt"
+  - "LICENSE"
+  - ".gitignore"
+  - ".claude/**"
+  - ".game_loop/*.md"
+  - ".game_loop/config.json"
+  - ".game_loop/notify.json"

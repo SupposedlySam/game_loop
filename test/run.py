@@ -659,6 +659,60 @@ def main():
               "update available" not in fresh_status())
         ghsrv.shutdown()
         open(cf, "w").write(cf_orig)
+
+        # #20: committed-but-unpushed work is invisible to everyone except the agent that wrote it,
+        # and the agent reports it as done — locally it IS done. checkpoint and mandate --clear say
+        # how far ahead of its upstream HEAD is. A warning, never a block; silent with no upstream.
+        # Needs a real repo with a real remote, so this runs in its own sandbox.
+        print("unpushed warning:")
+        up = make_sandbox()
+        remote = tempfile.mkdtemp(prefix="gameloop-remote-")
+        try:
+            def ug(*args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       *args], cwd=up, capture_output=True, text=True)
+
+            def ucommit(name):
+                with open(os.path.join(up, name), "w") as f:
+                    f.write(name)
+                ug("add", "-A")
+                ug("commit", "-q", "-m", name)
+
+            ug("init", "-q")
+            ucommit("a.txt")
+            subprocess.run(["git", "init", "--bare", "-q", remote], capture_output=True)
+            ug("remote", "add", "origin", remote)
+            ug("push", "-q", "-u", "origin", "HEAD")
+            r = gl(up, "checkpoint", "--notes", "still on the parser")
+            check("up to date with upstream → checkpoint stays quiet",
+                  r.returncode == 0 and "UNPUSHED" not in r.stdout)
+            for f in ("b.txt", "c.txt", "d.txt"):
+                ucommit(f)
+            r = gl(up, "checkpoint", "--notes", "still on the parser")
+            check("ahead of upstream → checkpoint warns, and says by how much",
+                  r.returncode == 0 and "UNPUSHED" in r.stdout and "3 commits" in r.stdout)
+            check("the unpushed warning never blocks the checkpoint",
+                  "✓ CHECKPOINT" in r.stdout)
+            gl(up, "mandate", "--set", "land the parser")
+            r = gl(up, "mandate", "--clear", "--notes", "parser landed")
+            check("mandate --clear warns about unpushed work too",
+                  r.returncode == 0 and "UNPUSHED" in r.stdout and "3 commits" in r.stdout)
+            plain = gl(up, "checkpoint", "--notes", "mid-way through the parser").stdout
+            loud = gl(up, "checkpoint", "--notes", "all done — deploying for the team").stdout
+            check("ordinary notes get the plain wording",
+                  "UNPUSHED" in plain and "never pushed" not in plain)
+            check("handoff-flavoured notes escalate the wording",
+                  "UNPUSHED" in loud and "never pushed" in loud)
+            # a branch nobody tracks was never promised to anyone: the honest exception
+            ug("checkout", "-q", "-b", "side-quest")
+            ucommit("e.txt")
+            r = gl(up, "checkpoint", "--notes", "all done — deploying for the team")
+            check("a branch with NO upstream stays quiet",
+                  r.returncode == 0 and "UNPUSHED" not in r.stdout)
+        finally:
+            shutil.rmtree(up, ignore_errors=True)
+            shutil.rmtree(remote, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

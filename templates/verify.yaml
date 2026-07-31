@@ -19,3 +19,26 @@
 #
 # "schema/*.sql":
 #   - "./scripts/apply-migrations.sh --dry-run"
+#
+# COVERAGE — a map of listed paths defaults to OWES-NOTHING, so a path nobody listed passes
+# `verify --check` in perfect silence. That is how a whole new package gets built, hand-tested and
+# committed with the gate reporting clean: green meant "nothing LISTED here is stale", never
+# "nothing is unverified". So coverage is computed the other way round — every changed path counts
+# as UNCHECKED until a rule claims it or you exclude it here. Ask at any time:
+#
+#     ./.game_loop/bin/verify --coverage
+#
+# `game_loop status` re-prints the same set every session, and the write guard names it at
+# `git commit`. While this file is empty that report says so plainly: nothing is checked.
+#
+# The one reserved key. Its entries are GLOBS, not commands — paths that genuinely need no check:
+#
+# "unchecked-ok":
+#   - "docs/**"
+#   - "*.md"
+#
+# Excluding is a stated decision that stays visible in this file and is counted in every report.
+# Leaving something UNCHECKED is fine too — it just says so out loud on every commit that touches
+# it. Being unchecked NEVER blocks: this file ships empty, so "unlisted ⇒ refused" would refuse
+# your first commit with the fix sitting behind the gate. Want the strict version? Opt in with a
+# catch-all rule:  "*": ["<your test command>"].

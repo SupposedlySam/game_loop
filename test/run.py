@@ -1248,6 +1248,180 @@ def main():
             check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)
         finally:
             shutil.rmtree(br, ignore_errors=True)
+
+        # #25: a manifest of listed paths defaults to OWES-NOTHING, so a file matching no glob owes
+        # nothing and passes `verify --check` in silence — a whole package built, hand-tested and
+        # committed while the gate reported clean. Green meant "nothing LISTED here is stale", never
+        # "nothing is unverified". Coverage is therefore computed the other way round: every changed
+        # path is UNCHECKED until a rule claims it or the manifest excludes it out loud.
+        # DEFAULT-DENY FOR VISIBILITY, DEFAULT-ALLOW FOR BLOCKING: the manifest ships EMPTY, so
+        # "unlisted ⇒ refused" would refuse a fresh install's first commit with the fix sitting
+        # behind the gate (INV5). Both halves are asserted below.
+        import re as _re
+        import time as _time
+        print("coverage — what the checks manifest is NOT looking at (#25):")
+        cv = make_sandbox()
+        try:
+            RULES = ('"src/**":\n  - "true"\n'
+                     '"unchecked-ok":\n  - ".game_loop/**"\n  - "docs/**"\n')
+
+            def cvwrite(rel, body="x\n"):
+                p = os.path.join(cv, rel)
+                if os.path.dirname(p):
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(body)
+
+            def cvyaml(text):
+                with open(os.path.join(cv, ".game_loop", "verify.yaml"), "w") as f:
+                    f.write(text)
+
+            def cvgit(*args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       *args], cwd=cv, capture_output=True, text=True)
+
+            def vfy(*args):
+                return subprocess.run([os.path.join(cv, ".game_loop", "bin", "verify"), *args],
+                                      cwd=cv, capture_output=True, text=True, env=_env())
+
+            def cvcommit(sid="sess-cov"):
+                return guard(cv, {"tool_name": "Bash", "session_id": sid, "cwd": cv,
+                                  "tool_input": {"command": "git commit -m x"}}, sid=sid)
+
+            cvgit("init", "-q")
+            cvyaml(RULES)
+            cvgit("add", "-A")
+            cvgit("commit", "-q", "-m", "init")
+
+            cvwrite("src/app.py")             # a rule claims it
+            cvwrite("lib/new_package.py")     # the reported failure: nothing claims it
+            cvwrite("docs/notes.md")          # excluded out loud
+            cvwrite("pubspec.lock")           # generated output, excluded by default
+            r = vfy("--coverage")
+            check("a changed source file matching no glob is reported UNCHECKED",
+                  "UNCHECKED" in r.stdout and "lib/new_package.py" in r.stdout)
+            check("a path a rule DOES claim is not reported as unchecked",
+                  "lib/new_package.py" in r.stdout and "src/app.py" not in r.stdout)
+            check("a path listed under unchecked-ok is not reported as unchecked",
+                  "lib/new_package.py" in r.stdout and "docs/notes.md" not in r.stdout)
+            check("generated output is excluded without anyone listing it",
+                  "lib/new_package.py" in r.stdout and "pubspec.lock" not in r.stdout)
+            try:
+                cov = json.loads(vfy("--coverage", "--porcelain").stdout)
+            except ValueError:
+                cov = {}          # no machine-readable answer is a FAILED check, not a crash
+            check("the three buckets are counted, not just the unchecked one",
+                  cov.get("unchecked") == ["lib/new_package.py"] and cov.get("checked") == 1
+                  and cov.get("excluded") == 2 and cov.get("rules") == 1
+                  and cov.get("exclusions") == 2)
+            check("the coverage report is a REPORT, not a gate — exit 0 with a path unchecked",
+                  r.returncode == 0 and "never a block" in r.stdout)
+            check("the report states what coverage itself cannot see (INV6)",
+                  "tautology" in r.stdout and "have not" in r.stdout and "changed" in r.stdout)
+
+            r = vfy()
+            check("a passing verify run still names what nothing checked",
+                  r.returncode == 0 and "all owed checks passed" in r.stdout
+                  and "NOT CHECKED" in r.stdout and "lib/new_package.py" in r.stdout)
+            r = vfy("--check")
+            check("a GREEN --check says what it did not look at (green != nothing unverified)",
+                  r.returncode == 0 and "evidence is newer than the change" in r.stdout
+                  and "NOT CHECKED" in r.stdout and "lib/new_package.py" in r.stdout)
+            check("an unchecked path does NOT make --check refuse (visibility, never blocking)",
+                  r.returncode == 0 and "VERIFY REFUSED" not in r.stdout)
+            quiet = cvcommit()                                  # nothing staged: no accusation
+            cvgit("add", "--", "lib/new_package.py", "docs/notes.md")
+            r = cvcommit()
+            check("the commit note names the STAGED path no rule checks",
+                  "STAGED FILE NO RULE CHECKS" in r.stdout and "lib/new_package.py" in r.stdout
+                  and "docs/notes.md" not in r.stdout)
+            check("the commit note is stated, never blocked",
+                  "NO RULE CHECKS" in r.stdout and not denied(r) and r.returncode == 0)
+            check("the commit note states what it cannot see (INV6)",
+                  "NO RULE CHECKS" in r.stdout and "commit -a" in r.stdout
+                  and "silence here is not evidence" in r.stdout.lower())
+            # the quiet case, asserted against a sibling that DID fire — a bare absence would pass
+            # against code that never implemented the note at all
+            check("an empty index accuses nobody (the note is about what the commit carries)",
+                  "NO RULE CHECKS" in r.stdout and "NO RULE CHECKS" not in quiet.stdout)
+
+            r = gl(cv, "status")
+            check("status names the unchecked set every session",
+                  "COVERAGE" in r.stdout and "UNCHECKED 1" in r.stdout
+                  and "lib/new_package.py" in r.stdout)
+            check("status states the write guard is an ALLOWLIST that denies the unnamed",
+                  "ALLOWLIST" in r.stdout and "denied WITHOUT being named" in r.stdout)
+            check("status names deploy verbs as the one DENYLIST, and says the unlisted run",
+                  "DENYLIST" in r.stdout and "6 verb(s) blocked" in r.stdout
+                  and "nobody listed is NOT blocked" in r.stdout)
+            check("status states what NONE of the rails can see (INV6)",
+                  "NONE of this sees" in r.stdout and "MCP tool" in r.stdout
+                  and "has not CHANGED" in r.stdout)
+
+            # The reported behaviour must be the ENFORCED behaviour: `status` keeps its own copy of
+            # the deploy verbs, and a status line that understates a rail's reach is worse than none.
+            src_gl = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+            src_gd = open(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh")).read()
+            def pick(s, pat):
+                m = _re.search(pat, s, _re.S)
+                return _re.findall(r'"([^"]+)"', m.group(1)) if m else []
+
+            check("the deploy verbs status reports are the ones the guard enforces",
+                  pick(src_gl, r"DEPLOY_VERB_DEFAULTS = \[(.*?)\]")
+                  == pick(src_gd, r"defaults = \[(.*?)\]") != [])
+
+            # The existing gate must be untouched: a rule whose file changed AFTER its last green
+            # run still refuses the commit. Coverage adds a report, it does not soften a check.
+            now = _time.time()
+            os.utime(os.path.join(cv, "src", "app.py"), (now + 60, now + 60))
+            r = vfy("--check")
+            check("existing owed-check behaviour is unchanged — a stale rule still REFUSES",
+                  r.returncode == 1 and "VERIFY REFUSED" in r.stdout and "src/**" in r.stdout)
+            check("and the stale refusal still blocks the commit",
+                  denied(cvcommit()))
+
+            # A FRESH INSTALL: templates/verify.yaml ships empty on purpose, because game_loop does
+            # not know your project. Everything is unchecked — which must be SAID, and must not cost
+            # the user their first commit. "Unlisted ⇒ refused" is the regression this repo already
+            # fixed once, and INV5 forbids a guard that blocks its own fix.
+            cvyaml("")
+            r = vfy()
+            check("an EMPTY manifest says NOTHING IS CHECKED, not merely 'nothing owed'",
+                  r.returncode == 0 and "nothing owes a check" in r.stdout
+                  and "NOTHING IS CHECKED" in r.stdout)
+            r = vfy("--coverage")
+            check("an empty manifest reports its own emptiness as a coverage fact",
+                  "NO RULES AT ALL" in r.stdout and "not the same thing as safe" in r.stdout
+                  and "lib/new_package.py" in r.stdout)
+            r = vfy("--check")
+            check("an empty manifest refuses nothing (--check stays a no-op)",
+                  r.returncode == 0 and "VERIFY REFUSED" not in r.stdout)
+            r = cvcommit()
+            check("a fresh install's first commit is NOT blocked by an empty manifest",
+                  not denied(r) and r.returncode == 0)
+            check("and that commit is told, out loud, that nothing checked it",
+                  "NOTHING IN THIS COMMIT IS CHECKED" in r.stdout
+                  and "no rules" in r.stdout.lower())
+            r = gl(cv, "status")
+            check("status calls an empty manifest what it is, without calling it safe",
+                  "NO RULES in .game_loop/verify.yaml" in r.stdout
+                  and "not the same thing as safe" in r.stdout)
+        finally:
+            shutil.rmtree(cv, ignore_errors=True)
+
+        # A report that cannot be read must say UNKNOWN. Degrading to a clean-looking line would
+        # recreate the exact failure — a rail silent where it is blind.
+        cu = make_sandbox()
+        try:
+            with open(os.path.join(cu, ".game_loop", "bin", "verify"), "w") as f:
+                f.write("#!/usr/bin/env python3\nimport sys\nsys.stderr.write('boom\\n')\n"
+                        "sys.exit(3)\n")
+            r = gl(cu, "status")
+            check("status reports UNKNOWN coverage, not clean, when the report cannot be read",
+                  "UNREADABLE" in r.stdout and "UNKNOWN, not clean" in r.stdout)
+        finally:
+            shutil.rmtree(cu, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

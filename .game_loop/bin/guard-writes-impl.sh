@@ -22,6 +22,11 @@
 #             a path built from a shell variable (`rm $TARGET/x`), or a script that mutates without
 #             naming the path on the command line. Those need tool-level matching this does not do.
 #             Do not read silence here as safety.
+#   DOES NOT: parse shell grammar. Command substitution, subshells and loops are read as flat text,
+#             and an UNQUOTED redirect target is cut at the first metacharacter — so a real target
+#             whose name literally contains `)`, `;`, `&` or `|` is checked only up to that
+#             character. Cutting yields a PREFIX of the path, which is still outside the allow
+#             roots in every ordinary case, so this loses precision in the message, not protection.
 #
 # THE ESCAPE HATCH IS THE HUMAN, deliberately. There is no env-var override — a guard the agent can
 # switch off is not a guard. A single mutation outside the repo is unlocked only by
@@ -340,9 +345,17 @@ def under(path, root):
 
 # Standard character devices: discard sinks and the console/std streams. A redirect to one of these
 # (e.g. `2>/dev/null`, `>/dev/stderr`) never writes a real out-of-repo file, so it must not be flagged.
-# Matched on the LITERAL path — /dev/stdout & friends are symlinks realpath would resolve away.
+# Matched on the LITERAL path — /dev/stdout & friends are symlinks realpath would resolve away (to a
+# tty or a pipe), which would then read as an out-of-repo file and deny.
 STD_DEVICES = {"/dev/null", "/dev/zero", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty",
                "/dev/random", "/dev/urandom"}
+
+
+def is_sink(p):
+    """True for a NON-FILESYSTEM sink: writing to it mutates nothing on disk, so it is exempt
+    outright, never merely 'outside the repo'. Normalized first, so /dev/./null is the same sink."""
+    p = os.path.normpath(p)
+    return p in STD_DEVICES or p.startswith("/dev/fd/")
 
 
 def offends(raw, cwd):
@@ -350,7 +363,7 @@ def offends(raw, cwd):
     p = os.path.expanduser(raw.replace("$HOME", home))
     if not os.path.isabs(p):
         p = os.path.join(cwd, p)
-    if p in STD_DEVICES or p.startswith("/dev/fd/"):
+    if is_sink(p):
         return None
     real = os.path.realpath(p)
     return None if any(under(real, a) for a in allow) else real
@@ -360,7 +373,13 @@ def redirect_targets(seg):
     """Redirect targets in one segment, QUOTE-AWARE in both directions: a redirect character inside
     quotes is data (a sed script, prose in a message) and must not be flagged, while a QUOTED target
     after a real, unquoted redirect is a genuine write and must be — the naive regex missed those,
-    because a captured token starting with a quote char never resolves to an absolute path."""
+    because a captured token starting with a quote char never resolves to an absolute path.
+
+    An UNQUOTED target ends at the first shell metacharacter, `)` included (issue #16). The shell
+    ends the word there, so the guard must too: in `$(find . 2>/dev/null)` the target is /dev/null,
+    not `/dev/null)`. Swallowing the paren both denied a discard sink and, for a genuinely
+    suspicious path, named a target nobody could act on. A QUOTED target keeps its metacharacters —
+    inside quotes they are part of the filename, which is exactly what the shell would write to."""
     targets, i, n, q = [], 0, len(seg), None
     while i < n:
         c = seg[i]
@@ -382,7 +401,7 @@ def redirect_targets(seg):
                     i = k
             else:
                 k = j
-                while k < n and seg[k] not in " \t;&|<>":
+                while k < n and seg[k] not in " \t;&|<>)":
                     k += 1
                 if k > j:
                     targets.append(seg[j:k])

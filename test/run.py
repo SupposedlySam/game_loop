@@ -420,6 +420,23 @@ def main():
         gl(proj, "mandate", "--clear", "--notes", "done", sid="sess-slk")
         check("mandate --clear pages the channel",
               any("mandate complete" in json.dumps(b) for _, b in FakeSlack.posts))
+
+        # The reply path must work with NO mandate bound — the case Slack paging exists for: mandate
+        # finished, agent still has a question, human is away. The watchdog must reach the poller and
+        # forward the reply even though the mandate is cleared (regression for the second bug: the
+        # watchdog stood down on "no mandate bound" BEFORE ever checking for a Slack-paged arm).
+        print("watchdog forwards a slack reply even with NO mandate bound:")
+        FakeSlack.posts.clear()
+        gl(proj, "arm", "--question", "deploy now?", "--read", real, "--predict", "yes", sid="sess-slk")
+        FakeSlack.thread_replies = [
+            {"ts": "111.222", "text": "parent"},
+            {"ts": "111.555", "user": "U1", "text": "yes deploy it"}]
+        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-slk",
+                                                       "transcript_path": tpath}),
+                           capture_output=True, text=True,
+                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        check("an unmandated session still forwards the slack reply (exit 2)",
+              r.returncode == 2 and "yes deploy it" in r.stderr)
         # paging must never take down the verb that pages: point at a dead port and arm anyway
         with open(notify_f, "w") as f:
             json.dump({"slack": {"bot_token": "x", "channel": "C",

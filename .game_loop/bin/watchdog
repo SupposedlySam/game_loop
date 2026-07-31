@@ -319,7 +319,7 @@ def poll_slack_replies(state):
             print(
                 "WATCHDOG: the human answered your T3 question — on Slack, from wherever they are.\n\n"
                 f"  Q: {armed.get('question')}\n  A:\n{answers}\n\n"
-                "The arm is cleared and the mandate is live again. Act on the answer and carry on.",
+                "The arm is cleared. Act on the answer and carry on.",
                 file=sys.stderr)
             sys.exit(2)
         slept = 0
@@ -330,8 +330,10 @@ def poll_slack_replies(state):
             if superseded():
                 quiet("superseded while polling slack replies")
         st = load_state()
-        if not (st.get("mandate") or {}).get("active"):
-            quiet("mandate released while polling slack replies")
+        # NB: no mandate check here, deliberately. A Slack-paged arm is polled until it is answered or
+        # withdrawn, regardless of mandate — the human holds the ball, and their reply must reach the
+        # run whether or not the autonomy mandate is still bound (see the caller). Termination is the
+        # arm going away (answered elsewhere / re-armed) or a newer watchdog superseding this one.
         if not st.get("t3_armed"):
             quiet("arm consumed while polling slack replies")
         state = st
@@ -406,15 +408,20 @@ def main():
     tpath = payload.get("transcript_path")
     state["_tpath"] = tpath
 
+    # A live T3 arm means the human is legitimately holding the ball — do not ring. Unless the arm was
+    # paged to Slack, in which case the ball can come back from a phone: poll the thread. This runs
+    # BEFORE the mandate check on purpose — carrying back the answer to a question you already asked is
+    # not nagging, and whether a mandate is bound is orthogonal to whether the human's reply should
+    # reach the run. (The classic case Slack paging exists for is precisely: mandate finished, agent
+    # has a question, human away.) poll_slack_replies quiet()s when the arm is unpageable, so an
+    # unmandated session without a Slack-armed question still falls straight through to the guard below.
+    if state.get("t3_armed"):
+        poll_slack_replies(state)
+
     # No mandate => nothing to keep going. The gate is inert and so is the watchdog: it must never nag
     # a session that is not under a mandate.
     if not m.get("active"):
         quiet("no mandate bound")
-
-    # A live T3 arm means the human is legitimately holding the ball — do not ring. Unless the arm
-    # was paged to Slack, in which case the ball can come back from a phone: poll the thread.
-    if state.get("t3_armed"):
-        poll_slack_replies(state)   # quiet()s when unpageable — the pre-Slack behavior
 
     # An exhausted usage window outranks everything below: idleness is EXPECTED while rate-limited,
     # and a ring is an API call into the very wall that killed the run. Park until the reset.

@@ -341,6 +341,7 @@ def main():
         class FakeSlack(http.server.BaseHTTPRequestHandler):
             posts = []
             thread_replies = []
+            channel_msgs = []      # top-level channel messages (conversations.history)
 
             def _json(self, obj):
                 body = json.dumps(obj).encode()
@@ -358,6 +359,8 @@ def main():
             def do_GET(self):
                 if self.path.startswith("/conversations.replies"):
                     self._json({"ok": True, "messages": FakeSlack.thread_replies})
+                elif self.path.startswith("/conversations.history"):
+                    self._json({"ok": True, "messages": FakeSlack.channel_msgs})
                 else:
                     self._json({"ok": True})
 
@@ -437,6 +440,21 @@ def main():
                            env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
         check("an unmandated session still forwards the slack reply (exit 2)",
               r.returncode == 2 and "yes deploy it" in r.stderr)
+
+        # A human who answers at the CHANNEL top level (not in-thread) must also be caught — the natural
+        # thing to do from a phone. replies() unions conversations.history with conversations.replies.
+        print("watchdog forwards a top-level channel reply (not just in-thread):")
+        FakeSlack.posts.clear()
+        FakeSlack.thread_replies = [{"ts": "111.222", "text": "parent"}]   # NO in-thread human reply
+        FakeSlack.channel_msgs = [{"ts": "111.777", "user": "U1", "text": "answer in the channel"}]
+        gl(proj, "arm", "--question", "channel reply?", "--read", real, "--predict", "x", sid="sess-slk")
+        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-slk",
+                                                       "transcript_path": tpath}),
+                           capture_output=True, text=True,
+                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        check("a top-level channel message is forwarded like a thread reply (exit 2)",
+              r.returncode == 2 and "answer in the channel" in r.stderr)
+        FakeSlack.channel_msgs = []
         # paging must never take down the verb that pages: point at a dead port and arm anyway
         with open(notify_f, "w") as f:
             json.dump({"slack": {"bot_token": "x", "channel": "C",

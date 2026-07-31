@@ -156,34 +156,48 @@ def send(event, text, thread_ts=None):
 
 
 def replies(thread_ts, oldest=None):
-    """Human replies in a thread, newest last: [{"ts","user","text"}, ...]. Never raises; [] on any
-    failure — a poller cannot distinguish "no reply yet" from "Slack is down" here, and must not try:
-    the log line is where that difference lives."""
+    """Human answers to a paged arm, oldest first: [{"ts","user","text"}, ...].
+
+    Reads BOTH the thread (conversations.replies) AND the channel's top-level messages
+    (conversations.history) posted after `oldest`, then unions them. A human who answers in the CHANNEL
+    — the natural thing to do from a phone — is caught as well as one who replies in-thread. Both use
+    the same `channels:history` scope (groups:history for a private channel), so this needs nothing new.
+
+    Trust scope, as elsewhere: any human message in the channel after the page is taken as the answer —
+    anyone in the channel can answer. Scope the channel to the human you're paging. Never raises; [] on
+    any failure — the log line is where "no reply yet" vs "Slack is down" lives, not the return value."""
     sl = _slack()
     if not can_read_replies() or not thread_ts:
         return []
     api = (sl.get("api_base") or "https://slack.com/api").rstrip("/")
-    q = urllib.parse.urlencode({"channel": sl["channel"], "ts": thread_ts, "limit": 50})
-    req = urllib.request.Request(api + "/conversations.replies?" + q,
-                                 headers={"Authorization": "Bearer " + sl["bot_token"]})
-    try:
+    hdr = {"Authorization": "Bearer " + sl["bot_token"]}
+    seen, out = set(), []
+
+    def collect(path, params):
+        req = urllib.request.Request(api + path + "?" + urllib.parse.urlencode(params), headers=hdr)
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
             r = json.loads(resp.read().decode() or "{}")
         if not r.get("ok"):
             _log({"kind": "notify_error", "op": "replies", "error": r.get("error", "not ok")})
-            return []
-        out = []
+            return
         for m in r.get("messages", []):
             ts = m.get("ts")
-            if not ts or ts == thread_ts:            # skip the parent message
+            if not ts or ts == thread_ts or ts in seen:  # skip the parent (our question) and dups
                 continue
-            if m.get("bot_id") or m.get("subtype"):  # skip our own posts and channel noise
+            if m.get("bot_id") or m.get("subtype"):       # skip our own posts and channel noise
                 continue
             if oldest and float(ts) <= float(oldest):
                 continue
             if m.get("text"):
+                seen.add(ts)
                 out.append({"ts": ts, "user": m.get("user", "?"), "text": m["text"]})
-        return out
+
+    try:
+        collect("/conversations.replies", {"channel": sl["channel"], "ts": thread_ts, "limit": 50})
+        collect("/conversations.history", {"channel": sl["channel"], "oldest": oldest or thread_ts,
+                                           "limit": 50})
     except Exception as e:  # noqa: BLE001
         _log({"kind": "notify_error", "op": "replies", "error": str(e)[:200]})
         return []
+    out.sort(key=lambda m: float(m["ts"]))
+    return out

@@ -716,8 +716,8 @@ def cmd_arm(s, a):
         # Page the human where they actually are (their phone), not just the terminal. On the
         # bot-token path the thread ts is kept so the watchdog can read their reply back into the
         # run; on the webhook path the page is one-way and the arm waits at the desk as before.
-        tail = ("\nReply in this thread and the watchdog will carry your answer back into the run."
-                if notify.can_read_replies() else "")
+        tail = ("\nReply here — in the channel or in this thread — and the watchdog will carry your "
+                "answer back into the run." if notify.can_read_replies() else "")
         ts = notify.send("arm", f"🙋 T3 — the Crawler needs you.\nQ: {a.question}\n"
                                 f"predicts: {a.predict}{tail}")
         if isinstance(ts, str):

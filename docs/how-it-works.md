@@ -118,6 +118,28 @@ one that states its limits.
 The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
 "<their words>"`.
 
+### The blast-radius warning — the same guard, at `git commit`
+
+The commit gate below asks whether a change was *verified*. It never asked whether it was
+*intended*, and one command widens a commit far past the work: a formatter aimed at a whole
+directory reformatted a dozen files nobody had opened, `git add -A` swept them in, and the commit
+message described something else. A commit's blast radius and the session's actual work are
+different sets, and only the session knows the second one.
+
+So the write guard records every path it allows through `Write`/`Edit`/`NotebookEdit` — one
+repo-relative line per file in `sessions/<id>/edited.txt`, beside that session's state — and at
+`git commit` compares it against the staged set, naming the excess and counting it. Generated and
+vendored paths are exempt (lockfiles, `vendor/`, `node_modules/`, `*.g.dart`, … ; extend with
+`config.json → generated_globs`), as is game_loop's own runtime state. It is a **warning, never a
+block** — sweeping edits are sometimes exactly the intent — delivered as context on the tool call,
+which is why the commit still proceeds untouched.
+
+What it misses, stated in the guard itself: it only knows edits it saw as `Write`/`Edit`, so a file
+written through Bash (a heredoc, `sed -i`, a script), by a sibling session, or before this session
+started is not in the set and gets named as excess. With no recorded edits it says nothing, and it
+reads the index — `git commit -a`, an explicit pathspec and `--no-verify` all pass unexamined.
+Silence from it is not evidence that a commit is tight.
+
 ### The limit gate — `game_loop limitgate`
 
 A second `PreToolUse` hook, watching `.game_loop/limits.json`. When a rate-limit window crosses
@@ -210,6 +232,7 @@ Everything lives in `.game_loop/`:
 | `limits.json` | the statusline tap's rate-limit snapshot (git-ignored; deliberately account-scoped — sessions share the subscription windows — with cross-session flock + monotonic merge on update) |
 | `sessions/<id>/HANDOFF.md` | the limit gate's demanded handoff, PER SESSION (git-ignored; delete after re-absorbing it) |
 | `sessions/<id>/state.json` | counters, phase, mandate, arms — PER Claude Code session (atomic writes; git-ignored) |
+| `sessions/<id>/edited.txt` | the paths this session wrote through Write/Edit, for the commit blast-radius warning (git-ignored) |
 | `state.json` | the no-session fallback state (a human terminal, an older harness) |
 | `log.jsonl` | append-only event log, shared across sessions; each line carries the writing session's `sid` (git-ignored) |
 | `INVARIANTS.md` | your north star; re-injected by `game_loop stepback` |

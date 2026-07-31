@@ -1,6 +1,7 @@
 # game_loop runtime state (dogfooded in this repo)
 .game_loop/state.json
 .game_loop/sessions/
+.game_loop/edited.txt
 .game_loop/log.jsonl
 .game_loop/verified.json
 .game_loop/probe/

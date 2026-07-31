@@ -208,6 +208,9 @@ even if you never automate the resume.
   inside the repo, the OS temp dir, and configured roots. Everything else is read-only. Covers
   `Write`/`Edit` and Bash mutators, blocks configured deploy verbs, and states what it *doesn't* catch.
   Escape hatch is the human (`game_loop authorize`), single-use and logged — never an env var.
+- **Blast-radius warning** (same guard, at `git commit`) — names the staged files this session never
+  wrote, so a directory-wide formatter or `git add -A` can't quietly widen a commit past the work.
+  A warning, never a block, and it says which edits it cannot see (Bash heredocs, `sed -i`, scripts).
 - **verify** — optional map from "you changed X" to "these checks must pass"; refuses a `git commit`
   when the evidence is older than the change. Ships empty (a no-op) until you add rules.
 

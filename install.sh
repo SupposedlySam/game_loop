@@ -188,6 +188,7 @@ if [ ! -e "$GI" ]; then
   cat > "$GI" <<'EOF'
 state.json
 sessions/
+edited.txt
 log.jsonl
 verified.json
 probe/
@@ -214,6 +215,11 @@ else
   if ! grep -q '^.update_cache.json$' "$GI"; then
     echo ".update_cache.json" >> "$GI"
     echo "  updated .game_loop/.gitignore (+ .update_cache.json — update-check cache)"
+  fi
+  # the no-session fallback's edited-path record (the per-session one is under sessions/)
+  if ! grep -q '^edited.txt$' "$GI"; then
+    echo "edited.txt" >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ edited.txt — what this session actually wrote)"
   fi
 fi
 

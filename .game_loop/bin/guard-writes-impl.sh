@@ -22,6 +22,15 @@
 #             a path built from a shell variable (`rm $TARGET/x`), or a script that mutates without
 #             naming the path on the command line. Those need tool-level matching this does not do.
 #             Do not read silence here as safety.
+#   DOES: at `git commit`, NAME the staged files this session never wrote — a warning about a
+#         commit widened past the work (a directory-wide formatter, a codemod, `git add -A`). It is
+#         STATED, NEVER BLOCKED: sweeping edits are sometimes the intent.
+#   DOES NOT: know about any edit it did not see as a Write/Edit/NotebookEdit. A file written
+#             through Bash (a heredoc, `sed -i`, a script or formatter), by a sibling session, or
+#             before this session started is absent from that set and gets named as excess; and
+#             with no recorded edits at all the check says nothing. It reads the INDEX, so
+#             `git commit -a`, an explicit pathspec, and `--no-verify` all pass it unexamined.
+#             Silence there is not evidence that a commit is tight.
 #   DOES NOT: parse shell grammar. Command substitution, subshells and loops are read as flat text,
 #             and an UNQUOTED redirect target is cut at the first metacharacter — so a real target
 #             whose name literally contains `)`, `;`, `&` or `|` is checked only up to that
@@ -54,11 +63,54 @@ if [ -n "$SID" ]; then
 else
   STATE_F="$GAMELOOP_DIR/state.json"
 fi
+# The paths THIS session wrote, beside its state and scoped the same way: a sibling session's edits
+# are not this session's work, exactly as a sibling's mandate is not its mandate.
+EDITED_F="$(dirname "$STATE_F")/edited.txt"
 
 deny() {
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
     "$(printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
   exit 0
+}
+
+# A WARNING, not a decision. Carries NO permissionDecision, so the tool call proceeds exactly as it
+# would have and the permission flow is untouched; the text is injected into the model's context
+# (PreToolUse -> hookSpecificOutput.additionalContext, "Text injected into model context" — read out
+# of the harness binary itself, bin/claude.exe). A harness that does not honour the field drops the
+# text and still runs the command: this degrades to silence, never to a block.
+note() {
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
+    "$(printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+  exit 0
+}
+
+# Record a path this Crawler wrote, so the commit gate can compare the session's actual work against
+# a commit's blast radius (issue #21). Append-only, one repo-relative path per line. This runs at
+# PreToolUse, i.e. BEFORE the write lands, so a denied or failed write still records — the set errs
+# toward TOO MANY files, which costs a missed warning, never a false accusation.
+record_edit() {
+  FP="$1" REPO_REAL="$REPO_REAL" EDITED_F="$EDITED_F" python3 <<'PY' 2>/dev/null
+import os, sys
+repo = os.environ["REPO_REAL"]
+real = os.path.realpath(os.environ["FP"])
+if real == repo or not real.startswith(repo + os.sep):
+    sys.exit(0)                               # outside the repo: never staged here, never our business
+rel = os.path.relpath(real, repo)
+f = os.environ["EDITED_F"]
+try:
+    with open(f) as fh:
+        already = rel in fh.read().split("\n")
+except OSError:
+    already = False
+if already:
+    sys.exit(0)
+try:
+    os.makedirs(os.path.dirname(f), exist_ok=True)
+    with open(f, "a") as fh:                  # append: concurrent hooks interleave lines, never clobber
+        fh.write(rel + "\n")
+except OSError:
+    pass
+PY
 }
 
 # A human-authorized, single-use exception (`game_loop authorize`). Takes the offending realpath;
@@ -125,7 +177,10 @@ real = os.path.realpath(os.environ["FP"])
 print("yes" if any(real == a or real.startswith(a + os.sep) for a in allow) else real)
 PY
 )
-    [ "$verdict" = "yes" ] && exit 0
+    if [ "$verdict" = "yes" ]; then
+      record_edit "$fp"                        # an in-repo write IS this session's work (issue #21)
+      exit 0
+    fi
     if [ -n "$verdict" ]; then
       consumed=$(consume_authorization "$verdict")
       [ "$consumed" = "yes" ] && exit 0
@@ -286,6 +341,107 @@ still describes it."
 A green check from BEFORE your change is evidence about code that no longer exists.
 Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record.$chained_hint"
       fi
+
+      # The gate above asks whether the change was VERIFIED. It never asks whether it was INTENDED,
+      # and one command widens a commit far past the work: a formatter aimed at a whole directory
+      # reformatted a dozen files nobody had opened, `git add -A` swept them in, and the message
+      # described something else entirely (issue #21). A commit's blast radius and the session's
+      # actual work are different sets, and only the session knows the second one — so name the
+      # excess. STATED, NEVER BLOCKED: sweeping edits are sometimes exactly the intent; the failure
+      # is that it happens silently, inside a diff nobody re-reads.
+      # Silent by design wherever it cannot reason: no recorded edits, no readable index, no git.
+      blast_note=$(REPO_REAL="$REPO_REAL" EDITED_F="$EDITED_F" CONFIG_F="$CONFIG_F" \
+                   GAMELOOP_DIR="$GAMELOOP_DIR" SID="$SID" python3 <<'PY'
+import datetime, json, os, subprocess, sys
+from fnmatch import fnmatch
+
+repo = os.environ["REPO_REAL"]
+try:
+    with open(os.environ["EDITED_F"]) as f:
+        edited = set(x.strip() for x in f if x.strip())
+except OSError:
+    edited = set()
+if not edited:
+    sys.exit(0)          # nothing observed at all — no evidence, so no accusation
+
+
+def git(*args):
+    try:
+        r = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True)
+    except OSError:
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+top = git("rev-parse", "--show-toplevel")
+staged = git("diff", "--cached", "--name-only")
+if top is None or staged is None:
+    sys.exit(0)          # not an index this can read — degrade to silence, never to noise
+top = os.path.realpath(top.strip())
+
+# Generated and vendored output is somebody else's work by definition. Without these exemptions the
+# warning fires on every lockfile and stops being read, and a guard nobody reads is a guard routed
+# around. Extend per project with config.json -> generated_globs.
+# game_loop's own runtime state first: this check writes edited.txt and log.jsonl itself, and a
+# guard that accuses a commit of the files the guard just wrote is a guard nobody trusts. (Normally
+# git-ignored — this covers an install whose .gitignore never got those entries.)
+EXEMPT = [".game_loop/sessions/*", ".game_loop/edited.txt", ".game_loop/log.jsonl",
+          ".game_loop/state.json", ".game_loop/verified.json", ".game_loop/limits.json",
+          "vendor/*", "*/vendor/*", "node_modules/*", "*/node_modules/*",
+          "third_party/*", "*/third_party/*", "dist/*", "*/dist/*", "build/*", "*/build/*",
+          "*.lock", "*-lock.json", "*-lock.yaml", "*.g.dart", "*.freezed.dart", "*.pb.go",
+          "*_pb2.py", "*.generated.*", "*.min.js", "*.min.css", "*.snap"]
+try:
+    with open(os.environ["CONFIG_F"]) as f:
+        EXEMPT += (json.load(f).get("generated_globs") or [])
+except (OSError, ValueError):
+    pass
+
+total, unedited = 0, []
+for line in staged.splitlines():
+    p = line.strip()
+    if not p:
+        continue
+    total += 1
+    rel = os.path.relpath(os.path.join(top, p), repo)   # git prints from ITS root, which may not be ours
+    if rel.startswith(".."):
+        continue                                       # staged outside our root: not ours to judge
+    if rel in edited or any(fnmatch(rel, g) for g in EXEMPT):
+        continue
+    unedited.append(rel)
+if not unedited:
+    sys.exit(0)
+
+n = len(unedited)
+lines = ["COMMIT INCLUDES %d FILE%s THIS SESSION NEVER EDITED" % (n, "" if n == 1 else "S")]
+lines += ["    " + p for p in unedited[:10]]
+if n > 10:
+    lines.append("    ... %d more" % (n - 10))
+lines += [
+    "",
+    "A formatter, a codemod, a --fix run or a dependency update probably widened this, and",
+    "'git add -A' swept it in. Intended? Say so in the commit message. Not intended? Unstage them:",
+    "    git restore --staged <path>     (and 'git checkout -- <path>' to drop the change itself)",
+    "",
+    "WHAT THIS SET SEES: only files THIS session wrote through Write/Edit/NotebookEdit. A file you",
+    "created or rewrote through Bash (a heredoc, 'sed -i', a script or formatter you ran), one a",
+    "sibling session wrote, or one already changed before this session started is NOT in it and is",
+    "listed above even when it was the point. And with no recorded edits this check says nothing at",
+    "all — silence here is not evidence that a commit is tight.",
+]
+try:
+    rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+    if os.environ.get("SID"):
+        rec["sid"] = os.environ["SID"][:8]
+    rec.update({"kind": "commit_unedited", "staged": total, "unedited": n,
+                "files": unedited[:10]})
+    with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
+except OSError:
+    pass
+sys.stdout.write("\n".join(lines))
+PY
+)
     fi
 
     # 1. Configured deploy/publish verbs — denied anywhere, no path needed.
@@ -464,6 +620,11 @@ If the human has explicitly authorized this specific path, record their words an
   game_loop authorize --path <prefix> --reason \"<their exact words>\"
 One authorization, one mutation, logged permanently. That is the only escape hatch, by design."
     fi
+
+    # LAST, deliberately: the blast-radius warning is the only non-blocking output here, so it is
+    # emitted after every check that can deny. A denial means the command never ran, and a warning
+    # about a commit that did not happen is noise.
+    [ -n "${blast_note:-}" ] && note "$blast_note"
     ;;
 esac
 

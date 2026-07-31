@@ -756,6 +756,30 @@ def category_tell(text):
     return None
 
 
+# Wording that makes an assertion read like it came off an AGGREGATE rather than off an observation.
+# Same standing as _CATEGORY_TELLS and for the same reason: a heuristic on prose decides what gets
+# SAID, never what gets refused (INV1). Any rephrasing walks straight past it, and it only ever fires
+# on a claim that is already citing a metric.
+_AGGREGATE_TELLS = [
+    r"\b\d+(\.\d+)?\s*%", r"\bper ?cent\w*\b", r"\btotals?\b", r"\bsummed\b", r"\bin total\b",
+    r"\baverage[ds]?\b", r"\bmean\b", r"\bcombined\b", r"\baggregate\w*\b", r"\bper event\b",
+    r"\bacross \d+\b", r"\bover \d+ (runs|trials|events|samples|iterations)\b",
+]
+
+
+def aggregate_tell(text):
+    """The wording that makes an assertion read like it was derived from a sum/mean/percentage, or None.
+
+    Advisory only, exactly like category_tell — and it misses an unbounded amount, starting with the
+    incident's own sentence, which named two bare totals and no arithmetic at all.
+    """
+    low = (text or "").lower()
+    for pat in _AGGREGATE_TELLS:
+        if (m := re.search(pat, low)):
+            return m.group(0).strip()
+    return None
+
+
 def cmd_claim(s, a):
     """Record an assertion about external reality, with the source that backs it — and how it landed.
 
@@ -783,6 +807,11 @@ def cmd_claim(s, a):
     satisfiable while being completely wrong: every instrument incident was run by an agent who
     could have cited a real file the whole time. Its keystone is a controlled instrument plus a
     two-endpoint reading (see admit_metric).
+
+    AN AGGREGATE IS NOT AN OBSERVATION. `--aggregate sum|mean|pct` says the effect was derived by
+    collapsing a set of events into one number, and a collapsed number owes the set it came from
+    (see admit_distribution). `aggregate_tell()` is only a nudge when an aggregate-shaped sentence
+    is filed without it, for the same reason category_tell never refuses.
     """
     outcome = (a.outcome or "resolved").lower()
     if outcome not in CLAIM_OUTCOMES:
@@ -810,9 +839,24 @@ def cmd_claim(s, a):
                 "whose response you already know, then claim:\n"
                 '  game_loop effector --prove ' + a.effector + ' --known-state ".." '
                 "--before <capture> --observed <capture>")
+    aggregate = (a.aggregate or "").lower() or None
+    if aggregate and aggregate not in AGGREGATE_KINDS:
+        die("--aggregate must be one of: " + " · ".join(AGGREGATE_KINDS) + "\n"
+            "  sum  — the effect is a total over events\n"
+            "  mean — the effect is an average over events\n"
+            "  pct  — the effect is a percentage, which is a total wearing a ratio\n"
+            "All three collapse a distribution into one number, and all three hide the same thing.")
+    if aggregate and not a.metric:
+        die("--aggregate describes a READING, so it needs the instrument that reading belongs to:\n"
+            '  game_loop claim --assert ".." --metric <name> --aggregate ' + aggregate + "\n"
+            "An aggregate with no measurement behind it is a number nobody can decompose.")
+    exclude = parse_event_index(a.exclude) if a.exclude is not None else None
+    if exclude is not None and not a.metric:
+        die("--exclude drops one event from a reading's distribution, so it needs --metric <name>.")
     # A metric is admitted through its own gate (controls + a two-endpoint reading), so it stands in
     # for --read the way a refutation's evidence does — the keystone changes shape, never softens.
-    metric = admit_metric(s, a.metric, a.recheck) if a.metric else None
+    metric = (admit_metric(s, a.metric, a.recheck, aggregate, exclude, a.because)
+              if a.metric else None)
     # For a refutation the evidence IS a source you read, so it stands in for --read. Retracting must
     # cost no more than claiming, or the cheapest move stays "say nothing and move on". An effector
     # proof stands in the same way: its before/after pair are real files, already resolved.
@@ -861,9 +905,16 @@ def cmd_claim(s, a):
            "confidence": a.confidence, "effector": a.effector,
            "scope": a.scope, "probes": probes}
     if metric:
-        inst, reading, mv = metric
+        inst, reading, mv, dist = metric
         rec.update({"metric": inst["name"], "measures": inst.get("measures"),
                     "reading": {k: reading[k] for k in ("before", "after", "delta")}})
+        if dist:
+            # The share the tool computed, the excluded event and the stated reason all go to the
+            # shared log. In the incident the artifact had already been identified and dismissed
+            # earlier in the SAME session and was rediscovered anyway; the record is what breaks that.
+            rec["distribution"] = dist
+            if "excluded" in dist:
+                reading["excluded"] = dict(dist["excluded"], at=now())
         if mv and a.recheck:
             # The re-check is recorded ON the instrument and counted against the readings it was
             # made at, so a LATER movement demands a fresh one instead of resting on this answer.
@@ -879,10 +930,26 @@ def cmd_claim(s, a):
     if paths:
         msg.append(f"  read (T0) : {', '.join(paths)}")
     if metric:
-        inst, reading, mv = metric
+        inst, reading, mv, dist = metric
         msg.append(f"  metric    : {inst['name']} — {_num(reading['before'])} → "
                    f"{_num(reading['after'])} (Δ {_num(reading['delta'])}, computed by the tool)")
         msg.append(f"  stands for: {inst.get('measures')}")
+        if aggregate:
+            msg.append(f"  derived by: {AGGREGATE_KINDS[aggregate]} over "
+                       f"{dist['events'] if dist else 0} events")
+        if dist and dist["top_event"] is not None:
+            msg.append(f"  shape     : {dist['events']} events totalling "
+                       f"{_num(dist['total'])} · event {dist['top_event']} carries "
+                       f"{dist['share_pct']:.1f}%   ← computed by the tool")
+        elif dist:
+            msg.append(f"  shape     : {dist['events']} events, every one of them zero")
+        if dist and "excluded" in dist:
+            ex, rest = dist["excluded"], dist["without"]
+            msg += [f"  excluded  : event {ex['event']} ({_num(ex['value'])}) — {ex['reason']}",
+                    f"  without it: {_num(rest['total'])} across {rest['n']} events — "
+                    f"{rest['per_event']:.1f} per event, {rest['nonzero']} non-zero",
+                    "→ the exclusion and its reason are on the record, so the next run inherits the "
+                    "artifact instead of rediscovering it."]
         if a.recheck:
             msg.append(f"  re-checked: {a.recheck}")
     if ev_paths:
@@ -911,11 +978,28 @@ def cmd_claim(s, a):
                 "  downstream of a scope claim, and the last moment the claim is cheap to check.",
                 "  (Wording only — it cannot tell a set claim from an innocent \"only\", so it never",
                 "   refuses, and any rephrasing walks past it. An instance claim owes nothing here.)"]
+    # Cited a metric, the sentence reads like it came off a total, and no distribution is attached.
+    # Loud, never blocking — the wording check cannot tell an aggregate from an innocent "total", and
+    # a guard that refused on a false positive here would block its own fix (INV5).
+    if metric and not metric[3] and (tell := aggregate_tell(a.assert_)):
+        msg += [f"⚠ that assertion reads aggregate-shaped (\"{tell}\") and the reading behind it has "
+                "no shape.",
+                "  A SUM IS NOT A DISTRIBUTION. One event of thirty once carried 96% of a total that",
+                "  was written up as a total elimination — and the totals revealed nothing; only the",
+                "  per-event values did. Record them against the reading and re-file it:",
+                f"    game_loop measure --instrument {metric[0]['name']} --before <n> --after <n> "
+                "--events \"<v,v,v,..>\"",
+                f"    game_loop claim --assert \"..\" --metric {metric[0]['name']} --aggregate sum",
+                "  (Wording only — it cannot tell a derived number from an observed one, so it never",
+                "   refuses, and the incident's own sentence named two bare totals and would have",
+                "   walked straight past it. A single-quantity reading owes nothing here.)"]
     if outcome == "refuted":
         msg.append("→ it now stands in the RULED-OUT list on `game_loop status`, so the next run "
                    "inherits it instead of re-walking it.")
     if metric:
         msg.append("  " + "\n  ".join(INSTRUMENT_MISSES))
+        if metric[3]:
+            msg.append("  " + "\n  ".join(DISTRIBUTION_MISSES))
     out(*msg)
     flair_out(s, "claim")
 
@@ -1598,7 +1682,7 @@ def cmd_effector(s, a):
 # cannot fail certifies the defect instead of catching it; a number admitted as evidence without
 # controls is that same failure one layer out — and it does not fail quietly, it MANUFACTURES
 # findings. `claim --read` cannot help here: every one of these incidents was run by an agent who
-# could have cited a real file the whole time. Three refusals, three logged failures:
+# could have cited a real file the whole time. Four refusals, four logged failures:
 #
 #   #14  A reading is a DELTA scoped to the interaction, never a lifetime total. A snapshot said 90%
 #        of one component's operations returned short (157839 of 176001) — read as a rate that is a
@@ -1615,10 +1699,18 @@ def cmd_effector(s, a):
 #        it, because a 43% reduction at p=0.037, n=250 was real, reproducible, correctly computed —
 #        and measured on a counter that had decoupled from user-visible harm in exactly the regime
 #        the fix created. So when the number moves, the connection is RE-CHECKED, not assumed.
+#   #12  A SUM IS NOT A DISTRIBUTION. An aggregate hides its own shape, and a run optimizing against
+#        one reads structure into a single outlier. 1066.7 units of damage against 0.0 looked like a
+#        total elimination and was written up as a finding; one event of thirty carried 96% of it,
+#        and that event was the first after a known state transition — an artifact already identified
+#        and dismissed EARLIER IN THE SAME SESSION. Excluding it: 1.5 per event against 0, two
+#        occurrences against zero. Nothing about the totals revealed this; only the per-event values
+#        did, and the same event produced three findings before anyone printed them.
 #
-# WHERE A GATE NEEDS A COMPUTATION, THE TOOL DOES IT. The caller names the numbers they saw; deltas
-# and percentages are computed here. Arithmetic handed to the caller is a defect generator — the
-# author of the sibling issue that says so got a coordinate conversion wrong on the very next run.
+# WHERE A GATE NEEDS A COMPUTATION, THE TOOL DOES IT. The caller names the numbers they saw; deltas,
+# percentages and the dominance share are computed here. Arithmetic handed to the caller is a defect
+# generator — the author of the sibling issue that says so got a coordinate conversion wrong on the
+# very next run.
 #
 # STATE IS PER SESSION, like pins and deliberately unlike the ruled-out list. A refutation is
 # durable knowledge about the CHECKOUT, so it lives in the shared log; a control is a MEASUREMENT
@@ -1632,6 +1724,23 @@ INSTRUMENT_MISSES = [
     "number is CONTROLLED — none of them can say it is the number that matters. #13's counter was",
     "structurally blind to a second fault mechanism, so the whole investigation searched one way.",
 ]
+
+# INV6 again, for the shape check specifically: it holds you to LOOKING, not to being right.
+DISTRIBUTION_MISSES = [
+    "what the shape check does NOT catch: whether what remains is an effect at all. It holds you",
+    "to reading the distribution before stating one — sample size, variance, and whether the events",
+    "are even independent stay yours, and a perfectly flat distribution can be perfectly flat noise.",
+]
+
+# The share of a total one event may carry before the aggregate stops describing anything but that
+# event. A half is deliberately generous — the incident's dominating event carried 96% — because a
+# threshold that fires on ordinary skew is a threshold that gets switched off, and a guard disabled
+# once is disabled forever (INV5).
+DOMINANCE_SHARE = 0.5
+
+# What an effect can be DERIVED from and still be a claim about a set of events rather than an
+# observation. All three collapse a distribution into one number, and all three hide the same thing.
+AGGREGATE_KINDS = {"sum": "sum", "mean": "mean", "pct": "percentage"}
 
 
 def _num(x):
@@ -1668,6 +1777,78 @@ def control_reading(flag, text):
     return {"before": _scalar(b), "after": _scalar(a), "delta": _scalar(a - b)}
 
 
+def parse_events(text):
+    """Parse a per-event distribution — commas or whitespace, garbage refused, never a traceback.
+
+    Two values is the floor. A "distribution" of one event is the total wearing a different hat: it
+    satisfies the gate while showing nothing, which is precisely the failure this gate exists for.
+    """
+    parts = (text or "").replace(",", " ").split()
+    if len(parts) < 2:
+        die("--events takes the per-event values behind the total — at least two of them, not "
+            f"{text!r}\n"
+            "One value is the total wearing a different hat. Paste what each event read, in event\n"
+            "order, zeros included, separated by commas or spaces:\n"
+            '  --events "1024, 0, 0, ... , 42.7"')
+    vals = []
+    for i, p in enumerate(parts, 1):
+        try:
+            v = float(p)
+        except (TypeError, ValueError):
+            v = None
+        if v is None or v != v or v in (float("inf"), float("-inf")):
+            die(f"event {i} of --events is not a finite number: {p!r}\n"
+                "Paste the per-event values as the counter read them. A distribution the tool cannot\n"
+                "parse is a distribution nobody checked, and that is the state this gate is about.")
+        vals.append(_scalar(v))
+    return vals
+
+
+def dominance(values):
+    """Which single event carries how much of the total — computed HERE, never taken from the caller.
+
+    The share is measured against the total MAGNITUDE (Σ|v|). That is what "one event carries the
+    aggregate" actually means, and it keeps a pair of opposite-signed events from cancelling into a
+    near-zero denominator and reporting a share of 10000%. An all-zero distribution has no share to
+    dominate, and dividing into one is how a gate produces a traceback instead of a refusal.
+    """
+    mass = [abs(v) for v in values]
+    total = sum(mass)
+    if not total:
+        return None
+    top = max(range(len(mass)), key=mass.__getitem__)
+    return {"event": top + 1, "value": values[top], "share": mass[top] / total,
+            "pct": 100.0 * mass[top] / total, "total": _scalar(total), "n": len(values)}
+
+
+def without_event(values, n):
+    """The shape that remains once event n is dropped — stated by the tool, not left to be worked out.
+
+    This is the number the incident never printed. "1066.7 against 0.0" read as a total elimination;
+    "1.5 per event across 29, one non-zero occurrence" ends the conversation instead of starting one.
+    """
+    rest = [v for i, v in enumerate(values, 1) if i != n]
+    total = sum(abs(v) for v in rest)
+    return {"n": len(rest), "total": _scalar(total), "nonzero": sum(1 for v in rest if v),
+            "per_event": (total / len(rest)) if rest else 0.0}
+
+
+def parse_event_index(text):
+    """--exclude names an event NUMBER, the one the refusal printed. Bad input refuses, never throws."""
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        die(f"--exclude takes the event NUMBER the refusal named, not {text!r}.\n"
+            "The refusal prints it — `event 1 read 1024` — so excluding it is answering the refusal\n"
+            "rather than guessing at it:  --exclude 1 --because \"..\"")
+
+
+def events_preview(values, keep=8):
+    """The per-event values, in event order, truncated so a thirty-event line stays readable."""
+    head = ", ".join(_num(v) for v in values[:keep])
+    return head + (f", … (+{len(values) - keep} more)" if len(values) > keep else "")
+
+
 def instrument_by_name(s, name):
     return next((i for i in (s.get("instruments") or []) if i.get("name") == name), None)
 
@@ -1701,15 +1882,112 @@ def metric_movement(inst):
     return {"pct": 100.0 * (first - latest) / first, "first": rs[0], "latest": rs[-1]}
 
 
-def admit_metric(s, name, recheck):
+def admit_distribution(inst, reading, aggregate, exclude, because):
+    """A SUM IS NOT A DISTRIBUTION — the #12 gate, run at the point the effect is CLAIMED.
+
+    The distribution attaches to the READING (`measure --events`) because the reading is the thing
+    that has a shape: the per-event values are the decomposition of that delta and of no other, and a
+    breakdown supplied at claim time could have come off a different measurement entirely. The
+    REFUSAL lives here because the claim is what states an effect, and it is stating the effect that
+    the incident got wrong. Same split as everything else in this family: `measure` records what was
+    read, `claim` is where a reading has to earn a sentence.
+
+    The share is computed HERE, from the values the caller pasted. Never accept a percentage somebody
+    worked out by hand — the sibling issue that says so had its own author botch a conversion on the
+    very next run.
+
+    ONE exclusion, and then the gate is done: dropping the outlier from the incident's own numbers
+    leaves 29 zeros and one 42.7, which is 100% dominance of the remainder. Re-checking the remainder
+    would refuse forever, and a guard with no path through it is a guard that gets switched off
+    (INV5). So the escape hatch is exactly one named event plus a stated reason, both on the record,
+    and what remains is PRINTED rather than re-judged.
+    """
+    events = reading.get("events") or []
+    if exclude is not None:
+        if not events:
+            die(f"--exclude {exclude} names an event in a per-event distribution, and the reading "
+                f"behind this claim has none.\n"
+                "There is nothing recorded to exclude FROM. Read the events out and record them with\n"
+                "the measurement first:\n"
+                f"  game_loop measure --instrument {inst['name']} --before <n> --after <n> "
+                '--events "<v,v,v,..>"')
+        if not 1 <= exclude <= len(events):
+            die(f"--exclude {exclude} is not one of this reading's {len(events)} events "
+                f"(they are numbered 1..{len(events)}).\n"
+                "Exclude the event the refusal NAMED. Excluding a different one leaves the dominating\n"
+                "event sitting in the total, which is the whole thing being checked.")
+        if not because:
+            die(f"--exclude {exclude} needs --because: WHY that event does not belong in the total.\n"
+                f"  dropping : event {exclude} — {_num(events[exclude - 1])}\n"
+                "An unrecorded exclusion is rediscovered. In the incident the dominating event was an\n"
+                "artifact that had ALREADY been identified and dismissed earlier in the same session,\n"
+                "and it went on to produce a third false finding because nothing carried the reason\n"
+                "forward. The reason is the deliverable here, not the exclusion.\n"
+                f'  game_loop claim --assert ".." --metric {inst["name"]} --exclude {exclude} '
+                '--because "first event after a known state transition; artifact already ruled out"')
+    if aggregate and not events:
+        die(f"this effect is derived from a {AGGREGATE_KINDS[aggregate]}, and the reading behind it "
+            "has no per-event breakdown.\n"
+            f"  instrument : {inst['name']}\n"
+            f"  reading    : {_num(reading['before'])} → {_num(reading['after'])} "
+            f"(Δ {_num(reading['delta'])})\n"
+            "A SUM IS NOT A DISTRIBUTION. An aggregate hides its own shape, and a run optimizing\n"
+            "against one will read structure into a single outlier: 1066.7 units of damage against\n"
+            "0.0 looked like a total elimination and was written up as a finding. One event of thirty\n"
+            "carried 96% of it. Nothing about the totals revealed that — only printing the per-event\n"
+            "values did, and by then the same artifact had produced three findings in one session.\n"
+            "Read the events out and record them with the measurement:\n"
+            f"  game_loop measure --instrument {inst['name']} --before {_num(reading['before'])} "
+            f"--after {_num(reading['after'])} --events \"<v,v,v,..>\"\n"
+            "  " + "\n  ".join(DISTRIBUTION_MISSES))
+    if not events:
+        return None
+    dom = dominance(events)
+    if dom and dom["share"] > DOMINANCE_SHARE and exclude != dom["event"]:
+        rest = without_event(events, dom["event"])
+        wrong = (f"  you dropped: event {exclude} — which is not the one carrying the total\n"
+                 if exclude is not None else "")
+        die("ONE EVENT CARRIES THE AGGREGATE — this is a total, not a distribution.\n"
+            f"  instrument : {inst['name']}\n"
+            f"  events     : {dom['n']}, totalling {_num(dom['total'])}\n"
+            f"  dominated  : event {dom['event']} read {_num(dom['value'])} — {dom['pct']:.1f}% of "
+            "the total (computed here; you were never asked for that share)\n"
+            f"  without it : {_num(rest['total'])} across {rest['n']} events — "
+            f"{rest['per_event']:.1f} per event, {rest['nonzero']} non-zero\n"
+            + wrong +
+            "A SUM IS NOT A DISTRIBUTION. In the incident 1066.7 units of damage against 0.0 read as\n"
+            "a total elimination and was written up as a finding — one event of thirty carried 96%,\n"
+            "and it was the FIRST event after a known state transition, an artifact already identified\n"
+            "and dismissed EARLIER IN THE SAME SESSION. Corrected, it was 1.5 units per event against\n"
+            "0, two occurrences against zero: no effect at that sample size. The same event produced\n"
+            "three separate findings before anyone printed the breakdown.\n"
+            "Explain that event, or exclude it WITH the reason — the reason is what stops it being\n"
+            "rediscovered a fourth time:\n"
+            f'  game_loop claim --assert ".." --metric {inst["name"]} --exclude {dom["event"]} '
+            '--because "first event after a known state transition; artifact already ruled out"\n'
+            "  " + "\n  ".join(DISTRIBUTION_MISSES))
+    dist = {"events": len(events), "values": list(events),
+            "top_event": dom["event"] if dom else None,
+            "top_value": dom["value"] if dom else None,
+            "share_pct": round(dom["pct"], 1) if dom else 0.0,
+            "total": dom["total"] if dom else 0,
+            "aggregate": aggregate}
+    if exclude is not None:
+        rest = without_event(events, exclude)
+        dist["excluded"] = {"event": exclude, "value": events[exclude - 1], "reason": because}
+        dist["without"] = rest
+    return dist
+
+
+def admit_metric(s, name, recheck, aggregate=None, exclude=None, because=None):
     """The admission gate for evidence that is a MEASUREMENT rather than a document.
 
     `claim --read` demands a real file because that is the check prose cannot satisfy for a
-    document. For a number the equivalent is not one check but four, and each of them was
+    document. For a number the equivalent is not one check but five, and each of them was
     satisfiable-while-completely-wrong in a real incident: the instrument is admitted (#11), it
     declared the harm it stands for (#13), it has been READ across an interaction rather than
-    snapshotted (#14), and if the number has since moved, the connection to the harm has been
-    re-checked (#13).
+    snapshotted (#14), if the number has since moved the connection to the harm has been re-checked
+    (#13), and an effect derived from an aggregate has shown the distribution under it (#12).
 
     Admission itself is enforced at REGISTRATION, the way a pin's --expect must already hold: a
     control that is not green when it is recorded is a check nobody believes later. So by the time a
@@ -1724,6 +2002,10 @@ def admit_metric(s, name, recheck):
             "A snapshot answers 'since process start', which is almost never the question. Read it\n"
             "around the thing you actually did, and cite that:\n"
             f"  game_loop measure --instrument {name} --before <n> --after <n>")
+    # The shape is checked BEFORE the movement, because a delta that is really one event has no
+    # movement worth re-checking: "43% smaller" off a dominated total describes the outlier, not the
+    # metric, and asking what it stands for would be answering the wrong question carefully.
+    dist = admit_distribution(inst, rs[-1], aggregate, exclude, because)
     mv = metric_movement(inst)
     # A re-check is counted against the readings it was made at, so it answers for THIS movement
     # only: the next reading that moves the number demands a fresh one. That is the difference
@@ -1743,7 +2025,7 @@ def admit_metric(s, name, recheck):
             "survived:\n"
             f'  game_loop claim --assert ".." --metric {name} --recheck "what would a user notice, '
             'and did you measure THAT or something correlated with it?"')
-    return inst, rs[-1], mv
+    return inst, rs[-1], mv, dist
 
 
 def instruments_report(s):
@@ -1768,6 +2050,16 @@ def instruments_report(s):
             last = rs[-1]
             lines.append(f"      readings  : {len(rs)} · latest {_num(last['before'])} → "
                          f"{_num(last['after'])} (Δ {_num(last['delta'])})")
+            # The shape has to outlive the context that read it for the same reason the harm does:
+            # the incident's outlier was already known and dismissed, and got rediscovered anyway.
+            if (ev := last.get("events")):
+                dom = dominance(ev)
+                lines.append(f"      shape     : {len(ev)} events" + (
+                    f" · event {dom['event']} carries {dom['pct']:.1f}%" if dom
+                    else " · every one of them zero"))
+            if (ex := last.get("excluded")):
+                lines.append(f"      excluded  : event {ex['event']} ({_num(ex['value'])}) — "
+                             f"{ex['reason']}")
         else:
             lines.append("      readings  : none yet — game_loop measure --instrument "
                          f"{i.get('name')} --before <n> --after <n>")
@@ -1895,6 +2187,11 @@ def cmd_measure(s, a):
     regime the process spent its wall clock in — usually idle, for anything being interactively
     driven. It also has the side benefit the issue names: the measurement becomes reproducible by
     anyone reading the log later, because both endpoints are in it.
+
+    `--events` attaches the SHAPE of that delta — the per-event values it is the total of. It is
+    optional here and refuses nothing, because `measure` records what was read; the refusal belongs
+    to `claim`, which is where an effect gets stated. What this command does do is PRINT the shape,
+    since printing the per-event values is the entire thing nobody did in the incident.
     """
     if not a.instrument:
         die("measure needs --instrument <name> --before <n> --after <n>.")
@@ -1910,8 +2207,10 @@ def cmd_measure(s, a):
             f"  game_loop measure --instrument {a.instrument} --before <n> --after <n>")
     b = parse_number("--before", a.before)
     af = parse_number("--after", a.after)
+    events = parse_events(a.events) if a.events else None
+    dom = dominance(events) if events else None
     reading = {"before": _scalar(b), "after": _scalar(af), "delta": _scalar(af - b),
-               "notes": a.notes, "at": now()}
+               "events": events, "notes": a.notes, "at": now()}
     insts = list(s.get("instruments") or [])   # copy: never mutate the module-level DEFAULT_STATE
     inst = dict(inst, readings=[*(inst.get("readings") or []), reading])
     insts[[i.get("name") for i in insts].index(inst["name"])] = inst
@@ -1919,13 +2218,27 @@ def cmd_measure(s, a):
     save(s)
     logline({"kind": "measure", "instrument": inst["name"], "measures": inst.get("measures"),
              "before": reading["before"], "after": reading["after"], "delta": reading["delta"],
-             "notes": a.notes})
+             "events": events, "dominance": dom, "notes": a.notes})
     msg = [f"✓ READING recorded [{inst['name']}] — a delta scoped to the interaction, not a total.",
            f"  before  : {_num(reading['before'])}",
            f"  after   : {_num(reading['after'])}",
            f"  Δ {_num(reading['delta'])}   ← computed here, from your two endpoints"]
     if a.notes:
         msg.append(f"  over    : {a.notes}")
+    if events:
+        msg.append(f"  events  : {len(events)} — {events_preview(events)}")
+        if dom is None:
+            msg.append("  shape   : every event read zero — no event carries this total")
+        else:
+            msg.append(f"  shape   : event {dom['event']} carries {dom['pct']:.1f}% of "
+                       f"{_num(dom['total'])}   ← computed here, never taken from you")
+        if dom and dom["share"] > DOMINANCE_SHARE:
+            rest = without_event(events, dom["event"])
+            msg.append(f"⚠ ONE EVENT CARRIES {dom['pct']:.1f}% OF THIS TOTAL. Without event "
+                       f"{dom['event']}: {_num(rest['total'])} across {rest['n']} events "
+                       f"({rest['per_event']:.1f} per event, {rest['nonzero']} non-zero).\n"
+                       "  A claim from this total is refused until that event is explained, or "
+                       "excluded WITH a reason.")
     mv = metric_movement(inst)
     if mv:
         msg.append(f"⚠ the metric MOVED {mv['pct']:.1f}% since its first reading here. Before citing "
@@ -3073,6 +3386,12 @@ def main():
                     help="a member you probed — a --scope claim needs TWO, on DIFFERENT members")
     cl.add_argument("--metric", help="admitted instrument whose READING backs it (not a document)")
     cl.add_argument("--recheck", help="for a metric that MOVED: what a user would notice now")
+    cl.add_argument("--aggregate", help="this effect was DERIVED by collapsing events: sum · mean · "
+                                        "pct — needs the reading's per-event --events")
+    cl.add_argument("--exclude", metavar="EVENT#",
+                    help="drop the dominating event the refusal NAMED from the total (needs --because)")
+    cl.add_argument("--because", help="for --exclude: WHY that event does not belong — recorded, so "
+                                      "the artifact is not rediscovered")
 
     n = sub.add_parser("note")
     n.add_argument("--text")
@@ -3168,6 +3487,8 @@ def main():
     ms.add_argument("--instrument", help="the admitted instrument being read")
     ms.add_argument("--before", help="the reading BEFORE the interaction")
     ms.add_argument("--after", help="the reading AFTER it")
+    ms.add_argument("--events", help="the per-event values this delta is the total of — a sum is not "
+                                     "a distribution, and only these show its shape")
     ms.add_argument("--notes", help="what the interaction was (this is what the delta is scoped to)")
 
     nf = sub.add_parser("notify")  # page the configured Slack channel by hand

@@ -380,11 +380,13 @@ fail quietly: it *manufactures* findings.
 game_loop instrument --register underruns --measures "dropouts the listener hears" \
                      --connects "an underrun empties the buffer, and an empty buffer is silence" \
                      --null 0,0 --positive 0,12
-game_loop measure --instrument underruns --before 40 --after 290 --notes "thirty trials"
-game_loop claim --assert "the fix cut underruns" --metric underruns [--recheck ".."]
+game_loop measure --instrument underruns --before 40 --after 290 --notes "thirty trials" \
+                  [--events "1024, 0, 0, ... , 42.7"]
+game_loop claim --assert "the fix cut underruns" --metric underruns [--recheck ".."] \
+                [--aggregate sum|mean|pct] [--exclude <event#> --because ".."]
 ```
 
-Three refusals, each from a logged failure:
+Four refusals, each from a logged failure:
 
 - **A reading is a delta scoped to the interaction, never a lifetime total.** `measure` takes two
   endpoints and does the subtraction; one absolute value is refused. A snapshot once reported 90% of
@@ -407,9 +409,31 @@ Three refusals, each from a logged failure:
   at registration and re-shown by every `status`, and when the number **moves**, `claim --metric`
   refuses until the connection is re-checked for *this* regime. The re-check is counted against the
   readings it was made at, so the next movement demands a fresh one.
+- **A sum is not a distribution.** An aggregate hides its own shape, and a run optimizing against one
+  reads structure into a single outlier. `1066.7` units of damage against `0.0` looked like a total
+  elimination and was written up as a finding; one event of thirty carried **96%** of it, and that
+  event was the first after a known state transition — an artifact already identified and dismissed
+  *earlier in the same session*. Excluding it: 1.5 per event against 0, no effect at that sample size.
+  Nothing about the totals revealed this, and the same event produced three findings before anyone
+  printed the breakdown. So `measure --events` attaches the per-event values to the reading they
+  decompose, and `claim --metric --aggregate sum|mean|pct` refuses when the reading has no shape, or
+  when one event carries more than **half** the total. The escape is one named event plus a stated
+  reason — `--exclude 1 --because ".."` — and both go on the record, because an unrecorded exclusion
+  is what gets rediscovered. Half is deliberately generous: a threshold that fires on ordinary skew
+  gets switched off, and a guard disabled once is disabled forever (INV5). One exclusion, then the
+  gate is done — re-judging the remainder would refuse forever, since dropping that outlier leaves 29
+  zeros and one non-zero event. What remains is *printed* instead: `42.7 across 29 events — 1.5 per
+  event, 1 non-zero`, the sentence the incident never wrote.
 
-Where a gate needs a computation, **the tool computes it** — deltas and the movement percentage are
-never asked of the caller. Arithmetic in the harness is a defect generator.
+Where a gate needs a computation, **the tool computes it** — deltas, the movement percentage and the
+dominance share are never asked of the caller. Arithmetic in the harness is a defect generator, and the
+author of the sibling issue that says so got a conversion wrong on the very next run.
+
+The distribution attaches to the **reading**, not to the claim: the per-event values are the
+decomposition of *that* delta and of no other, and a breakdown supplied at claim time could have come
+off a different measurement entirely. The **refusal** lives on the claim, because the claim is where an
+effect gets stated, and stating the effect is what the incident got wrong. `measure` records and prints;
+`claim` is where a reading has to earn a sentence.
 
 Instruments are **per-session state**, like pins and deliberately unlike the ruled-out list: a
 refutation is durable knowledge about the checkout, but a control is a *measurement taken in one run's
@@ -419,7 +443,12 @@ readings themselves go to the shared log, where they stay reproducible.
 What this **misses**, printed by the guard itself: it cannot tell whether the *right* metric was
 chosen. Every control says the chosen number is *controlled* — none can say it is the number that
 matters, and the counter above was structurally blind to a second fault mechanism, so the whole
-investigation searched one way.
+investigation searched one way. The shape check misses more still: it holds you to *reading* the
+distribution before stating an effect, never to being right about one. Sample size, variance and
+whether the events are independent stay yours, and a perfectly flat distribution can be perfectly flat
+noise. `--aggregate` is also a **declaration** — a run that never says its number came off a total is
+only nudged, the same way a set-shaped claim filed as an instance is only nudged, because enforcement
+that depends on reading English is not enforcement (INV1).
 
 ### fixes — `game_loop fix`
 

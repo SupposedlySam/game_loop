@@ -1158,6 +1158,96 @@ def main():
         # evidence, it must not touch the document path that INV2 rests on.
         check("the document path is unchanged — --read alone still sources a claim",
               gl(proj, "claim", "--assert", "y", "--read", real).returncode == 0)
+
+        # #21: the commit gate asks whether a change was VERIFIED. It never asked whether it was
+        # INTENDED. A formatter run against a whole directory reformatted a dozen files the session
+        # had never opened, `git add -A` swept them in, and the commit message described five other
+        # ones. So the guard records what THIS session wrote through Write/Edit and, at commit, names
+        # the staged excess — stated, never blocked.
+        # Own sandbox: a real git repo with an EMPTY verify.yaml, so the owed-checks gate cannot deny
+        # and swallow the warning under test. Every "stays quiet" check below also asserts something
+        # POSITIVE (the recorded set, or a sibling case that does fire) — a bare absence would pass
+        # against code that never implemented the check at all.
+        print("write guard (commit blast radius):")
+        br = make_sandbox()
+        try:
+            with open(os.path.join(br, ".game_loop", "verify.yaml"), "w") as f:
+                f.write("")
+            edited_f = os.path.join(br, ".game_loop", "sessions", "sess-blast", "edited.txt")
+
+            def brgit(*args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       *args], cwd=br, capture_output=True, text=True)
+
+            def brwrite(rel):
+                p = os.path.join(br, rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(rel + "\n")
+
+            def bredit(rel, sid="sess-blast"):
+                """The REAL guard on a real Write — the only thing that records a session edit."""
+                return guard(br, {"tool_name": "Write", "session_id": sid,
+                                  "tool_input": {"file_path": os.path.join(br, rel)}}, sid=sid)
+
+            def brcommit(sid="sess-blast"):
+                return guard(br, {"tool_name": "Bash", "session_id": sid, "cwd": br,
+                                  "tool_input": {"command": "git commit -m x"}}, sid=sid)
+
+            brgit("init", "-q")
+            brwrite("README.md")
+            brgit("add", "-A")
+            brgit("commit", "-q", "-m", "init")
+            for rel in ("lib/parser.dart", "lib/lexer.dart"):
+                brwrite(rel)
+                bredit(rel)
+            brgit("add", "--", "lib/parser.dart", "lib/lexer.dart")
+            r = brcommit()
+            recorded = open(edited_f).read().split() if os.path.exists(edited_f) else []
+            check("a Write inside the repo is recorded as this session's work",
+                  set(recorded) == {"lib/parser.dart", "lib/lexer.dart"})
+            check("a commit staging only session-edited files stays quiet",
+                  not denied(r) and "NEVER EDITED" not in r.stdout and recorded)
+
+            # the reported incident: a directory-wide formatter, then `git add -A`
+            for i in range(12):
+                brwrite(f"lib/untouched_{i}.dart")
+            brgit("add", "-A")
+            r = brcommit()
+            check("a commit staging untouched files names them, and says how many",
+                  "COMMIT INCLUDES 12 FILES THIS SESSION NEVER EDITED" in r.stdout
+                  and "lib/untouched_0.dart" in r.stdout and "more" in r.stdout)
+            check("the blast-radius warning never blocks the commit",
+                  "NEVER EDITED" in r.stdout and not denied(r) and r.returncode == 0)
+            check("the warning states what its edited set cannot see (INV6)",
+                  "NEVER EDITED" in r.stdout and "Bash" in r.stdout
+                  and "silence here is not evidence" in r.stdout.lower())
+            rb = brcommit(sid="sess-blast-other")
+            check("a session with no recorded edits accuses nobody (no evidence, no noise)",
+                  "NEVER EDITED" in r.stdout and "NEVER EDITED" not in rb.stdout)
+
+            # generated and vendored output is somebody else's: exempt, or the warning cries wolf on
+            # every lockfile and stops being read. One plain untouched file rides along, so this
+            # asserts a live check that skipped the right paths — not a silent one.
+            for i in range(12):
+                os.remove(os.path.join(br, f"lib/untouched_{i}.dart"))
+            brgit("reset", "-q")
+            for rel in ("vendor/dep/lib.js", "node_modules/pkg/index.js", "pubspec.lock",
+                        "lib/model.g.dart", "lib/swept_in.dart"):
+                brwrite(rel)
+            brgit("add", "-A")
+            r = brcommit()
+            check("generated and vendored paths do not trigger the warning",
+                  "COMMIT INCLUDES 1 FILE THIS SESSION NEVER EDITED" in r.stdout
+                  and "lib/swept_in.dart" in r.stdout
+                  and "vendor/dep/lib.js" not in r.stdout and "pubspec.lock" not in r.stdout
+                  and "model.g.dart" not in r.stdout)
+            brlog_f = os.path.join(br, ".game_loop", "log.jsonl")
+            brlog = open(brlog_f).read() if os.path.exists(brlog_f) else ""
+            check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)
+        finally:
+            shutil.rmtree(br, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

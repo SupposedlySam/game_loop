@@ -100,6 +100,7 @@ DEFAULT_CONFIG = {
     "read_roots": [],          # extra dirs where `claim --read` may resolve a path
     "allow_write_roots": [],   # extra dirs the write guard permits (beyond the repo + scratchpad)
     "deploy_verbs": [],        # extra irreversible verbs the guard blocks anywhere
+    "generated_globs": [],     # extra generated/vendored paths the commit blast-radius warning skips
     "trans_nudge_every": 12,   # phase transitions between retro nudges
     "watchdog": {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3},
     # Usage-limit survival (statusline tap + limitgate + watchdog park). threshold_pct is where the

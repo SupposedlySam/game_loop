@@ -905,7 +905,7 @@ def _stop_verdict(s, payload):
     text, why_not = _last_assistant_text(payload)
     asking = _asked_the_user(text)
 
-    if armed:
+    if armed and not armed.get("spent"):
         return True, "T3 armed — spending it now", {
             "kind": "t3_spend", "question": armed.get("question"),
             "read": armed.get("read"), "predict": armed.get("predict")}
@@ -1000,8 +1000,16 @@ def cmd_stopgate(s, a, payload):
     if rec:
         logline(rec)
     if allow:
-        if s.get("t3_armed"):
-            s["t3_armed"] = None            # CONSUME: one arm == one interruption
+        if s.get("t3_armed") and not s["t3_armed"].get("spent"):
+            # CONSUME: one arm == one interruption. A Slack-paged arm keeps its thread ts alive —
+            # marked spent, not nulled — so the watchdog can still poll the human's reply back into
+            # the run (poll_slack_replies reads t3_armed.slack_ts). `spent` stops the SAME arm from
+            # re-opening the gate on a later turn-end, so the one-interruption invariant still holds.
+            # A plain arm (no slack_ts) is nulled outright, exactly as before.
+            if s["t3_armed"].get("slack_ts"):
+                s["t3_armed"]["spent"] = True
+            else:
+                s["t3_armed"] = None
             s["t3_spend_count"] = s.get("t3_spend_count", 0) + 1
         s["stop_ok"] = False                # CONSUME: one checkpoint == one turn-end
         s["stop_ok_notes"] = None

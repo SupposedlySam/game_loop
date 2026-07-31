@@ -386,6 +386,23 @@ def main():
               any("prod or staging?" in json.dumps(b) for _, b in FakeSlack.posts)
               and (slk_state.get("t3_armed") or {}).get("slack_ts") == "111.222")
 
+        # The turn-end that ASKS the question runs through the stop gate FIRST. It must not destroy the
+        # arm's thread ts, or the watchdog below finds nothing to poll (the real-world bug: reply never
+        # forwarded). A Slack-paged arm survives as `spent`; a spent arm no longer re-opens the gate.
+        print("a slack-paged arm survives the stop gate (so the reply can still come back):")
+        r = gl(proj, "stopgate",
+               stdin=json.dumps({"last_assistant_message": "prod or staging — which one?"}),
+               sid="sess-slk")
+        with open(os.path.join(proj, ".game_loop", "sessions", "sess-slk", "state.json")) as f:
+            slk_state = json.load(f)
+        check("the ask turn-end passes the gate once (exit 0)", r.returncode == 0)
+        check("a slack-paged arm survives the gate (kept spent, ts intact) for the watchdog to poll",
+              (slk_state.get("t3_armed") or {}).get("slack_ts") == "111.222"
+              and (slk_state.get("t3_armed") or {}).get("spent") is True)
+        r = gl(proj, "stopgate",
+               stdin=json.dumps({"last_assistant_message": "and which region?"}), sid="sess-slk")
+        check("a spent slack arm does not re-open the gate (one interruption holds)", r.returncode == 2)
+
         print("watchdog forwards a slack reply:")
         FakeSlack.thread_replies = [
             {"ts": "111.222", "text": "parent"},

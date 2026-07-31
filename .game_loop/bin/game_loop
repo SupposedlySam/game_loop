@@ -35,6 +35,7 @@ Every event appends to the shared .game_loop/log.jsonl, stamped with the session
 Configuration lives in .game_loop/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
 """
 import argparse
+import collections
 import datetime
 import json
 import os
@@ -1243,12 +1244,111 @@ def _promised_to_continue(text):
     return any(mk in _closing(text) for mk in _CONTINUE_MARKERS)
 
 
+_TRANSCRIPT_TAIL = 250              # records kept from the end — a tail in LINES, never in bytes
+_TRANSCRIPT_LINE_MAX = 128 * 1024   # a pasted image arrives as ONE base64 line north of 1MB
+_DENIAL_DEPTH_MAX = 12              # how far the field walk descends before it gives up
+
+
+def _denial_kinds(node, depth=0):
+    """Every `toolDenialKind` carried as a FIELD of the decoded record, at any depth.
+
+    Never a text match. That string turns up in a transcript as ordinary DATA — every file the crawl
+    read that mentions it, every doc that documents it, echoed back verbatim — so grepping a session
+    can match it many times with zero real refusals among them. Presence-of-string and
+    presence-of-field are different questions, and only the field is evidence. This is the mirror of
+    the write guard's problem, where quoted command text fakes a redirect: structure tells them
+    apart, string presence never does.
+    """
+    if depth > _DENIAL_DEPTH_MAX:
+        return
+    if isinstance(node, dict):
+        kind = node.get("toolDenialKind")
+        if isinstance(kind, str) and kind.strip():
+            yield kind.strip()
+        for v in node.values():
+            yield from _denial_kinds(v, depth + 1)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _denial_kinds(v, depth + 1)
+
+
+def _scan_transcript(path):
+    """One bounded, fail-soft pass over the live session transcript.
+
+    Returns (tail, stats, why_not). tail is the last `_TRANSCRIPT_TAIL` decoded records; stats is
+    {"lines", "skipped", "oversized", "denials": {kind: n}}; why_not is non-None when the transcript
+    could not be read at all. NOTHING here raises — this runs inside a Stop hook, and a hook that
+    raises takes the session with it.
+
+    The transcript is appended to WHILE it is read, so:
+      * the tail is capped in RECORDS, not bytes. A byte window lets one oversized line starve
+        everything useful out of view — the readout goes blank at exactly the busiest moment;
+      * an oversized line is truncated rather than carried, so a pasted image costs one slot instead
+        of the whole read (and the whole of memory);
+      * the final line is routinely half-written, so every line decodes under try/skip;
+      * what was dropped is COUNTED. Silence from the reader is not evidence the transcript was
+        clean — the drops are stated, not swallowed.
+
+    What it does NOT catch (INV6): a denial or a message older than the record cap is invisible here,
+    and a line that decodes into a well-formed but LYING record is counted as good. This bounds the
+    read and reports its own drops; it does not verify the harness's own bookkeeping.
+    """
+    stats = {"lines": 0, "skipped": 0, "oversized": 0, "denials": {}}
+    if not path or not os.path.isfile(path):
+        return [], stats, f"transcript_path does not exist: {path}"
+    tail = collections.deque(maxlen=_TRANSCRIPT_TAIL)
+    try:
+        # utf-8 explicitly, not the locale's default: a transcript is UTF-8 JSONL wherever it runs,
+        # and errors="replace" means arbitrary unicode in tool output degrades instead of raising.
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                stats["lines"] += 1
+                if len(raw) > _TRANSCRIPT_LINE_MAX:
+                    # An image, near certainly. Truncated it cannot decode, so it lands as one
+                    # counted skip — which is the point: it does not get to push the good records out.
+                    raw = raw[:_TRANSCRIPT_LINE_MAX]
+                    stats["oversized"] += 1
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    stats["skipped"] += 1     # malformed, truncated, or the half-written last line
+                    continue
+                if not isinstance(rec, dict):
+                    stats["skipped"] += 1
+                    continue
+                for kind in _denial_kinds(rec):
+                    stats["denials"][kind] = stats["denials"].get(kind, 0) + 1
+                tail.append(rec)
+    except OSError as e:
+        return list(tail), stats, f"transcript unreadable: {e}"
+    return list(tail), stats, None
+
+
+def _note_transcript_drops(path, stats):
+    """Make the drops observable. A reader that skips a line and says nothing is a reader claiming a
+    clean read it did not have — so the count lands in the shared log, where a later run can find it.
+    """
+    if not (stats["skipped"] or stats["oversized"]):
+        return
+    try:
+        logline({"kind": "transcript_skipped", "transcript_path": path, "lines": stats["lines"],
+                 "skipped": stats["skipped"], "oversized": stats["oversized"]})
+    except OSError:
+        pass  # observability that breaks the gate is worse than the gap it reports
+
+
 def _last_assistant_text(payload):
     """The agent's most recent assistant message.
 
     Claude Code hands `last_assistant_message` over directly on the Stop payload. The transcript
     fallback stays because that field is an undocumented internal that may move, and a gate whose
     input silently vanishes is a gate that silently stops holding.
+
+    The fallback reads through `_scan_transcript`, so it is bounded in records and fails soft per
+    line, and anything it dropped is logged rather than swallowed.
 
     Returns (text, why_not). why_not is non-None when we could NOT check — surfaced, never swallowed.
     """
@@ -1260,19 +1360,11 @@ def _last_assistant_text(payload):
         return None, "no last_assistant_message and no transcript_path in the Stop payload"
     if not os.path.isfile(transcript_path):
         return None, f"transcript_path does not exist: {transcript_path}"
-    try:
-        with open(transcript_path) as f:
-            lines = f.readlines()
-    except OSError as e:
-        return None, f"transcript unreadable: {e}"
-    for line in reversed(lines):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    tail, stats, why_not = _scan_transcript(transcript_path)
+    _note_transcript_drops(transcript_path, stats)
+    if why_not:
+        return None, why_not
+    for rec in reversed(tail):
         if rec.get("type") != "assistant":
             continue
         content = (rec.get("message") or {}).get("content")
@@ -1430,6 +1522,11 @@ def cmd_stopgate(s, a, payload):
             f.write("\n")
     except OSError:
         pass  # a probe that fails must never take the gate down with it
+
+    # Remember where the live transcript is. The gate fires every turn-end, so this is the reliable
+    # way `status` can later count the harness's own tool-denials; the watchdog records the same key.
+    if isinstance(payload.get("transcript_path"), str) and payload["transcript_path"]:
+        s["_tpath"] = payload["transcript_path"]
 
     allow, reason, rec = _stop_verdict(s, payload)
     if rec:
@@ -1698,6 +1795,40 @@ def ruled_out():
     return found
 
 
+def denials_report(s):
+    """The HARNESS's own refusals, as enforcement evidence. Never raises.
+
+    A "gates fired" count is the loop talking about itself — its blocks, its arms, its rings. A
+    `toolDenialKind` in the transcript is something else entirely: the harness actually refusing a
+    tool call. That is the referee firing, and it is the difference between showing enforcement and
+    showing a dashboard. Read as a FIELD of the decoded record (`_denial_kinds`), at any depth, and
+    never by text match — the string itself is all over a normal transcript as data.
+
+    An empty result is the truth, not a blind spot: armed, nothing tripped it. What this does NOT
+    catch (INV6): only the transcript this session's hooks last named is read, so refusals from a
+    session whose transcript has rolled away are invisible, and a refusal the harness records under
+    some other shape is not counted. Zero here means "none in THIS transcript", never "none ever".
+    """
+    tpath = s.get("_tpath")
+    _, stats, why_not = _scan_transcript(tpath)
+    if why_not:
+        return ["denials: no transcript in reach — the harness's own refusals cannot be counted "
+                "(absence of signal, not evidence that none happened)"]
+    d = stats["denials"]
+    if d:
+        total = sum(d.values())
+        lines = [f"denials: the harness refused {total} tool call{'' if total == 1 else 's'} in this "
+                 "transcript — " + ", ".join(f"{k} ×{n}" for k, n in sorted(d.items())),
+                 "  read as a field in the decoded record, never grepped — the string alone is data"]
+    else:
+        lines = ["denials: 0 — armed, nothing tripped it. The harness refused no tool call in this "
+                 "transcript (read as a field, never grepped; 0 here is not proof of safety)"]
+    if stats["skipped"] or stats["oversized"]:
+        lines.append(f"  transcript: {stats['lines']} lines · {stats['skipped']} skipped "
+                     f"· {stats['oversized']} oversized (truncated, not carried)")
+    return lines
+
+
 def _short(p):
     """A repo-relative path when it is under the repo, else the absolute one. Display only."""
     try:
@@ -1760,6 +1891,7 @@ def cmd_status(s, a):
         if len(ro) > RULED_OUT_SHOWN:
             out(f"  … {len(ro) - RULED_OUT_SHOWN} older — grep '\"outcome\": \"refuted\"' "
                 ".game_loop/log.jsonl")
+    out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     snap = load_limits()
     if snap:
         lim = limits_summary(snap) or "snapshot present but empty (API-key auth exposes no limits)"

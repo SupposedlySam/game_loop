@@ -898,6 +898,93 @@ def main():
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
               '"outcome": "refuted"' in log)
+
+        # #24 / #26: the session transcript is a LIVE, adversarial file — appended to while it is
+        # read, so its last line is routinely half-written, and one pasted image lands as a single
+        # base64 line of megabytes. The reader must stay bounded, must fail soft per line, and must
+        # SAY what it dropped. And the harness's own tool-denials must be read as a FIELD of the
+        # decoded record: the string "toolDenialKind" is all over a normal transcript as data.
+        print("transcript reader (bounded, fail-soft, observable — #24):")
+        tr = os.path.join(proj, "live-transcript.jsonl")
+
+        def write_transcript(*records):
+            with open(tr, "w") as f:
+                for rec in records:
+                    f.write(rec if isinstance(rec, str) else json.dumps(rec))
+                    f.write("\n")
+
+        def assistant(text):
+            return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+        def stop_on_transcript(sid):
+            return gl(proj, "stopgate",
+                      stdin=json.dumps({"session_id": sid, "transcript_path": tr}))
+
+        def log_text():
+            with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+                return f.read()
+
+        # A fresh session per case: two consecutive blocks trip the circuit breaker, and these cases
+        # each expect a block.
+        for sid in ("sess-tr-half", "sess-tr-bad", "sess-tr-big"):
+            gl(proj, "mandate", "--set", "read the transcript honestly", sid=sid)
+
+        write_transcript(assistant("Which branch should I use?"),
+                         '{"type":"assistant","message":{"content":[{"type":"tex')
+        r = stop_on_transcript("sess-tr-half")
+        check("a half-written final line still yields the correct earlier record",
+              r.returncode == 2 and "asking the human a question" in r.stderr)
+
+        seen = len(log_text())
+        write_transcript(assistant("Which branch should I use?"), "{ not json at all")
+        r = stop_on_transcript("sess-tr-bad")
+        added = log_text()[seen:]
+        check("a malformed record is skipped, and the skip is observable in the log",
+              r.returncode == 2 and '"kind": "transcript_skipped"' in added
+              and '"skipped": 1' in added)
+
+        seen = len(log_text())
+        write_transcript(assistant("Which branch should I use?"),
+                         {"type": "user", "message": {"content": [
+                             {"type": "image", "source": {"data": "A" * (300 * 1024)}}]}})
+        r = stop_on_transcript("sess-tr-big")
+        added = log_text()[seen:]
+        check("an oversized single line does not dominate the read",
+              r.returncode == 2 and "asking the human a question" in r.stderr
+              and '"oversized": 1' in added)
+        for sid in ("sess-tr-half", "sess-tr-bad", "sess-tr-big"):
+            gl(proj, "mandate", "--clear", "--notes", "done", sid=sid)
+
+        print("harness tool-denials as enforcement evidence (#26):")
+        r = gl(proj, "status", sid="sess-den-none")
+        check("a session with no transcript in reach says so, and does not report zero denials",
+              "no transcript in reach" in r.stdout and "absence of signal" in r.stdout)
+
+        # The word as DATA: an assistant message about the field, and tool output quoting a grep of
+        # it. A text match would call these denials; reading the field calls them what they are.
+        write_transcript(assistant("The harness records a refusal as toolDenialKind in the "
+                                   "transcript — read in docs/how-it-works.md."),
+                         {"type": "user", "message": {"content": [
+                             {"type": "tool_result",
+                              "content": "grep -rn toolDenialKind . -> 15 matches"}]}})
+        stop_on_transcript("sess-den-text")
+        r = gl(proj, "status", sid="sess-den-text")
+        check("a record whose TEXT contains toolDenialKind is NOT counted as a denial",
+              "denials: 0" in r.stdout)
+        check("an empty result reads as armed, nothing tripped it — not a blind spot",
+              "armed, nothing tripped it" in r.stdout and "blind" not in r.stdout)
+
+        # The same word, this time as a FIELD nested three levels down in the record.
+        write_transcript(assistant("Writing the file now."),
+                         {"type": "user", "message": {"content": [
+                             {"type": "tool_result", "toolDenialKind": "deny_rule",
+                              "content": "the write was refused"}]}})
+        stop_on_transcript("sess-den-field")
+        r = gl(proj, "status", sid="sess-den-field")
+        check("a record carrying the FIELD is counted as a denial",
+              "the harness refused 1 tool call" in r.stdout and "deny_rule ×1" in r.stdout)
+        check("the denial readout names how it was read — field, not grep",
+              "read as a field in the decoded record, never grepped" in r.stdout)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

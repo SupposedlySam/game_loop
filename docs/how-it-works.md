@@ -174,6 +174,32 @@ a block** (holding commits back is sometimes right), and a branch with **no upst
 nobody was ever promised that branch. What it misses is stated in the code: uncommitted work, stashes,
 other local branches, and the fact that "pushed" is not "merged".
 
+### The transcript reader — and the harness's own refusals
+
+The Stop gate's fallback input is the live session transcript, which is an adversarial file: it is
+appended to *while it is read*, so its last line is routinely half-written; a pasted image arrives as
+a single base64 line of several megabytes; tool output carries malformed lines and arbitrary unicode.
+So the reader (`_scan_transcript`) tails it in **records, never in bytes** — a byte window lets one
+oversized line starve everything useful out of view, which blanks the readout at exactly the busiest
+moment — truncates an oversized line rather than carrying it, decodes every line under try/skip, and
+**never raises**: a Stop hook that throws takes the session with it. What it dropped is counted and
+logged as `transcript_skipped`, because silence from a reader is not evidence the transcript was clean.
+
+The same pass counts something the loop cannot otherwise know. `🎮 GameLoop has kept the crawl going N
+times` counts the loop's *own* events — its blocks, its rings. Those are the loop talking about itself.
+A `toolDenialKind` in the transcript is the **harness actually refusing a tool call** — the referee
+firing — so `status` surfaces those separately as enforcement evidence rather than a dashboard.
+
+The catch, and it is the whole point: you cannot find them by grepping for `toolDenialKind`. That
+string is all over a normal transcript as ordinary **data** — every file the crawl read that mentions
+it, every doc that documents it, echoed back verbatim; grepping one real session matched it ~15 times
+with zero real refusals among them. So the reader walks the *decoded record* and reads the **field**,
+at any depth, never the text. This is the mirror image of the write guard's problem, where quoted
+command text fakes a redirect: structure tells them apart, string presence never does. An empty result
+prints as **"armed, nothing tripped it"** — the truth. What it misses, stated in the readout and in the
+code: only the transcript this session's hooks last named is read, so a refusal from a session whose
+transcript has rolled away is invisible, and `0` means *none in this transcript*, never *none ever*.
+
 ### The arm → gate → consume primitive
 
 The shape shared by every expensive action. You **arm** one spend, a hook **gates** on it, and using

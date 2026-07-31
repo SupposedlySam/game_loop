@@ -22,3 +22,6 @@ NEXT_SESSION.md
 
 # macOS
 .DS_Store
+
+# showrunner: per-Crawler git worktrees (local only)
+.worktrees/

@@ -135,6 +135,7 @@ DEFAULT_STATE = {
     "pin_seq": 0,      # monotonic id source — a released pin's id is never handed out again
     "effectors": [],   # things that ACT, proved to have acted (before/after pair) — see cmd_effector
     "instruments": [], # metrics admitted as evidence: declared harm + null/positive controls + readings
+    "fixes": [],       # fixes proved by exercising what they PRODUCE — see cmd_fix (a repro is not one)
 }
 
 
@@ -1014,8 +1015,11 @@ def cmd_mandate(s, a):
         out("✓ MANDATE released — the Stop gate is inert again.",
             f"  was  : {m.get('text')}",
             f"  notes: {a.notes or '(none)'}")
-        # The work is being declared done — say whether anyone but this machine can see it.
+        # The work is being declared done — say whether anyone but this machine can see it, and
+        # whether a fix it reports was ever exercised. This is the loudest "shipped" there is.
         if (w := unpushed_warning(a.notes)):
+            out(w)
+        if (w := fix_warning(s, a.notes)):
             out(w)
         flair_out(s, "mandate_clear")
         return
@@ -1065,8 +1069,10 @@ def cmd_checkpoint(s, a):
         f"  {a.notes}",
         "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
     # The handback is where the human forms their picture of what exists; "14 commits that only exist
-    # here" belongs in that picture.
+    # here" belongs in that picture — and so does "the fix in those commits was never exercised".
     if (w := unpushed_warning(a.notes)):
+        out(w)
+    if (w := fix_warning(s, a.notes)):
         out(w)
     flair_out(s, "checkpoint")
 
@@ -1927,6 +1933,285 @@ def cmd_measure(s, a):
     out(*msg)
 
 
+# ── fixes: a verified DIAGNOSIS is not a verified FIX ────────────────────────────────────────────
+#
+# `effector` proves a verb ACTS. This proves a FIX HOLDS — and they are different claims, which is
+# exactly what the observed failure (#27) mistook. A bug was diagnosed exhaustively: the wrong
+# behaviour reproduced, the root cause read at the real source, the mechanism understood. Then a fix
+# was written and shipped as a public PR whose produced code DID NOT COMPILE. Three signals were
+# green and every one answered a question nobody had asked:
+#
+#   · the code generator's own tests compared its output to a FIXTURE — which the fix never touched;
+#   · the analyzer ran on the GENERATOR, not on the code the generator emits;
+#   · the diagnosis's reproduction still reproduced — it was never a test of the fix at all.
+#
+#     EFFORT SPENT VERIFYING THE DIAGNOSIS MANUFACTURES FALSE CONFIDENCE ABOUT THE FIX.
+#
+# A diagnosis is proven by REPRODUCING THE BAD BEHAVIOUR. A fix is proven by EXERCISING WHAT THE FIX
+# PRODUCES against the outcome it promises — compile the generated code, run the patched path, watch
+# the bad behaviour come back good. The cruelty is that the two feel like one thing, and the ratio
+# runs the wrong way: the more thoroughly the diagnosis was verified, the more convincing the
+# unverified fix feels.
+#
+# .game_loop/verify.yaml's header already argues the near half of this — "if a change has an OUTPUT
+# that is not the thing you edited, no verification counts until the output's real consumer has
+# consumed it ... three green signals, all vacuous, none lying." That is a rule about WHAT TO RUN
+# while the work is open. This is the same rule at HANDBACK, where nothing runs any more and all
+# that is left is what the run says it did.
+#
+# THE KEYSTONE is `effector`'s, because the shape is identical — the previously-bad behaviour coming
+# back good IS a before/after pair:
+#
+#     TWO REAL ARTIFACTS, CAPTURED EITHER SIDE OF THE FIX, THAT **THIS TOOL** COMPARES.
+#
+# Plus one refusal that belongs to this verb alone: THE PROOF MAY NOT BE THE REPRO. The diagnosis's
+# artifact is named at proof time so the tool can hand it back — if one artifact can satisfy both
+# claims, the gate is already defeated, because that identity IS the bug. A repro that still
+# reproduces is the diagnosis holding, not the fix.
+#
+# NOT AN EFFECTOR, and deliberately its own small registry rather than a mode on that one: `claim
+# --effector <name>` admits findings on the strength of a verb having acted, and `status` prints
+# "EFFECTORS — proved to actually act. A finding may lean on these and no others". A fix proof
+# filed there would make both of those sentences false. The MACHINERY is shared (resolve_read,
+# _digest, _scan_text, the same UNCHECKED-never-✓ posture); the meaning is not.
+
+
+def fix_proof(s, name):
+    return next((f for f in (s.get("fixes") or []) if f.get("name") == name), None)
+
+
+def fix_state(f):
+    """(symbol, note) for one fix proof — can its evidence still be inspected?
+
+    WHAT THIS DOES NOT CATCH, said plainly, and it is `effector_state`'s admission again: a proof is
+    a POINT-IN-TIME fact about the working tree. Nothing here expires one, so a fix proved and then
+    edited over still reads ✓. The age is printed rather than hidden, because the check is
+    CHECKED-rung and the staleness is only VISIBLE-rung.
+    """
+    if resolve_read(f.get("produces") or "") is None:
+        return "✗", f"MISSING — the fix's own output is gone from {f.get('produces')}"
+    for role in ("before", "observed"):
+        real = resolve_read(f.get(role) or "")
+        if real is None:
+            return "✗", f"MISSING — the {role} verdict is gone from {f.get(role)}"
+        if _digest(real) != f.get(role + "_digest"):
+            return "?", (f"unverifiable — the {role} verdict at that path is no longer the one that "
+                         "was compared (overwritten by a later run); the pair is in the log")
+    if not f.get("expect"):
+        return "•", ("holds (UNCHECKED — no --expect, so the pair only proves the verdict MOVED, "
+                     "not that it moved to the promised outcome)")
+    return "✓", f"holds — the verdict moved to what the fix promised ({f['expect']!r} appeared)"
+
+
+def fixes_report(s):
+    """The fixes block for `status` — what a handback is about to call done, and whether it holds."""
+    fixes = s.get("fixes") or []
+    if not fixes:
+        return ['fixes: none proved — `game_loop fix --prove <name> --promises ".." --produces '
+                "<the fix's own output> --diagnosis <the repro> --before <verdict> --observed "
+                "<verdict>` before reporting one done"]
+    lines = ["", "FIXES — proved by exercising what the fix PRODUCES, not by re-running the repro:"]
+    for f in fixes:
+        sym, note = fix_state(f)
+        lines.append(f"  {sym} {f.get('name')} — proved {f.get('at')}")
+        lines.append(f"      promises : {f.get('promises')}")
+        lines.append(f"      produces : {_short(f.get('produces') or '')}")
+        lines.append(f"      verdict  : {_short(f.get('before') or '')} → "
+                     f"{_short(f.get('observed') or '')} ({note})")
+        lines.append(f"      diagnosis: {_short(f.get('diagnosis') or '')} — the repro, kept "
+                     "separate on purpose")
+    lines.append("  → a fix proof is point-in-time: re-prove after the tree moves under it.")
+    return lines
+
+
+def cmd_fix(s, a):
+    """Prove (or list, or release) that a FIX HOLDS, by exercising what the fix produces.
+
+    A proof names the OUTCOME the fix promises, the fix's OWN OUTPUT, the diagnosis's repro, and the
+    real consumer's verdict from either side of the change. The tool compares the verdicts and
+    refuses the repro back. Nothing the caller says about it working is load-bearing; the files are.
+    Same spirit as `pin --expect`, which must already hold at registration, and as `effector`, whose
+    pair the caller never gets to summarize: a proof taken on faith is a proof nobody will believe.
+
+    SESSION-SCOPED, like effector proofs and unlike the RULED-OUT list. A refutation is knowledge
+    about the CHECKOUT; a fix proof is a fact about the working tree AT ONE MOMENT, and the tree
+    moves — a later session inheriting "that is proved" about code it has since rewritten is the
+    original failure in a fresh coat. Every proof still APPENDS to the shared log, with all three
+    digests, so the audit trail stays global even though the admission is not.
+    """
+    fixes = list(s.get("fixes") or [])   # copy: never mutate the module-level DEFAULT_STATE list
+
+    if a.list:
+        if not fixes:
+            out("no fixes proved in this session.")
+            return
+        out(*fixes_report(s)[1:])
+        return
+
+    if a.release:
+        hit = fix_proof(s, a.release)
+        if not hit:
+            die(f"no proved fix named {a.release!r} in this session. `game_loop fix --list` shows "
+                "them.")
+        if not a.notes:
+            die("fix --release needs --notes: say why this proof no longer stands.\n"
+                f"  releasing: {hit['name']} (proved {hit['at']} — promised: {hit['promises']})\n"
+                "A handback stopped warning about this fix because of that proof, so retiring it is "
+                "a stated decision, not a tidy-up.")
+        fixes.remove(hit)
+        s["fixes"] = fixes
+        save(s)
+        logline({"kind": "fix_release", "name": hit["name"], "notes": a.notes})
+        out("✓ FIX PROOF RELEASED — this run no longer claims that fix holds.",
+            f"  was  : {hit['name']} — promised: {hit['promises']}",
+            f"  notes: {a.notes}",
+            "→ re-prove it before reporting the fix done again.")
+        return
+
+    if not a.prove or not a.promises or not a.produces or not a.diagnosis or not a.before \
+            or not a.observed:
+        die("fix --prove needs --promises, --produces, --diagnosis, --before and --observed.\n"
+            "  --prove     : the fix you are about to report as done\n"
+            "  --promises  : the OUTCOME it promises — what someone gets now that they did not\n"
+            "  --produces  : the fix's OWN output — the generated file, the rendered template, the\n"
+            "                patched artifact. NOT the source you edited: a generator's own test\n"
+            "                comparing emitted text to emitted text is the vacuous green signal.\n"
+            "  --diagnosis : the artifact that proved the BUG — the repro. Named here so this tool\n"
+            "                can refuse to take it back as proof of the fix.\n"
+            "  --before    : the REAL consumer's verdict on the unfixed output (the failing compile,\n"
+            "                the wrong render, the bad run)\n"
+            "  --observed  : that SAME consumer's verdict on the fixed output\n"
+            "  --expect    : optional text the fixed verdict brings into being — turns 'the verdict\n"
+            "                moved' into 'it moved to the outcome that was promised'\n"
+            "A diagnosis is proven by reproducing the bad behaviour; a fix is proven by that\n"
+            "behaviour coming back good. Reproducing it once more is the FIRST claim, again.")
+
+    real = {}
+    for role, given in (("produces", a.produces), ("diagnosis", a.diagnosis),
+                        ("before", a.before), ("observed", a.observed)):
+        r = resolve_read(given)
+        if r is None:
+            die(f"--{role} does not resolve to a real, non-empty file: {given}\n"
+                "Name the file on disk. A fix reported from four descriptions of files is the "
+                "report this verb exists to stop.")
+        real[role] = r
+    digest = {role: _digest(p) for role, p in real.items()}
+
+    # The fix's output is not its diagnosis. Naming the repro as the thing the fix emits is the
+    # collapse this verb is named after, arriving one flag early.
+    if real["produces"] == real["diagnosis"]:
+        die("REFUSED — --produces and --diagnosis are the same file.\n"
+            f"  both: {real['produces']}\n"
+            "The repro is what proved the BUG. The fix's output is what has to be exercised now. "
+            "If they are one file, nothing here has been asked the second question.")
+
+    # THE refusal that belongs to this verb. If the diagnosis's repro can stand as proof of the fix,
+    # the gate is defeated — and it is defeated in exactly the way #27 describes, by a run that
+    # verified the diagnosis so thoroughly it stopped noticing the fix was unverified.
+    if real["observed"] == real["diagnosis"] or digest["observed"] == digest["diagnosis"]:
+        die("REFUSED — the observed verdict IS the diagnosis's repro"
+            + (" (byte-identical)." if real["observed"] != real["diagnosis"] else ".") + "\n"
+            f"  diagnosis: {real['diagnosis']}\n"
+            f"  observed : {real['observed']}\n"
+            "That artifact proves the BUG, and it proved it before the fix existed. Handing it back "
+            "here proves the diagnosis a second time — the claim you already had. A fix is proved by "
+            "the previously-bad behaviour COMING BACK GOOD, so --observed must be what the fixed "
+            "artifact does now, produced by the real consumer of the fix's output.")
+
+    if digest["before"] == digest["observed"]:
+        die(f"REFUSED — the before and after verdicts are IDENTICAL ({digest['before']}).\n"
+            f"  before  : {real['before']}\n"
+            f"  observed: {real['observed']}\n"
+            "The consumer says exactly what it said unfixed. That is the shape a repro that STILL "
+            "REPRODUCES arrives in, and it is the failure this verb exists for: the generated code "
+            "still did not compile, and three green checks pointed elsewhere. Before you report the "
+            "fix, check what you exercised — is it the fix's OUTPUT or the source you edited, is it "
+            "the REAL consumer or the generator's own test, was the output regenerated at all?")
+
+    if a.expect:
+        body = {role: _scan_text(real[role]) for role in ("before", "observed")}
+        for role in ("before", "observed"):
+            if body[role] is None:
+                die(f"--expect reads TEXT and the {role} verdict is too large to grep "
+                    f"(> {EFFECTOR_SCAN_MAX >> 20}MB).\n"
+                    "Anchor --expect to the consumer's own output — the compiler's line, the test "
+                    "name, the rendered field. Or drop --expect and take the weaker UNCHECKED proof "
+                    "knowingly.")
+        if a.expect not in body["observed"]:
+            die(f"--expect {a.expect!r} does not appear in the observed verdict.\n"
+                "The verdicts differ, so SOMETHING moved — but not to the outcome you promised. A "
+                "compile that fails differently is not a compile that passes.")
+        if a.expect in body["before"]:
+            die(f"--expect {a.expect!r} was ALREADY in the before verdict.\n"
+                "Then it is not evidence the fix did anything; it is evidence it was already true. "
+                "Name what the FIX brings into being.")
+
+    proof = {"name": a.prove, "promises": a.promises, "produces": real["produces"],
+             "diagnosis": real["diagnosis"], "before": real["before"], "observed": real["observed"],
+             "produces_digest": digest["produces"], "diagnosis_digest": digest["diagnosis"],
+             "before_digest": digest["before"], "observed_digest": digest["observed"],
+             "expect": a.expect, "at": now()}
+    fixes = [f for f in fixes if f.get("name") != a.prove] + [proof]   # a fresh proof supersedes
+    s["fixes"] = fixes
+    save(s)
+    logline({"kind": "fix_proof", **{k: proof[k] for k in
+                                     ("name", "promises", "produces", "diagnosis", "before",
+                                      "observed", "produces_digest", "diagnosis_digest",
+                                      "before_digest", "observed_digest", "expect")}})
+    sym, note = fix_state(proof)
+    out(f"{sym} FIX PROVED — {a.prove} was exercised through what it produces.",
+        f"  promises : {a.promises}",
+        f"  produces : {_short(real['produces'])}  [{digest['produces']}]",
+        f"  before   : {_short(real['before'])}  [{digest['before']}]",
+        f"  observed : {_short(real['observed'])}  [{digest['observed']}]",
+        f"  diagnosis: {_short(real['diagnosis'])}  [{digest['diagnosis']}] — the repro, and NOT "
+        "what proved this",
+        f"  verdict  : {note}",
+        "→ the handback stops warning about an unproved fix while this stands.",
+        "→ WHAT THIS DOES NOT CATCH: that --produces was really regenerated from what you edited; "
+        "that the thing which wrote --observed is the REAL consumer rather than another stand-in for "
+        "it; or that the outcome you promised is the one the reporter wanted. It holds you to a "
+        "moved verdict on the fix's own output — not to the right fix.")
+
+
+# Handback notes that read like a shipped fix. Same posture as _HANDBACK_ESCALATORS and
+# _CATEGORY_TELLS, and for the same reason: a heuristic on prose decides what gets SAID, never what
+# gets refused (INV1 — enforcement that depends on reading English is not enforcement). Deliberately
+# generous: over-firing costs one paragraph, under-firing costs the afternoon somebody spends on top
+# of a fix that never held.
+_FIX_TELLS = re.compile(
+    r"\b(fix(?:ed|es|ing)?|fixup|bug ?fix|hotfix|patch(?:ed|es|ing)?|repair\w*|"
+    r"corrected|root[- ]?caused?|regression|"
+    r"(?:no longer|stopped|doesn't|does not) (?:crash\w*|fail\w*|break\w*|hang\w*))\b", re.I)
+
+
+def fix_warning(s, notes=None):
+    """The handback line for a fix nobody exercised, or None. Logs when it fires, so how often a run
+    reports a fix it never proved is a fact in log.jsonl rather than a hunch (INV4 wants the entry
+    before anyone argues this should become a block — and INV5 says it must not)."""
+    if not notes or not (m := _FIX_TELLS.search(notes)):
+        return None
+    if s.get("fixes"):
+        return None
+    logline({"kind": "fix_unproved", "tell": m.group(0), "notes": notes})
+    return "\n".join([
+        f"⚠ FIX CLAIMED, NOT PROVED — these notes report a fix (\"{m.group(0)}\") and nothing in "
+        "this run has\n  exercised what that fix PRODUCES.",
+        "  A verified diagnosis is not a verified fix: the diagnosis is proven by reproducing the "
+        "bad\n  behaviour, the fix by running the fixed artifact against the outcome it promises. "
+        "The worst\n  version of this shipped a PR whose generated code did not compile, under three "
+        "green checks —\n  a generator test against an unchanged fixture, an analyzer pointed at the "
+        "generator instead of\n  what it generates, and a repro that still reproduced. None of them "
+        "was a test of the fix.",
+        "  Not a block; some fixes are proved elsewhere and some notes just say \"fixed\". If this "
+        "one holds,\n  prove it — or say in the handback where it was proved:",
+        '    game_loop fix --prove <name> --promises ".." --produces <the fix\'s own output> \\',
+        "        --diagnosis <the repro> --before <consumer's verdict, unfixed> "
+        "--observed <verdict, fixed>",
+        "  (Wording only — any rephrasing walks straight past it, and it cannot tell WHICH fix a "
+        "standing\n   proof was for. Silence here is not evidence the fix holds.)"])
+
+
 # ── the Stop gate ────────────────────────────────────────────────────────────────────────────────
 #
 # The gate makes the session stop SAYING the wrong thing at turn-end under a mandate. The watchdog
@@ -2512,6 +2797,10 @@ def cmd_status(s, a):
         "→ before a finding leans on a verb having ACTED (a click, a scroll, a keystroke):",
         '   game_loop effector --prove <name> --known-state ".." --before <capture> --observed '
         "<capture>",
+        "→ before reporting a FIX done (a verified diagnosis is not a verified fix — prove the "
+        "OUTPUT):",
+        '   game_loop fix --prove <name> --promises ".." --produces <the fix\'s own output> '
+        "--diagnosis <the repro> --before <verdict> --observed <verdict>",
         "→ before a NUMBER backs anything (it is a test whose subject is reality — control it first):",
         '   game_loop instrument --register <name> --measures ".." --connects ".." '
         "--null <b,a> --positive <b,a>",
@@ -2521,6 +2810,7 @@ def cmd_status(s, a):
     out(*pins_report(s))   # load-bearing env facts, re-shown every session: this is what survives
     out(*effectors_report(s))   # which verbs are proved to actually act — findings lean only on these
     out(*instruments_report(s))   # the declared harm must outlive the context that declared it
+    out(*fixes_report(s))   # which fixes were exercised through their OWN output — not their repro
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.
@@ -2729,6 +3019,19 @@ def main():
     im.add_argument("--release", metavar="NAME", help="retire an instrument (requires --notes)")
     im.add_argument("--notes", help="why a retired instrument is no longer trusted")
 
+    fx = sub.add_parser("fix")  # prove a FIX HOLDS by exercising what it PRODUCES (a repro is not one)
+    fx.add_argument("--prove", help="the fix you are about to report as done")
+    fx.add_argument("--promises", help="the OUTCOME it promises — what someone gets that they didn't")
+    fx.add_argument("--produces", help="real path to the fix's OWN output, not the source you edited")
+    fx.add_argument("--diagnosis", help="real path to the repro that proved the BUG — refused back "
+                                        "as proof of the fix")
+    fx.add_argument("--before", help="real path to the consumer's verdict on the UNFIXED output")
+    fx.add_argument("--observed", help="real path to that same consumer's verdict on the FIXED one")
+    fx.add_argument("--expect", help="text the fixed verdict brings into being (and the before lacks)")
+    fx.add_argument("--list", action="store_true", help="show this session's proved fixes")
+    fx.add_argument("--release", help="fix name whose proof no longer stands (needs --notes)")
+    fx.add_argument("--notes", help="why a released fix proof no longer stands")
+
     ms = sub.add_parser("measure")  # ONE reading of an instrument: two endpoints, delta computed here
     ms.add_argument("--instrument", help="the admitted instrument being read")
     ms.add_argument("--before", help="the reading BEFORE the interaction")
@@ -2760,7 +3063,7 @@ def main():
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
-     "pin": cmd_pin, "effector": cmd_effector,
+     "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
      "instrument": cmd_instrument, "measure": cmd_measure}[a.cmd](s, a)
 
 

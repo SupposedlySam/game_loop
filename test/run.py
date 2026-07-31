@@ -1248,6 +1248,141 @@ def main():
             check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)
         finally:
             shutil.rmtree(br, ignore_errors=True)
+
+        # #27: the gates above all check that WORK HAPPENED. None of them checks that a FIX WORKS.
+        # A bug was diagnosed exhaustively and the fix shipped as a PR whose generated code did not
+        # compile — under three green signals, every one answering a question nobody asked. So a fix
+        # is owed a proof of its OWN OUTPUT, kept distinct from the diagnosis's repro, and a handback
+        # that reports a fix without one is warned (never blocked — #20's posture, and INV5).
+        # Every rejection below asserts the game_loop die() text, not merely a non-zero exit: an
+        # unimplemented subcommand also exits non-zero, and a test that passes for that reason is a
+        # test that cannot fail.
+        print("fix proofs (a verified diagnosis is not a verified fix, #27):")
+        fxd = os.path.join(proj, "fixwork")
+        os.makedirs(fxd, exist_ok=True)
+
+        def fxfile(name, body):
+            p = os.path.join(fxd, name)
+            with open(p, "w") as f:
+                f.write(body)
+            return p
+
+        # the fix's OWN output (generated code), the repro that proved the bug, and the REAL
+        # consumer's verdict from either side of the change.
+        produces = fxfile("generated_model.dart", "class Model { Model(); }\n")
+        repro = fxfile("repro.txt", "reproduced: Model() throws on a null id\n")
+        repro_copy = fxfile("repro_copy.txt", "reproduced: Model() throws on a null id\n")
+        vbefore = fxfile("compile_before.txt", "generated_model.dart:1:14: error: expected ';'\n")
+        vbefore_again = fxfile("compile_before_again.txt",
+                               "generated_model.dart:1:14: error: expected ';'\n")
+        vafter = fxfile("compile_after.txt",
+                        "generated_model.dart: Built build/app.js — 0 errors\n")
+
+        base = ["fix", "--prove", "null-id", "--promises",
+                "the generated model compiles and accepts a null id"]
+        r = gl(proj, *base, "--produces", produces, "--before", vbefore, "--observed", vafter)
+        check("a fix proof that never names the diagnosis's repro is refused",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--diagnosis" in r.stderr)
+        r = gl(proj, *base, "--diagnosis", repro, "--before", vbefore, "--observed", vafter)
+        check("a fix proof that never names the fix's own output is refused",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--produces" in r.stderr)
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+               "--before", "/no/such/verdict.txt", "--observed", vafter)
+        check("a fix proof whose before verdict does not resolve is refused",
+              r.returncode != 0 and "--before does not resolve" in r.stderr)
+        r = gl(proj, *base, "--produces", "/no/such/generated.dart", "--diagnosis", repro,
+               "--before", vbefore, "--observed", vafter)
+        check("a fix proof whose produced output does not resolve is refused",
+              r.returncode != 0 and "--produces does not resolve" in r.stderr)
+        # naming the repro as the thing the fix emits is the collapse, one flag early.
+        r = gl(proj, *base, "--produces", repro, "--diagnosis", repro,
+               "--before", vbefore, "--observed", vafter)
+        check("naming the repro as the fix's own output is refused",
+              r.returncode != 0 and "--produces and --diagnosis are the same file" in r.stderr)
+        # THE refusal. "the diagnosis's reproduction still reproduced — it was never a test of the
+        # fix." If one artifact can satisfy both claims, the gate is already defeated.
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+               "--before", vbefore, "--observed", repro)
+        check("a proof that is merely the diagnosis repro is refused",
+              r.returncode != 0 and "the observed verdict IS the diagnosis's repro" in r.stderr
+              and "COMING BACK GOOD" in r.stderr)
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+               "--before", vbefore, "--observed", repro_copy)
+        check("a byte-identical COPY of the repro is refused too (a rename is not a proof)",
+              r.returncode != 0 and "byte-identical" in r.stderr)
+        # the consumer re-run after the "fix" and saying exactly what it said before: the incident.
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+               "--before", vbefore, "--observed", vbefore_again)
+        check("an unmoved verdict is refused — the generated code still does not compile",
+              r.returncode != 0 and "IDENTICAL" in r.stderr and "STILL REPRODUCES" in r.stderr)
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+               "--observed", vafter, "--expect", "0 warnings")
+        check("--expect absent from the observed verdict is refused (it moved, but not to the promise)",
+              r.returncode != 0 and "does not appear in the observed verdict" in r.stderr)
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+               "--observed", vafter, "--expect", "generated_model.dart")
+        check("--expect that was ALREADY true before the fix is refused",
+              r.returncode != 0 and "ALREADY in the before verdict" in r.stderr)
+        # the handback warning, before anything is proved.
+        # Each of the three checks below is a DIFFERENTIAL against `warned`, not a bare absence: a
+        # harness that never printed the warning at all would satisfy "stays quiet" and "is
+        # silenced" for free, and a check that passes when the feature is missing is not a check.
+        warned = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        check("a fix reported at a handback with no proof of the fixed artifact is warned about",
+              warned.returncode == 0 and "FIX CLAIMED, NOT PROVED" in warned.stdout
+              and "verified diagnosis is not a verified fix" in warned.stdout)
+        check("the fix warning never blocks the checkpoint",
+              warned.returncode == 0 and "FIX CLAIMED, NOT PROVED" in warned.stdout
+              and "✓ CHECKPOINT" in warned.stdout)
+        check("the fix warning says what it does NOT catch (INV6)",
+              "any rephrasing walks straight past it" in warned.stdout
+              and "not evidence the fix holds" in warned.stdout)
+        r = gl(proj, "checkpoint", "--notes", "still tracing the generator's null handling")
+        check("notes that report no fix stay quiet (no evidence, no noise)",
+              r.returncode == 0 and "FIX CLAIMED" in warned.stdout
+              and "FIX CLAIMED" not in r.stdout)
+        # a real before/after on the fix's own output, and the promise named in --expect.
+        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+               "--observed", vafter, "--expect", "0 errors")
+        check("a real before/after on the fixed artifact's own output is accepted",
+              r.returncode == 0 and "FIX PROVED" in r.stdout
+              and "moved to what the fix promised" in r.stdout)
+        check("an accepted fix proof states what it does NOT catch (INV6)",
+              "DOES NOT CATCH" in r.stdout and "really regenerated" in r.stdout
+              and "not to the right fix" in r.stdout)
+        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        check("a proved fix silences the handback warning (same notes that warned a moment ago)",
+              r.returncode == 0 and "✓ CHECKPOINT" in r.stdout
+              and "FIX CLAIMED" in warned.stdout and "FIX CLAIMED" not in r.stdout)
+        r = gl(proj, "status")
+        check("status carries the fix proof and its promised outcome through compaction",
+              "FIXES" in r.stdout and "accepts a null id" in r.stdout
+              and "the repro, kept separate on purpose" in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            fxlog = f.read()
+        check("the proof is greppable in the log as compared artifacts, not a verdict",
+              '"kind": "fix_proof"' in fxlog and '"before_digest"' in fxlog
+              and '"observed_digest"' in fxlog and '"diagnosis_digest"' in fxlog)
+        check("a fix reported without proof is permanent in the log (INV4 wants the entry)",
+              '"kind": "fix_unproved"' in fxlog)
+        # a fix proof is a fact about THIS tree at ONE moment — it cannot quiet a sibling's handback.
+        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash", sid="sess-fix-b")
+        check("a fix proof does not leak into another session's handback",
+              r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout)
+        r = gl(proj, "fix", "--release", "null-id")
+        check("refuses to retire a fix proof without --notes (a handback went quiet on it)",
+              r.returncode != 0 and "--notes" in r.stderr)
+        r = gl(proj, "fix", "--release", "null-id", "--notes", "the generator was rewritten since")
+        check("releases a fix proof by name",
+              r.returncode == 0 and "FIX PROOF RELEASED" in r.stdout)
+        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        check("after a release, the handback warns about that fix again",
+              r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout)
+        gl(proj, "mandate", "--set", "land the generator fix")
+        r = gl(proj, "mandate", "--clear", "--notes", "shipped — the null-id bug is fixed")
+        check("mandate --clear warns about an unproved fix too (the loudest 'shipped' there is)",
+              r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout
+              and "✓ MANDATE released" in r.stdout)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

@@ -898,6 +898,56 @@ def main():
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
               '"outcome": "refuted"' in log)
+
+        # #22: "only X" / "X is restricted" is a claim about a SET drawn from a sample of one. The
+        # observation is usually right and the SCOPE is the invented part — so a second probe on a
+        # DIFFERENT member is the price of asserting one, and a repeat of the first probe is not it.
+        print("claim scope (a claim about a set costs a second probe, #22):")
+        r = gl(proj, "claim", "--assert", "only the events table refuses deletes", "--read", real,
+               "--scope", "tables you can delete from", "--probe", "events")
+        check("a scope claim with ONE probe is refused",
+              r.returncode != 0 and "needs two --probe values" in r.stderr)
+        r = gl(proj, "claim", "--assert", "only the events table refuses deletes", "--read", real,
+               "--scope", "tables you can delete from", "--probe", "events", "--probe", " Events ")
+        check("two probes on the SAME member is refused (a repeat proves nothing)",
+              r.returncode != 0 and "name the same member" in r.stderr)
+        r = gl(proj, "claim", "--assert", "x", "--read", real, "--probe", "events",
+               "--probe", "orders")
+        check("probes with no category named are refused",
+              r.returncode != 0 and "is not a boundary" in r.stderr)
+        r = gl(proj, "claim", "--assert", "only the events table refuses deletes", "--read", real,
+               "--scope", "tables you can delete from", "--probe", "events", "--probe", "orders")
+        check("two DIFFERENT probes is accepted",
+              r.returncode == 0 and "CLAIM sourced" in r.stdout)
+        check("both probes are handed back, not just the count",
+              "events" in r.stdout and "orders" in r.stdout)
+        check("an admitted scope claim says what it cannot check (INV6)",
+              "CANNOT CHECK" in r.stdout)
+        check("a claim filed WITH a scope is not also nudged about one",
+              r.returncode == 0 and "reads category-shaped" not in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("both probes are recorded, in the log a later session inherits",
+              '"probes": ["events", "orders"]' in log)
+        check("the category they belong to is recorded with them",
+              '"scope": "tables you can delete from"' in log)
+        # The detector is a NUDGE, never a gate: enforcement that depends on reading English is not
+        # enforcement (INV1), and a guard that blocked on a false positive would block its own fix
+        # (INV5). So a set-shaped assertion filed as an instance is admitted — and made loud.
+        r = gl(proj, "claim", "--assert", "deletes are restricted on the events table", "--read", real)
+        check("a category-shaped assertion filed as an instance is FLAGGED, not blocked",
+              r.returncode == 0 and "reads category-shaped" in r.stdout)
+        check("the nudge names the workaround as the tell",
+              "WORKAROUND" in r.stdout)
+        r = gl(proj, "claim", "--assert", "the retry helper sleeps 2s between attempts",
+               "--read", real)
+        check("an ordinary instance claim is untouched — no nudge, nothing owed",
+              r.returncode == 0 and "CLAIM sourced" in r.stdout
+              and "reads category-shaped" not in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("an instance claim records an empty scope, so set claims stay greppable apart",
+              '"scope": null, "probes": []' in log)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

@@ -711,6 +711,45 @@ CLAIM_OUTCOMES = {
 }
 
 
+# ── scope claims ────────────────────────────────────────────────────────────────────────────────
+#
+# "only X", "X is restricted", "X does not support Y" is a claim about a SET, and it is routinely
+# drawn from a sample of one. The observed failure (#22): one table's DELETE returned 500, the run
+# concluded that THAT table was restricted, told the human so, and designed an archive-instead-of-
+# delete scheme around the restriction. Hours later every DELETE on every table returned 500 — the
+# delete path was down everywhere. The observation was correct and the SCOPE was invented, and one
+# request against any other table at the moment of the first failure would have shown it.
+#
+# So a scope claim costs a second probe on a DIFFERENT member of the category. That is the keystone
+# prose cannot satisfy here: not a file this time, but a second data point the first cannot fake.
+
+# Wording that READS category-shaped. A heuristic, and only ever a NUDGE — it never refuses a claim.
+# INV1 is explicit that enforcement must not depend on reading English (rephrase, and any word list
+# loses), and INV5 forbids a guard that blocks its own fix, which a false positive here would be.
+# It earns its place anyway because the run filing the claim is exactly the one that cannot see it
+# is a set claim — so the flag has to be put in front of it while the second probe is still cheap.
+_CATEGORY_TELLS = (
+    r"\bonly\b", r"\ball\b", r"\bevery\b", r"\bany\b", r"\bnever\b", r"\balways\b",
+    r"\bunsupported\b", r"\bcannot\b", r"\bcan't\b",
+    r"\b(?:does|do|did|is|are)\s*n[o']?t\s+(?:support|allow|permit|accept)\w*\b",
+    r"\b(?:is|are|was|were)\s+(?:restricted|protected|forbidden|blocked|disallowed|read-only)\b",
+    r"\bnot\s+(?:allowed|permitted|supported)\b",
+)
+
+
+def category_tell(text):
+    """The wording that makes an assertion read like a claim about a SET, or None.
+
+    A heuristic on prose, deliberately kept out of the enforcement path: it decides what gets said,
+    never what gets refused. What it misses is unbounded — any rephrasing walks straight past it.
+    """
+    low = (text or "").lower()
+    for pat in _CATEGORY_TELLS:
+        if (m := re.search(pat, low)):
+            return m.group(0).strip()
+    return None
+
+
 def cmd_claim(s, a):
     """Record an assertion about external reality, with the source that backs it — and how it landed.
 
@@ -725,6 +764,13 @@ def cmd_claim(s, a):
     wrong. A retraction costs exactly one real path, the same as any other claim: retracting already
     LOOKED like failure while costing what progress costs, and that asymmetry is what taught the
     quiet move-on. `game_loop status` reads the standing RULED-OUT list back out of the shared log.
+
+    SCOPE. A claim about a CATEGORY is not a claim about the instance you observed — "only X", "X is
+    restricted", "X does not support Y" are claims about a SET, and a set is exactly what one
+    observation cannot establish. `--scope "<the category>"` with two `--probe` values on DIFFERENT
+    members is the admission gate for those, and both probes are recorded. The flag is the
+    enforcement; `category_tell()` is only a nudge when a set-shaped assertion is filed as an
+    instance, because enforcement that depends on reading English is not enforcement (INV1).
     """
     outcome = (a.outcome or "resolved").lower()
     if outcome not in CLAIM_OUTCOMES:
@@ -757,9 +803,27 @@ def cmd_claim(s, a):
         die("these --evidence paths don't resolve to a real, non-empty file: " + ", ".join(ev_bad) +
             "\nThe disproving evidence is the point of a retraction — name the real control, log, or "
             "output that killed the claim, not a description of one.")
+    # A scope claim costs a second probe on a DIFFERENT member. One data point can only ever say
+    # "this call failed"; the sentence that gets acted on is "this CLASS of call fails".
+    probes = [p.strip() for p in (a.probe or []) if p.strip()]
+    if probes and not a.scope:
+        die("--probe needs the category it is probing: --scope \"<the set you are claiming about>\".\n"
+            "Two members with no set named is not a boundary, it is two observations.")
+    if a.scope:
+        if len(probes) < 2:
+            die(f"a claim about \"{a.scope}\" needs two --probe values, on DIFFERENT members.\n"
+                "\"only X\" / \"X is restricted\" / \"X does not support Y\" is a claim about a SET,\n"
+                "and it is the first hypothesis that fits one failure — seductive because it explains\n"
+                "the evidence completely while being invented. Probe a second member: one more\n"
+                "request is what turns the guess into a boundary.")
+        members = {" ".join(p.split()).lower() for p in probes}
+        if len(members) < 2:
+            die(f"both --probe values name the same member ({probes[0]}) — a second probe identical\n"
+                f"to the first proves nothing. Probe a DIFFERENT member of \"{a.scope}\": the one that\n"
+                "says whether you found a boundary or the whole path is down.")
     logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
              "outcome": outcome, "evidence": list(ev_resolved.values()),
-             "confidence": a.confidence})
+             "confidence": a.confidence, "scope": a.scope, "probes": probes})
     s["claim_count"] = s.get("claim_count", 0) + 1
     save(s)
     msg = [CLAIM_OUTCOMES[outcome],
@@ -770,6 +834,25 @@ def cmd_claim(s, a):
         msg.append(f"  killed by : {', '.join(ev_paths)}")
     if a.confidence:
         msg.append(f"  confidence: {a.confidence}")
+    if a.scope:
+        msg += [f"  scope     : {a.scope}",
+                f"  probes    : {' · '.join(probes)}",
+                "→ recorded as a boundary rather than a guess.",
+                "  WHAT THIS CANNOT CHECK: that either probe was actually run, or that the second",
+                "  member sits on the other side of the category. It holds you to two members, not",
+                "  to the right two."]
+    elif (tell := category_tell(a.assert_)):
+        # Filed as an instance, but it READS like a claim about a set. Loud, never blocking.
+        msg += [f"⚠ that assertion reads category-shaped (\"{tell}\") but was filed as an instance.",
+                "  A scope hypothesis is the first thing that fits one failure, and one observation",
+                "  is exactly what cannot establish it. If it is a claim about a SET, probe a second",
+                "  member and re-file it:",
+                "    game_loop claim --assert \"..\" --read <path> --scope \"<the category>\" "
+                "--probe <a> --probe <b>",
+                "  The tell that you need this: you start building a WORKAROUND. A workaround is",
+                "  downstream of a scope claim, and the last moment the claim is cheap to check.",
+                "  (Wording only — it cannot tell a set claim from an innocent \"only\", so it never",
+                "   refuses, and any rephrasing walks past it. An instance claim owes nothing here.)"]
     if outcome == "refuted":
         msg.append("→ it now stands in the RULED-OUT list on `game_loop status`, so the next run "
                    "inherits it instead of re-walking it.")
@@ -1744,6 +1827,8 @@ def cmd_status(s, a):
         "",
         "→ before asserting external behavior:",
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
+        '→ if the assertion is about a SET ("only X", "X is restricted"), a second member is the price:',
+        '   game_loop claim --assert ".." --read <path> --scope "<category>" --probe <a> --probe <b>',
         "→ when local state becomes load-bearing (a pinned dep commit, a toolchain, an SDK path):",
         '   game_loop pin --fact ".." --reason ".." --path <real path> [--expect ..] [--restore ..]',
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
@@ -1872,6 +1957,9 @@ def main():
     cl.add_argument("--confidence", help="optional: what would change your mind?")
     cl.add_argument("--outcome", help="how it landed: resolved (default) · refuted · inconclusive")
     cl.add_argument("--evidence", help="real path[,path] that DISPROVED it — required for refuted")
+    cl.add_argument("--scope", help="the CATEGORY an \"only X\" / \"X is restricted\" claim is about")
+    cl.add_argument("--probe", action="append",
+                    help="a member you probed — a --scope claim needs TWO, on DIFFERENT members")
 
     n = sub.add_parser("note")
     n.add_argument("--text")

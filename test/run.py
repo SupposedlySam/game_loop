@@ -1945,6 +1945,131 @@ def main():
                   "UNREADABLE" in r.stdout and "UNKNOWN, not clean" in r.stdout)
         finally:
             shutil.rmtree(cu, ignore_errors=True)
+        # #28: what a change owes, and whether the evidence is newer than the change, are facts
+        # about a TREE — its files, their mtimes, its verified.json. The hook is registered as
+        # "$CLAUDE_PROJECT_DIR"/.game_loop/bin/guard-writes.sh, so it always runs out of the MAIN
+        # checkout, and a commit made in a git worktree was gated on the main checkout's record and
+        # the main checkout's files. Wrong in both directions: finished, independently verified work
+        # was refused because an unrelated tree was mid-something-else; and — the actual defect — a
+        # worktree could commit a gated change while the main record sat green from a run that never
+        # saw those files, defeating the gate's whole premise with evidence about a different tree.
+        # Every guard() call below names the MAIN sandbox as the project, reproducing the live shape
+        # exactly: the hook belongs to the main tree, the commit happens somewhere else.
+        print("write guard (the commit gate follows the tree the commit lands in — #28):")
+        import time as _t
+        wmain = make_sandbox()
+        try:
+            def wgit(cwd, *args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       "-c", "init.defaultBranch=main", *args],
+                                      cwd=cwd, capture_output=True, text=True)
+
+            def wverify(tree):
+                """The REAL verify, run IN a tree — the only thing that makes that tree's record
+                green, and it writes the record beside itself."""
+                return subprocess.run([os.path.join(tree, ".game_loop", "bin", "verify")],
+                                      cwd=tree, capture_output=True, text=True, env=_env())
+
+            def wcommit(cwd, sid=None):
+                return guard(wmain, {"tool_name": "Bash", "cwd": cwd, "session_id": sid or "",
+                                     "tool_input": {"command": "git commit -m x"}}, sid=sid)
+
+            def wwrite(tree, rel, when):
+                """Write a file and PIN its mtime: staleness here is a comparison against a recorded
+                timestamp, and a test that depends on wall-clock ordering is a flaky test."""
+                p = os.path.join(tree, rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(rel + "\n")
+                os.utime(p, (_t.time() + when, _t.time() + when))
+                return p
+
+            # A rule whose command PASSES, so a tree can be made genuinely green. The worktree and
+            # the nested repo are kept out of the main tree's own status, or each tree would owe the
+            # other's files; verified.json is runtime state and must not travel through git.
+            with open(os.path.join(wmain, ".game_loop", "verify.yaml"), "w") as f:
+                f.write('"*.txt":\n  - "true"\n')
+            with open(os.path.join(wmain, ".gitignore"), "w") as f:
+                f.write("wt/\nnested/\n.game_loop/verified.json\n")
+            wgit(wmain, "init", "-q")
+            wgit(wmain, "add", "-A")
+            wgit(wmain, "commit", "-q", "-m", "init")
+            wgit(wmain, "worktree", "add", "-q", "wt", "-b", "wtwork")
+            wt = os.path.join(wmain, "wt")
+            check("the worktree is real, and carries its own runnable .game_loop",
+                  os.access(os.path.join(wt, ".game_loop", "bin", "verify"), os.X_OK)
+                  and os.path.isdir(os.path.join(wt, ".git")) is False)
+
+            # FALSE REFUSAL: worktree verified, main tree mid-something-else. Observed live.
+            wwrite(wt, "work.txt", -5)
+            wverify(wt)
+            wwrite(wmain, "unrelated.txt", +5)
+            r = wcommit(wmain)
+            check("the main tree is genuinely stale, and refuses its own commit (the control)",
+                  denied(r) and "VERIFY REFUSED" in r.stdout and "unrelated.txt" in r.stdout)
+            r = wcommit(wt)
+            check("a verified worktree commit is allowed while the main tree is stale (#28)",
+                  not denied(r))
+
+            # FALSE PASS — the defect. Main green from a run that never saw the worktree's files.
+            os.utime(os.path.join(wmain, "unrelated.txt"), (_t.time() - 5, _t.time() - 5))
+            wverify(wmain)
+            r = wcommit(wmain)
+            check("the main tree passes once its own checks have run (the control)",
+                  not denied(r))
+            wwrite(wt, "late.txt", +5)
+            r = wcommit(wt)
+            check("a STALE worktree commit is refused though the main record is green (#28)",
+                  denied(r) and "VERIFY REFUSED" in r.stdout and "late.txt" in r.stdout)
+            # denied() is asserted again on purpose: without it this reads as satisfied by a commit
+            # that was never refused at all, which is exactly the broken behaviour.
+            check("and the refusal names the worktree's file, not the main tree's",
+                  denied(r) and "unrelated.txt" not in r.stdout)
+
+            # A tree the guard can NAME but cannot CHECK. Borrowing the project's record here would
+            # report confidence about files that record never saw, which is the exact failure above.
+            os.remove(os.path.join(wt, "late.txt"))
+            wverify(wt)
+            nested = os.path.join(wmain, "nested")
+            os.makedirs(nested, exist_ok=True)
+            wgit(nested, "init", "-q")
+            r = wcommit(nested)
+            check("a commit landing in a tree with no game_loop is refused, not borrowed (#28)",
+                  denied(r) and "carries no game_loop" in r.stdout
+                  and "--no-verify" in r.stdout and nested in r.stdout)
+
+            # The edited set stays SESSION-wide — one session is one session however many trees it
+            # works in — but the INDEX it is compared against must be the committing tree's, or the
+            # two sets describe different worlds and every worktree file reads as excess.
+            sid = "sess-wt-blast"
+            guard(wmain, {"tool_name": "Write", "session_id": sid,
+                          "tool_input": {"file_path": os.path.join(wt, "lib", "mine.dart")}},
+                  sid=sid)
+            for rel in ("lib/mine.dart", "lib/swept.dart"):
+                wwrite(wt, rel, -5)
+            wgit(wt, "add", "--", "lib/mine.dart", "lib/swept.dart")
+            r = wcommit(wt, sid=sid)
+            check("the blast-radius warning reads the COMMITTING tree's index (#28)",
+                  not denied(r)
+                  and "COMMIT INCLUDES 1 FILE THIS SESSION NEVER EDITED" in r.stdout
+                  and "swept.dart" in r.stdout and "mine.dart" not in r.stdout)
+            check("the session's edited set is one set, written beside the session's state",
+                  os.path.exists(os.path.join(wmain, ".game_loop", "sessions", sid, "edited.txt")))
+
+            # REGRESSION GUARDS, and they pass in BOTH states by construction — that IS the claim:
+            # resolving the tree changed nothing for a commit in the project itself.
+            wwrite(wmain, "second.txt", +5)
+            r = wcommit(wmain)
+            check("an ordinary in-project commit is still gated on the project's own record",
+                  denied(r) and "VERIFY REFUSED" in r.stdout and "second.txt" in r.stdout)
+            os.utime(os.path.join(wmain, "second.txt"), (_t.time() - 5, _t.time() - 5))
+            wverify(wmain)
+            r = wcommit(wmain)
+            check("and passes again once the project's own checks have run",
+                  not denied(r))
+        finally:
+            shutil.rmtree(wmain, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

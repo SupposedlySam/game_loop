@@ -31,6 +31,15 @@
 #             with no recorded edits at all the check says nothing. It reads the INDEX, so
 #             `git commit -a`, an explicit pathspec, and `--no-verify` all pass it unexamined.
 #             Silence there is not evidence that a commit is tight.
+#   DOES: at `git commit`, check the owed-checks record of the TREE the commit lands in — a git
+#         worktree carries its own .game_loop/ and is gated on that, never on the tree this script
+#         happens to sit in. A commit landing in a tree that has no .game_loop/ is REFUSED rather
+#         than checked against somebody else's record.
+#   DOES NOT: find the tree through a path this script cannot resolve. The target comes from the
+#             same scan as everything else, so a `cd $SOMEVAR` or a path built from a variable
+#             leaves the target reading as the project root, and the project's own record is used.
+#             Nor does it read a commit's tree from git config it never runs: GIT_DIR/GIT_WORK_TREE
+#             in the environment of the command being run are not consulted.
 #   DOES NOT: parse shell grammar. Command substitution, subshells and loops are read as flat text,
 #             and an UNQUOTED redirect target is cut at the first metacharacter — so a real target
 #             whose name literally contains `)`, `;`, `&` or `|` is checked only up to that
@@ -44,6 +53,20 @@
 set -uo pipefail
 payload=$(cat)
 
+# THIS script's .game_loop/ — the project the session was pointed at, since the hook is registered as
+# "$CLAUDE_PROJECT_DIR"/.game_loop/bin/guard-writes.sh. Deliberately SESSION-WIDE, not per git
+# worktree, and the distinction matters once a session works in several trees at once (#28):
+#   SESSION STATE (state.json, and the edited set beside it) stays HERE. An authorization is granted
+#     by a human to a SESSION; `game_loop authorize` writes it wherever the human ran it, and one
+#     granted in the project must be spendable by the same session working in a worktree — splitting
+#     it per tree would silently lose the human's only escape hatch (INV5). The session is one
+#     session however many trees it touches.
+#   log.jsonl stays HERE too. It is the permanent record `status` reads the ruled-out list back
+#     from, and worktrees are deleted when their work merges — a per-tree log would take the history
+#     with it, and fragment the one file that is supposed to outlive every session.
+#   THE COMMIT GATE does NOT stay here. What a change owes, and whether the evidence is newer than
+#     the change, are facts about a TREE — its files, its mtimes, its record. That one is resolved
+#     from the tree the commit targets; see the commit scan below.
 GAMELOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"    # .game_loop/
 REPO="${CLAUDE_PROJECT_DIR:-$(dirname "$GAMELOOP_DIR")}"
 CONFIG_F="$GAMELOOP_DIR/config.json"
@@ -269,17 +292,47 @@ PY
     #    WHOLE body never ran — including edits/deletions chained before the commit — and the natural
     #    retry (just the commit) silently drops them, with a commit message still describing work that
     #    never happened. The denial must therefore name what else was in the command (issue #9).
-    #    First output line: "yes"/"" (a repo-targeting commit is present); each further line: one
-    #    chained non-commit segment, truncated for display.
-    commit_scan=$(REPO_REAL="$REPO_REAL" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
-import json, os, re, shlex, sys
+    #    THE TREE IS PART OF THE ANSWER (issue #28). The hook is registered as
+    #    "$CLAUDE_PROJECT_DIR"/.game_loop/bin/guard-writes.sh, so this script's own location always
+    #    resolves to the MAIN checkout. A commit made in a git WORKTREE was therefore gated on the
+    #    main checkout's verified.json and the main checkout's file mtimes — a different set of files
+    #    in a different state. Wrong in both directions: a freshly verified worktree was refused for
+    #    the main tree's unrelated staleness, and a worktree could commit a gated file while the main
+    #    record sat green from a run that never saw it. The second defeats the gate's whole premise —
+    #    the evidence was about another tree entirely. So the tree is resolved HERE, from the same
+    #    answer the repo-scoping check already computes, and its own .game_loop/ is what gets checked.
+    #    First output line: "yes"/"" (a repo-targeting commit is present); SECOND line: which
+    #    .game_loop/ that commit is answerable to —
+    #      root:<dir>          check this one (the target tree's own record)
+    #      undetermined:<dir>  a tree we can NAME but cannot CHECK -> refuse, saying so
+    #    each further line: one chained non-commit segment, truncated for display.
+    #    Only a tree STRICTLY INSIDE the project moves the answer; the project itself, a project that
+    #    lives inside a larger checkout, and a target git can name no tree for all keep this script's
+    #    own .game_loop — so a repo without worktrees behaves exactly as it always did.
+    commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
+import json, os, re, shlex, subprocess, sys
 payload = json.loads(sys.argv[1])
 cmd = os.environ.get("SCAN_CMD", "")
 repo = os.environ["REPO_REAL"]
 cwd = payload.get("cwd") or repo
 home = os.path.expanduser("~")
 found = False
+target = None
 others = []
+
+
+def tree_of(path):
+    """The git tree a commit made in `path` actually lands in. A worktree is its own tree, holding
+    its own files at its own mtimes — and its own .game_loop/. Empty when git can name no tree."""
+    try:
+        r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True)
+    except OSError:
+        return ""
+    out = r.stdout.strip()
+    return os.path.realpath(out) if r.returncode == 0 and out else ""
+
+
 for seg in re.split(r"&&|\|\||;|\||\n", cmd):
     seg = seg.strip()
     if not seg:
@@ -304,17 +357,56 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
         if os.path.realpath(tgt).startswith(os.path.realpath(repo).rstrip(os.sep) + os.sep) \
                 or os.path.realpath(tgt) == os.path.realpath(repo):
             found = True
+            if target is None:
+                target = tgt          # the tree whose record this commit is answerable to (#28)
             continue
     others.append(seg if len(seg) <= 70 else seg[:67] + "...")
+
+answerable = ""
+if found:
+    own = "root:" + os.environ["GAMELOOP_DIR"]
+    root = os.path.realpath(repo).rstrip(os.sep)
+    top = tree_of(target)
+    if top and top != root and top.startswith(root + os.sep):
+        # A DIFFERENT tree, nested inside the project: a worktree, or a repo of its own. Its files
+        # are the ones being committed, so its record is the only evidence that describes them.
+        gl = os.path.join(top, ".game_loop")
+        answerable = ("root:" + gl if os.path.exists(os.path.join(gl, "bin", "verify"))
+                      else "undetermined:" + top)
+    else:
+        answerable = own
 print("yes" if found else "")
+print(answerable)
 for o in others:
     print(o)
 PY
 )
     commit_here=$(printf '%s\n' "$commit_scan" | head -1)
-    chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +2 | grep -v '^$' || true)
+    commit_root=$(printf '%s\n' "$commit_scan" | sed -n '2p')
+    chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +3 | grep -v '^$' || true)
     if [ "$commit_here" = "yes" ]; then
-      if ! "$GAMELOOP_DIR/bin/verify" --check >/tmp/.game_loop_verify 2>&1; then
+      case "$commit_root" in
+        undetermined:*)
+          deny "BLOCKED: this commit lands in a tree that carries no game_loop, so its owed checks cannot be read.
+
+    the commit's tree:  ${commit_root#undetermined:}
+    the tree these checks describe:  $REPO_REAL
+
+.game_loop/verify.yaml and the record of when each check last ran belong to ONE tree. Checking a
+DIFFERENT tree's record would answer a question about files this commit does not contain — and report
+confidence either way. That is the false green this gate exists to prevent, so it refuses instead (INV6).
+
+Install game_loop in that tree so it carries its own record, commit from the tree the checks describe,
+or commit with --no-verify to skip the gate out loud and on the record."
+          ;;
+      esac
+      GAMELOOP_TARGET="${commit_root#root:}"
+      # The blast-radius check below reads an INDEX; it must read the index of the tree being
+      # committed, or it compares this session's work against staged files from somewhere else.
+      # Unchanged whenever the target resolves to this script's own tree.
+      TARGET_TREE="$REPO_REAL"
+      [ "$GAMELOOP_TARGET" != "$GAMELOOP_DIR" ] && TARGET_TREE="$(dirname "$GAMELOOP_TARGET")"
+      if ! "$GAMELOOP_TARGET/bin/verify" --check >/tmp/.game_loop_verify 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
         # `verify` and `git commit` in ONE call can never pass — the check runs before your verify
         # line does. Run them as two separate calls.
@@ -351,11 +443,14 @@ Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record
       # is that it happens silently, inside a diff nobody re-reads.
       # Silent by design wherever it cannot reason: no recorded edits, no readable index, no git.
       blast_note=$(REPO_REAL="$REPO_REAL" EDITED_F="$EDITED_F" CONFIG_F="$CONFIG_F" \
-                   GAMELOOP_DIR="$GAMELOOP_DIR" SID="$SID" python3 <<'PY'
+                   GAMELOOP_DIR="$GAMELOOP_DIR" TARGET_TREE="$TARGET_TREE" SID="$SID" python3 <<'PY'
 import datetime, json, os, subprocess, sys
 from fnmatch import fnmatch
 
 repo = os.environ["REPO_REAL"]
+# The tree this commit lands in — its index is the blast radius (#28). Equal to the repo itself for
+# every commit outside a worktree, which is the only shape this ever saw before.
+tree = os.environ.get("TARGET_TREE") or repo
 try:
     with open(os.environ["EDITED_F"]) as f:
         edited = set(x.strip() for x in f if x.strip())
@@ -367,7 +462,7 @@ if not edited:
 
 def git(*args):
     try:
-        r = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True)
+        r = subprocess.run(["git", "-C", tree] + list(args), capture_output=True, text=True)
     except OSError:
         return None
     return r.stdout if r.returncode == 0 else None
@@ -406,7 +501,11 @@ for line in staged.splitlines():
     rel = os.path.relpath(os.path.join(top, p), repo)   # git prints from ITS root, which may not be ours
     if rel.startswith(".."):
         continue                                       # staged outside our root: not ours to judge
-    if rel in edited or any(fnmatch(rel, g) for g in EXEMPT):
+    # In a worktree, rel carries the worktree prefix (which is what the edited set records, so the
+    # two still compare) — but the exemptions describe a path INSIDE a tree, so they are matched
+    # against the tree-relative form too. Same list, same answer, for a commit in the repo itself.
+    forms = [rel] if os.path.realpath(tree) == repo else [rel, p]
+    if rel in edited or any(fnmatch(x, g) for x in forms for g in EXEMPT):
         continue
     unedited.append(rel)
 if not unedited:

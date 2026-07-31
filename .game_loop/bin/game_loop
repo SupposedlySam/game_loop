@@ -129,6 +129,8 @@ DEFAULT_STATE = {
     "watchdog_rings_total": 0,
     "stop_gate_blocks_total": 0,
     "flair_fired": [],
+    "pins": [],        # load-bearing environment facts, carried so `status` re-shows them post-compaction
+    "pin_seq": 0,      # monotonic id source — a released pin's id is never handed out again
 }
 
 
@@ -879,6 +881,168 @@ def cmd_authorize(s, a):
         "→ the guard will consume this and log the use. It is permanent in log.jsonl.")
 
 
+# ── environment pins ─────────────────────────────────────────────────────────────────────────────
+#
+# THE FAILURE THIS EXISTS FOR: a run moved a dependency checkout to a non-default commit because the
+# work needed an API only present there. Later, tidying up loose ends, it restored that checkout to
+# its default branch — which silently removed the API, and the next build failed on a symbol that
+# "does not exist". The required commit was written down in exactly one place: a comment inside a CI
+# config. Recovering it meant reading CI config and a reflog.
+#
+# The trap works precisely BECAUSE reverting unexplained local state is good hygiene. The tidying
+# instinct is correct; nothing warns it off. So the fix is not a rule to remember — it is to make the
+# fact VISIBLE with its reason: a pin lives in resume state, `status` re-prints it after every
+# compaction, and releasing one is an explicit, logged act. Reverting it becomes a decision on the
+# record instead of an invisible one.
+#
+# Same keystone as claim/harden/arm: a pin must name something that really exists on disk. An LLM
+# writes a plausible sentence about a pinned commit for free; it cannot conjure a path that resolves.
+
+PIN_PROBE_MAX = 1 << 20   # don't slurp a huge file to re-check --expect; status must stay instant
+
+
+def resolve_env(p):
+    """Resolve a pin's anchor: a real file OR a real directory, as-is or under a read root.
+
+    Deliberately looser than resolve_read() in two ways, because a pin means something different
+    from a citation. A pin's subject is routinely a DIRECTORY — a dependency checkout, an installed
+    SDK — and demanding a file there only pushes you to cite an arbitrary file inside it. And
+    emptiness is not the test: resolve_read() insists on a non-empty file because you claim to have
+    READ it; a pin claims the thing EXISTS. Existence is still the ungameable part, which is the
+    whole reason the anchor is mandatory.
+    """
+    for cand in [p] + [os.path.join(r, p) for r in config().get("read_roots", [])]:
+        cand = os.path.expanduser(cand)
+        if os.path.exists(cand):
+            return os.path.realpath(cand)
+    return None
+
+
+def pin_state(pin):
+    """(symbol, note) for one pin: is its anchor still there, and does --expect still hold?
+
+    WHAT THIS DOES NOT CATCH, said plainly: with no --expect this checks only that the anchor still
+    EXISTS. The failure that prompted all of this — a checkout restored to its default branch —
+    leaves a perfectly real directory behind, so an existence check alone would report a cheerful ✓
+    on a pin that has already been undone. That is why --expect exists, and why its absence prints as
+    "unchecked", never as ✓: a guard that overstates its reach buys false confidence.
+    """
+    real = resolve_env(pin.get("path") or "")
+    if real is None:
+        return "✗", f"MISSING — nothing at {pin.get('path')} any more"
+    exp = pin.get("expect")
+    if not exp:
+        return "•", "present (UNCHECKED — no --expect, so a change inside it is invisible here)"
+    try:
+        if os.path.isdir(real):
+            return "?", "unverifiable — --expect reads a file; this anchor is a directory"
+        if os.path.getsize(real) > PIN_PROBE_MAX:
+            return "?", "unverifiable — anchor too large to probe; anchor a smaller file"
+        with open(real, errors="replace") as f:
+            body = f.read()
+    except OSError as e:
+        return "?", f"unverifiable — {e}"
+    if exp in body:
+        return "✓", f"holds (still contains {exp!r})"
+    return "✗", f"DRIFTED — no longer contains {exp!r}; the pin has been undone"
+
+
+def pins_report(s):
+    """The pins block for `status` — surviving compaction is the entire point of putting it here."""
+    pins = s.get("pins") or []
+    if not pins:
+        return ['pins: none registered — `game_loop pin --fact ".." --reason ".." --path <real path>` '
+                "the moment local state becomes load-bearing"]
+    lines = ["", "PINS — load-bearing environment facts. Do NOT tidy these away:"]
+    for p in pins:
+        sym, note = pin_state(p)
+        lines.append(f"  {sym} [{p.get('id')}] {p.get('fact')}")
+        lines.append(f"      why    : {p.get('reason')}")
+        lines.append(f"      anchor : {p.get('path')} — {note}")
+        if p.get("restore"):
+            lines.append(f"      restore: {p['restore']}")
+    lines.append('  → reverting one is a DECISION: game_loop pin --release <id> --notes ".."')
+    return lines
+
+
+def cmd_pin(s, a):
+    """Register (or list, or release) a load-bearing environment fact, WITH the reason.
+
+    The reason is not paperwork — it is the whole payload. "dep is on abc123" invites a tidy-up;
+    "dep is on abc123 because the merge API does not exist on the default branch" stops one. The
+    anchor is the keystone, and --expect is what turns a displayed pin into a checked one.
+    """
+    pins = list(s.get("pins") or [])   # copy: never mutate the module-level DEFAULT_STATE list
+
+    if a.list:
+        if not pins:
+            out("no pins registered.")
+            return
+        out(*pins_report(s)[1:])
+        return
+
+    if a.release:
+        hit = next((p for p in pins if p.get("id") == a.release), None)
+        if not hit:
+            die(f"no pin with id {a.release!r} in this session. `game_loop pin --list` shows the live "
+                "ones.")
+        if not a.notes:
+            die("pin --release needs --notes: say why this fact is no longer load-bearing.\n"
+                f"  releasing: [{hit['id']}] {hit['fact']}\n"
+                f"  it was kept because: {hit['reason']}\n"
+                "Making the revert a STATED decision is the only job this verb has. An unexplained "
+                "release is the invisible revert all over again.")
+        pins.remove(hit)
+        s["pins"] = pins
+        save(s)
+        logline({"kind": "pin_release", "id": hit["id"], "fact": hit["fact"],
+                 "path": hit.get("path"), "notes": a.notes})
+        out("✓ PIN RELEASED — the revert is on the record.",
+            f"  was  : [{hit['id']}] {hit['fact']}",
+            f"  kept because: {hit['reason']}",
+            f"  notes: {a.notes}",
+            "→ whatever depended on it is now free to be tidied away. That was the decision.")
+        return
+
+    if not a.fact or not a.reason or not a.path:
+        die("pin needs --fact, --reason, and --path <real path>.\n"
+            "  --fact   : the environment fact the build depends on (a pinned commit, a toolchain "
+            "version, an installed SDK)\n"
+            "  --reason : WHY it is load-bearing — what breaks when someone tidies it away\n"
+            "  --path   : the real path the fact lives at (this is the gate)\n"
+            "  --expect : optional text that must stay in that file — turns the pin into a CHECK\n"
+            "  --restore: optional exact command that re-establishes it\n"
+            "A fact with no reason cannot defend itself against a cleanup, and a fact with no path "
+            "is a sentence about the environment rather than a handle on it.")
+    real = resolve_env(a.path)
+    if real is None:
+        die(f"--path does not name anything on disk: {a.path}\n"
+            "Name the checkout, file, or install dir the fact actually lives at (absolute, or "
+            "relative to the repo / a read_root). If it isn't there, the pin is already broken.")
+    pin = {"id": f"p{s.get('pin_seq', 0) + 1}", "fact": a.fact, "reason": a.reason, "path": real,
+           "expect": a.expect, "restore": a.restore, "at": now()}
+    if a.expect:
+        sym, note = pin_state(pin)
+        if sym != "✓":
+            die(f"--expect does not hold right now: {note}\n"
+                "A pin records state you have ALREADY established, so its check must be green at "
+                "registration. A check born red is a check nobody will believe later.")
+    pins.append(pin)
+    s["pins"] = pins
+    s["pin_seq"] = s.get("pin_seq", 0) + 1
+    save(s)
+    logline({"kind": "pin", **{k: pin[k] for k in ("id", "fact", "reason", "path", "expect",
+                                                   "restore")}})
+    out(f"✓ PIN registered [{pin['id']}] — carried in resume state, re-shown by every `status`.",
+        f"  fact   : {pin['fact']}",
+        f"  why    : {pin['reason']}",
+        f"  anchor : {real}" + (f"  (expect {a.expect!r} — CHECKED)" if a.expect else
+                                "  (no --expect — status can only confirm it still exists)"),
+        *([f"  restore: {a.restore}"] if a.restore else []),
+        "→ this is now a visible fact, so reverting it is a decision: "
+        'game_loop pin --release ' + pin["id"] + ' --notes ".."')
+
+
 # ── the Stop gate ────────────────────────────────────────────────────────────────────────────────
 #
 # The gate makes the session stop SAYING the wrong thing at turn-end under a mandate. The watchdog
@@ -1364,8 +1528,11 @@ def cmd_status(s, a):
         "",
         "→ before asserting external behavior:",
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
+        "→ when local state becomes load-bearing (a pinned dep commit, a toolchain, an SDK path):",
+        '   game_loop pin --fact ".." --reason ".." --path <real path> [--expect ..] [--restore ..]',
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
+    out(*pins_report(s))   # load-bearing env facts, re-shown every session: this is what survives
     snap = load_limits()
     if snap:
         lim = limits_summary(snap) or "snapshot present but empty (API-key auth exposes no limits)"
@@ -1512,6 +1679,16 @@ def main():
     cp = sub.add_parser("checkpoint")  # report + hand back, without asking anything
     cp.add_argument("--notes", help="what you did and what happens next")
 
+    pn = sub.add_parser("pin")  # carry a load-bearing environment fact (+ its reason) in resume state
+    pn.add_argument("--fact", help="the environment fact the build depends on")
+    pn.add_argument("--reason", help="why it is load-bearing — what breaks if it's tidied away")
+    pn.add_argument("--path", help="real path the fact lives at (checkout / file / install dir)")
+    pn.add_argument("--expect", help="text that must stay in that file — makes the pin a CHECK")
+    pn.add_argument("--restore", help="the exact command that re-establishes it")
+    pn.add_argument("--list", action="store_true", help="show this session's live pins")
+    pn.add_argument("--release", help="pin id to release (requires --notes)")
+    pn.add_argument("--notes", help="why a released pin is no longer load-bearing")
+
     nf = sub.add_parser("notify")  # page the configured Slack channel by hand
     nf.add_argument("--text", help="the message the run's human should see")
     nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
@@ -1536,7 +1713,8 @@ def main():
     s = load()
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
-     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify}[a.cmd](s, a)
+     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
+     "pin": cmd_pin}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

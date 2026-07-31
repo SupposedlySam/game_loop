@@ -742,6 +742,68 @@ def main():
         finally:
             shutil.rmtree(up, ignore_errors=True)
             shutil.rmtree(remote, ignore_errors=True)
+        # #18: environment state the build depends on is invisible to the harness, so a run cannot
+        # tell a stale leftover from a load-bearing pin — and "revert the unexplained local state" is
+        # normally correct hygiene. A pin carries the fact WITH its reason in resume state, so status
+        # (the compaction-recovery path) shows it and reverting it becomes a visible decision.
+        # Every rejection below asserts the game_loop die() prefix, not merely a non-zero exit: an
+        # unimplemented subcommand also exits non-zero, and a test that passes for that reason is a
+        # test that cannot fail.
+        print("environment pins:")
+        dep = os.path.join(proj, "dep-checkout")
+        os.makedirs(dep, exist_ok=True)
+        head_f = os.path.join(dep, "HEAD")      # stand-in for a checkout's .git/HEAD
+        with open(head_f, "w") as f:
+            f.write("abc123def456\n")
+        pinned = ["pin", "--fact", "dep-checkout is pinned to abc123def456",
+                  "--reason", "the merge API only exists on that commit; default branch lacks it",
+                  "--path", head_f, "--expect", "abc123def456",
+                  "--restore", "git -C dep-checkout checkout abc123def456"]
+        r = gl(proj, *pinned)
+        check("registers a pin anchored to a real path", r.returncode == 0 and "PIN" in r.stdout)
+        r = gl(proj, "status")
+        check("the pin survives into status, with the reason it is load-bearing",
+              "dep-checkout is pinned to abc123def456" in r.stdout
+              and "the merge API only exists on that commit" in r.stdout
+              and "git -C dep-checkout checkout abc123def456" in r.stdout)
+        check("pin --list shows the live pin", "abc123def456" in gl(proj, "pin", "--list").stdout)
+        r = gl(proj, "pin", "--fact", "toolchain is 3.11", "--reason", "the build needs it",
+               "--path", os.path.join(proj, "no-such-checkout"))
+        check("refuses a pin whose --path names nothing on disk",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
+        r = gl(proj, "pin", "--fact", "toolchain is 3.11", "--path", head_f)
+        check("refuses a pin with no --reason (an unexplained pin is the invisible state again)",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
+        r = gl(proj, "pin", "--fact", "dep is at deadbeef", "--reason", "why",
+               "--path", head_f, "--expect", "deadbeef")
+        check("refuses an --expect that does not already hold (a check born red is no check)",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
+        # The reported failure exactly: the anchor still EXISTS after the tidy-up, its content moved.
+        with open(head_f, "w") as f:
+            f.write("ref: refs/heads/main\n")
+        check("status flags a pin whose anchor drifted out from under it",
+              "DRIFTED" in gl(proj, "status").stdout)
+        with open(head_f, "w") as f:
+            f.write("abc123def456\n")
+        # pins are per-session state like everything else — one session's pins never leak into another
+        gl(proj, "pin", "--fact", "sess-pin-A only", "--reason", "A's build needs it",
+           "--path", head_f, sid="sess-pin-a")
+        check("a pin registered in one session does not appear in another's status",
+              "sess-pin-A only" not in gl(proj, "status", sid="sess-pin-b").stdout
+              and "sess-pin-A only" in gl(proj, "status", sid="sess-pin-a").stdout)
+        r = gl(proj, "pin", "--release", "p1")
+        check("refuses to release a pin without --notes (the revert must stay a stated decision)",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
+        r = gl(proj, "pin", "--release", "p1", "--notes", "the API landed on the default branch")
+        check("releases a pin by id", r.returncode == 0 and "RELEASED" in r.stdout)
+        r = gl(proj, "status")   # a bare absence would pass against an unimplemented verb, so this
+        check("a released pin is gone from status",  # asserts the empty-pins line is present too
+              "dep-checkout is pinned to abc123def456" not in r.stdout and "pins: none" in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("both the pin and its release are permanent in the log",
+              '"pin"' in log and '"pin_release"' in log
+              and "the API landed on the default branch" in log)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

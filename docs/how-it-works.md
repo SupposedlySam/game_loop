@@ -421,6 +421,57 @@ chosen. Every control says the chosen number is *controlled* — none can say it
 matters, and the counter above was structurally blind to a second fault mechanism, so the whole
 investigation searched one way.
 
+### fixes — `game_loop fix`
+
+Every gate above checks that **work happened**. None of them checks that a **fix works**. A bug was
+once diagnosed exhaustively — the wrong behaviour reproduced, the root cause read at the real source,
+the mechanism understood — and the fix shipped as a public PR whose produced code **did not compile**.
+Three signals were green and every one answered a question nobody had asked: the code generator's own
+tests compared its output to a **fixture the fix never touched**; the analyzer ran on the **generator**,
+not on the code the generator emits; and the diagnosis's reproduction **still reproduced**, which was
+never a test of the fix at all.
+
+> **Effort spent verifying the diagnosis manufactures false confidence about the fix.**
+
+They are different claims with different success criteria. A diagnosis is proven by **reproducing the
+bad behaviour**; a fix is proven by **exercising what the fix produces** against the outcome it
+promises — compile the generated code, run the patched path, watch the bad behaviour come back good.
+And the ratio runs the wrong way: the more thoroughly the diagnosis was verified, the more convincing
+the unverified fix feels. `verify.yaml`'s header argues the near half of this as a rule about *what to
+run* while the work is open; this is the same rule at **handback**, where nothing runs any more.
+
+```
+game_loop fix --prove null-id --promises "the generated model compiles and accepts a null id" \
+              --produces generated_model.dart --diagnosis repro.txt \
+              --before compile_before.txt --observed compile_after.txt [--expect "0 errors"]
+game_loop fix --list · --release null-id --notes ".."
+```
+
+The keystone is `effector`'s, because the shape is identical — *the previously-bad behaviour coming
+back good is a before/after pair* — so the caller hands over two real artifacts and **the tool**
+compares them. `--before`/`--observed` are the **real consumer's** verdict from either side of the
+change; a pair that is byte-identical is refused, because that is exactly the shape a repro that still
+reproduces arrives in. `--produces` is the fix's **own output**, not the source you edited: naming the
+repro there is refused one flag early. `--expect` separates "the verdict moved" from "it moved to what
+was promised", and its absence prints `UNCHECKED`, never `✓`.
+
+One refusal belongs to this verb alone: **the proof may not be the repro.** The diagnosis's artifact is
+named at proof time so the tool can hand it straight back — by path *or* by digest, so a copy under a
+new name does not launder it. If one artifact can satisfy both claims the gate is already defeated,
+because that identity **is** the bug.
+
+At the two handbacks (`checkpoint`, `mandate --clear`), notes that read like a shipped fix with no
+proof standing get a **warning, never a block** — the same posture and the same spirit as the unpushed
+check: the artifact exists, but the thing that makes it real hasn't happened. Proofs are
+**session-scoped** like effector proofs: the working tree moves, and a later session inheriting "that
+is proved" about code it has since rewritten is the original failure in a fresh coat.
+
+What it **does not catch**, printed by the verb itself: that `--produces` was really regenerated from
+what you edited; that whatever wrote `--observed` is the *real* consumer rather than another stand-in
+for it; or that the outcome you promised is the one the reporter wanted. It holds you to a moved
+verdict on the fix's own output — not to the right fix. The handback tell is wording only: any
+rephrasing walks past it, and it cannot tell *which* fix a standing proof was for.
+
 ---
 
 ## The files

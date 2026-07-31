@@ -36,6 +36,7 @@ Configuration lives in .game_loop/config.json. Nothing here needs any dependency
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -131,6 +132,7 @@ DEFAULT_STATE = {
     "flair_fired": [],
     "pins": [],        # load-bearing environment facts, carried so `status` re-shows them post-compaction
     "pin_seq": 0,      # monotonic id source — a released pin's id is never handed out again
+    "effectors": [],   # things that ACT, proved to have acted (before/after pair) — see cmd_effector
 }
 
 
@@ -736,9 +738,27 @@ def cmd_claim(s, a):
         die("a refuted claim needs --evidence <path[,path]>: the control, log, or output that\n"
             "DISPROVED it. A retraction without its evidence is a deletion — the next session just\n"
             "re-walks the dead path. Name the file that killed it; that is the whole value here.")
+    # A finding that depends on a verb having ACTED is admitted only if that verb has been proved to
+    # act (`effector --prove`). This is the #19 gate at the point of assertion: the four incidents
+    # were all confident, detailed, WRONG findings written from a screen an effector never touched.
+    proof = None
+    if a.effector:
+        proof = effector_proof(s, a.effector)
+        if proof is None:
+            proved = ", ".join(e.get("name", "?") for e in (s.get("effectors") or [])) or "(none)"
+            die(f"this claim leans on the effector {a.effector!r} having acted, and nothing in this "
+                "session proves it did.\n"
+                f"  proved here: {proved}\n"
+                "An effector that fails quietly does not produce zero findings — it produces FALSE "
+                "ones, indistinguishable in tone and detail from real ones. Prove it against a state "
+                "whose response you already know, then claim:\n"
+                '  game_loop effector --prove ' + a.effector + ' --known-state ".." '
+                "--before <capture> --observed <capture>")
     # For a refutation the evidence IS a source you read, so it stands in for --read. Retracting must
-    # cost no more than claiming, or the cheapest move stays "say nothing and move on".
-    read_arg = a.read or (a.evidence if outcome == "refuted" else None)
+    # cost no more than claiming, or the cheapest move stays "say nothing and move on". An effector
+    # proof stands in the same way: its before/after pair are real files, already resolved.
+    read_arg = (a.read or (a.evidence if outcome == "refuted" else None)
+                or (proof["before"] + "," + proof["observed"] if proof else None))
     if not a.assert_ or not read_arg:
         die("claim needs --assert \"<what you're about to tell the human>\" and --read <path[,path]>.\n"
             "The read path is the keystone: name the file you ACTUALLY read, not a memory of it.\n"
@@ -759,7 +779,7 @@ def cmd_claim(s, a):
             "output that killed the claim, not a description of one.")
     logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
              "outcome": outcome, "evidence": list(ev_resolved.values()),
-             "confidence": a.confidence})
+             "confidence": a.confidence, "effector": a.effector})
     s["claim_count"] = s.get("claim_count", 0) + 1
     save(s)
     msg = [CLAIM_OUTCOMES[outcome],
@@ -768,6 +788,9 @@ def cmd_claim(s, a):
            f"  read (T0) : {', '.join(paths)}"]
     if ev_paths:
         msg.append(f"  killed by : {', '.join(ev_paths)}")
+    if proof:
+        msg.append(f"  effector  : {proof['name']} — proved {proof['at']} against: "
+                   f"{proof['known_state']}")
     if a.confidence:
         msg.append(f"  confidence: {a.confidence}")
     if outcome == "refuted":
@@ -1164,6 +1187,286 @@ def cmd_pin(s, a):
         *([f"  restore: {a.restore}"] if a.restore else []),
         "→ this is now a visible fact, so reverting it is a decision: "
         'game_loop pin --release ' + pin["id"] + ' --notes ".."')
+
+
+# ── effectors: things that ACT ───────────────────────────────────────────────────────────────────
+#
+# `pin` and `claim` cover things that ARE and things that were READ. An EFFECTOR is a third kind: a
+# verb the run uses to act on the world — a click, a scroll, a keystroke, a synthetic tap. Nothing
+# here governed those, and an effector that quietly does nothing is worse than a bad measurement:
+#
+#     AN EFFECTOR THAT FAILS QUIETLY DOES NOT PRODUCE ZERO FINDINGS, IT PRODUCES FALSE ONES,
+#     AND THEY ARE INDISTINGUISHABLE IN TONE AND DETAIL FROM REAL ONES.
+#
+# The agent acts, reads the unchanged screen as THE APP'S behaviour, and writes it up. Four of these
+# landed in one session driving a desktop app through synthetic input (the failures this gate is
+# owed, per INV4 — every one of them EXITED ZERO):
+#
+#   1. A verb that was never a verb.       The scroll helper called `cliclick w:` — `w:` is *wait*,
+#                                          not *wheel*. Top-severity finding: "the app cannot scroll
+#                                          at all". The content was simply below the fold.
+#   2. A verb fixed and never wired in.    A real scroller was written; the helper still called the
+#                                          broken one. Fixed, and still live in the tool in use.
+#   3. A verb that needed arithmetic.      Clicks took retina pixels and asked the caller to multiply
+#                                          by 1.73. The author got the conversion wrong on the very
+#                                          next run: the click landed in empty background, the app
+#                                          correctly did nothing — indistinguishable from a dead
+#                                          control. Hence --scale/--aim below: THE TOOL CONVERTS.
+#   4. An environmental one.               The display slept, every screenshot came back solid black,
+#                                          and the macOS lock screen was written up as an application
+#                                          sign-in failure, with a plausible narrative attached.
+#
+# THE KEYSTONE. `claim`'s is "name a real file that resolves" — prose cannot satisfy it. That reaches
+# evidence which is a DOCUMENT. Here the evidence is an ACT, and the equivalent un-fakeable check is:
+#
+#     TWO REAL ARTIFACTS, CAPTURED EITHER SIDE OF THE ACT, THAT **THIS TOOL** COMPARES AND FINDS
+#     DIFFERENT.
+#
+# The caller never asserts that something changed; it hands over the before and the after and the
+# tool does the comparing. That is deliberately the one thing a confident sentence cannot supply —
+# and note what it costs the four failures above: in every one of them the screen genuinely did not
+# change, so every one of them produces a byte-identical pair and is REFUSED. Case 4 refuses loudest:
+# black before, black after.
+#
+# THE EXIT CODE IS NOT THE ASSERTION. There is deliberately no flag anywhere here that accepts a
+# return code, a "succeeded", or a count of commands run. `--exit-code` exists ONLY to be refused by
+# name, because it is the affordance a hurried run reaches for first and an argparse "unrecognized
+# argument" would teach it nothing.
+
+EFFECTOR_SCAN_MAX = 4 << 20   # --expect reads TEXT; don't slurp a 40MB capture to grep it
+
+
+def _digest(path):
+    """Short content digest of a real path, streamed — captures are binary and can be large."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()[:12]
+
+
+def _scan_text(path):
+    """The head of a file as text, for --expect. None when it is too big to be worth grepping."""
+    if os.path.getsize(path) > EFFECTOR_SCAN_MAX:
+        return None
+    with open(path, "rb") as f:
+        return f.read().decode("utf-8", "replace")
+
+
+def effector_proof(s, name):
+    return next((e for e in (s.get("effectors") or []) if e.get("name") == name), None)
+
+
+def effector_state(e):
+    """(symbol, note) for one proof — can its evidence still be inspected?
+
+    WHAT THIS DOES NOT CATCH, said plainly: a proof is a POINT-IN-TIME fact about the environment,
+    and failure 4 above happened MID-RUN. Nothing here expires a proof, so an effector proved while
+    the display was awake still reads ✓ after it sleeps. That is why the age is printed rather than
+    hidden: the check is CHECKED-rung, the staleness is VISIBLE-rung, and pretending otherwise would
+    buy exactly the false confidence this whole verb exists to remove.
+    """
+    for role in ("before", "observed"):
+        real = resolve_read(e.get(role) or "")
+        if real is None:
+            return "✗", f"MISSING — the {role} artifact is gone from {e.get(role)}"
+        if _digest(real) != e.get(role + "_digest"):
+            return "?", (f"unverifiable — the {role} artifact at that path is no longer the one that "
+                         "was compared (overwritten by a later capture); the pair is in the log")
+    if not e.get("expect"):
+        return "•", ("acted (UNCHECKED — no --expect, so the pair only proves SOMETHING changed, "
+                     "not that the asserted thing did)")
+    return "✓", f"acted, and the change was the asserted one ({e['expect']!r} appeared)"
+
+
+def effectors_report(s):
+    """The effectors block for `status` — a proof the run depends on must survive compaction."""
+    effs = s.get("effectors") or []
+    if not effs:
+        return ['effectors: none proved — `game_loop effector --prove <name> --known-state ".." '
+                "--before <path> --observed <path>` before any finding leans on one acting"]
+    lines = ["", "EFFECTORS — proved to actually act. A finding may lean on these and no others:"]
+    for e in effs:
+        sym, note = effector_state(e)
+        lines.append(f"  {sym} {e.get('name')} — proved {e.get('at')}")
+        lines.append(f"      known state: {e.get('known_state')}")
+        lines.append(f"      observed   : {_short(e.get('before') or '')} → "
+                     f"{_short(e.get('observed') or '')} ({note})")
+        if e.get("scale"):
+            lines.append(f"      coordinates: scale {e['scale']} — "
+                         f"`game_loop effector --aim {e.get('name')} --at X,Y` converts. Never "
+                         "multiply by hand.")
+    lines.append("  → a proof is point-in-time: re-prove after the environment could have changed "
+                 "(a display sleeping mid-run is failure 4).")
+    return lines
+
+
+def _aim(s, a):
+    """Convert a point into the effector's own coordinate space, so the CALLER never multiplies.
+
+    Failure 3 is the whole reason this exists: the helper asked its caller to multiply measured
+    coordinates by 1.73, and the person who wrote that instruction got it wrong on the next run. A
+    mis-aimed click lands in empty background, the app correctly does nothing, and that reads as a
+    dead control. ARITHMETIC IN THE HARNESS IS A DEFECT GENERATOR — so the conversion lives here,
+    where it is written once and checked, instead of in a sentence addressed to whoever is driving.
+    """
+    e = effector_proof(s, a.aim)
+    if not e:
+        die(f"no proved effector named {a.aim!r} in this session — nothing to aim.\n"
+            "Prove it first; an unproved effector's coordinates are arithmetic on a guess.")
+    if not e.get("scale"):
+        die(f"effector {a.aim!r} was proved without --scale, so there is no conversion to apply.\n"
+            "If it takes coordinates in the space you measure in, aim with your numbers unchanged. "
+            "If it does not, re-prove it with --scale <factor> and let this verb do the multiplying.")
+    try:
+        x, y = (float(v) for v in (a.at or "").split(","))
+    except (ValueError, TypeError):
+        die("--aim needs --at X,Y (the point as YOU measured it, in your own coordinate space).")
+    scale = float(e["scale"])
+    out(f"✓ AIM converted for {a.aim} — use these numbers verbatim.",
+        f"  measured : {x:g},{y:g}",
+        f"  send     : {round(x * scale)},{round(y * scale)}",
+        f"  scale    : {scale:g} (recorded at proof time; you did not compute this, and that is "
+        "the point)")
+
+
+def cmd_effector(s, a):
+    """Prove (or list, or release, or aim) an effector — a verb the run acts on the world with.
+
+    A proof names a state whose response you ALREADY KNOW — a view you know overflows, a control you
+    know is live, a field you can read back — and hands over the capture from either side of the act.
+    The tool compares them. Nothing the caller says about the outcome is load-bearing; the two files
+    are. Same spirit as `pin --expect`, which must already hold at registration: a proof is recorded
+    only once the change has ALREADY been demonstrated, because a proof taken on faith is a proof
+    nobody will believe later.
+
+    SESSION-SCOPED, on purpose, and unlike the RULED-OUT list. A refutation is knowledge about the
+    CHECKOUT, so it lives in the shared log. An effector proof is the opposite: a perishable fact
+    about THIS run's environment — this display awake, this helper wired to this binary, this app
+    instance. Letting session B admit findings on the strength of a proof session A took against a
+    screen B never saw is the original bug wearing a different hat: findings admitted on the strength
+    of a success that belonged to something else. Every proof still APPENDS to the shared log, with
+    both digests, so the audit trail is global even though the admission is not.
+    """
+    effs = list(s.get("effectors") or [])   # copy: never mutate the module-level DEFAULT_STATE list
+
+    if a.list:
+        if not effs:
+            out("no effectors proved in this session.")
+            return
+        out(*effectors_report(s)[1:])
+        return
+
+    if a.aim:
+        _aim(s, a)
+        return
+
+    if a.release:
+        hit = effector_proof(s, a.release)
+        if not hit:
+            die(f"no proved effector named {a.release!r} in this session. `game_loop effector --list` "
+                "shows them.")
+        if not a.notes:
+            die("effector --release needs --notes: say why this proof no longer stands.\n"
+                f"  releasing: {hit['name']} (proved {hit['at']} against: {hit['known_state']})\n"
+                "Findings that leaned on it were admitted on its strength, so retiring it is a "
+                "stated decision, not a tidy-up.")
+        effs.remove(hit)
+        s["effectors"] = effs
+        save(s)
+        logline({"kind": "effector_release", "name": hit["name"], "notes": a.notes})
+        out("✓ EFFECTOR PROOF RELEASED — no finding may lean on it now.",
+            f"  was  : {hit['name']} — {hit['known_state']}",
+            f"  notes: {a.notes}",
+            "→ re-prove it before the next finding that depends on it acting.")
+        return
+
+    if a.exit_code is not None:
+        die("THE EXIT CODE IS NOT THE ASSERTION. Every effector failure this gate exists for "
+            "returned success:\n"
+            "  · `cliclick w:` — that is WAIT, not wheel. Exit 0, nothing scrolled, and the run's "
+            "top finding was \"the app cannot scroll at all\".\n"
+            "  · a fixed scroller nobody wired in. Exit 0 from the broken one.\n"
+            "  · a click mis-aimed by a hand-done conversion. Exit 0, into empty background.\n"
+            "A return code reports that a COMMAND RAN, never that the WORLD MOVED. Prove it the only "
+            "way that cannot be faked:\n"
+            '  game_loop effector --prove <name> --known-state ".." --before <capture> '
+            "--observed <capture>")
+
+    if not a.prove or not a.known_state or not a.before or not a.observed:
+        die("effector --prove needs --known-state, --before, and --observed.\n"
+            "  --prove       : the verb you are about to depend on (scroll, click, type)\n"
+            "  --known-state : a state whose RESPONSE YOU ALREADY KNOW — a view you know overflows, "
+            "a control you know is live, a field you can read back\n"
+            "  --before      : the capture taken BEFORE you acted\n"
+            "  --observed    : the capture taken AFTER (this is the contract's --observed: the "
+            "change, not the exit code)\n"
+            "  --expect      : optional text that must appear in --observed and NOT in --before — "
+            "turns 'something changed' into 'the asserted thing changed'\n"
+            "  --scale       : optional coordinate factor; `--aim` then converts so you never do\n"
+            "One capture is not a proof: a result with nothing to compare it against is a photograph "
+            "of an assumption. The pair is the whole check, and this tool does the comparing.")
+
+    real = {}
+    for role, given in (("before", a.before), ("observed", a.observed)):
+        r = resolve_read(given)
+        if r is None:
+            die(f"--{role} does not resolve to a real, non-empty file: {given}\n"
+                "Capture the state to a file and name that file. An empty capture is the shape a "
+                "dead screen-grab arrives in, so it is refused here rather than compared.")
+        real[role] = r
+
+    digest = {role: _digest(p) for role, p in real.items()}
+    if digest["before"] == digest["observed"]:
+        die(f"REFUSED — the before and after captures are IDENTICAL ({digest['before']}).\n"
+            f"  before  : {real['before']}\n"
+            f"  observed: {real['observed']}\n"
+            "Whatever ran, the world did not move, and that is exactly the failure this verb exists "
+            "to catch: an unchanged screen read as THE APP'S behaviour and written up as a defect. "
+            "Before you blame the app, check the verb — is it the verb you think it is (`w:` is "
+            "wait, not wheel), is the fixed one actually wired in, is the aim converted, is the "
+            "display even awake?")
+
+    if a.expect:
+        body = {role: _scan_text(p) for role, p in real.items()}
+        for role in ("before", "observed"):
+            if body[role] is None:
+                die(f"--expect reads TEXT and the {role} capture is too large to grep "
+                    f"(> {EFFECTOR_SCAN_MAX >> 20}MB).\n"
+                    "Anchor --expect to a text artifact — a UI dump, an accessibility read-back, the "
+                    "field's own value — not a full-resolution image. Or drop --expect and take the "
+                    "weaker UNCHECKED proof knowingly.")
+        if a.expect not in body["observed"]:
+            die(f"--expect {a.expect!r} does not appear in the observed capture.\n"
+                "The pair differs, so SOMETHING changed — but not the thing you asserted. That gap "
+                "is where a false finding is born.")
+        if a.expect in body["before"]:
+            die(f"--expect {a.expect!r} was ALREADY in the before capture.\n"
+                "Then it is not evidence the act did anything; it is evidence it was already true. "
+                "Name something the act BRINGS INTO BEING.")
+
+    proof = {"name": a.prove, "known_state": a.known_state,
+             "before": real["before"], "observed": real["observed"],
+             "before_digest": digest["before"], "observed_digest": digest["observed"],
+             "expect": a.expect, "scale": a.scale, "at": now()}
+    effs = [e for e in effs if e.get("name") != a.prove] + [proof]   # a fresh proof supersedes
+    s["effectors"] = effs
+    save(s)
+    logline({"kind": "effector_proof", **{k: proof[k] for k in
+                                          ("name", "known_state", "before", "observed",
+                                           "before_digest", "observed_digest", "expect", "scale")}})
+    sym, note = effector_state(proof)
+    out(f"{sym} EFFECTOR PROVED — {a.prove} actually acts. Findings may now lean on it.",
+        f"  known state: {a.known_state}",
+        f"  before     : {_short(real['before'])}  [{digest['before']}]",
+        f"  observed   : {_short(real['observed'])}  [{digest['observed']}]",
+        f"  verdict    : {note}",
+        *([f"  coordinates: scale {a.scale} — `game_loop effector --aim {a.prove} --at X,Y` does the "
+           "conversion. Do not multiply by hand; that is failure 3."] if a.scale else []),
+        '→ cite it: game_loop claim --assert ".." --effector ' + a.prove,
+        "→ WHAT THIS DOES NOT CATCH: that you proved the RIGHT effector, or that it still acts now — "
+        "a proof is point-in-time and the display can sleep after it. Re-prove when the environment "
+        "could have moved.")
 
 
 # ── the Stop gate ────────────────────────────────────────────────────────────────────────────────
@@ -1746,9 +2049,13 @@ def cmd_status(s, a):
         '   game_loop claim --assert ".." --read <real path> [--confidence ..]',
         "→ when local state becomes load-bearing (a pinned dep commit, a toolchain, an SDK path):",
         '   game_loop pin --fact ".." --reason ".." --path <real path> [--expect ..] [--restore ..]',
+        "→ before a finding leans on a verb having ACTED (a click, a scroll, a keystroke):",
+        '   game_loop effector --prove <name> --known-state ".." --before <capture> --observed '
+        "<capture>",
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
     out(*pins_report(s))   # load-bearing env facts, re-shown every session: this is what survives
+    out(*effectors_report(s))   # which verbs are proved to actually act — findings lean only on these
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.
@@ -1872,6 +2179,8 @@ def main():
     cl.add_argument("--confidence", help="optional: what would change your mind?")
     cl.add_argument("--outcome", help="how it landed: resolved (default) · refuted · inconclusive")
     cl.add_argument("--evidence", help="real path[,path] that DISPROVED it — required for refuted")
+    cl.add_argument("--effector", help="a verb this finding depends on having ACTED; refused unless "
+                                       "`effector --prove`d in this session")
 
     n = sub.add_parser("note")
     n.add_argument("--text")
@@ -1923,6 +2232,24 @@ def main():
     pn.add_argument("--release", help="pin id to release (requires --notes)")
     pn.add_argument("--notes", help="why a released pin is no longer load-bearing")
 
+    ef = sub.add_parser("effector")  # prove a verb ACTUALLY ACTS before a finding leans on it
+    ef.add_argument("--prove", help="the effector you are about to depend on (scroll, click, type)")
+    ef.add_argument("--known-state", dest="known_state",
+                    help="a state whose RESPONSE YOU ALREADY KNOW (a view you know overflows)")
+    ef.add_argument("--before", help="real path to the capture taken BEFORE the act")
+    ef.add_argument("--observed", help="real path to the capture taken AFTER — the change, not the "
+                                       "exit code")
+    ef.add_argument("--expect", help="text that must appear in --observed and NOT in --before")
+    ef.add_argument("--scale", help="coordinate factor; --aim then converts so you never multiply")
+    ef.add_argument("--aim", help="effector name: convert a point into ITS coordinate space")
+    ef.add_argument("--at", help="for --aim: X,Y as YOU measured it")
+    ef.add_argument("--list", action="store_true", help="show this session's proved effectors")
+    ef.add_argument("--release", help="effector name whose proof no longer stands (needs --notes)")
+    ef.add_argument("--notes", help="why a released proof no longer stands")
+    # Present ONLY to be refused by name. A hurried run reaches for this first, and argparse's
+    # "unrecognized argument" would teach it nothing about why a return code is not a proof.
+    ef.add_argument("--exit-code", dest="exit_code", help="(refused — see cmd_effector)")
+
     nf = sub.add_parser("notify")  # page the configured Slack channel by hand
     nf.add_argument("--text", help="the message the run's human should see")
     nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
@@ -1948,7 +2275,7 @@ def main():
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
-     "pin": cmd_pin}[a.cmd](s, a)
+     "pin": cmd_pin, "effector": cmd_effector}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

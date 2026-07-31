@@ -898,6 +898,103 @@ def main():
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
               '"outcome": "refuted"' in log)
+
+        # #19: an EFFECTOR is a verb the run ACTS with, and one that fails quietly does not produce
+        # zero findings — it produces FALSE ones, indistinguishable in tone and detail from real
+        # ones. Every incident behind this gate EXITED ZERO, so the gate must be unsatisfiable by a
+        # return code: the keystone is a before/after pair THIS TOOL compares, never an assertion
+        # that something moved.
+        print("effector proofs (a verb that actually acts, #19):")
+        cap = os.path.join(proj, "captures")
+        os.makedirs(cap, exist_ok=True)
+        before = os.path.join(cap, "before.txt")
+        after = os.path.join(cap, "after.txt")
+        unchanged = os.path.join(cap, "unchanged.txt")
+        with open(before, "w") as f:
+            f.write("comps: row1\ncomps: row2\n")
+        with open(unchanged, "w") as f:
+            f.write("comps: row1\ncomps: row2\n")   # byte-identical: `cliclick w:` waited, exit 0
+        with open(after, "w") as f:
+            f.write("comps: row1\ncomps: row2\ncomps: row3 BELOW THE FOLD\n")
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--exit-code", "0")
+        check("a proof backed only by an exit code is refused, by name",
+              r.returncode != 0 and "EXIT CODE IS NOT THE ASSERTION" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--observed", after)
+        check("a result with nothing to compare it against is refused",
+              r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--before" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--before", before, "--observed", after)
+        check("a proof without a known-response state is refused",
+              r.returncode != 0 and "--known-state" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--before", before, "--observed", "/no/such/capture.png")
+        check("a proof whose observed artifact does not resolve is refused",
+              r.returncode != 0 and "--observed does not resolve" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--before", "/no/such/capture.png", "--observed", after)
+        check("a proof whose before artifact does not resolve is refused",
+              r.returncode != 0 and "--before does not resolve" in r.stderr)
+        # THE keystone. This is the `cliclick w:` incident exactly: exit 0, nothing scrolled, and
+        # "the app cannot scroll at all" filed as the run's top-severity finding.
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--before", before, "--observed", unchanged)
+        check("an identical before/after pair is refused — the world did not move",
+              r.returncode != 0 and "IDENTICAL" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--before", before, "--observed", after, "--expect", "row9 NEVER RENDERED")
+        check("--expect absent from the observed capture is refused (something changed, not THAT)",
+              r.returncode != 0 and "does not appear in the observed capture" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+               "--before", before, "--observed", after, "--expect", "comps: row1")
+        check("--expect that was ALREADY true before the act is refused",
+              r.returncode != 0 and "ALREADY in the before capture" in r.stderr)
+        r = gl(proj, "effector", "--prove", "scroll", "--known-state",
+               "the comps list overflows the fold", "--before", before, "--observed", after,
+               "--expect", "row3 BELOW THE FOLD", "--scale", "1.73")
+        check("a proof naming a known-response state and a real observed change is accepted",
+              r.returncode == 0 and "EFFECTOR PROVED" in r.stdout)
+        check("an accepted proof states what it does NOT catch (INV6)",
+              "DOES NOT CATCH" in r.stdout and "point-in-time" in r.stdout)
+        r = gl(proj, "claim", "--assert", "the app cannot scroll at all", "--read", real,
+               "--effector", "click")
+        check("a claim depending on an unproven effector is refused",
+              r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
+        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+               "--effector", "scroll")
+        check("a claim on a proved effector is admitted, its pair standing in for --read",
+              r.returncode == 0 and "effector  : scroll" in r.stdout)
+        # A proof is a perishable fact about THIS run's environment (this display awake, this helper
+        # wired to this binary), so it must not admit a sibling session's findings.
+        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+               "--effector", "scroll", sid="sess-eff-b")
+        check("an effector proof does not leak into another session's admissions",
+              r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
+        # "Arithmetic in the harness is a defect generator": 640x1.73 was the conversion whose
+        # author got it wrong on the very next run, so the tool does it.
+        r = gl(proj, "effector", "--aim", "scroll", "--at", "640,480")
+        check("the tool converts coordinates so the caller never multiplies by hand",
+              r.returncode == 0 and "1107,830" in r.stdout)
+        r = gl(proj, "effector", "--aim", "nosuch", "--at", "1,1")
+        check("aiming an unproven effector is refused (arithmetic on a guess)",
+              r.returncode != 0 and "nothing to aim" in r.stderr)
+        r = gl(proj, "status")
+        check("status carries the proof and its known-response state through compaction",
+              "EFFECTORS" in r.stdout and "the comps list overflows the fold" in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("the proof is greppable in the log as a compared PAIR, not a verdict",
+              '"kind": "effector_proof"' in log and '"before_digest"' in log
+              and '"observed_digest"' in log)
+        r = gl(proj, "effector", "--release", "scroll")
+        check("refuses to retire a proof without --notes (findings were admitted on it)",
+              r.returncode != 0 and "--notes" in r.stderr)
+        r = gl(proj, "effector", "--release", "scroll", "--notes", "the display slept mid-run")
+        check("releases a proof by name", r.returncode == 0 and "RELEASED" in r.stdout)
+        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+               "--effector", "scroll")
+        check("after a release, a claim leaning on that effector is refused again",
+              r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

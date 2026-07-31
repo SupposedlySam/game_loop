@@ -215,6 +215,53 @@ registration, because a check born red is a check nobody believes later. What a 
 stated in the code: with no `--expect` it only proves the anchor still exists, and the failure above
 leaves a perfectly real directory behind — so an unchecked pin prints `UNCHECKED`, never `✓`.
 
+### effectors — `game_loop effector`
+
+`claim` governs things that were **read**; `pin` governs things that **are**. An **effector** is a verb
+the run **acts** with — a click, a scroll, a keystroke — and nothing governed those. An effector that
+fails quietly is worse than a bad measurement: **it does not produce zero findings, it produces false
+ones, and they are indistinguishable in tone and detail from real ones.** The agent acts, reads the
+unchanged screen as *the app's* behaviour, and writes it up. Four of those landed in one session
+driving a desktop app through synthetic input, and every one of them **exited zero**: a scroll helper
+that called `cliclick w:` (that is *wait*, not *wheel*) and produced the top-severity finding "the app
+cannot scroll at all"; a real scroller written and never wired in, so the bug was "fixed" and still
+live in the tool in use; a click that asked its caller to multiply coordinates by 1.73 by hand, which
+the author got wrong on the very next run — landing in empty background, where an app correctly doing
+nothing is indistinguishable from a dead control; and a display that slept, turning every screenshot
+black and the macOS lock screen into a written-up application sign-in failure.
+
+So the keystone here is not a path but a **pair**:
+
+> two real artifacts, captured either side of the act, that **the tool** compares and finds different.
+
+```
+game_loop effector --prove scroll --known-state "the comps list overflows the fold" \
+                   --before before.txt --observed after.txt \
+                   [--expect "row3 BELOW THE FOLD"] [--scale 1.73]
+game_loop effector --list · --aim scroll --at 640,480 · --release scroll --notes ".."
+game_loop claim --assert ".." --effector scroll     # refused unless proved in this session
+```
+
+The caller never asserts that something changed; it hands over the before and the after. All four
+incidents produce a byte-identical pair and are **refused** — the black-screen one loudest. **The exit
+code is not the assertion**, so no flag accepts one: `--exit-code` exists only to be refused by name,
+because it is what a hurried run reaches for and an argparse error would teach it nothing. `--expect`
+is the same lift `pin --expect` gives a pin — it separates "something changed" (a clock ticked) from
+"the asserted thing changed", and its absence prints `UNCHECKED`, never `✓`. And because **arithmetic
+in the harness is a defect generator**, a recorded `--scale` means `--aim` does the multiplying; the
+caller is never asked for a number they worked out themselves.
+
+Proofs are **session-scoped**, unlike the RULED-OUT list: a refutation is knowledge about the
+*checkout*, while a proof is a perishable fact about *this run's environment* — this display awake,
+this helper wired to this binary. Admitting session B's findings on a proof taken against a screen B
+never saw is the original bug wearing a different hat. Every proof still appends to the shared log
+with both digests, so the audit trail stays global.
+
+What it **does not catch**, stated in the code and in the verb's own output: that you proved the
+*right* effector; that the pair changed *because of* your act rather than alongside it (that is what
+`--expect` narrows, not closes); and that it still acts *now* — a proof is point-in-time, and failure
+4 happened mid-run. Nothing expires a proof, so `status` prints its age rather than hiding it.
+
 ### harden — `game_loop harden`
 
 The meta-guard. When you learn something, you don't write it down — you `harden` it into an artifact

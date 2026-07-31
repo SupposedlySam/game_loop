@@ -189,9 +189,11 @@ even if you never automate the resume.
 |---|---|
 | `game_loop status` | Rehydrate the loop after compaction. Run first, every session. |
 | `game_loop mandate --set ".."` / `--clear` | Bind / release an autonomy mandate (arms the Stop gate + watchdog). |
+| `game_loop mandate --park --reason ".."` / `--resume` | A HUMAN called a break: pause without closing. The mandate stays open work; one turn-end, consumed. |
 | `game_loop checkpoint --notes ".."` | End a turn to *report* progress (no question). One turn-end, consumed. |
 | `game_loop arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
 | `game_loop claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
+| `game_loop claim --assert ".." --outcome refuted --evidence <path>` | Retract it: a first-class negative result. Must name the control that killed it; `status` keeps the RULED-OUT list. |
 | `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
 | `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
 | `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |

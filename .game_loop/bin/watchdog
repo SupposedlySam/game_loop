@@ -263,6 +263,8 @@ def park_until_limit_resets(state):
         st = load_state()
         if not (st.get("mandate") or {}).get("active"):
             quiet("mandate released while parked at the usage limit")
+        if (st.get("mandate") or {}).get("parked"):
+            quiet("the human called a break while parked at the usage limit")
         if st.get("t3_armed"):
             quiet("T3 armed while parked — the human is holding the ball")
         if not exhausted_windows(limits_snapshot(), time.time()):
@@ -423,6 +425,13 @@ def main():
     if not m.get("active"):
         quiet("no mandate bound")
 
+    # A human-called break (`game_loop mandate --park`) means the run is stopped deliberately, by the
+    # one authority this engine defers to. Idleness is EXPECTED, and ringing would drag the session
+    # back into work the human just paused. The mandate stays open; only they end the break
+    # (`mandate --resume`). Distinct from the usage-limit park below, which the clock ends.
+    if m.get("parked"):
+        quiet("mandate parked at the human's request")
+
     # An exhausted usage window outranks everything below: idleness is EXPECTED while rate-limited,
     # and a ring is an API call into the very wall that killed the run. Park until the reset.
     park_until_limit_resets(state)  # returns immediately when no window is exhausted
@@ -498,6 +507,8 @@ def main():
     m = state.get("mandate") or {}
     if not m.get("active"):
         quiet("mandate released while sleeping")
+    if m.get("parked"):
+        quiet("the human called a break while sleeping")
     if state.get("t3_armed"):
         quiet("T3 armed while sleeping")
 

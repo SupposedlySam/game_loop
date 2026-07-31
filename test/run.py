@@ -804,6 +804,100 @@ def main():
         check("both the pin and its release are permanent in the log",
               '"pin"' in log and '"pin_release"' in log
               and "the API landed on the default branch" in log)
+        # #15: a HUMAN-called break needs somewhere to go. Without it the only endings are "violate
+        # the gate" or "fabricate a closure that reads forever as though the work was done". A park
+        # keeps the mandate OPEN and attributes the break to the human — and, crucially, it is
+        # SINGLE-USE, so it cannot be spent to disarm the gate permanently.
+        print("mandate park (a human-called break, #15):")
+        pk = "sess-park15"
+        gl(proj, "mandate", "--set", "ship the outcomes work", sid=pk)
+        r = gl(proj, "mandate", "--park", sid=pk)
+        check("park refuses without the human's words (--reason)",
+              r.returncode != 0 and "reason" in r.stderr)
+        r = gl(proj, "mandate", "--park", "--reason", "take a break, I need the branch",
+               "--next", "re-run the control experiment", sid=pk)
+        check("park with the human's verbatim words is accepted", r.returncode == 0)
+        r = gl(proj, "stopgate", stdin=json.dumps(
+            {"session_id": pk, "last_assistant_message": "Parked. Everything is committed."}))
+        check("a parked mandate lets the turn end (exit 0)", r.returncode == 0)
+        r = gl(proj, "stopgate", stdin=json.dumps(
+            {"session_id": pk, "last_assistant_message": "Still stopped."}))
+        check("a park buys ONE turn-end, then the gate is live again (exit 2)",
+              r.returncode == 2 and "PARKED" in r.stderr)
+        r = gl(proj, "status", sid=pk)
+        check("a parked mandate still shows as OPEN work on resume",
+              "PARKED" in r.stdout and "ship the outcomes work" in r.stdout)
+        check("the human's verbatim words survive into status",
+              "take a break, I need the branch" in r.stdout)
+        check("the recorded next step survives into status",
+              "re-run the control experiment" in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("the log distinguishes a human-called break from a self-terminated run",
+              '"kind": "mandate_park"' in log and '"by": "human"' in log)
+        # the word `park` is already taken by the usage-limit park (watchdog). Both must coexist:
+        # different noun parked, different log kind, neither shadowing the other.
+        check("the usage-limit park is untouched — both park kinds appear, distinctly",
+              '"kind": "watchdog_limit_park"' in log and '"kind": "mandate_park"' in log)
+        rp = gl(proj, "mandate", "--park", "--reason", "back in an hour", sid=pk)
+        r = gl(proj, "stopgate", stdin=json.dumps(
+            {"session_id": pk, "last_assistant_message": "Parked. Should I switch branches first?"}))
+        check("a park does not launder a question at turn-end",
+              rp.returncode == 0 and r.returncode == 2)
+        rr = gl(proj, "mandate", "--resume", sid=pk)
+        check("resume hands the break's own words back",
+              rr.returncode == 0 and "back in an hour" in rr.stdout)
+        r = gl(proj, "status", sid=pk)
+        check("a resumed mandate is live again, no longer parked",
+              rr.returncode == 0 and "PARKED" not in r.stdout
+              and "MANDATE: ship the outcomes work" in r.stdout)
+        r = gl(proj, "stopgate", stdin=json.dumps(
+            {"session_id": pk, "last_assistant_message": "Ending here."}))
+        check("after resume the gate is live again (bare turn-end blocks)",
+              rr.returncode == 0 and r.returncode == 2)
+        # the break must actually happen: a watchdog that rings a parked run drags the session back
+        # to work the human paused.
+        gl(proj, "mandate", "--park", "--reason", "stepping out", sid=pk)
+        r = subprocess.run([wd_bin], input=json.dumps({"session_id": pk, "transcript_path": tpath}),
+                           capture_output=True, text=True,
+                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        check("the watchdog does not ring a run parked by its human", r.returncode == 0)
+        gl(proj, "mandate", "--clear", "--notes", "done", sid=pk)
+
+        # #17: being wrong is the outcome most worth keeping. A retraction must be structurally
+        # distinct from a success, must carry the control that killed it, and must cost no more than
+        # any other claim — the incentive to quietly move on is the bug being fixed.
+        print("claim outcomes (being wrong is first-class, #17):")
+        r = gl(proj, "claim", "--assert", "the cache is invalidated on write",
+               "--read", real, "--outcome", "refuted")
+        check("a refuted claim REFUSES without the disproving evidence",
+              r.returncode != 0 and "--evidence" in r.stderr)
+        r = gl(proj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
+               "--outcome", "refuted", "--evidence", "/no/such/control.log")
+        check("a refuted claim refuses evidence that isn't a real file",
+              r.returncode != 0 and "don't resolve to a real" in r.stderr)
+        control = os.path.join(proj, "control.log")
+        with open(control, "w") as f:
+            f.write("control run: the cache was NOT invalidated\n")
+        r = gl(proj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
+               "--outcome", "refuted", "--evidence", control)
+        check("a refuted claim with real evidence is recorded",
+              r.returncode == 0 and "REFUTED" in r.stdout)
+        r = gl(proj, "claim", "--assert", "x", "--read", real, "--outcome", "nonsense")
+        check("an unknown --outcome is refused",
+              r.returncode != 0 and "inconclusive" in r.stderr)
+        r = gl(proj, "claim", "--assert", "the flag defaults on", "--outcome", "refuted",
+               "--evidence", control)
+        check("a retraction costs exactly one real path (evidence stands in for --read)",
+              r.returncode == 0)
+        r = gl(proj, "status")
+        check("status surfaces the standing RULED-OUT list",
+              "RULED OUT" in r.stdout and "the cache is invalidated on write" in r.stdout)
+        check("the ruled-out entry names the control that killed it", "control.log" in r.stdout)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            log = f.read()
+        check("a refutation is greppable in the log as an outcome, not a success",
+              '"outcome": "refuted"' in log)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

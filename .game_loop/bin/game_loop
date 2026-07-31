@@ -701,54 +701,172 @@ def unpushed_warning(notes=None):
 
 # ── verbs ────────────────────────────────────────────────────────────────────────────────────────
 
+# How a claim LANDED, and the headline each outcome prints. `resolved` is the default, so nothing
+# about an ordinary claim changes. The other two exist because a harness that records only forward
+# motion is training the agent to quietly move on when it turns out to be wrong.
+CLAIM_OUTCOMES = {
+    "resolved": "✓ CLAIM sourced.",
+    "refuted": "✗ CLAIM REFUTED — a ruled-out path, on the record.",
+    "inconclusive": "~ CLAIM INCONCLUSIVE — recorded; it did not settle.",
+}
+
+
 def cmd_claim(s, a):
-    """Record an assertion about external reality, with the source that backs it.
+    """Record an assertion about external reality, with the source that backs it — and how it landed.
 
     THE gate. Every "X does Y" about a dependency, a harness, or another repo goes through here. It
     refuses prose and demands a real file. This is the keystone check the module docstring describes:
     a path, not a paragraph.
+
+    OUTCOMES. Being WRONG is the result most worth keeping: the reason a dead path is not re-walked
+    in a later session is that the log says *this looked right, here is the control that killed it*.
+    So an outcome is explicit — resolved (default) / refuted / inconclusive — and a refutation must
+    name the control that killed it (`--evidence`), which is this same keystone turned on being
+    wrong. A retraction costs exactly one real path, the same as any other claim: retracting already
+    LOOKED like failure while costing what progress costs, and that asymmetry is what taught the
+    quiet move-on. `game_loop status` reads the standing RULED-OUT list back out of the shared log.
     """
-    if not a.assert_ or not a.read:
+    outcome = (a.outcome or "resolved").lower()
+    if outcome not in CLAIM_OUTCOMES:
+        die("--outcome must be one of: " + " · ".join(CLAIM_OUTCOMES) + "\n"
+            "  resolved     — it held up\n"
+            "  refuted      — it did NOT: name the control that killed it with --evidence\n"
+            "  inconclusive — the experiment ran and did not settle it")
+    if outcome == "refuted" and not a.evidence:
+        die("a refuted claim needs --evidence <path[,path]>: the control, log, or output that\n"
+            "DISPROVED it. A retraction without its evidence is a deletion — the next session just\n"
+            "re-walks the dead path. Name the file that killed it; that is the whole value here.")
+    # For a refutation the evidence IS a source you read, so it stands in for --read. Retracting must
+    # cost no more than claiming, or the cheapest move stays "say nothing and move on".
+    read_arg = a.read or (a.evidence if outcome == "refuted" else None)
+    if not a.assert_ or not read_arg:
         die("claim needs --assert \"<what you're about to tell the human>\" and --read <path[,path]>.\n"
             "The read path is the keystone: name the file you ACTUALLY read, not a memory of it.\n"
             "A claim you cannot source is a guess wearing a citation.")
-    paths = [p.strip() for p in a.read.split(",") if p.strip()]
+    paths = [p.strip() for p in read_arg.split(",") if p.strip()]
     resolved = {p: resolve_read(p) for p in paths}
     bad = [p for p, r in resolved.items() if r is None]
     if bad:
         die("these --read paths don't resolve to a real, non-empty file "
             "(absolute, or relative to the repo / a read_root): "
             + ", ".join(bad) + "\nName a source you actually read (T0), then claim.")
+    ev_paths = [p.strip() for p in (a.evidence or "").split(",") if p.strip()]
+    ev_resolved = {p: resolve_read(p) for p in ev_paths}
+    ev_bad = [p for p, r in ev_resolved.items() if r is None]
+    if ev_bad:
+        die("these --evidence paths don't resolve to a real, non-empty file: " + ", ".join(ev_bad) +
+            "\nThe disproving evidence is the point of a retraction — name the real control, log, or "
+            "output that killed the claim, not a description of one.")
     logline({"kind": "claim", "assert": a.assert_, "read": list(resolved.values()),
+             "outcome": outcome, "evidence": list(ev_resolved.values()),
              "confidence": a.confidence})
     s["claim_count"] = s.get("claim_count", 0) + 1
     save(s)
-    msg = ["✓ CLAIM sourced.",
+    msg = [CLAIM_OUTCOMES[outcome],
            f"  assert    : {a.assert_}",
+           f"  outcome   : {outcome}",
            f"  read (T0) : {', '.join(paths)}"]
+    if ev_paths:
+        msg.append(f"  killed by : {', '.join(ev_paths)}")
     if a.confidence:
         msg.append(f"  confidence: {a.confidence}")
+    if outcome == "refuted":
+        msg.append("→ it now stands in the RULED-OUT list on `game_loop status`, so the next run "
+                   "inherits it instead of re-walking it.")
     out(*msg)
     flair_out(s, "claim")
 
 
 def cmd_mandate(s, a):
-    """Bind (or release) an autonomy mandate. While bound, the Stop gate is live.
+    """Bind, park, resume, or release an autonomy mandate. While bound, the Stop gate is live.
 
     Self-binding on purpose. A human says "work autonomously"; that instruction is prose, and prose
     is what the agent demonstrably ignores. Recording it in state turns it into something a hook can
     read at the exact moment the session tries to stop early.
+
+    A mandate has exactly TWO ends, and the difference between them is the whole point:
+      * --clear  CLOSURE. The work is done. The gate goes inert because there is nothing left.
+      * --park   A HUMAN CALLED A BREAK. Not done, not given up on — interrupted by the one authority
+                 this engine exists to defer to. The mandate stays OPEN, so `status` keeps showing it
+                 as outstanding work with the human's own words and the next step intact.
+    Nothing else ends a mandate, which is what keeps the gate sharp for everything else: before this,
+    an interrupted run had two options, violate the gate or fabricate a closure that reads forever
+    after as though the work had been finished.
+
+    WHAT A PARK CANNOT DO, structurally: it is not a way out of the gate. It buys exactly ONE
+    turn-end (`_stop_verdict` consumes it, like a checkpoint or an arm), it does not launder a
+    question — the ask/announce checks run first — and it does not clear anything, so the next
+    turn-end faces a live gate again and the parked work follows the run until it is really closed.
+
+    WHAT IT CANNOT ENFORCE, said plainly (INV6, and the same honesty `authorize` owes): nothing on
+    this side of the keyboard can verify the human really called the break — the agent is the one
+    typing. What it does is make the break LOUD (`mandate_park` in the log, attributed to the human,
+    with their verbatim words), NARROW (one turn-end), and PERMANENT (never quietly reads as a
+    closure). That is strictly more than `--clear` could ever prove, and `--clear` is the exit an
+    interrupted run was already taking.
+
+    On the name: `park` is also the watchdog's word for waiting out an exhausted usage window
+    (`limit_park`). Same meaning — the run pauses and is expected to come back — different noun
+    parked and different waker: the clock ends a limit park, the human ends this one. Every
+    identifier here is namespaced to the mandate (`mandate.parked`, `mandate_park`,
+    `mandate_resume`) and shares nothing with `limit_parked_until` / `watchdog_limit_park`.
     """
     m = s.setdefault("mandate", {})
+    if a.park:
+        if not m.get("active"):
+            die("nothing to park — no mandate is bound, so the Stop gate is already inert.")
+        if not a.reason:
+            die("mandate --park needs --reason \"<the human's words, verbatim>\".\n"
+                "This exit exists for THEIR break, not your judgement — so it records who called it\n"
+                "and in whose words. Quote them; don't paraphrase, and don't park your own decision.")
+        nxt = a.next or (s.get("phase") or {}).get("doing")
+        m["parked"] = {"by": "human", "reason": a.reason, "next": nxt, "at": now(), "spent": False}
+        s["stop_blocks"] = 0
+        save(s)
+        logline({"kind": "mandate_park", "text": m.get("text"), "by": "human",
+                 "reason": a.reason, "next": nxt})
+        out("⏸ MANDATE PARKED — a human called this break. The work stays OPEN, not closed.",
+            f"  mandate    : {m.get('text')}",
+            f"  their words: {a.reason}",
+            f"  next step  : {nxt or '(none recorded — say what you were about to do)'}",
+            "→ this buys ONE turn-end. It is not a closure: `game_loop status` keeps showing this as",
+            "  outstanding, and the next turn-end meets a live gate again.",
+            "→ when they're back:  game_loop mandate --resume",
+            "   if it turns out to be finished: game_loop mandate --clear --notes \"..\"")
+        return
+    if a.resume:
+        p = m.get("parked")
+        if not p:
+            die("nothing to resume — this mandate is not parked. (A mandate that was never bound is "
+                "bound with `mandate --set \"..\"`.)")
+        m.pop("parked")
+        m["active"] = True
+        s["stop_blocks"] = 0
+        # Same re-arm as --set: the break may have outlasted the ring budget, and a resumed run must
+        # not inherit an exhausted watchdog and silently never be woken.
+        s["watchdog_rings"] = 0
+        s["watchdog_last_ring_size"] = 0
+        s["watchdog_exhausted_paged"] = False
+        save(s)
+        logline({"kind": "mandate_resume", "text": m.get("text"), "parked_at": p.get("at"),
+                 "reason": p.get("reason")})
+        out("▶ MANDATE RESUMED — the break is over and the Stop gate is LIVE again.",
+            f"  mandate    : {m.get('text')}",
+            f"  parked at  : {p.get('at')} — {p.get('reason')}",
+            f"  next step  : {p.get('next') or '(none was recorded)'}",
+            "→ pick that next step up; the work was never closed.")
+        return
     if a.clear:
         if not m.get("active"):
             out("no mandate was bound; nothing to clear.")
             return
+        was_parked = bool(m.pop("parked", None))
         m["active"] = False
         m["cleared_at"] = now()
         s["stop_blocks"] = 0
         save(s)
-        logline({"kind": "mandate_clear", "text": m.get("text"), "notes": a.notes})
+        logline({"kind": "mandate_clear", "text": m.get("text"), "notes": a.notes,
+                 "was_parked": was_parked})
         if notify:
             notify.send("mandate_clear",
                         f"🏁 mandate complete — {m.get('text')}\nnotes: {a.notes or '(none)'}")
@@ -761,7 +879,11 @@ def cmd_mandate(s, a):
         flair_out(s, "mandate_clear")
         return
     if not a.set:
-        die("mandate needs --set \"<the mandate, in the human's words>\" or --clear [--notes ..]")
+        die("mandate needs --set \"<the mandate, in the human's words>\", or one of\n"
+            "  --park --reason \"<their words>\"   a human called a break (stays OPEN)\n"
+            "  --resume                          they're back\n"
+            "  --clear [--notes ..]              the work is actually done")
+    m.pop("parked", None)   # a re-bind supersedes any break; the new words are the mandate now
     m.update({"active": True, "text": a.set, "since": now()})
     s["stop_blocks"] = 0
     # A new mandate re-arms the watchdog, so it does not inherit an exhausted ring budget from an
@@ -777,6 +899,7 @@ def cmd_mandate(s, a):
         "    game_loop checkpoint --notes \"..\"                report progress and hand back (no question)",
         "    game_loop arm --question .. --read .. --predict .. ask something you genuinely can't derive",
         "    game_loop mandate --clear --notes \"..\"           the work is actually done",
+        "    game_loop mandate --park --reason \"<their words>\"  ONLY when a human calls a break",
         "Otherwise the Stop hook sends you back to work. That is the point.")
     flair_out(s, "mandate_set")
 
@@ -1233,6 +1356,17 @@ def _stop_verdict(s, payload):
         ), {"kind": "stop_gate_block", "reason": "announced-then-stopped",
             "mandate": m.get("text"), "phase": (s.get("phase") or {}).get("doing")}
 
+    # A human-called break. Deliberately BELOW the two block checks above: a park is a break, not an
+    # amnesty, so it cannot launder a question or an announce-then-stop. Like the checkpoint and the
+    # arm it is CONSUMED (cmd_stopgate marks it spent), so it buys one turn-end and never disarms the
+    # gate — which is what makes this exit narrower than the `--clear` an interrupted run used to
+    # fabricate, rather than a new way out.
+    parked = (m.get("parked") or {})
+    if parked and not parked.get("spent"):
+        return True, "mandate parked at the human's request — the break may take effect", {
+            "kind": "mandate_park_stop", "mandate": m.get("text"), "by": parked.get("by"),
+            "reason": parked.get("reason"), "next": parked.get("next")}
+
     if s.get("stop_ok"):
         return True, "checkpoint declared — reporting, not asking", {
             "kind": "checkpoint", "notes": s.get("stop_ok_notes"),
@@ -1246,6 +1380,23 @@ def _stop_verdict(s, payload):
         return True, "circuit breaker — blocked twice already, standing down", {
             "kind": "stop_gate_exhausted", "mandate": m.get("text"),
             "note": "gate stood down after 2 consecutive blocks; it did not hold"}
+
+    if parked:
+        # The park was spent on the turn-end that took the break. Something is running again, so the
+        # break is over or was never the reason — either way the parked work needs dispositioning
+        # rather than a second silent exit on the human's name.
+        return False, (
+            "STOP GATE CLOSED — the mandate is PARKED, and that park is already spent.\n\n"
+            f"  MANDATE: {m.get('text')}  (parked {parked.get('at')} — {parked.get('by')})\n"
+            f"  THEIR WORDS: {parked.get('reason')}\n"
+            f"  NEXT STEP  : {parked.get('next') or '(none recorded)'}\n\n"
+            "A park buys ONE turn-end — the break itself. This turn is a second one, so the break is\n"
+            "over or something else woke you. The work was never closed; say what is true now:\n\n"
+            "  game_loop mandate --resume                        they're back — pick the next step up\n"
+            "  game_loop mandate --park --reason \"<their words>\"  still their break, freshly on record\n"
+            "  game_loop mandate --clear --notes \"..\"             it turned out to be finished\n"
+            "  game_loop checkpoint --notes \"..\"                  you worked and are reporting back\n"
+        ), {"kind": "stop_gate_block", "reason": "park-spent", "mandate": m.get("text")}
 
     return False, (
         "STOP GATE CLOSED — turn-end under an autonomy mandate, with no checkpoint declared.\n\n"
@@ -1284,6 +1435,10 @@ def cmd_stopgate(s, a, payload):
     if rec:
         logline(rec)
     if allow:
+        if (rec or {}).get("kind") == "mandate_park_stop":
+            # CONSUME: one park == one turn-end (the break itself). The mandate stays parked — it is
+            # not a closure — but the pass is gone, so the gate is live again on the next turn-end.
+            s["mandate"]["parked"]["spent"] = True
         if s.get("t3_armed") and not s["t3_armed"].get("spent"):
             # CONSUME: one arm == one interruption. A Slack-paged arm keeps its thread ts alive —
             # marked spent, not nulled — so the watchdog can still poll the human's reply back into
@@ -1505,13 +1660,74 @@ def update_notice():
             f"/main/install.sh | bash -s -- .")
 
 
+RULED_OUT_SHOWN = 5          # newest N printed in full; the rest are counted and pointed at
+_LOG_TAIL_BYTES = 512 * 1024  # the log is append-only and unbounded — read only its tail
+
+
+def ruled_out():
+    """The standing RULED-OUT list: claims recorded with `--outcome refuted`, newest first.
+
+    Read from the SHARED log rather than per-session state, on purpose. A negative result is
+    knowledge about the CHECKOUT, and the run that must not re-walk the dead path is usually a LATER
+    session that holds none of this one's state — so state, which is compartmentalized by design,
+    is exactly the wrong place for it. The log is the one artifact a resumed run inherits.
+
+    Best effort and bounded: only the log's tail is read, and an unreadable or half-written line is
+    skipped. A status that cannot print the list must still print everything else.
+    """
+    start = 0
+    try:
+        with open(LOG_F, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            start = max(0, f.tell() - _LOG_TAIL_BYTES)
+            f.seek(start)
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    if start and lines:
+        lines = lines[1:]   # a tail read can slice a line in half — drop the fragment
+    found = []
+    for ln in lines:
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue
+        if rec.get("kind") == "claim" and rec.get("outcome") == "refuted":
+            found.append(rec)
+    found.reverse()
+    return found
+
+
+def _short(p):
+    """A repo-relative path when it is under the repo, else the absolute one. Display only."""
+    try:
+        rel = os.path.relpath(p, REPO_ROOT)
+    except (ValueError, TypeError):
+        return p
+    return p if rel.startswith("..") else rel
+
+
 def cmd_status(s, a):
     _prune_stale_sessions()
     out(render_banner(s))
     if (n := retro_nudge(s)):
         out(n)
     m = s.get("mandate") or {}
-    mandate_line = f"MANDATE: {m['text']}" if m.get("active") else "MANDATE: none (Stop gate inert)"
+    parked = m.get("parked") or {}
+    if parked:
+        # A parked mandate is OPEN work, not a finished one — say so where it cannot be missed, with
+        # the human's own words and the step that was interrupted, so a resumed run picks up the
+        # thread instead of rediscovering it.
+        mandate_line = (f"MANDATE: {m.get('text')}\n"
+                        f"  ⏸ PARKED — a {parked.get('by', 'human')} called this break. STILL OPEN, "
+                        "not closed.\n"
+                        f"    their words: {parked.get('reason')}\n"
+                        f"    next step  : {parked.get('next') or '(none recorded)'}\n"
+                        "    → game_loop mandate --resume   (or --clear --notes \"..\" if it is done)")
+    elif m.get("active"):
+        mandate_line = f"MANDATE: {m['text']}"
+    else:
+        mandate_line = "MANDATE: none (Stop gate inert)"
     session_line = (f"session: {SESSION[:8]} (state: .game_loop/sessions/…)" if SESSION
                     else "session: none detected — repo-global state (.game_loop/state.json)")
     others, active = _sibling_sessions()
@@ -1533,6 +1749,17 @@ def cmd_status(s, a):
         "→ writes outside this repo are blocked by .game_loop/bin/guard-writes.sh (PreToolUse)",
         "knowledge: .game_loop/LEDGER.md (reference, NOT a gate) · log: .game_loop/log.jsonl")
     out(*pins_report(s))   # load-bearing env facts, re-shown every session: this is what survives
+    if (ro := ruled_out()):
+        # The single most useful question at the start of a resumed investigation is "what has
+        # already been ruled out?" — so it is answered before it is asked.
+        out("", f"RULED OUT ({len(ro)}) — refuted claims. Don't re-walk these:")
+        for rec in ro[:RULED_OUT_SHOWN]:
+            out(f"  ✗ {rec.get('assert')}",
+                "    killed by: " + (", ".join(_short(p) for p in (rec.get("evidence") or []))
+                                     or "(no evidence recorded)"))
+        if len(ro) > RULED_OUT_SHOWN:
+            out(f"  … {len(ro) - RULED_OUT_SHOWN} older — grep '\"outcome\": \"refuted\"' "
+                ".game_loop/log.jsonl")
     snap = load_limits()
     if snap:
         lim = limits_summary(snap) or "snapshot present but empty (API-key auth exposes no limits)"
@@ -1643,6 +1870,8 @@ def main():
     cl.add_argument("--assert", dest="assert_", help="what you're about to tell the human")
     cl.add_argument("--read", help="real path[,path] to the source that backs it")
     cl.add_argument("--confidence", help="optional: what would change your mind?")
+    cl.add_argument("--outcome", help="how it landed: resolved (default) · refuted · inconclusive")
+    cl.add_argument("--evidence", help="real path[,path] that DISPROVED it — required for refuted")
 
     n = sub.add_parser("note")
     n.add_argument("--text")
@@ -1670,6 +1899,11 @@ def main():
     md.add_argument("--set", help="the mandate, in the human's words")
     md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
     md.add_argument("--notes", help="why it's satisfied")
+    md.add_argument("--park", action="store_true",
+                    help="a HUMAN called a break: pause WITHOUT closing (needs --reason)")
+    md.add_argument("--resume", action="store_true", help="they're back — re-arm the gate")
+    md.add_argument("--reason", help="for --park: the human's words, verbatim")
+    md.add_argument("--next", help="for --park: the step to pick back up on resume")
 
     ar = sub.add_parser("arm")  # arm ONE T3 spend (one interruption of the human)
     ar.add_argument("--question", help="what you need that you cannot get yourself")

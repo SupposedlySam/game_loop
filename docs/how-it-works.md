@@ -39,6 +39,25 @@ instruction to keep working.
 
 With **no mandate bound the gate is inert** — it never sits between a human and a normal conversation.
 
+#### The one non-closure exit — `game_loop mandate --park`
+
+A mandate has exactly two ends. `--clear` is **closure**: the work is done. `--park --reason "<their
+words>"` is a **human-called break**: not done, not given up on, interrupted by the one authority the
+gate exists to defer to. Before it existed, an interrupted run's only options were to violate the gate
+or to fabricate a closure that reads forever after as though the work had been finished — so every
+session improvised, and the log could not tell an externally-interrupted run from a self-terminated
+one. Now `mandate_park` says so, in the human's own words, attributed to them.
+
+A park is **not a way out of the gate**, structurally: it buys exactly one turn-end (consumed like a
+checkpoint or an arm), the ask/announce checks still run first so it cannot launder a question, and it
+clears nothing — `game_loop status` keeps showing the mandate as OPEN with the recorded next step
+intact, and the next turn-end meets a live gate again. The watchdog stands down while parked, so the
+break actually happens; only `mandate --resume` ends it. What it cannot enforce, plainly: nothing on
+this side of the keyboard can verify the human really called the break — the agent is the one typing.
+It makes the break loud, narrow, and permanently attributable, which is strictly more than the
+`--clear` an interrupted run was already reaching for. (`park` is also the watchdog's word for waiting
+out a usage limit — same meaning, different waker: the clock ends that one, the human ends this one.)
+
 ### 2. The watchdog — `bin/watchdog`
 
 The gate stops the session *saying* the wrong thing. It cannot make it *do* the next thing — a blocked
@@ -103,6 +122,17 @@ sibling repo you actually read is exactly the point, so absolute paths outside t
 (`read_roots` only add extra bases for resolving *relative* paths). This is the epistemic guardrail: it
 stops the confident-but-unsourced assertion, which is
 the most expensive mistake an unattended agent makes because nobody is watching to catch it.
+
+A claim also records **how it landed** — `--outcome resolved` (the default) / `refuted` /
+`inconclusive` — because being wrong is the result most worth keeping: the reason a dead path is not
+re-walked in a later session is that the log says *this looked right, here is the control that killed
+it*. A refutation must name that control (`--evidence <path>`), the same keystone turned on being
+wrong, and it costs exactly one real path like any other claim — retracting already *looked* like
+failure while costing what progress costs, and that asymmetry is what taught the quiet move-on.
+`game_loop status` reads the standing **RULED OUT** list straight back out of the shared log, so a
+resumed session inherits the negative results instead of rediscovering them. The list lives in the log
+rather than in state on purpose: a negative result is knowledge about the *checkout*, and the run that
+must not re-walk the dead path is usually a later session holding none of this one's state.
 
 ### The write guard — `bin/guard-writes.sh`
 

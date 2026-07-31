@@ -33,7 +33,13 @@ repo — record it with the source that backs it:
 
 ```
 ./.game_loop/bin/game_loop claim --assert "<what you're about to say>" --read <path> --confidence "<what would refute it>"
+./.game_loop/bin/game_loop claim --assert "<what turned out to be wrong>" --outcome refuted --evidence <the control that killed it>
 ```
+
+Record how it landed: `--outcome resolved` (default) / `refuted` / `inconclusive`. A refutation is the
+result most worth keeping — it must name the control that disproved it, and `game_loop status` then
+carries a standing RULED-OUT list so a later run inherits the dead path instead of re-walking it.
+Retracting costs exactly one real path, the same as claiming: being wrong should be cheap and visible.
 
 It refuses unless `--read` names a real, non-empty file — an absolute path to any real file, or a path
 relative to the repo or a configured `read_root`. The keystone is that the file *exists* and you read
@@ -56,7 +62,13 @@ Instead, keep working — and when you genuinely need to end a turn, pick one:
 ./.game_loop/bin/game_loop checkpoint --notes ".."                  # report progress and hand back, NO question
 ./.game_loop/bin/game_loop arm --question ".." --read <path> --predict ".."   # ask something you truly can't derive
 ./.game_loop/bin/game_loop mandate --clear --notes ".."             # the work is actually done
+./.game_loop/bin/game_loop mandate --park --reason "<their words>"  # ONLY when a HUMAN calls a break
 ```
+
+`mandate --park` is the one non-closure exit: the human said stop, so the mandate stays OPEN (status
+keeps showing it, with their verbatim words and the next step) instead of being fabricated into a
+closure. It buys ONE turn-end, it cannot launder a question, and only `mandate --resume` ends it. It
+is for THEIR break, never your judgement — that is what the log records.
 
 `arm` requires the path to a file you ALREADY read that did NOT answer the question — if the answer was
 on disk, you don't need the human. `checkpoint` and `arm` are each single-use (consumed on the next

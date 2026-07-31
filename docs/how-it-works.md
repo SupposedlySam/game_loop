@@ -286,6 +286,60 @@ the system enforces, and the command refuses unless you name the real file that 
 are the index; the artifact is the enforcement. Take the highest rung that applies (IMPOSSIBLE > LOUD
 > CHECKED > AUTOMATED > VISIBLE > doc-of-last-resort).
 
+### instruments — `game_loop instrument` / `measure` / `claim --metric`
+
+`claim --read` reaches only evidence that is a **document**. When the evidence is a **number**, "name a
+real file" is not merely insufficient — it is satisfiable while being completely wrong: every incident
+below was run by an agent who could have cited a real file the whole time. **An instrument is a test
+whose subject is reality**, and this project already holds that a test which cannot fail certifies the
+defect instead of catching it. These are that idea one layer out, and an uncontrolled number does not
+fail quietly: it *manufactures* findings.
+
+```
+game_loop instrument --register underruns --measures "dropouts the listener hears" \
+                     --connects "an underrun empties the buffer, and an empty buffer is silence" \
+                     --null 0,0 --positive 0,12
+game_loop measure --instrument underruns --before 40 --after 290 --notes "thirty trials"
+game_loop claim --assert "the fix cut underruns" --metric underruns [--recheck ".."]
+```
+
+Three refusals, each from a logged failure:
+
+- **A reading is a delta scoped to the interaction, never a lifetime total.** `measure` takes two
+  endpoints and does the subtraction; one absolute value is refused. A snapshot once reported 90% of
+  a component's operations returning short (157839 of 176001) — a catastrophic root cause, and the
+  leading hypothesis for hours. Deltas across the actual interaction showed **zero in thirty trials**:
+  the rest had accrued while idle, where the behavior is correct. Two endpoints is the structural
+  rule, because demanding them is what makes the other two enforceable rather than advisory — and it
+  makes the measurement reproducible by anyone reading the log later, since both endpoints are in it.
+- **A metric needs a null control and a positive control.** The null is sampled while the phenomenon
+  is *absent*; non-zero means it measures something else, and it is **named in the refusal** rather
+  than passed silently, because non-zero is the exact tell (one counter read 4053 units of "damage"
+  per 4000 units of deliberately doing nothing, and that one flaw produced three false findings, one
+  presented as 8-for-8 deterministic). The positive control is the mirror: a metric that only ever
+  reads zero is equally untrustworthy — it earns trust by *catching* a known-real event, not by
+  reading clean. Both are checked at registration, like a pin's `--expect`: a control that is not
+  green when it is recorded is a check nobody believes later.
+- **An optimized proxy must declare the user-visible harm it stands for, and how it connects to it.**
+  A 43% reduction at p=0.037, n=250 was real, reproducible and correctly computed — on a counter that
+  had decoupled from user-visible harm in exactly the regime the fix created. So the harm is recorded
+  at registration and re-shown by every `status`, and when the number **moves**, `claim --metric`
+  refuses until the connection is re-checked for *this* regime. The re-check is counted against the
+  readings it was made at, so the next movement demands a fresh one.
+
+Where a gate needs a computation, **the tool computes it** — deltas and the movement percentage are
+never asked of the caller. Arithmetic in the harness is a defect generator.
+
+Instruments are **per-session state**, like pins and deliberately unlike the ruled-out list: a
+refutation is durable knowledge about the checkout, but a control is a *measurement taken in one run's
+regime*, and inheriting one is precisely the "assumed to have survived the change" failure above. The
+readings themselves go to the shared log, where they stay reproducible.
+
+What this **misses**, printed by the guard itself: it cannot tell whether the *right* metric was
+chosen. Every control says the chosen number is *controlled* — none can say it is the number that
+matters, and the counter above was structurally blind to a second fault mechanism, so the whole
+investigation searched one way.
+
 ---
 
 ## The files

@@ -590,6 +590,27 @@ def cmd_notify(s, a):
         return
     logline({"kind": "notify_manual", "text": text})
     out("✓ paged the channel." + ("" if res is True else f" (thread ts {res})"))
+    if a.test:
+        # Sending proves chat:write; it does NOT prove the bot can READ replies back. Probe that too,
+        # so a wrong history scope (the classic: channels:history on a PRIVATE channel) is named here
+        # instead of silently swallowing every reply at poll time.
+        if not notify.can_read_replies():
+            out("• send-only (webhook or no bot token+channel) — arm questions page one-way; a Slack "
+                "reply can't resume the run. Use bot_token+channel to enable phone-answer resume.")
+        else:
+            ok, detail = notify.read_probe()
+            if ok:
+                out("✓ reply reads work — the watchdog can carry a Slack answer back into the run.")
+            else:
+                tip = {
+                    "missing_scope": "add the history scope for THIS channel's type and REINSTALL the "
+                    "Slack app: groups:history (private), channels:history (public), im:history (DM), "
+                    "mpim:history (group DM). A C-prefixed id can still be a PRIVATE channel.",
+                    "not_in_channel": "invite the bot into the channel (/invite @your-bot).",
+                    "channel_not_found": "check the channel id in .game_loop/notify.json.",
+                }.get(detail, "")
+                out(f"⚠ reply READS FAILED: {detail} — arm will page, but the human's reply won't come "
+                    "back.", *(["  " + tip] if tip else []))
 
 
 # ── verbs ────────────────────────────────────────────────────────────────────────────────────────

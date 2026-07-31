@@ -16,14 +16,23 @@ CONFIGURATION — .game_loop/notify.json (gitignored; credentials never land in 
 
     {
       "slack": {
-        "bot_token": "xoxb-...",          # send + read replies (chat:write, channels:history)
-        "channel": "C0123456789",          # channel ID the bot is invited to
+        "bot_token": "xoxb-...",          # SEND: chat:write. READ replies: the history scope for the
+        "channel": "C0123456789",          #   channel TYPE (see below) — the bot must be a MEMBER.
         "webhook_url": "https://hooks.slack.com/services/...",  # send-only alternative
         "api_base": "https://slack.com/api",   # override for tests only
-        "reply_poll_sec": 20               # watchdog's thread-poll cadence
+        "reply_poll_sec": 20               # watchdog's poll cadence
       },
       "events": { "checkpoint": true }     # per-event overrides of DEFAULT_EVENTS
     }
+
+BOT-TOKEN SCOPES: chat:write to send. To READ replies (so a phone answer resumes the run), add the
+history scope that MATCHES the channel's type, then reinstall the app so the token picks it up:
+    public channel  -> channels:history        private channel -> groups:history
+    direct message  -> im:history              group DM (mpim) -> mpim:history
+A channel id beginning with `C` is NOT necessarily public — Slack issues `C` ids to private channels
+too, so match the scope to the actual channel type, not the id prefix. `game_loop notify --test`
+actively probes the read path and names the missing scope if reads fail. Reads use the universal
+`conversations.history` / `conversations.replies` methods for every type (no per-type endpoint).
 
 Provide bot_token+channel OR webhook_url. The webhook path cannot read replies (Slack webhooks are
 write-only), so `arm` questions become one-way pages — still useful, just no phone-answer resume.
@@ -201,3 +210,23 @@ def replies(thread_ts, oldest=None):
         return []
     out.sort(key=lambda m: float(m["ts"]))
     return out
+
+
+def read_probe():
+    """Actively verify the bot can READ this channel — distinct from can_read_replies(), which only
+    checks config shape. Returns (ok: bool, detail: str). `notify --test` uses it so a wrong history
+    scope surfaces LOUDLY instead of as a silently-empty reply list: a PRIVATE channel needs
+    groups:history (channels:history returns missing_scope), and a C-prefixed id can still be private."""
+    sl = _slack()
+    if not can_read_replies():
+        return (False, "send-only path (webhook, or no bot_token+channel) — replies cannot be read")
+    api = (sl.get("api_base") or "https://slack.com/api").rstrip("/")
+    q = urllib.parse.urlencode({"channel": sl["channel"], "limit": 1})
+    req = urllib.request.Request(api + "/conversations.history?" + q,
+                                 headers={"Authorization": "Bearer " + sl["bot_token"]})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
+            r = json.loads(resp.read().decode() or "{}")
+        return (True, "reads OK") if r.get("ok") else (False, r.get("error", "not ok"))
+    except Exception as e:  # noqa: BLE001
+        return (False, str(e)[:120])

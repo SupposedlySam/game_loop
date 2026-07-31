@@ -342,6 +342,7 @@ def main():
             posts = []
             thread_replies = []
             channel_msgs = []      # top-level channel messages (conversations.history)
+            history_error = None   # set to e.g. "missing_scope" to make history reads fail
 
             def _json(self, obj):
                 body = json.dumps(obj).encode()
@@ -360,7 +361,10 @@ def main():
                 if self.path.startswith("/conversations.replies"):
                     self._json({"ok": True, "messages": FakeSlack.thread_replies})
                 elif self.path.startswith("/conversations.history"):
-                    self._json({"ok": True, "messages": FakeSlack.channel_msgs})
+                    if FakeSlack.history_error:
+                        self._json({"ok": False, "error": FakeSlack.history_error})
+                    else:
+                        self._json({"ok": True, "messages": FakeSlack.channel_msgs})
                 else:
                     self._json({"ok": True})
 
@@ -379,6 +383,15 @@ def main():
         check("notify --test pages the channel",
               r.returncode == 0 and "paged" in r.stdout
               and any(p == "/chat.postMessage" for p, _ in FakeSlack.posts))
+        check("notify --test verifies reply READS work (history scope present)",
+              "reply reads work" in r.stdout)
+        # a wrong history scope (channels:history on a PRIVATE channel) must be NAMED, not swallowed
+        FakeSlack.history_error = "missing_scope"
+        r = gl(proj, "notify", "--test")
+        check("notify --test names a missing history scope instead of failing silently",
+              "READS FAILED" in r.stdout and "missing_scope" in r.stdout
+              and "groups:history" in r.stdout)
+        FakeSlack.history_error = None
         gl(proj, "mandate", "--set", "notify work", sid="sess-slk")
         FakeSlack.posts.clear()
         gl(proj, "arm", "--question", "prod or staging?", "--read", real,

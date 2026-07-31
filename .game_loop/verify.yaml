@@ -30,6 +30,10 @@
   - "python3 test/run.py"
 ".game_loop/bin/guard-writes-impl.sh":
   - "python3 test/run.py"
+".game_loop/bin/guard-mcp.sh":
+  - "python3 test/run.py"
+".game_loop/bin/guard-mcp-impl.sh":
+  - "python3 test/run.py"
 ".game_loop/bin/verify":
   - "python3 test/run.py"
 ".game_loop/bin/flair.py":

@@ -210,6 +210,12 @@ even if you never automate the resume.
   inside the repo, the OS temp dir, and configured roots. Everything else is read-only. Covers
   `Write`/`Edit` and Bash mutators, blocks configured deploy verbs, and states what it *doesn't* catch.
   Escape hatch is the human (`game_loop authorize`), single-use and logged — never an env var.
+- **MCP guard** (`guard-mcp.sh`, a `PreToolUse` hook on `mcp__.*`) — the write guard reads Bash, but a
+  connected MCP server can delete, send or force-push with no shell command at all. This classifies the
+  call *before* it runs, on the tool name and the argument shape: read-only verbs pass; mutating verbs,
+  a `DELETE FROM` in a SQL argument, or a truthy `force` flag are refused. It fails **closed** on
+  anything it can't classify — safe to do here, because it gates only `mcp__.*` and so can never block
+  its own fix. Same human escape hatch, spelled with the tool name.
 - **verify** — optional map from "you changed X" to "these checks must pass"; refuses a `git commit`
   when the evidence is older than the change. Ships empty (a no-op) until you add rules.
 
@@ -227,6 +233,9 @@ for the guarantees as runnable checks (`python3 test/run.py`).
                              // absolute paths to real files already pass — the check is existence, not containment
   "allow_write_roots": [],   // extra dirs the write guard permits (beyond repo + OS temp)
   "deploy_verbs": [],        // extra irreversible verbs to block anywhere, e.g. "firebase deploy"
+  "mcp_read_only_tools": [], // MCP tools/servers the MCP guard may treat as read-only when it cannot
+                             // classify them, e.g. "mcp__docs__" or "mcp__db__explainPlan". Resolves
+                             // ambiguity ONLY — it can never silence a mutating verb or argument.
   "trans_nudge_every": 12,   // phase transitions between retro nudges
   "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 },
   "limits": {                // usage-limit survival (see "Survive Claude Code usage limits")

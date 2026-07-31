@@ -134,6 +134,23 @@ resumed session inherits the negative results instead of rediscovering them. The
 rather than in state on purpose: a negative result is knowledge about the *checkout*, and the run that
 must not re-walk the dead path is usually a later session holding none of this one's state.
 
+A claim about a **category** costs more than a claim about an instance. "Only X", "X is restricted",
+"X does not support Y" are claims about a *set*, and a set is exactly what one observation cannot
+establish — the observation is usually right and the scope is invented. (One table's DELETE returned
+500; the run reported that table as restricted, the human relied on it, and an archive-instead-of-
+delete scheme was built. Hours later every DELETE on every table returned 500: the path was down
+everywhere, and one request against any other table would have shown it.) So
+`claim --scope "<the category>" --probe <a> --probe <b>` demands two probes on **different** members
+— a repeat of the first proves nothing — and records both, which is one more request in exchange for
+a boundary instead of a guess. The flag is the enforcement. A wording check on the assertion is only
+a **nudge**: when something set-shaped is filed as an instance, the claim is still admitted and the
+second probe is offered loudly, because enforcement that depends on reading English is not
+enforcement and a false positive must never block a legitimate claim. What the gate cannot check, in
+its own output: that either probe was really run, or that the second member sits on the far side of
+the category. It holds you to two members, not to the right two. The moment to reach for it is the
+one the incident names — **you start building a workaround**, which is always downstream of a scope
+claim and the last point at which the claim is cheap to check.
+
 ### The write guard — `bin/guard-writes.sh`
 
 A `PreToolUse` hook enforcing an **allowlist**: writes are permitted only under the repo, the OS temp

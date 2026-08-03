@@ -116,6 +116,36 @@ DEFAULT_CONFIG = {
     "update_api_base": "https://api.github.com",   # override for tests
 }
 
+# THE user-owned file set — the one place it is written down (issue #30).
+#
+# Everything under .game_loop/ is one of three things: the tool (bin/, VERSION — always refreshed by
+# install.sh), runtime state (gitignored, per-tree), or one of THESE — the project's own files, seeded
+# once and never overwritten. Three readers need this set and none of them may keep its own copy:
+# install.sh (what to seed, or adopt from another tree), `status` (what has drifted between two trees
+# of one project), and an orchestrator provisioning worktrees, which otherwise hardcodes a list that
+# goes stale the moment game_loop adds a file. It is published as `game_loop owned --porcelain`.
+#
+#   seed_from — where a FRESH install copies it from, relative to the game_loop payload root.
+#               verify.yaml comes from templates/ because it ships EMPTY: game_loop's own rules would
+#               (wrongly) fire on a new project's first commit.
+#   rule      — does it define what the project ENFORCES? Two trees carrying different rule files are
+#               two different projects. LEDGER.md is owned but is NOT a rule: findings are notes about
+#               one tree's work and are expected to diverge, so drift there is not a finding.
+OWNED_FILES = [
+    {"path": "config.json",   "seed_from": ".game_loop/config.json",   "rule": True},
+    {"path": "INVARIANTS.md", "seed_from": ".game_loop/INVARIANTS.md", "rule": True},
+    {"path": "verify.yaml",   "seed_from": "templates/verify.yaml",    "rule": True},
+    {"path": "LEDGER.md",     "seed_from": ".game_loop/LEDGER.md",     "rule": False},
+]
+
+# TWO sets, named, because there are two different questions and one flat list makes a caller GUESS
+# which it is answering — which is how the answers silently diverge. "Does this tree carry the same
+# harness?" is about all four. "Do these two trees enforce the same RULES?" is about the gate-carrying
+# three, and only that one should stop a spawn: LEDGER.md is accumulated findings, reference and not
+# a gate, so two trees are EXPECTED to write different ones and a block on that would be noise.
+RULE_FILES = [o["path"] for o in OWNED_FILES if o["rule"]]
+NOTES_FILES = [o["path"] for o in OWNED_FILES if not o["rule"]]
+
 # The irreversible verbs the write guard blocks with no path needed. A copy for reporting only —
 # bin/guard-writes-impl.sh owns the enforcing list, and a test asserts the two still agree, because
 # a status line that understates a rail's reach is worse than no status line.
@@ -3420,6 +3450,216 @@ def coverage_report(s):
     return lines
 
 
+def main_checkout():
+    """Absolute path of the MAIN checkout when THIS tree is a linked worktree — else None.
+
+    `git worktree list --porcelain` lists the main worktree first; that is the whole detection. It
+    never raises and never guesses: no git, not a repo, a detached HEAD, a BARE main worktree (no
+    files to compare against), a parent directory that has been deleted — every one of them returns
+    None, because a drift report that invents a parent is worse than no drift report at all.
+    """
+    listing = _git("worktree", "list", "--porcelain")
+    if not listing:
+        return None
+    path = None
+    for ln in listing.split("\n\n")[0].splitlines():   # the first record is the main worktree
+        if ln.startswith("worktree "):
+            path = ln[len("worktree "):].strip()
+        elif ln.strip() == "bare":
+            return None
+    if not path or not os.path.isdir(path):
+        return None
+    try:
+        if os.path.realpath(path) == os.path.realpath(REPO_ROOT):
+            return None    # this IS the main checkout — there is no parent to compare against
+    except OSError:
+        return None
+    return path
+
+
+def _same_bytes(a, b):
+    """True / False / None — None means UNREADABLE, which is never allowed to read as 'same'."""
+    try:
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return None
+
+
+# `worktree --porcelain` verdicts, and what each is FOR. Only "clean" means compared-and-matching,
+# and it is the only 0 — the ways of not knowing are deliberately NOT folded in with it, because a
+# caller that reads "cannot determine" as "clean" is the exact silent-and-wrong failure this exists
+# to stop. "drifted" and "notes-drifted" are separated for the same reason in the other direction:
+# differing RULES mean the two trees enforce different things and a spawn should stop; a differing
+# LEDGER.md is two trees taking their own notes, which is what they are supposed to do.
+#
+#   0 clean          every owned file matches
+#   1 drifted        a RULE file differs — the trees enforce different things (block)
+#   3 notes-drifted  rules match; a non-rule owned file differs (warn, do not block)
+#   2 …              could not determine. NEVER read a 2 as clean.
+WORKTREE_EXIT = {"clean": 0, "drifted": 1, "notes-drifted": 3,
+                 "not-a-worktree": 2, "no-parent-harness": 2, "unreadable": 2}
+
+
+def _compare(names, pdir):
+    """Split `names` into matched / drifted / unreadable against the same file under `pdir`."""
+    res = {"matched": [], "drifted": [], "unreadable": []}
+    for name in names:
+        same = _same_bytes(os.path.join(ROOT, name), os.path.join(pdir, name))
+        res["unreadable" if same is None else "matched" if same else "drifted"].append(name)
+    return res
+
+
+def worktree_drift():
+    """Compare THIS tree's owned files against the main checkout's. Never raises.
+
+    The one comparison, computed once: the `status` block and `worktree --porcelain` are two
+    renderings of this dict, so a machine and a human can never be told different things.
+
+    Answers BOTH questions, separately, because they warrant different responses:
+      rules   — the gate-carrying files. Differ ⇒ the trees enforce different things.
+      harness — every owned file, rules included. Differ ⇒ the trees are not the same install.
+
+    status:  clean · drifted · notes-drifted · not-a-worktree · no-parent-harness · unreadable
+    """
+    empty = {"matched": [], "drifted": [], "unreadable": []}
+    base = {"tree": REPO_ROOT, "main_checkout": None,
+            "owned": [dict(o) for o in OWNED_FILES],
+            "rule_files": list(RULE_FILES), "notes_files": list(NOTES_FILES),
+            "rules": dict(empty), "harness": dict(empty)}
+    parent = main_checkout()
+    if not parent:
+        return {**base, "status": "not-a-worktree",
+                "detail": "this tree is not a linked worktree — there is no main checkout to "
+                          "compare it against"}
+    base["main_checkout"] = parent
+    pdir = os.path.join(parent, ".game_loop")
+    if not os.path.isdir(pdir):
+        return {**base, "status": "no-parent-harness",
+                "detail": f"the main checkout ({parent}) carries no .game_loop/ — this tree's rules "
+                          "are compared against nothing"}
+    rules = _compare(RULE_FILES, pdir)
+    harness = _compare([o["path"] for o in OWNED_FILES], pdir)
+    base = {**base, "rules": rules, "harness": harness}
+    if rules["drifted"]:
+        return {**base, "status": "drifted",
+                "detail": f"{len(rules['drifted'])} RULE file(s) differ from the main checkout — "
+                          "these trees enforce different things: " + ", ".join(rules["drifted"])}
+    if rules["unreadable"]:
+        return {**base, "status": "unreadable",
+                "detail": "rule file(s) could not be read, so they are NOT known to match: "
+                          + ", ".join(rules["unreadable"])}
+    if harness["drifted"]:
+        return {**base, "status": "notes-drifted",
+                "detail": "the rules match; these owned-but-not-rule file(s) differ, which is "
+                          "ordinary for per-tree notes: " + ", ".join(harness["drifted"])}
+    if harness["unreadable"]:
+        return {**base, "status": "unreadable",
+                "detail": "owned file(s) could not be read: " + ", ".join(harness["unreadable"])}
+    return {**base, "status": "clean",
+            "detail": "every owned file is byte-identical to the main checkout's"}
+
+
+def worktree_report(s):
+    """The WORKTREE block for `status` — do this tree and the main checkout run the SAME rules? (#30)
+
+    A linked worktree is a second working copy of ONE project, and the owned rule files are what that
+    project enforces. When they differ, the tree is playing by a rule set nobody chose — and the
+    dangerous direction is the silent one: a verify.yaml with no rules owes nothing, so the commit
+    gate reports success while checking nothing. Reported whether or not anything is wrong, for the
+    same reason COVERAGE is: a rail that only speaks up when it feels like it teaches nobody its reach.
+
+    Empty in the ordinary case — a main checkout has no parent, so this block simply does not appear.
+
+    What this does NOT catch (INV6): only THIS tree against the MAIN checkout, and only the owned
+    files, and only by their bytes. A third worktree that drifted is invisible here; so is a divergent
+    bin/, a divergent .claude/settings.json, and any rule file whose CONTENT is a tautology — two
+    identical verify.yaml files say the trees agree, never that either one checks anything real.
+    """
+    d = worktree_drift()
+    if d["status"] == "not-a-worktree":
+        return []
+    lines = ["", "WORKTREE — a second tree of one project must carry that project's rules (#30):",
+             f"  main checkout: {d['main_checkout']}"]
+    if d["status"] == "no-parent-harness":
+        lines.append("  ⚠ the main checkout carries NO .game_loop/ — this tree's rules are compared "
+                     "against nothing.")
+        return lines
+    rules, harness = d["rules"], d["harness"]
+    if rules["drifted"]:
+        lines.append(f"  ⚠ RULES DIFFER — {len(rules['drifted'])} of the gate-carrying file(s) are "
+                     "not the main checkout's.")
+        lines.append("    These two trees ENFORCE DIFFERENT THINGS. The quiet direction is the "
+                     "dangerous one: a")
+        lines.append("    verify.yaml with fewer rules owes less, and reports success while "
+                     "checking nothing.")
+        for name in rules["drifted"]:
+            lines.append(f"      .game_loop/{name}")
+        lines.append(f"    → adopt the main checkout's:  ./install.sh --same-as {d['main_checkout']} "
+                     f"{REPO_ROOT}")
+        lines.append("      (or diff them and decide — the difference may be the one you meant)")
+    elif rules["matched"]:
+        lines.append("  ✓ RULES MATCH the main checkout: "
+                     + ", ".join(f".game_loop/{n}" for n in rules["matched"]))
+    notes_drift = [n for n in harness["drifted"] if n in NOTES_FILES]
+    if notes_drift:
+        lines.append("  · notes differ (owned, but no gate reads them — two trees keeping their own "
+                     "records is")
+        lines.append("    ordinary, and this is a note, not a finding): "
+                     + ", ".join(f".game_loop/{n}" for n in notes_drift))
+    unreadable = harness["unreadable"]
+    if unreadable:
+        lines.append("  ? UNREADABLE — cannot be compared, so treat them as UNKNOWN, not matching: "
+                     + ", ".join(f".game_loop/{n}" for n in unreadable))
+    lines.append("  → NOT compared: bin/ · .claude/settings.json · any OTHER worktree · whether a "
+                 "matching rule is real")
+    lines.append("  → provisioning trees? `game_loop worktree --porcelain` answers BOTH questions as "
+                 "JSON —")
+    lines.append("    `rules` (differ ⇒ stop the spawn) and `harness` (differ ⇒ worth a warning), "
+                 "plus the")
+    lines.append("    owned-file set itself. Read those instead of hardcoding a list.")
+    return lines
+
+
+def cmd_worktree(s, a):
+    """`game_loop worktree` — the drift answer on its own, for a human or for a spawn path (#30).
+
+    Follows `verify --coverage --porcelain`: JSON on stdout, one object. Unlike that one this is
+    allowed a non-zero exit, because it is answering a question rather than reporting coverage — but
+    the exit code is never the ONLY signal. Read `status`: only "clean" was compared and matched.
+    """
+    d = worktree_drift()
+    if a.porcelain:
+        json.dump(d, sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        block = worktree_report(s)
+        out(*(block or ["worktree: this tree is not a linked worktree — nothing to compare. "
+                        f"({d['detail']})"]))
+    sys.exit(WORKTREE_EXIT.get(d["status"], 2))
+
+
+def cmd_owned(s, a):
+    """Publish the owned-file set, so nothing outside game_loop has to hardcode it (#30)."""
+    if a.porcelain:
+        print(json.dumps({"owned": [dict(o) for o in OWNED_FILES],
+                          "rule_files": list(RULE_FILES), "notes_files": list(NOTES_FILES)},
+                         indent=2))
+        return
+    out("OWNED — the files this PROJECT owns. install.sh seeds them once and never overwrites them;",
+        "  everything else under .game_loop/ is the tool (bin/, VERSION) or runtime state.")
+    for o in OWNED_FILES:
+        out(f"  {'rule ' if o['rule'] else 'notes'}  .game_loop/{o['path']}"
+            f"   (fresh install copies {o['seed_from']})")
+    out("",
+        "  TWO sets, because there are two questions. `rule_files` are what the project ENFORCES —",
+        "  two trees carrying different ones enforce different things, and that should stop a spawn.",
+        "  `notes_files` are owned too, and drift there is ORDINARY: a ledger of findings is a record",
+        "  of one tree's work, not a gate. Together they are the whole harness. Provisioning a tree?",
+        "  Read this (`--porcelain` for JSON) rather than listing it again somewhere else: a",
+        "  hardcoded copy goes wrong silently the moment game_loop adds a file.")
+
+
 def cmd_status(s, a):
     _prune_stale_sessions()
     out(render_banner(s))
@@ -3479,6 +3719,7 @@ def cmd_status(s, a):
     out(*instruments_report(s))   # the declared harm must outlive the context that declared it
     out(*fixes_report(s))   # which fixes were exercised through their OWN output — not their repro
     out(*coverage_report(s))   # what the rails are NOT looking at — silence from a rail is not safety
+    out(*worktree_report(s))   # …and whether the rails in THIS tree are the project's at all (#30)
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.
@@ -3725,6 +3966,16 @@ def main():
     nf.add_argument("--text", help="the message the run's human should see")
     nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
 
+    ow = sub.add_parser("owned")  # the user-owned file set, published so nobody re-lists it (#30)
+    ow.add_argument("--porcelain", action="store_true", help="emit the set as JSON, for tools")
+
+    wt = sub.add_parser("worktree")  # does this tree carry the PROJECT's rules, or its own? (#30)
+    wt.add_argument("--porcelain", action="store_true",
+                    help="emit the verdict as JSON: `rules` (differ ⇒ the trees enforce different "
+                         "things) and `harness` (every owned file), each naming its files, plus the "
+                         "owned set. exit 0 ONLY for clean; 1 rules drifted; 3 notes drifted; "
+                         "2 could not determine — never read a 2 as clean")
+
     sub.add_parser("stopgate")    # Stop-hook entrypoint; not for humans
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
@@ -3748,6 +3999,9 @@ def main():
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "attribute": cmd_attribute,
      "notify": cmd_notify,
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
+     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
+     "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix, "owned": cmd_owned,
+     "worktree": cmd_worktree,
      "instrument": cmd_instrument, "measure": cmd_measure}[a.cmd](s, a)
 
 

@@ -64,10 +64,15 @@
   - "python3 test/run.py"
 ".game_loop/verify.yaml":
   - "python3 test/run.py"
+# install.sh was deliberately unlisted while it only copied files — nothing could fail. It now DECIDES
+# something (issue #30: adopt a linked worktree's project rules, or refuse), and a wrong decision
+# there hands a tree a harness that gates nothing. That is behaviour, the suite drives the real
+# installer through its real interface, so it owes the suite like every other gate.
+"install.sh":
+  - "python3 test/run.py"
 
 # Deliberately unchecked, and it stays visible here. Prose, licence text, editor config and the
 # payload copied verbatim into other projects: no command exists that fails when they are "broken".
-# NOT listed: install.sh — nothing checks it, and that gap should keep saying so out loud.
 "unchecked-ok":
   - "*.md"
   - "docs/**"

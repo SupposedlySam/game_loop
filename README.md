@@ -51,6 +51,15 @@ cd game_loop
 Either way, `install.sh` copies `.game_loop/` into your project and merges the hooks into its
 `.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
 
+> **Installing into a git worktree?** A linked worktree is a second working copy of *one* project,
+> so it must carry that project's rules — seeding the blank `verify.yaml` there would leave the
+> commit gate owing nothing and reporting success while checking nothing. `install.sh` detects the
+> case and copies the **main checkout's** `config.json`, `INVARIANTS.md`, `verify.yaml` and
+> `LEDGER.md` instead; if that checkout has no harness it refuses rather than substituting defaults
+> (`--fresh` overrides). For trees git can't connect — a sibling clone, a copied directory — say it
+> by hand: `./install.sh --same-as /path/to/main /path/to/tree`. `game_loop status` re-checks it
+> every session, and `game_loop worktree --porcelain` is the same answer as JSON for a spawn script.
+
 > **Start a new Claude Code session before step 3.** Claude Code reads hook configuration when a
 > session *starts*, and `install.sh` writes `.claude/settings.json` after yours already did — so in
 > the install session every gate is registered on disk and silently never invoked. Nothing errors;
@@ -201,6 +210,8 @@ even if you never automate the resume.
 | `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |
 | `game_loop note --text ".."` | Append a note to the log. |
 | `game_loop notify --text ".."` / `--test` | Page the configured Slack channel by hand / verify the channel works. |
+| `game_loop worktree [--porcelain]` | Does this linked worktree carry the *project's* rules? Names the files that drifted. `--porcelain` answers both questions as JSON — `rules` (differ ⇒ the trees enforce different things) and `harness` (every owned file). Exit 0 **only** when it compared and matched; 1 rules drifted, 3 notes drifted, 2 could not determine — never read a 2 as clean. |
+| `game_loop owned [--porcelain]` | The files a project owns (seeded once, never overwritten), split into `rule_files` and `notes_files`. Provisioning trees? Read this instead of hardcoding the list. |
 
 ## The guardrails
 

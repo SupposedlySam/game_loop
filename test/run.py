@@ -2070,6 +2070,247 @@ def main():
                   not denied(r))
         finally:
             shutil.rmtree(wmain, ignore_errors=True)
+
+        # #30: install.sh seeds the user-owned files ONLY IF ABSENT, and templates/verify.yaml ships
+        # with no rules at all. Into a LINKED WORKTREE of a project whose .game_loop/ the user has
+        # gitignored themselves, nothing crosses — so the install seeds a BLANK manifest, and a blank
+        # manifest owes nothing: the commit gate goes on reporting success while checking nothing.
+        # Present and different is the worst shape a rail can take, and it arrives in silence.
+        #
+        # (The DEFAULT install does not have this problem, and the tests below build both shapes to
+        # keep that honest: install.sh writes an inner .game_loop/.gitignore listing only RUNTIME
+        # state, so config.json / INVARIANTS.md / verify.yaml are TRACKED and a worktree inherits
+        # them correctly. The gap is real only where the user gitignored the whole directory.)
+        #
+        # A linked worktree is a second working copy of ONE project, not a new project, and git
+        # already knows which case is which — so the project's own files are the right default there
+        # and no one has to know a flag. Where git cannot connect two trees, --same-as says it by hand.
+        print("install into a linked worktree carries the PROJECT's rules, not blank ones (#30):")
+        adopt = tempfile.mkdtemp(prefix="gameloop-adopt-")
+        try:
+            def agit(cwd, *args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       "-c", "init.defaultBranch=main", *args],
+                                      cwd=cwd, capture_output=True, text=True)
+
+            def install(*args):
+                """The REAL installer, through its real interface — the thing being fixed."""
+                return subprocess.run([os.path.join(REPO, "install.sh"), *args],
+                                      capture_output=True, text=True, env=_env())
+
+            def read(*parts):
+                with open(os.path.join(*parts)) as f:
+                    return f.read()
+
+            def mkproject(name, rules=True):
+                """A real git repo that gitignores its WHOLE .game_loop/ — the one non-default
+                choice under which a linked worktree inherits no rules at all."""
+                p = os.path.join(adopt, name)
+                os.makedirs(p)
+                agit(p, "init", "-q")
+                with open(os.path.join(p, ".gitignore"), "w") as f:
+                    f.write(".game_loop/\n")
+                with open(os.path.join(p, "README.md"), "w") as f:
+                    f.write("x\n")
+                if rules:
+                    install(p)
+                    with open(os.path.join(p, ".game_loop", "verify.yaml"), "a") as f:
+                        f.write('"src/**":\n  - "make the-projects-own-check"\n')
+                    with open(os.path.join(p, ".game_loop", "INVARIANTS.md"), "a") as f:
+                        f.write("\n## INV9 — the project's own north star\n")
+                    # install.sh stamps a VERSION, which makes `status` reach for the network to
+                    # compare shas. This suite makes no network call: turn the courtesy check off.
+                    cf = os.path.join(p, ".game_loop", "config.json")
+                    with open(cf) as f:
+                        c = json.load(f)
+                    c["update_check"] = False
+                    with open(cf, "w") as f:
+                        json.dump(c, f, indent=2)
+                        f.write("\n")
+                agit(p, "add", "-A")
+                agit(p, "commit", "-q", "-m", "init")
+                return p
+
+            def worktree_of(p, name):
+                wt = os.path.join(adopt, name)
+                agit(p, "worktree", "add", "-q", wt, "-b", name)
+                return wt
+
+            mainco = mkproject("mainco")
+            wt = worktree_of(mainco, "wt")
+            # PREMISE, not a behaviour claim: it holds in both states, and it is what makes the rest
+            # of this block a test of anything. If a worktree DID inherit the rules there is no bug.
+            check("the premise: a worktree of a .game_loop-gitignoring project inherits no rules",
+                  os.path.isdir(os.path.join(wt, ".git")) is False
+                  and not os.path.exists(os.path.join(wt, ".game_loop")))
+
+            r = install(wt)
+            check("installing into a linked worktree adopts the project's verify.yaml, not the "
+                  "blank template",
+                  r.returncode == 0 and "adopted .game_loop/verify.yaml" in r.stdout
+                  and "make the-projects-own-check" in read(wt, ".game_loop", "verify.yaml"))
+            check("...and its INVARIANTS.md, so the tree's north star is the project's",
+                  "## INV9 — the project's own north star" in read(wt, ".game_loop",
+                                                                  "INVARIANTS.md"))
+            with open(os.path.join(mainco, ".game_loop", "config.json"), "rb") as f:
+                pcfg = f.read()
+            with open(os.path.join(wt, ".game_loop", "config.json"), "rb") as f:
+                wcfg = f.read()
+            check("...and its config.json BYTE-FOR-BYTE — no rename of project_name to the "
+                  "worktree's directory, which would manufacture the drift this just prevented",
+                  pcfg == wcfg)
+            rv = subprocess.run([os.path.join(wt, ".game_loop", "bin", "verify"), "--check"],
+                                cwd=wt, capture_output=True, text=True, env=_env())
+            check("and the adopted tree's gate has rules to enforce, where a blank one owed nothing",
+                  "no rules in .game_loop/verify.yaml" not in rv.stdout)
+
+            r = gl(wt, "worktree", "--porcelain")
+            d = json.loads(r.stdout)
+            check("an adopted worktree reports clean — and clean is the ONLY verdict that exits 0",
+                  r.returncode == 0 and d["status"] == "clean" and not d["rules"]["drifted"]
+                  and d["rules"]["matched"] == ["config.json", "INVARIANTS.md", "verify.yaml"]
+                  and d["harness"]["matched"] == ["config.json", "INVARIANTS.md", "verify.yaml",
+                                                  "LEDGER.md"])
+
+            # TWO questions, two answers. A ledger of findings is a record of ONE tree's work, so it
+            # is owned but is not a gate: two trees keeping different ones is what they are for.
+            # Collapsing that into "the harnesses differ" would make the real signal — differing
+            # RULES — arrive wrapped in noise that a spawn path learns to ignore.
+            with open(os.path.join(wt, ".game_loop", "LEDGER.md"), "a") as f:
+                f.write("\n- VERIFIED: something this tree alone looked into\n")
+            r = gl(wt, "worktree", "--porcelain")
+            d = json.loads(r.stdout)
+            check("a differing LEDGER.md is notes-drifted, NOT drifted — the rules still match",
+                  d["status"] == "notes-drifted" and d["rules"]["drifted"] == []
+                  and d["harness"]["drifted"] == ["LEDGER.md"])
+            check("...and it gets its own exit code, so a spawn can warn where it would not block",
+                  r.returncode == 3)
+            r = gl(wt, "status")
+            check("...and status says so as a note rather than as a finding",
+                  "notes differ" in r.stdout and "RULES MATCH" in r.stdout
+                  and "RULES DIFFER" not in r.stdout)
+
+            # Now drift a RULE, and make sure both renderings say the same thing about the same files.
+            with open(os.path.join(wt, ".game_loop", "verify.yaml"), "a") as f:
+                f.write('"docs/**":\n  - "only-in-this-tree"\n')
+            r = gl(wt, "status")
+            check("status NAMES the drifted rule file in a linked worktree",
+                  "WORKTREE" in r.stdout and "RULES DIFFER" in r.stdout
+                  and ".game_loop/verify.yaml" in r.stdout
+                  and str(mainco) in r.stdout)
+            r = gl(wt, "worktree", "--porcelain")
+            d = json.loads(r.stdout)
+            check("worktree --porcelain names WHICH files drifted, not merely that something did",
+                  d["status"] == "drifted" and d["rules"]["drifted"] == ["verify.yaml"]
+                  and d["rules"]["matched"] == ["config.json", "INVARIANTS.md"])
+            check("...and a rule drift outranks the notes drift it is reported alongside",
+                  sorted(d["harness"]["drifted"]) == ["LEDGER.md", "verify.yaml"])
+            check("...and a drifted tree exits 1 — distinguishable from clean without parsing prose",
+                  r.returncode == 1)
+
+            # The three ways of NOT KNOWING, each named and each exit 2. An orchestrator that reads
+            # "cannot determine" as "clean" is the silent-and-wrong failure this whole issue is about,
+            # so none of them is allowed to share an exit code with a tree that was actually compared.
+            r = gl(mainco, "worktree", "--porcelain")
+            check("a main checkout reports not-a-worktree at exit 2, never a clean 0",
+                  r.returncode == 2 and json.loads(r.stdout)["status"] == "not-a-worktree")
+
+            r = install(wt)
+            check("re-installing a drifted worktree keeps its files and says DRIFT out loud",
+                  r.returncode == 0 and "DRIFT" in r.stdout
+                  and "kept    .game_loop/verify.yaml" in r.stdout
+                  and "only-in-this-tree" in read(wt, ".game_loop", "verify.yaml"))
+
+            # A worktree of a project with NO harness. Seeding the templates here is exactly the
+            # silent substitution, so it is refused — and refused BEFORE anything is written, because
+            # a tree left holding half a harness is not a refusal.
+            nogl = mkproject("nogl", rules=False)
+            wtb = worktree_of(nogl, "wtnogl")
+            r = install(wtb)
+            check("installing into a linked worktree whose main checkout has NO harness is REFUSED",
+                  r.returncode != 0 and "REFUSED" in r.stderr and "LINKED WORKTREE" in r.stderr
+                  and nogl in r.stderr)
+            check("...and the refusal writes nothing at all into the tree",
+                  not os.path.exists(os.path.join(wtb, ".game_loop")))
+            check("...and it names a way through itself, which a guard owes (INV5)",
+                  "--fresh" in r.stderr and "--same-as" in r.stderr)
+            r = install("--fresh", wtb)
+            check("--fresh is that way through: it seeds the blank templates and says so",
+                  r.returncode == 0 and "seeded  .game_loop/verify.yaml" in r.stdout)
+            r = gl(wtb, "worktree", "--porcelain")
+            check("a worktree whose main checkout has no harness says so at exit 2, not clean",
+                  r.returncode == 2 and json.loads(r.stdout)["status"] == "no-parent-harness")
+
+            # An ordinary project. This is the common path and it was already correct: these two
+            # PASS IN BOTH STATES by construction, and that is the entire claim being made.
+            plain = os.path.join(adopt, "plain")
+            os.makedirs(plain)
+            fresh = install(plain)
+            check("a fresh install into an ordinary project still seeds the blank template",
+                  fresh.returncode == 0 and "seeded  .game_loop/verify.yaml" in fresh.stdout
+                  and "adopted" not in fresh.stdout)
+            with open(os.path.join(plain, ".game_loop", "config.json")) as f:
+                check("...and still renames project_name to the target's own directory",
+                      json.load(f).get("project_name") == "plain")
+            r = gl(plain, "worktree", "--porcelain")
+            check("a tree that is no git repo at all degrades to a verdict, never a traceback",
+                  r.returncode == 2 and json.loads(r.stdout)["status"] == "not-a-worktree"
+                  and "Traceback" not in r.stderr)
+
+            # --same-as: the same behaviour, stated by hand, for the trees git cannot connect.
+            sib = os.path.join(adopt, "sibling")
+            os.makedirs(sib)
+            r = install("--same-as", mainco, sib)
+            check("--same-as carries a project's rules into a tree that is NOT a linked worktree",
+                  r.returncode == 0 and "adopted .game_loop/verify.yaml" in r.stdout
+                  and "make the-projects-own-check" in read(sib, ".game_loop", "verify.yaml"))
+            sib2 = os.path.join(adopt, "sibling2")
+            os.makedirs(sib2)
+            r = install("--same-as", nogl, sib2)
+            check("--same-as refuses a checkout with no game_loop files rather than seeding blanks",
+                  r.returncode != 0 and "REFUSED" in r.stderr
+                  and not os.path.exists(os.path.join(sib2, ".game_loop")))
+            r = install("--same-as", os.path.join(adopt, "no-such-tree"), sib2)
+            check("--same-as on a path that does not exist fails loudly, and still writes nothing",
+                  r.returncode != 0 and "no such directory" in r.stderr.lower()
+                  and not os.path.exists(os.path.join(sib2, ".game_loop")))
+
+            # The owned-file set has ONE home. An external tool that keeps its own copy goes wrong
+            # silently the moment game_loop adds a file, so the set is published rather than guessed.
+            r = gl(wt, "owned", "--porcelain")
+            pub = json.loads(r.stdout)
+            owned = pub["owned"]
+            check("the owned-file set is readable from outside the process, so nothing hardcodes it",
+                  r.returncode == 0
+                  and [o["path"] for o in owned] == ["config.json", "INVARIANTS.md",
+                                                     "verify.yaml", "LEDGER.md"])
+            check("...and it is published as TWO named sets, so no caller has to guess which it "
+                  "is answering",
+                  pub["rule_files"] == ["config.json", "INVARIANTS.md", "verify.yaml"]
+                  and pub["notes_files"] == ["LEDGER.md"]
+                  and sorted(pub["rule_files"] + pub["notes_files"])
+                  == sorted(o["path"] for o in owned))
+            # `owned` is asserted to be the full four in both: `all()` over an empty list is True,
+            # and a check an empty answer satisfies is a check that cannot fail.
+            check("...install.sh seeds exactly that set — one list, not two that drift apart",
+                  len(owned) == 4
+                  and all(f"  seeded  .game_loop/{o['path']}" in fresh.stdout for o in owned))
+            wd = json.loads(gl(wt, "worktree", "--porcelain").stdout)
+            check("...and the drift verdict carries both sets too, so one call answers both questions",
+                  len(owned) == 4 and wd["owned"] == owned
+                  and wd["rule_files"] == pub["rule_files"]
+                  and wd["notes_files"] == pub["notes_files"])
+            # Empty == empty would satisfy this trivially, so both sides are pinned to the real set.
+            check("...and the drift check compares them SEPARATELY, naming which set it means",
+                  len(pub["rule_files"]) == 3 and len(owned) == 4
+                  and sorted(wd["rules"]["matched"] + wd["rules"]["drifted"]
+                             + wd["rules"]["unreadable"]) == sorted(pub["rule_files"])
+                  and sorted(wd["harness"]["matched"] + wd["harness"]["drifted"]
+                             + wd["harness"]["unreadable"])
+                  == sorted(o["path"] for o in owned))
+        finally:
+            shutil.rmtree(adopt, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

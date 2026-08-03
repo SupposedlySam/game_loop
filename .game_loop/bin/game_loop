@@ -3903,8 +3903,17 @@ def self_hooks_block(code):
         "",
         f"{HOME_ENV} is not optional in any of those: it is what keeps verify.yaml, the record of "
         "what",
-        "was checked, and every byte of state in the REPO. Then reload — hooks are read at session "
-        "start.",
+        "was checked, and every byte of state in the REPO.",
+        "",
+        "THEN REMOVE THE GAME_LOOP HOOKS FROM .claude/settings.json — the two files MERGE, they do",
+        "not override. Leaving both wired runs EVERY gate twice: two write guards, two stop gates,",
+        "two watchdogs polling. Measured, not predicted: a commit under both printed the same",
+        "blast-radius warning verbatim two times. Nothing breaks loudly, which is the problem —",
+        "duplicate output reads as the tool repeating itself rather than as two of it running.",
+        "  In THIS repo the tracked file carries no hooks for exactly that reason; `./install.sh .`",
+        "  puts the unpinned wiring back whenever you want to stop running pinned.",
+        "",
+        "Then reload — hooks are read at session start, so none of this takes effect until you do.",
     ]
 
 

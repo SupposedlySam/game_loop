@@ -2781,6 +2781,14 @@ def main():
         check("...and prints wiring that SETS the home, for settings.local.json — not the tracked one",
               'GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop"' in r.stdout
               and "settings.local.json" in r.stdout and "NOT in the tracked" in r.stdout)
+        # Measured, not predicted: settings.json and settings.local.json MERGE. Wiring the pin
+        # without unwiring the tracked file ran every gate twice — a commit printed the same
+        # blast-radius warning verbatim two times. It fails quietly, since duplicate output reads
+        # as the tool repeating itself rather than as two copies of it running, so the instructions
+        # have to say it. This pins that they do.
+        check("...and says to REMOVE the tracked hooks, because the two files merge rather than override",
+              "REMOVE THE GAME_LOOP HOOKS" in r.stdout and "MERGE" in r.stdout
+              and "twice" in r.stdout and "install.sh ." in r.stdout)
         fresh = run("verify", "--check", code=selfcode)
         check("...and what it produced refuses to run blind, end to end",
               fresh.returncode == 2 and "PINNED code checkout" in fresh.stderr)

@@ -159,9 +159,16 @@ def main():
             impl_src = f.read()
         with open(impl_f, "w") as f:
             f.write("this is ( not valid bash\n")
+        broken = guard(proj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
         check("fails OPEN when the guard impl is malformed (can't block its own fix)",
-              not denied(guard(proj, {"tool_name": "Bash",
-                                      "tool_input": {"command": "rm -rf ~/outside"}})))
+              not denied(broken))
+        # #39: failing open is right; failing open in SILENCE is not. With no output at all, a
+        # guard that is ABSENT is indistinguishable from one that ran and was content — INV3 stops
+        # being enforced and nothing says so, and a syntax error is exactly the edit an agent makes
+        # while working ON this guard. Note the check ABOVE passes either way: it asserts only the
+        # allow, which is precisely how the silence survived. So assert the NOTICE.
+        check("...and SAYS SO — a silent fail-open is INV3 switched off with no signal (#39)",
+              "WRITE GUARD IS NOT RUNNING" in broken.stdout and "INV3" in broken.stdout)
         with open(impl_f, "w") as f:                 # restore so later checks use the real guard
             f.write(impl_src)
 

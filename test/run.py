@@ -2800,6 +2800,58 @@ def main():
         shutil.rmtree(sp, ignore_errors=True)
         shutil.rmtree(pin, ignore_errors=True)
 
+    # The documented `curl | bash` one-liner could install into a FRESH directory and could never
+    # UPGRADE one. Piped, BASH_SOURCE[0] is empty; the old fallback to $0 made `dirname bash` = "."
+    # so SRC became the cwd. On a fresh target the file test below it failed and the fetch happened
+    # anyway — which is why installing into clean directories never showed it. On an upgrade the
+    # target already had .game_loop/bin/game_loop, the test passed against the target's OWN old
+    # copy, the fetch was skipped, SRC == TARGET, and it died claiming you had pointed it at the
+    # game_loop repo. Reported from outside with a two-arm repro; the arms are pinned here.
+    print("install.sh: the piped one-liner upgrades, not only installs fresh:")
+    inst = os.path.join(REPO, "install.sh")
+    ibug = tempfile.mkdtemp(prefix="gameloop-install-")
+    try:
+        def piped(target):
+            """`curl | bash` faithfully: bash reads the script from STDIN, so BASH_SOURCE[0] is
+            empty — the condition the bug turned on. GAME_LOOP_REPO names a repo that cannot
+            resolve so the fetch fails fast; every assertion here is about WHICH BRANCH was taken
+            and is printed BEFORE curl runs, so none of them depends on the network."""
+            e = _env(); e["GAME_LOOP_REPO"] = "SupposedlySam/no-such-repo-control"
+            with open(inst) as f:
+                return subprocess.run(["bash", "-s", "--", target], stdin=f,
+                                      capture_output=True, text=True, env=e)
+
+        fresh = os.path.join(ibug, "fresh")
+        os.makedirs(fresh)
+        r = piped(fresh)
+        check("piped into a FRESH directory still fetches (the arm that always worked)",
+              "Fetching game_loop" in r.stdout)
+
+        upg = os.path.join(ibug, "upgrade", ".game_loop", "bin")
+        os.makedirs(upg)
+        with open(os.path.join(upg, "game_loop"), "w") as f:
+            f.write("#!/usr/bin/env python3\n")
+        target = os.path.dirname(os.path.dirname(upg))
+        r = piped(target)
+        check("piped into a repo that ALREADY has game_loop fetches too — the upgrade path",
+              "Fetching game_loop" in r.stdout)
+        check("...and never misreads the target's own copy as the payload directory",
+              "same directory" not in r.stderr and "repo itself" not in r.stderr)
+
+        # The local-payload arm must not regress into always fetching: run from a real checkout,
+        # the script sits next to the payload and the network must not be touched at all.
+        local_t = os.path.join(ibug, "local")
+        os.makedirs(local_t)
+        r = subprocess.run([inst, local_t], capture_output=True, text=True, env=_env())
+        check("run from a checkout, the local payload is used and nothing is fetched",
+              "Fetching game_loop" not in r.stdout and "Installing game_loop into" in r.stdout)
+
+        r = subprocess.run([inst, REPO], capture_output=True, text=True, env=_env())
+        check("installing a checkout onto itself is refused, naming the evidence not an inference",
+              r.returncode != 0 and "same directory" in r.stderr and REPO in r.stderr)
+    finally:
+        shutil.rmtree(ibug, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

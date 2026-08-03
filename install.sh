@@ -26,7 +26,21 @@ REF="${GAME_LOOP_REF:-main}"
 # Locate the payload. Running from a clone, it sits next to this script. Piped through `curl | bash`
 # there is no checkout — fetch the repo tarball into a temp dir and use that. `--strip-components=1`
 # drops the archive's top folder (game_loop-<ref>/) so we never have to guess its name.
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+#
+# BASH_SOURCE[0] is the ONLY honest answer to "was I loaded from a file on disk?". A previous
+# version fell back to `$0`, and that broke the documented one-liner on the one path that matters
+# most: piped, `$0` is "bash", `dirname bash` is ".", and SRC silently became WHEREVER THE USER WAS
+# STANDING. On a fresh directory that is harmless — the file test below fails and the fetch happens
+# anyway — but on an UPGRADE the target already has .game_loop/bin/game_loop, so the test passed
+# against the target's OWN (old) copy, the fetch was skipped, SRC and TARGET resolved to the same
+# path, and the run died claiming you had pointed it at the game_loop repo. The single path that
+# could never work was upgrading, which is exactly the path nothing else propagates either.
+SELF="${BASH_SOURCE[0]:-}"
+if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+  SRC="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
+else
+  SRC=""   # piped: no local payload exists, and inferring one from the cwd is the bug above
+fi
 if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
   command -v curl >/dev/null 2>&1 || { echo "curl is required to fetch game_loop." >&2; exit 1; }
   command -v tar  >/dev/null 2>&1 || { echo "tar is required to unpack game_loop." >&2; exit 1; }
@@ -93,7 +107,14 @@ fi
 TARGET="$(cd "$TARGET" && pwd)"
 
 if [ "$TARGET" = "$SRC" ]; then
-  echo "That is the game_loop repo itself — it already dogfoods game_loop. Point this at another project." >&2
+  # Name the EVIDENCE, not an inference about which repo you are in. The old wording asserted
+  # "that is the game_loop repo itself", which cost a bug reporter a control run to disprove —
+  # their directory was a stub, not this repo. What is actually known is that the two paths match.
+  echo "REFUSED: the payload and the target are the same directory —" >&2
+  echo "    $TARGET" >&2
+  echo "Installing a checkout onto itself would copy bin/ over its own source. If this IS the" >&2
+  echo "game_loop repo it already dogfoods game_loop and needs no install; if you meant to upgrade" >&2
+  echo "a project, name that project's path instead of this one." >&2
   exit 1
 fi
 

@@ -3133,14 +3133,39 @@ def hooks_live_warning():
     turn-ends, and the human's read was "you must not be on the game_loop" — which was exactly right.
 
     The tell is the probe. `cmd_stopgate` writes `probe/stop-payload.json` on EVERY invocation, so
-    its absence is proof the Stop hook has never fired in this checkout. Rung 5 of the harden ladder:
-    the system reports the fact rather than leaving it to be guessed.
+    its absence means no Stop hook has been recorded here. Rung 5 of the harden ladder: the fact is
+    REPORTED rather than left to be guessed.
+
+    WHAT THE PROBE DOES NOT PROVE, and this is the correction that earned this paragraph: absence is
+    a statement about the PROBE'S lifetime, not the hook's. A checkout that was working before the
+    probe existed reads identically to one that never fired, until its next Stop. So this says "no
+    record", never "never fired" — a guard that overstates its reach buys false confidence (INV6),
+    and a diagnostic is least trustworthy exactly when someone first runs it to decide whether to
+    trust the wiring. Another project adopting this pattern had its own tool report a hook as
+    never-fired that its author had watched work minutes earlier.
+
+    THE REMEDY DEPENDS ON THE HOST. Claude Code as the VSCode extension registers hooks with the
+    session at WINDOW LOAD, so reloading the window is what actually wires them — cheaper than, and
+    sufficient without, a restart. Detected by CLAUDE_CODE_ENTRYPOINT (`claude-vscode`), never by
+    TERM_PROGRAM: that is equally true of a plain `claude` in VSCode's integrated terminal, where the
+    remedy really IS a restart, and it is unset here entirely — so keying off it does not merely
+    misdirect, it detects nothing and falls through, which is the silent failure again.
     """
     if not os.path.isfile(os.path.join(ROOT, "probe", "stop-payload.json")):
-        return ("⚠ HOOKS NOT LIVE — the Stop gate has never fired in this checkout (no "
+        vscode = os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-vscode"
+        remedy = ("Reload the VSCode window — the extension registers hooks at window load, so a\n"
+                  "  hook written mid-session stays inert until then (a restart also works, and "
+                  "costs more)."
+                  if vscode else
+                  "Start a new session — hooks are read at session start (or /hooks).")
+        return ("⚠ HOOKS NOT LIVE — no record of the Stop gate firing in this checkout (no "
                 "probe/stop-payload.json).\n"
-                "  Claude Code reads hooks at session START; install.sh wrote .claude/settings.json\n"
-                "  after this one began. Start a new session (or /hooks) or NOTHING here is enforced.")
+                "  Claude Code reads hooks when a session starts; install.sh wrote "
+                ".claude/settings.json\n"
+                "  after this one began, so nothing here is enforced yet.\n"
+                f"  → {remedy}\n"
+                "  (This tracks the PROBE's lifetime, not the hook's: a checkout that fired before\n"
+                "   probing shipped reads the same way until its next Stop.)")
     return None
 
 

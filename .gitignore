@@ -29,3 +29,6 @@ NEXT_SESSION.md
 
 # llm_chat identity for this project
 .llm_chat/
+
+# machine-local hook config (absolute paths)
+.claude/settings.local.json

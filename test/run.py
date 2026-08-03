@@ -49,6 +49,11 @@ def _env(proj=None, sid=None, **extra):
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.pop("GAME_LOOP_SESSION", None)
+    # Same reason, one variable later (#34): the suite runs inside a Claude session that sets
+    # CLAUDE_CODE_ENTRYPOINT, and letting it through means a test asking "what happens with NO
+    # entrypoint" silently gets this one instead — the arm never varies and passes for the wrong
+    # reason. A test whose control is contaminated by the runner cannot fail.
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -2531,6 +2536,49 @@ def main():
             shutil.rmtree(adopt, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
+
+    # #34: the hooks-live warning claims only what the probe supports, and names the remedy for the
+    # HOST. Absence of the probe is a statement about the PROBE's lifetime, not the hook's — a
+    # checkout that fired before probing shipped reads identically until its next Stop, so the wording
+    # must say "no record", never "never fired". And the VSCode extension registers hooks at WINDOW
+    # LOAD, so "start a new session" is the expensive remedy there and obscures the one that works.
+    print("hooks-live warning (#34):")
+    hp = make_sandbox()
+    try:
+        def status_with(entrypoint):
+            env = _env(hp, sid="sess-hooks", CLAUDE_CODE_ENTRYPOINT=entrypoint)
+            return subprocess.run([os.path.join(hp, ".game_loop", "bin", "game_loop"), "status"],
+                                  capture_output=True, text=True, env=env).stdout
+
+        probe = os.path.join(hp, ".game_loop", "probe", "stop-payload.json")
+        if os.path.exists(probe):
+            os.remove(probe)
+
+        vs = status_with("claude-vscode")
+        check("no probe → the warning fires", "HOOKS NOT LIVE" in vs)
+        check("it says NO RECORD, not 'never fired' (the probe's lifetime, not the hook's)",
+              "no record of the Stop gate firing" in vs and "never fired" not in vs)
+        check("it states that limit out loud, not only in a comment (INV6)",
+              "PROBE's lifetime" in vs)
+        check("under the VSCode extension the remedy is the RELOAD, not a restart",
+              "Reload the VSCode window" in vs)
+        other = status_with("cli")
+        check("under any other host the remedy is a new session",
+              "Start a new session" in other and "Reload the VSCode window" not in other)
+        check("the host is read from CLAUDE_CODE_ENTRYPOINT — TERM_PROGRAM is unset here and "
+              "would detect nothing",
+              "Reload the VSCode window" in status_with("claude-vscode")
+              and "Reload the VSCode window" not in subprocess.run(
+                  [os.path.join(hp, ".game_loop", "bin", "game_loop"), "status"],
+                  capture_output=True, text=True,
+                  env=_env(hp, sid="sess-hooks", TERM_PROGRAM="vscode")).stdout)
+
+        os.makedirs(os.path.dirname(probe), exist_ok=True)
+        with open(probe, "w") as f:
+            f.write("{}")
+        check("a recorded firing silences it", "HOOKS NOT LIVE" not in status_with("claude-vscode"))
+    finally:
+        shutil.rmtree(hp, ignore_errors=True)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

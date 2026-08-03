@@ -135,6 +135,7 @@ DEFAULT_STATE = {
     "watchdog_rings": 0,
     "t3_armed": None,
     "authorized": [],
+    "attributed": [],  # merges declared by REF and recomputed here — one commit each (see #29)
     "watchdog_rings_total": 0,
     "stop_gate_blocks_total": 0,
     "flair_fired": [],
@@ -1240,6 +1241,143 @@ def cmd_authorize(s, a):
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
         "→ the guard will consume this and log the use. It is permanent in log.jsonl.")
+
+
+# ── merge attribution ────────────────────────────────────────────────────────────────────────────
+#
+# THE FAILURE THIS EXISTS FOR (issue #29, and it was logged before it was built): the blast-radius
+# warning compares a commit's staged files against what THIS session wrote through Write/Edit. That
+# set is session-wide, deliberately and correctly — one session is one session however many trees it
+# touches — which is exactly why it never contains what a SIBLING session wrote on a branch. The
+# moment this session integrates that work, `git merge` brings the files in and every one of them
+# reads as excess. Observed live across ~14 integration commits: the warning fired on 8, naming 2-10
+# files each time, all of them the point of the commit. A warning that is wrong every time is one
+# people learn to scroll past, and a rail nobody reads is a rail already routed around.
+#
+# The scoping is not the bug. The bug is that the check had no way to be told a commit's PROVENANCE.
+#
+# THE KEYSTONE, APPLIED TO PROVENANCE: a declaration names REFS, never filenames, and game_loop
+# recomputes the file set from the ref itself. A JSON array of paths is precisely the plausible
+# string a model produces for free and nothing can check; a ref is real, resolvable, and the
+# recomputation IS the check — a ref that does not resolve is REFUSED, the same shape as
+# `claim --read` refusing a path that is not there.
+#
+# NOT config.json -> generated_globs, deliberately, though it was the shortcut sitting right there.
+# That list is keyed to PATHS rather than to provenance: it would suppress genuine findings on those
+# paths forever, it grows monotonically as more of a repo gets orchestrated, and it lies — merged
+# files are not generated. This is the opposite trade: narrow, single-use, logged, and it makes the
+# check STRICTER rather than quieter, because what nothing accounts for becomes the only output.
+
+
+def _git_out(tree, *args):
+    """git in `tree`: stdout on success, None on any failure at all.
+
+    Never raises, on purpose. A missing ref, a shallow clone, an unborn HEAD, a detached HEAD, git
+    not installed — every one of them has to become a STATED refusal or silence, never a traceback
+    out of a guard.
+    """
+    try:
+        r = subprocess.run(["git", "-C", tree] + list(args), capture_output=True, text=True)
+    except (OSError, ValueError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def attribution_tree():
+    """The tree an attribution is computed in: the git tree holding the cwd when that is the project
+    itself or a tree nested inside it (a worktree), else the project.
+
+    Same answer the commit gate resolves for the tree a commit LANDS in (#28), so the two sets
+    describe one world. A cwd somewhere else entirely falls back to the project rather than
+    attributing a foreign checkout's refs.
+    """
+    root = os.path.realpath(REPO_ROOT)
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        return root
+    top = _git_out(cwd, "rev-parse", "--show-toplevel") or ""
+    top = os.path.realpath(top.strip()) if top.strip() else ""
+    return top if top and (top == root or top.startswith(root + os.sep)) else root
+
+
+def merge_files(tree, ref):
+    """Recompute what a ref actually carries. Returns (paths, None) or (None, refusal).
+
+    The set is `git diff --name-only $(git merge-base HEAD <ref>)..<ref>` — the files that ref brings
+    that HEAD does not already have. Paths come back REPO-relative, the one space edited.txt and the
+    blast-radius check both speak, so a worktree's paths carry the worktree's prefix.
+    """
+    if not _git_out(tree, "rev-parse", "--git-dir"):
+        return None, "%s is not a git tree, so there is no ref to recompute anything from" % tree
+    sha = (_git_out(tree, "rev-parse", "--verify", "--quiet", ref + "^{commit}") or "").strip()
+    if not sha:
+        return None, "'%s' does not resolve to a commit in %s" % (ref, tree)
+    if not (_git_out(tree, "rev-parse", "--verify", "--quiet", "HEAD") or "").strip():
+        return None, ("HEAD does not resolve in %s — with no commit to compare against there is no "
+                      "set of files a merge would bring in" % tree)
+    base = (_git_out(tree, "merge-base", "HEAD", sha) or "").strip()
+    if not base:
+        return None, ("HEAD and '%s' share no merge-base in %s — nothing connects the two histories, "
+                      "so no set of files can be recomputed from that ref" % (ref, tree))
+    diff = _git_out(tree, "diff", "--name-only", base + ".." + sha)
+    if diff is None:
+        return None, "git could not diff %s..'%s' in %s" % (base[:8], ref, tree)
+    prefix = os.path.relpath(tree, os.path.realpath(REPO_ROOT))
+    paths = []
+    for line in diff.splitlines():
+        p = line.strip()
+        if p:
+            paths.append(p if prefix == "." else os.path.normpath(os.path.join(prefix, p)))
+    return paths, None
+
+
+def cmd_attribute(s, a):
+    """Declare that the next commit lands work a NAMED REF carries. One commit, consumed, logged.
+
+    Mirrors `authorize` exactly — the arm -> gate -> CONSUME primitive the whole tool rests on. It
+    buys one commit's worth of attribution and writes a permanent log entry carrying the reason, so
+    every widening of what the blast-radius check will accept is readable forever.
+
+    The load-bearing part is what it REFUSES to take: a list of filenames. Only refs, and the files
+    are recomputed here from each ref. A ref that does not resolve is refused outright, because an
+    attribution game_loop cannot recompute would suppress a real finding on nothing but a sentence.
+
+    Honest about its own edges, and they are stated in the guard too: the declaration is spent by the
+    next commit the blast-radius check actually EXAMINES (a session with no recorded edits of its own
+    is already silent there, and does not burn it), and the check runs at PreToolUse — so a commit
+    denied further down the same command has still spent it.
+    """
+    refs = [r.strip() for r in (a.merge or []) if r and r.strip()]
+    if not refs or not a.reason:
+        die("attribute needs --merge <ref> [--merge <ref> ...] and --reason \"<why this commit "
+            "carries them>\".\n"
+            "It names REFS, never filenames. A list of paths is a sentence anything can write; a ref\n"
+            "is checkable, and game_loop recomputes the files from it. That recomputation IS the check.")
+    tree = attribution_tree()
+    files, per_ref = [], []
+    for ref in refs:
+        got, refusal = merge_files(tree, ref)
+        if refusal:
+            die("attribute REFUSES this declaration: " + refusal + ".\n"
+                "Name a ref that resolves — a branch, a tag, a sha. An attribution that cannot be\n"
+                "recomputed is a claim with nothing behind it, and it would silence a real finding.")
+        per_ref.append({"ref": ref, "files": len(got)})
+        files.extend(got)
+    files = sorted(dict.fromkeys(files))
+    head = (_git_out(tree, "rev-parse", "HEAD") or "").strip()[:12]
+    rec = {"refs": refs, "per_ref": per_ref, "files": files, "reason": a.reason,
+           "tree": tree, "head": head, "at": now(), "uses_left": 1}
+    s.setdefault("attributed", []).append(rec)
+    save(s)
+    logline({"kind": "attribute", "refs": refs, "files": len(files), "reason": a.reason,
+             "tree": tree, "head": head})
+    out("✓ ATTRIBUTED — one commit's merges accounted for, recomputed from the refs.",
+        *["  %s: %d file(s)" % (d["ref"], d["files"]) for d in per_ref],
+        f"  total : {len(files)} distinct file(s)  (no filename you typed is in this — only the refs)",
+        f"  reason: {a.reason}",
+        "→ the next commit's blast-radius check partitions THREE ways: your own edits, these, and",
+        "  whatever is in NEITHER — and only that third set is reported. Consumed there, logged there.")
 
 
 # ── environment pins ─────────────────────────────────────────────────────────────────────────────
@@ -3501,6 +3639,12 @@ def main():
     az.add_argument("--reason", help="the human's own words")
     az.add_argument("--uses", help="how many mutations (default 1)")
 
+    at = sub.add_parser("attribute")  # a commit's merges, named by REF and recomputed here (#29)
+    at.add_argument("--merge", action="append",
+                    help="a ref this commit lands (repeatable): a branch, tag or sha — never a "
+                         "filename. game_loop recomputes the files from it")
+    at.add_argument("--reason", help="why this commit carries work another session produced")
+
     md = sub.add_parser("mandate")  # bind an autonomy mandate; while bound, the Stop gate is live
     md.add_argument("--set", help="the mandate, in the human's words")
     md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
@@ -3601,7 +3745,8 @@ def main():
     s = load()
     {"status": cmd_status, "claim": cmd_claim, "note": cmd_note, "harden": cmd_harden,
      "stepback": cmd_stepback, "trans": cmd_trans, "mandate": cmd_mandate, "arm": cmd_arm,
-     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
+     "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "attribute": cmd_attribute,
+     "notify": cmd_notify,
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
      "instrument": cmd_instrument, "measure": cmd_measure}[a.cmd](s, a)
 

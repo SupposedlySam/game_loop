@@ -186,6 +186,45 @@ written through Bash (a heredoc, `sed -i`, a script), by a sibling session, or b
 started is not in the set and gets named as excess. With no recorded edits it says nothing, and it
 reads the index — `git commit -a`, an explicit pathspec and `--no-verify` all pass unexamined.
 Silence from it is not evidence that a commit is tight.
+
+#### Provenance — `game_loop attribute --merge <ref>`
+
+That "by a sibling session" case is not a rare edge; it is an orchestrator's *normal shape*. When the
+session that writes the code and the session that lands it are different, `git merge` brings in files
+this session never touched, and every one reads as excess. Observed live across ~14 integration
+commits: the warning fired on 8, naming 2–10 legitimate files each time. A merge-**only** session is
+already silent (no recorded edits ⇒ no accusation); the broken case is the **mixed** one — a few
+edits of its own plus merges. And a warning that is wrong every time is one people learn to scroll
+past, at which point it stops working for the case it was built for.
+
+The session scoping is not the bug — an authorization is granted to a *session*, and must be
+spendable across every tree it works in (INV5). The bug was that the check had no way to be told a
+commit's **provenance**. So it can be, once, out loud:
+
+```
+game_loop attribute --merge <ref> [--merge <ref> ...] --reason "<why this commit carries them>"
+```
+
+The declaration names **refs, never filenames**, and game_loop recomputes the file set itself:
+`git diff --name-only $(git merge-base HEAD <ref>)..<ref>`. That is this project's keystone — *cite
+the file you read* — applied to attribution. A JSON array of filenames is exactly the plausible
+string a model produces for free and nothing can check; a ref is real, resolvable, and **the
+recomputation is the check**. A ref that does not resolve is refused, the same way `claim --read`
+refuses a path that is not there. Then the check partitions staged files **three** ways: this
+session's own edits, what a named ref carries, and what is in **neither** — and that third set
+becomes the entire output. It is consumed by the next commit the check examines and written to
+`log.jsonl` with its refs and reason, exactly like `authorize`.
+
+This is **stricter, not quieter**. Today a file *nobody* wrote is one line among ten legitimate ones
+in a warning everyone skips; after, it is the only line. What it still cannot check (INV6): that a
+declaration was *honest* about intent. A real ref chosen to blanket a file resolves fine. It is
+narrowed to one commit and permanently attributable instead — the most a guard on this side of the
+keyboard can do.
+
+Deliberately **not** solved with `config.json → generated_globs`, which was the shortcut sitting
+right there: that list is keyed to *paths* rather than provenance, so it would suppress genuine
+findings on those paths forever, it grows monotonically as more of a repo gets orchestrated, and it
+lies — merged files are not generated.
 ### The MCP guard — `bin/guard-mcp.sh`
 
 The write guard reads **Bash**. But a session with MCP servers connected can take an irreversible

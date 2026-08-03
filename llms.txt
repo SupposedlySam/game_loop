@@ -124,6 +124,14 @@ resort — say why 1–5 don't apply).
 - **`git commit` is refused if owed checks are stale** (when `.game_loop/verify.yaml` has rules). Run
   `./.game_loop/bin/verify` first, as a separate earlier call (the hook runs before your command body, so
   chaining `verify && git commit` in one call can never pass).
+- **`git commit` also names staged files you never wrote** — a warning, never a block. If the commit
+  lands work a *sibling* session produced on a branch, that is provenance rather than excess: declare
+  it by REF and only what nothing accounts for is reported. Single-use and logged.
+  ```
+  ./.game_loop/bin/game_loop attribute --merge <ref> [--merge <ref> ...] --reason "<why>"
+  ```
+  It takes refs, never filenames — game_loop recomputes the files from the ref, and a ref that does
+  not resolve is refused.
 
 None of these have an env-var override, by design. The only escape hatch is a human.
 

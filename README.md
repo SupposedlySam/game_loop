@@ -197,6 +197,7 @@ even if you never automate the resume.
 | `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
 | `game_loop pin --fact .. --reason .. --path <path> [--expect ..]` | Carry a load-bearing environment fact (a pinned dep commit, a toolchain, an SDK path) in resume state, so a later tidy-up can't silently revert it. `--list` / `--release <id> --notes ".."`. |
 | `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
+| `game_loop attribute --merge <ref> [--merge <ref>] --reason ".."` | Declare that the next commit lands work a named REF carries, so the blast-radius warning reports only what *nothing* accounts for. Takes refs, never filenames — the files are recomputed from the ref. One commit, consumed, logged. |
 | `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
 | `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |
 | `game_loop note --text ".."` | Append a note to the log. |
@@ -213,6 +214,8 @@ even if you never automate the resume.
 - **Blast-radius warning** (same guard, at `git commit`) — names the staged files this session never
   wrote, so a directory-wide formatter or `git add -A` can't quietly widen a commit past the work.
   A warning, never a block, and it says which edits it cannot see (Bash heredocs, `sed -i`, scripts).
+  A commit's *provenance* can be declared by REF (`game_loop attribute --merge <ref>`) — game_loop
+  recomputes what that ref carries, and then only what **nothing** accounts for is reported.
 - **MCP guard** (`guard-mcp.sh`, a `PreToolUse` hook on `mcp__.*`) — the write guard reads Bash, but a
   connected MCP server can delete, send or force-push with no shell command at all. This classifies the
   call *before* it runs, on the tool name and the argument shape: read-only verbs pass; mutating verbs,

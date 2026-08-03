@@ -25,12 +25,20 @@
 #   DOES: at `git commit`, NAME the staged files this session never wrote — a warning about a
 #         commit widened past the work (a directory-wide formatter, a codemod, `git add -A`). It is
 #         STATED, NEVER BLOCKED: sweeping edits are sometimes the intent.
+#   DOES: accept a commit's PROVENANCE, declared by REF — `game_loop attribute --merge <ref>`. The
+#         files are recomputed from the ref by game_loop, never taken as a supplied list, and the
+#         declaration is single-use and logged. What a named ref carries stops being reported; what
+#         NOTHING accounts for becomes the only output. Stricter, not quieter (issue #29).
 #   DOES NOT: know about any edit it did not see as a Write/Edit/NotebookEdit. A file written
-#             through Bash (a heredoc, `sed -i`, a script or formatter), by a sibling session, or
-#             before this session started is absent from that set and gets named as excess; and
-#             with no recorded edits at all the check says nothing. It reads the INDEX, so
-#             `git commit -a`, an explicit pathspec, and `--no-verify` all pass it unexamined.
-#             Silence there is not evidence that a commit is tight.
+#             through Bash (a heredoc, `sed -i`, a script or formatter), by a sibling session with
+#             no attribution declared, or before this session started is absent from that set and
+#             gets named as excess; and with no recorded edits at all the check says nothing. It
+#             reads the INDEX, so `git commit -a`, an explicit pathspec, and `--no-verify` all pass
+#             it unexamined. Silence there is not evidence that a commit is tight.
+#   DOES NOT: verify that an attribution was HONEST about intent. It verifies only that the refs
+#             resolve and recomputes what they carry — a real ref deliberately chosen to blanket a
+#             file is not detectable here. It is narrowed to one commit and written to log.jsonl
+#             with its refs and reason instead, which makes it attributable rather than impossible.
 #   DOES: at `git commit`, check the owed-checks record of the TREE the commit lands in — a git
 #         worktree carries its own .game_loop/ and is gated on that, never on the tree this script
 #         happens to sit in. A commit landing in a tree that has no .game_loop/ is REFUSED rather
@@ -442,8 +450,11 @@ Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record
       # excess. STATED, NEVER BLOCKED: sweeping edits are sometimes exactly the intent; the failure
       # is that it happens silently, inside a diff nobody re-reads.
       # Silent by design wherever it cannot reason: no recorded edits, no readable index, no git.
+      # A commit's PROVENANCE is the third thing this needs to know and could not be told (issue
+      # #29). See the attribution block inside the Python below.
       blast_note=$(REPO_REAL="$REPO_REAL" EDITED_F="$EDITED_F" CONFIG_F="$CONFIG_F" \
-                   GAMELOOP_DIR="$GAMELOOP_DIR" TARGET_TREE="$TARGET_TREE" SID="$SID" python3 <<'PY'
+                   GAMELOOP_DIR="$GAMELOOP_DIR" TARGET_TREE="$TARGET_TREE" SID="$SID" \
+                   STATE_F="$STATE_F" python3 <<'PY'
 import datetime, json, os, subprocess, sys
 from fnmatch import fnmatch
 
@@ -459,6 +470,33 @@ except OSError:
 if not edited:
     sys.exit(0)          # nothing observed at all — no evidence, so no accusation
 
+# PROVENANCE — the third bucket (issue #29). The edited set is session-wide and correct, which is
+# exactly why it can never contain what a SIBLING session wrote on a branch: when this session lands
+# that work, `git merge` brings the files in and every one reads as excess. Across ~14 integration
+# commits the warning fired on 8, naming only legitimate files — and a warning that is wrong every
+# time is one people learn to scroll past.
+# So a session may DECLARE a commit's provenance: `game_loop attribute --merge <ref> --reason "..."`.
+# The declaration names REFS; game_loop recomputed the files from each ref itself (never from a
+# supplied list — that recomputation is the check, and an unresolvable ref is refused there). Here we
+# only read the result back, union it, and CONSUME the declaration exactly like an authorization.
+# The effect is a STRICTER check, not a quieter one: a file nothing accounts for stops being one line
+# among ten legitimate ones and becomes the only line.
+state_f = os.environ.get("STATE_F", "")
+attributed, att_refs, att_reason, att_live, st = set(), [], None, [], None
+try:
+    with open(state_f) as f:
+        st = json.load(f)
+except (OSError, ValueError):
+    st = None
+for rec in (st or {}).get("attributed", []) if isinstance(st, dict) else []:
+    if rec.get("uses_left", 0) <= 0:
+        continue                                  # already spent: one declaration, one commit
+    att_live.append(rec)
+    attributed.update(rec.get("files") or [])
+    att_refs.extend(rec.get("refs") or [])
+    if att_reason is None:
+        att_reason = rec.get("reason")
+
 
 def git(*args):
     try:
@@ -473,6 +511,28 @@ staged = git("diff", "--cached", "--name-only")
 if top is None or staged is None:
     sys.exit(0)          # not an index this can read — degrade to silence, never to noise
 top = os.path.realpath(top.strip())
+
+# CONSUME, here and not a line earlier: a declaration is spent by the next commit this check
+# actually EXAMINES. Above this point the check said nothing at all (no recorded edits, no readable
+# index), and burning an attribution on a commit it never spoke about would leave the commit it was
+# written for facing the full, wrong list. Same semantics as an authorization: one buys one, and the
+# spend is logged with the refs, so a widening of what this check accepts is readable forever.
+if att_live:
+    for rec in att_live:
+        rec["uses_left"] = rec.get("uses_left", 1) - 1
+    try:
+        with open(state_f, "w") as f:
+            json.dump(st, f, indent=2)
+            f.write("\n")
+        spend = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+        if os.environ.get("SID"):
+            spend["sid"] = os.environ["SID"][:8]
+        spend.update({"kind": "attributed_merge", "refs": list(dict.fromkeys(att_refs)),
+                      "files": len(attributed), "reason": att_reason})
+        with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
+            f.write(json.dumps(spend) + "\n")
+    except OSError:
+        pass
 
 # Generated and vendored output is somebody else's work by definition. Without these exemptions the
 # warning fires on every lockfile and stops being read, and a guard nobody reads is a guard routed
@@ -492,7 +552,7 @@ try:
 except (OSError, ValueError):
     pass
 
-total, unedited = 0, []
+total, unedited, from_merge = 0, [], 0
 for line in staged.splitlines():
     p = line.strip()
     if not p:
@@ -507,33 +567,66 @@ for line in staged.splitlines():
     forms = [rel] if os.path.realpath(tree) == repo else [rel, p]
     if rel in edited or any(fnmatch(x, g) for x in forms for g in EXEMPT):
         continue
+    if any(x in attributed for x in forms):
+        from_merge += 1        # a named ref carries it, and game_loop recomputed that — not excess
+        continue
     unedited.append(rel)
 if not unedited:
     sys.exit(0)
 
 n = len(unedited)
-lines = ["COMMIT INCLUDES %d FILE%s THIS SESSION NEVER EDITED" % (n, "" if n == 1 else "S")]
-lines += ["    " + p for p in unedited[:10]]
-if n > 10:
-    lines.append("    ... %d more" % (n - 10))
+if att_live:
+    # THE WHOLE OUTPUT is now what nothing accounts for. This is stricter than the old shape, not
+    # quieter: the same file used to be one line among ten legitimate ones in a warning everyone had
+    # learned to skip, and it is now the only line.
+    lines = ["COMMIT INCLUDES %d FILE%s NOTHING ACCOUNTS FOR — NOT THIS SESSION, NOT ANY "
+             "ATTRIBUTED MERGE" % (n, "" if n == 1 else "S")]
+    lines += ["    " + p for p in unedited[:10]]
+    if n > 10:
+        lines.append("    ... %d more" % (n - 10))
+    lines += [
+        "",
+        "AND THAT IS THE ENTIRE LIST. %d other staged file%s came in with an attributed merge:"
+        % (from_merge, "" if from_merge == 1 else "s"),
+        "    " + (", ".join(dict.fromkeys(att_refs)) or "(no ref named)"),
+        "    reason: " + (att_reason or "(none given)"),
+        "recomputed by game_loop from those refs, never from a list of filenames you supplied. So the",
+        "lines above are STRICTLY the unexplained ones — read them, they are not padding.",
+        "Not intended? Unstage them:",
+        "    git restore --staged <path>     (and 'git checkout -- <path>' to drop the change itself)",
+    ]
+else:
+    lines = ["COMMIT INCLUDES %d FILE%s THIS SESSION NEVER EDITED" % (n, "" if n == 1 else "S")]
+    lines += ["    " + p for p in unedited[:10]]
+    if n > 10:
+        lines.append("    ... %d more" % (n - 10))
+    lines += [
+        "",
+        "A formatter, a codemod, a --fix run or a dependency update probably widened this, and",
+        "'git add -A' swept it in. Intended? Say so in the commit message. Not intended? Unstage them:",
+        "    git restore --staged <path>     (and 'git checkout -- <path>' to drop the change itself)",
+        "",
+        "LANDING WORK A SIBLING SESSION PRODUCED ON A BRANCH? That is provenance, not excess, and this",
+        "set cannot see it. Declare it by REF and it drops out, leaving only what nothing accounts for:",
+        "    game_loop attribute --merge <ref> [--merge <ref> ...] --reason \"<why this commit "
+        "carries them>\"",
+    ]
 lines += [
     "",
-    "A formatter, a codemod, a --fix run or a dependency update probably widened this, and",
-    "'git add -A' swept it in. Intended? Say so in the commit message. Not intended? Unstage them:",
-    "    git restore --staged <path>     (and 'git checkout -- <path>' to drop the change itself)",
-    "",
-    "WHAT THIS SET SEES: only files THIS session wrote through Write/Edit/NotebookEdit. A file you",
-    "created or rewrote through Bash (a heredoc, 'sed -i', a script or formatter you ran), one a",
-    "sibling session wrote, or one already changed before this session started is NOT in it and is",
-    "listed above even when it was the point. And with no recorded edits this check says nothing at",
-    "all — silence here is not evidence that a commit is tight.",
+    "WHAT THIS SET SEES: files THIS session wrote through Write/Edit/NotebookEdit, plus the files a",
+    "live `game_loop attribute --merge <ref>` declaration accounts for (recomputed from the ref, and",
+    "spent by this commit). A file you created or rewrote through Bash (a heredoc, 'sed -i', a script",
+    "or formatter you ran), one a sibling session wrote with no attribution, or one already changed",
+    "before this session started is NOT in it and is listed above even when it was the point. And",
+    "with no recorded edits this check says nothing at all — silence here is not evidence that a",
+    "commit is tight.",
 ]
 try:
     rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
     if os.environ.get("SID"):
         rec["sid"] = os.environ["SID"][:8]
     rec.update({"kind": "commit_unedited", "staged": total, "unedited": n,
-                "files": unedited[:10]})
+                "attributed": from_merge, "files": unedited[:10]})
     with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
         f.write(json.dumps(rec) + "\n")
 except OSError:

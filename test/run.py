@@ -2070,6 +2070,225 @@ def main():
                   not denied(r))
         finally:
             shutil.rmtree(wmain, ignore_errors=True)
+
+        # #29: the blast-radius set is scoped to the SESSION, deliberately and correctly — which is
+        # exactly why it can never hold what a SIBLING session wrote on a branch. The moment this
+        # session integrates that work, `git merge` brings the files in and every one reads as
+        # excess. Observed live across ~14 integration commits: the warning fired on 8, naming only
+        # legitimate files. A merge-ONLY session is already silent (no recorded edits ⇒ no
+        # accusation); the broken case is the MIXED session — a few edits of its own PLUS merges —
+        # which is an orchestrator's normal shape, and it is the shape reproduced below.
+        # The fix is not a wider exemption list. It is a single-use, logged declaration that names
+        # REFS and lets game_loop recompute the files itself, so a supplied list of filenames — the
+        # one thing a model can write for free and nothing can check — is never accepted.
+        print("write guard (a commit's provenance, declared by REF — #29):")
+        at = make_sandbox()
+        try:
+            with open(os.path.join(at, ".game_loop", "verify.yaml"), "w") as f:
+                f.write("")            # empty: the owed-checks gate must not deny and swallow the note
+            at_state_f = os.path.join(at, ".game_loop", "sessions", "sess-attr", "state.json")
+            at_log_f = os.path.join(at, ".game_loop", "log.jsonl")
+
+            def atgit(*args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       "-c", "init.defaultBranch=main", *args],
+                                      cwd=at, capture_output=True, text=True)
+
+            def atgl(*args, cwd=None, sid="sess-attr"):
+                """game_loop with its CWD IN THE TREE. `attribute` resolves the tree from the cwd,
+                the same way the commit gate resolves the tree a commit lands in (#28)."""
+                return subprocess.run([os.path.join(at, ".game_loop", "bin", "game_loop"), *args],
+                                      cwd=cwd or at, capture_output=True, text=True,
+                                      env=_env(sid=sid))
+
+            def atwrite(rel):
+                p = os.path.join(at, rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(rel + "\n")
+
+            def atedit(rel, sid="sess-attr"):
+                """The REAL guard on a real Write — the only thing that records a session edit."""
+                return guard(at, {"tool_name": "Write", "session_id": sid,
+                                  "tool_input": {"file_path": os.path.join(at, rel)}}, sid=sid)
+
+            def atcommit(sid="sess-attr"):
+                return guard(at, {"tool_name": "Bash", "session_id": sid, "cwd": at,
+                                  "tool_input": {"command": "git commit -m x"}}, sid=sid)
+
+            def atlog():
+                return open(at_log_f).read() if os.path.exists(at_log_f) else ""
+
+            def atattributed():
+                """The live declarations, fail-soft: a missing state file is 'none', not a crash —
+                these run against code that may never have written one."""
+                try:
+                    with open(at_state_f) as f:
+                        return json.load(f).get("attributed") or []
+                except (OSError, ValueError):
+                    return []
+
+            # Running the real CLI in this tree leaves __pycache__ beside its modules; ignoring it
+            # keeps `git add -A` describing the fixture rather than the interpreter.
+            with open(os.path.join(at, ".gitignore"), "w") as f:
+                f.write("__pycache__/\n")
+            atgit("init", "-q")
+            atwrite("README.md")
+            atgit("add", "-A")
+            atgit("commit", "-q", "-m", "init")
+            # A SIBLING session's work, on a real branch: three files THIS session never wrote.
+            atgit("checkout", "-q", "-b", "crawler/auth")
+            for rel in ("lib/auth.dart", "lib/token.dart", "lib/session_store.dart"):
+                atwrite(rel)
+            atgit("add", "-A")
+            atgit("commit", "-q", "-m", "the crawler's work")
+            atgit("checkout", "-q", "main")
+            # THE MIXED SHAPE: land the sibling's branch, and edit one file of our own on top.
+            atgit("merge", "--no-commit", "--no-ff", "crawler/auth")
+            atwrite("lib/mine.dart")
+            atedit("lib/mine.dart")
+            atgit("add", "--", "lib/mine.dart")
+
+            r = atcommit()
+            # THE CONTROL, and it passes in BOTH states by construction — that is the point of it:
+            # this is the reported defect, reproduced, and the fix must not change it until a
+            # declaration exists. It proves the fixture is really the broken shape, nothing more.
+            check("the reported defect, reproduced: a merge's files read as this session's excess",
+                  not denied(r)
+                  and "COMMIT INCLUDES 3 FILES THIS SESSION NEVER EDITED" in r.stdout
+                  and "lib/auth.dart" in r.stdout and "lib/token.dart" in r.stdout
+                  and "lib/mine.dart" not in r.stdout)
+            check("and the warning now names the way out, by REF — a guard must not block its own "
+                  "fix (INV5)",
+                  "LANDING WORK A SIBLING SESSION PRODUCED ON A BRANCH" in r.stdout
+                  and "game_loop attribute --merge <ref> [--merge <ref> ...]" in r.stdout)
+
+            # THE KEYSTONE. A ref is checkable and the recomputation IS the check, so a ref that does
+            # not resolve is refused outright — the same shape as `claim --read` refusing a path that
+            # is not there. Asserted on the words, never on a bare non-zero exit: an unknown
+            # subcommand also exits non-zero, and would "pass" this against code with no verb at all.
+            r = atgl("attribute", "--merge", "crawler/does-not-exist", "--reason", "landing it")
+            check("an attribution naming a ref that does not resolve is REFUSED, in words",
+                  r.returncode != 0 and "REFUSES this declaration" in r.stderr
+                  and "'crawler/does-not-exist' does not resolve to a commit" in r.stderr)
+            # The precise thing this verb refuses to accept: a FILENAME. A list of paths is the
+            # plausible string a model produces for free; it is not a ref, so it does not resolve.
+            r = atgl("attribute", "--merge", "lib/auth.dart", "--reason", "landing it")
+            check("a FILENAME handed to --merge is refused — this verb takes refs, not paths",
+                  r.returncode != 0
+                  and "'lib/auth.dart' does not resolve to a commit" in r.stderr)
+
+            r = atgl("attribute", "--merge", "crawler/auth",
+                     "--reason", "landing the crawler's auth work")
+            check("an attribution naming a real ref recomputes that ref's file set itself",
+                  r.returncode == 0 and "ATTRIBUTED" in r.stdout
+                  and "crawler/auth: 3 file(s)" in r.stdout
+                  and "only the refs" in r.stdout)
+            stored = (atattributed() or [{}])[0]
+            check("what is stored is the RECOMPUTED set, keyed to the ref that produced it",
+                  len(atattributed()) == 1 and stored.get("refs") == ["crawler/auth"]
+                  and sorted(stored.get("files") or []) == ["lib/auth.dart",
+                                                            "lib/session_store.dart",
+                                                            "lib/token.dart"]
+                  and stored.get("uses_left") == 1)
+            # A refusal must leave nothing behind to be spent later. Asserted against a state that
+            # already HOLDS one declaration, so "nothing was added" is a real observation rather
+            # than the empty truth it would be against a tool with no such verb at all.
+            r = atgl("attribute", "--merge", "crawler/also-not-real", "--reason", "landing it")
+            check("a refused declaration adds nothing to the state it was refused against",
+                  r.returncode != 0 and len(atattributed()) == 1
+                  and atattributed()[0].get("refs") == ["crawler/auth"])
+            check("the declaration is permanent in the log, with its refs and its reason",
+                  '"kind": "attribute"' in atlog() and '"crawler/auth"' in atlog()
+                  and "landing the crawler's auth work" in atlog())
+
+            # A file in NEITHER bucket: not written through Write/Edit, not carried by any named ref.
+            # This is the finding the old warning buried among ten legitimate ones.
+            atwrite("lib/nobody_wrote_this.dart")
+            atgit("add", "-A")
+            r = atcommit()
+            check("attributed files drop out of the warning entirely",
+                  "lib/auth.dart" not in r.stdout and "lib/token.dart" not in r.stdout
+                  and "lib/session_store.dart" not in r.stdout)
+            check("a file in NEITHER bucket is still named, and is now the ONLY thing named",
+                  "COMMIT INCLUDES 1 FILE NOTHING ACCOUNTS FOR" in r.stdout
+                  and "lib/nobody_wrote_this.dart" in r.stdout
+                  and "lib/mine.dart" not in r.stdout)
+            check("the note says what it accounted for and why that is STRICTER, not quieter",
+                  "3 other staged files came in with an attributed merge" in r.stdout
+                  and "crawler/auth" in r.stdout
+                  and "landing the crawler's auth work" in r.stdout
+                  and "STRICTLY the unexplained ones" in r.stdout)
+            check("the WHAT-THIS-SET-SEES paragraph GAINED the attributed case, losing nothing "
+                  "(INV6)",
+                  "WHAT THIS SET SEES" in r.stdout and "Write/Edit/NotebookEdit" in r.stdout
+                  and "game_loop attribute --merge <ref>` declaration accounts for" in r.stdout
+                  and "silence here is not evidence" in r.stdout.lower())
+            check("a provenance-aware warning still NEVER blocks the commit",
+                  "NOTHING ACCOUNTS FOR" in r.stdout and not denied(r) and r.returncode == 0)
+            check("the SPEND is its own permanent record, naming the refs it was spent on",
+                  '"attributed_merge"' in atlog() and '"crawler/auth"' in atlog())
+
+            # SINGLE-USE, exactly like `authorize`: one declaration buys one commit. The spend count
+            # is asserted, not just the message — the message alone reads the same against code that
+            # never had the verb, and a test that cannot fail is worthless.
+            atwrite("lib/second_nobody.dart")
+            atgit("add", "-A")
+            r2 = atcommit()
+            spends = [ln for ln in atlog().splitlines() if '"attributed_merge"' in ln]
+            check("the declaration is single-use — one spend, and the SECOND commit is not covered",
+                  len(spends) == 1
+                  and "NOTHING ACCOUNTS FOR" not in r2.stdout
+                  and "COMMIT INCLUDES 5 FILES THIS SESSION NEVER EDITED" in r2.stdout
+                  and "lib/auth.dart" in r2.stdout)
+            # A REGRESSION GUARD that passes in BOTH states by construction — that IS the claim:
+            # with nothing declared, this check says exactly what it said before.
+            check("with no live attribution the warning is word-for-word the one that shipped before",
+                  "attributed merge" not in r2.stdout
+                  and "'git add -A' swept it in" in r2.stdout
+                  and "git restore --staged <path>" in r2.stdout
+                  and "silence here is not evidence" in r2.stdout.lower())
+
+            # Git must never throw out of this. Every degenerate tree — no git at all, unrelated
+            # histories — becomes a STATED refusal, never a traceback out of a gate.
+            ng = make_sandbox()
+            try:
+                def nggl(*args):
+                    return subprocess.run([os.path.join(ng, ".game_loop", "bin", "game_loop"),
+                                           "attribute", *args], cwd=ng, capture_output=True,
+                                          text=True, env=_env(sid="sess-nogit"))
+
+                def nggit(*args):
+                    return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                           "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                           "-c", "init.defaultBranch=main", *args],
+                                          cwd=ng, capture_output=True, text=True)
+
+                r = nggl("--merge", "main", "--reason", "landing it")
+                check("attribute in a tree with no git refuses in words, never with a traceback",
+                      r.returncode != 0 and "is not a git tree" in r.stderr
+                      and "Traceback" not in r.stderr and "Traceback" not in r.stdout)
+                nggit("init", "-q")
+                with open(os.path.join(ng, "a.txt"), "w") as f:
+                    f.write("a\n")
+                nggit("add", "-A")
+                nggit("commit", "-q", "-m", "init")
+                nggit("checkout", "-q", "--orphan", "stranger")
+                with open(os.path.join(ng, "b.txt"), "w") as f:
+                    f.write("b\n")
+                nggit("add", "-A")
+                nggit("commit", "-q", "-m", "unrelated")
+                nggit("checkout", "-q", "main")
+                r = nggl("--merge", "stranger", "--reason", "landing it")
+                check("a ref sharing no history with HEAD is refused, saying there is nothing to "
+                      "recompute",
+                      r.returncode != 0 and "share no merge-base" in r.stderr
+                      and "Traceback" not in r.stderr and "Traceback" not in r.stdout)
+            finally:
+                shutil.rmtree(ng, ignore_errors=True)
+        finally:
+            shutil.rmtree(at, ignore_errors=True)
     finally:
         shutil.rmtree(proj, ignore_errors=True)
 

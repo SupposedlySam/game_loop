@@ -54,6 +54,11 @@ def _env(proj=None, sid=None, **extra):
     # entrypoint" silently gets this one instead — the arm never varies and passes for the wrong
     # reason. A test whose control is contaminated by the runner cannot fail.
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    # Same reason again: this suite may itself be guarded by a PINNED harness, whose hooks export
+    # GAME_LOOP_HOME. Letting it through would point every sandboxed script at the REAL repo's
+    # .game_loop — the tests would write their state into it and every "unset" control would
+    # silently be an "override set" case, passing for the wrong reason.
+    env.pop("GAME_LOOP_HOME", None)
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -2579,6 +2584,213 @@ def main():
         check("a recorded firing silences it", "HOOKS NOT LIVE" not in status_with("claude-vscode"))
     finally:
         shutil.rmtree(hp, ignore_errors=True)
+
+    # PINNED HARNESS. game_loop dogfoods itself: the hooks guarding a session run the very bin/ that
+    # session is editing, so a half-finished gate is live in the same breath it is written. A merge
+    # left conflict markers in bin/game_loop and every verb died with a SyntaxError; a shell parse
+    # error in the write guard once blocked every tool call including its own fix. Running the CODE
+    # from a pinned checkout fixes that — and the NAIVE version of it switches dogfooding off in
+    # silence, because bin/verify resolves the tree it checks from its own __file__ and a pinned copy
+    # resolves that to ITSELF. So GAME_LOOP_HOME splits the two: CODE pinned, HOME (rules, state,
+    # log, pins) in the repo. These tests build the trap exactly and prove it does not happen.
+    print("pinned harness (GAME_LOOP_HOME):")
+    sp = make_sandbox()
+    pin = tempfile.mkdtemp(prefix="gameloop-pin-")
+    try:
+        def spgit(*args):
+            return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                   "-c", "user.name=tester", "-c", "commit.gpgsign=false", *args],
+                                  cwd=sp, capture_output=True, text=True)
+
+        home = os.path.join(sp, ".game_loop")
+        # A project that gates its OWN harness — the shape this whole feature exists for.
+        with open(os.path.join(home, "verify.yaml"), "w") as f:
+            f.write('".game_loop/bin/*":\n  - "echo CHECK-RAN"\n')
+        spgit("init", "-q")
+        spgit("add", "-A")
+        spgit("commit", "-q", "-m", "init")
+
+        # The pinned CODE: bin/ only. The project's own files are deliberately absent — a second copy
+        # of config.json and verify.yaml beside the code is a second identity, and the trap needs
+        # only one misread of it to report a green nobody earned.
+        pincode = os.path.join(pin, ".game_loop")
+        shutil.copytree(home, pincode)
+        for owned in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md"):
+            if os.path.exists(p := os.path.join(pincode, owned)):
+                os.remove(p)
+
+        # The change under test: the repo's own harness, edited, with no check run since.
+        with open(os.path.join(home, "bin", "game_loop"), "a") as f:
+            f.write("\n# an edit to the live harness\n")
+
+        def run(binary, *args, home_val=None, code=None, stdin=None):
+            env = _env(sp, sid="sess-pin")
+            if home_val is not None:
+                env["GAME_LOOP_HOME"] = home_val
+            exe = os.path.join(code or pincode, "bin", binary)
+            if not os.path.isfile(exe):
+                # A binary that is not there is a FAILED expectation, not a crashed suite: these
+                # tests are meant to be run against code that does not have the feature yet, and a
+                # traceback there hides every result after it.
+                return subprocess.CompletedProcess([exe], 127, "", f"no such binary: {exe}")
+            return subprocess.run([exe, *args], input=stdin, capture_output=True, text=True,
+                                  cwd=sp, env=env, timeout=60)
+
+        def hook(script, payload, home_val=None, code=None):
+            env = _env(sp, sid="sess-pin")
+            if home_val is not None:
+                env["GAME_LOOP_HOME"] = home_val
+            return subprocess.run([os.path.join(code or pincode, "bin", script)],
+                                  input=json.dumps(payload), capture_output=True, text=True,
+                                  env=env, timeout=60)
+
+        # CONTROL. What the repo's OWN gate says about that edit — the answer a pin must reproduce.
+        own = run("verify", "--check", code=home)
+        check("the repo's own verify refuses the harness edit (the answer a pin must preserve)",
+              own.returncode == 1 and "VERIFY REFUSED" in own.stdout
+              and ".game_loop/bin/game_loop" in own.stdout)
+
+        # THE TRAP, built exactly: pinned code, nothing naming the home. It resolves the tree from
+        # __file__, checks the PINNED directory — where nothing changed and no manifest exists — and
+        # reports green about a repo it never looked at. This one PASSES IN BOTH STATES on purpose:
+        # it asserts the HOLE, not the fix, so that the refusal on the next line is provably
+        # load-bearing rather than decorative. Nothing else here would notice if it stopped being a
+        # hole — and then the marker would be guarding nothing.
+        naive = run("verify", "--check")
+        check("a pinned copy told nothing about its home IS the trap — it reports green "
+              "(passes in both states)",
+              naive.returncode == 0 and "nothing owes a check" in naive.stdout)
+
+        with open(os.path.join(pincode, "PINNED"), "w") as f:
+            f.write("{}\n")
+        blind = run("verify", "--check")
+        check("...so a PINNED checkout run with no GAME_LOOP_HOME refuses instead of answering",
+              blind.returncode == 2 and "PINNED code checkout" in blind.stderr
+              and "nothing owes a check" not in blind.stdout)
+
+        # THE FIX: the same pinned binary, told which home it serves, answers about the REPO.
+        pinned = run("verify", "--check", home_val=home)
+        check("pinned code with GAME_LOOP_HOME set checks the REPO, not the copy it runs from",
+              pinned.returncode == 1 and "VERIFY REFUSED" in pinned.stdout
+              and ".game_loop/bin/game_loop" in pinned.stdout)
+        check("...and the manifest it read is the REPO's — the rule that fired exists only there",
+              ".game_loop/bin/*" in pinned.stdout and "echo CHECK-RAN" in pinned.stdout
+              and not os.path.exists(os.path.join(pincode, "verify.yaml")))
+
+        # A home that cannot be trusted is refused, never guessed: a silent fallback to __file__ is
+        # the trap again, wired by a typo instead of by omission.
+        gone = os.path.join(pin, "no-such-home")
+        r = run("verify", "--check", home_val=gone)
+        check("a home that does not exist is refused, naming the file it looked for",
+              r.returncode == 2 and "does not name a game_loop home" in r.stderr
+              and os.path.join(gone, "config.json") in r.stderr)
+        notgl = os.path.join(pin, "not-a-game-loop")
+        os.makedirs(notgl)
+        r = run("verify", "--check", home_val=notgl)
+        check("a directory that exists but carries no config.json is refused the same way",
+              r.returncode == 2 and "does not name a game_loop home" in r.stderr
+              and os.path.join(notgl, "config.json") in r.stderr)
+        r = run("verify", "--check", home_val="")
+        check("an EMPTY value is refused too — 'read it as unset' is the silent fallback again",
+              r.returncode == 2 and "(empty value)" in r.stderr)
+
+        # Each entrypoint resolves its own home (a shared import is one more thing to break while the
+        # harness is mid-edit), so the agreement BETWEEN them is what a test has to hold.
+        entry = {"game_loop": run("game_loop", "status", home_val=gone),
+                 "verify": run("verify", "--check", home_val=gone),
+                 "watchdog": run("watchdog", home_val=gone, stdin="{}")}
+        check("every python entrypoint refuses a bad home, not only the one that gates commits",
+              len(entry) == 3
+              and all(r.returncode == 2 and "does not name a game_loop home" in r.stderr
+                      for r in entry.values()))
+        w = hook("guard-writes.sh", {"tool_name": "Write",
+                                     "tool_input": {"file_path": os.path.join(sp, "f.txt")}},
+                 home_val=gone)
+        check("the write guard refuses a bad home rather than enforcing some other project's policy",
+              denied(w) and "does not name a game_loop home" in w.stdout
+              and "allow_write_roots" in w.stdout)
+        m = hook("guard-mcp.sh", {"tool_name": "mcp__x__write", "tool_input": {}}, home_val=gone)
+        check("...and so does the MCP guard, whose config decides which calls merely READ",
+              denied(m) and "does not name a game_loop home" in m.stdout)
+        w = hook("guard-writes.sh", {"tool_name": "Write",
+                                     "tool_input": {"file_path": os.path.join(sp, "f.txt")}})
+        check("a PINNED guard run with no home refuses too — that wiring is the trap by omission",
+              denied(w) and "PINNED code checkout" in w.stdout)
+
+        # State in the pinned directory would be DESTROYED by the next upgrade, because upgrading IS
+        # a re-checkout — and accumulated identity is exactly the thing that most needs to survive it.
+        r = run("game_loop", "mandate", "--set", "pinned work", home_val=home)
+        check("state written by pinned code lands in the HOME...",
+              r.returncode == 0
+              and os.path.isfile(os.path.join(home, "sessions", "sess-pin", "state.json")))
+        check("...and so does the log — the pinned copy stays empty, since a re-pin deletes it",
+              os.path.isfile(os.path.join(home, "log.jsonl"))
+              and not os.path.exists(os.path.join(pincode, "log.jsonl"))
+              and not os.path.exists(os.path.join(pincode, "sessions"))
+              and not os.path.exists(os.path.join(pincode, "state.json")))
+
+        st = run("game_loop", "status", home_val=home)
+        check("status names BOTH locations, so the split is visible rather than inferred",
+              "PINNED CODE" in st.stdout and pincode in st.stdout and home in st.stdout)
+        check("...and says which of the two the rules and state actually come from",
+              "read from and written to the HOME" in st.stdout)
+
+        # End to end: the commit gate, fired by the real guard, running pinned code, still refusing
+        # the REPO's unverified change. This is the whole feature in one assertion.
+        spgit("add", "-A")
+        cm = hook("guard-writes.sh", {"tool_name": "Bash", "session_id": "sess-pin", "cwd": sp,
+                                      "tool_input": {"command": "git commit -m x"}}, home_val=home)
+        check("the commit gate, run from pinned code, still refuses the repo's unverified change",
+              denied(cm) and "VERIFY REFUSED" in cm.stdout
+              and ".game_loop/bin/game_loop" in cm.stdout)
+
+        # THE COMMON PATH — variable unset, code and home the same directory. Every existing install
+        # depends on this being untouched. These three PASS IN BOTH STATES by construction, and that
+        # is precisely the claim being made about them.
+        check("unset: the repo's own verify behaves exactly as before (passes in both states)",
+              own.returncode == 1 and "VERIFY REFUSED" in own.stdout)
+        plain = run("game_loop", "status", code=home)
+        check("unset: status says nothing about pinning (passes in both states)",
+              plain.returncode == 0 and "PINNED CODE" not in plain.stdout)
+        pw = hook("guard-writes.sh", {"tool_name": "Write",
+                                      "tool_input": {"file_path": os.path.join(sp, "f.txt")}},
+                  code=home)
+        check("unset: the write guard still allows an in-repo write (passes in both states)",
+              not denied(pw))
+
+        # `game_loop self` — a verb rather than a paragraph, because the checkout is two git commands
+        # but the WIRING is what a human writes by hand, and the one wiring that recreates the trap
+        # (pinned bin/, GAME_LOOP_HOME forgotten) is a step you can forget.
+        r = run("game_loop", "self", "--pin", "HEAD", code=home)
+        selfcode = os.path.join(sp, ".game_loop_self", ".game_loop")
+        check("`self --pin` checks the harness out INSIDE the repo and nowhere else",
+              r.returncode == 0 and os.path.isfile(os.path.join(selfcode, "bin", "game_loop"))
+              and selfcode.startswith(sp + os.sep))
+        check("...stamps VERSION and PINNED, so running it blind refuses instead of guessing",
+              os.path.isfile(os.path.join(selfcode, "VERSION"))
+              and os.path.isfile(os.path.join(selfcode, "PINNED")))
+        # The checkout's existence is asserted first: "none of these four files is present" is
+        # satisfied for free by a directory that was never created, and a check an empty answer
+        # satisfies is a check that cannot fail.
+        check("...drops the project's own files from the copy — one identity, never two",
+              os.path.isfile(os.path.join(selfcode, "bin", "verify"))
+              and not any(os.path.exists(os.path.join(selfcode, o))
+                          for o in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md")))
+        check("...keeps the binaries executable, or the hooks would silently not run at all",
+              os.access(os.path.join(selfcode, "bin", "guard-writes.sh"), os.X_OK))
+        check("...and prints wiring that SETS the home, for settings.local.json — not the tracked one",
+              'GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop"' in r.stdout
+              and "settings.local.json" in r.stdout and "NOT in the tracked" in r.stdout)
+        fresh = run("verify", "--check", code=selfcode)
+        check("...and what it produced refuses to run blind, end to end",
+              fresh.returncode == 2 and "PINNED code checkout" in fresh.stderr)
+        bad = run("game_loop", "self", "--pin", "no-such-ref-anywhere", code=home)
+        check("an unresolvable ref fails loudly and leaves the existing pin untouched",
+              bad.returncode != 0 and "cannot resolve" in bad.stderr
+              and os.path.isfile(os.path.join(selfcode, "bin", "game_loop")))
+    finally:
+        shutil.rmtree(sp, ignore_errors=True)
+        shutil.rmtree(pin, ignore_errors=True)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

@@ -614,3 +614,57 @@ older harness) falls back to the repo-global `state.json`, which behaves exactly
 `GAME_LOOP_SESSION` overrides the id; set-but-empty (`GAME_LOOP_SESSION=`) deliberately targets the
 repo-global file — that is how a leftover pre-per-session mandate gets cleared. Authorizations
 (`game_loop authorize`) are session-scoped too: granted in a session, spendable only there.
+
+### Running the harness from a pinned checkout
+
+Only relevant if you are editing game_loop itself — or any project whose hooks run code that project
+is changing. The hooks run `$CLAUDE_PROJECT_DIR/.game_loop/bin/*`, so a half-finished edit to a gate
+is *live* in the same breath it is written. That has really happened here: a merge left conflict
+markers in `bin/game_loop` and every verb died with a `SyntaxError`; a shell parse error in the write
+guard blocked every tool call **including its own fix** (which is why `guard-writes.sh` is a fail-open
+shim over `guard-writes-impl.sh`); and while fixing the guard's redirect handling, the unfixed guard
+blocked the commit carrying the fix.
+
+The fix is to run the **code** from a pinned checkout while the **home** stays in the repo:
+
+```
+game_loop self --pin <ref>      # checks .game_loop out of <ref> into <repo>/.game_loop_self
+game_loop self                  # what is pinned now, plus the hook wiring to paste
+```
+
+Upgrading is then a deliberate act — re-pin at a newer commit. `status` prints a **PINNED CODE** block
+naming both directories and both commits, every session, so "the pinned copy is behind the repo" is
+visible rather than inferred.
+
+`GAME_LOOP_HOME` is what splits them, and it is not optional in a pinned setup:
+
+- **Unset** — home is the code's own directory. Byte-identical to a normal install; that is the path
+  every existing install takes.
+- **Set** — it must name a `.game_loop/` that exists and carries `config.json`, or every entrypoint
+  **refuses**. A silent fallback to the code's own directory is the whole hazard, so there isn't one.
+  An empty value is refused too (unlike `GAME_LOOP_SESSION=`, where empty names a real target).
+- **A pinned checkout run with no `GAME_LOOP_HOME` also refuses**, on a `PINNED` marker `self --pin`
+  stamps into it. That combination is otherwise indistinguishable from an ordinary install and is the
+  one wiring that recreates the failure below.
+
+**Why the split falls exactly there.** `bin/verify` resolves the tree it checks from its own
+`__file__`. A pinned copy resolves that to *itself* — so editing the repo's own `.game_loop/bin/`
+would owe nothing, `verify --check` would print "nothing owes a check", and the commit gate would
+pass. Dogfooding silently off, reporting success. Second: a pin is upgraded **by re-checkout**, so
+state written beside the pinned code is destroyed on every upgrade — and pins, the ruled-out list,
+hardened learnings and `log.jsonl` are precisely the accumulated identity that most needs to survive a
+version bump. So `verify.yaml`, `config.json`, `INVARIANTS.md`, `state`, `sessions/`, `log.jsonl` and
+`verified.json` all stay in the repo's `.game_loop/`; `self --pin` deletes the project-owned files out
+of the copy so there is only ever one identity to read.
+
+**The hooks that point at the pin belong in `.claude/settings.local.json`** — gitignored,
+machine-local — **never in the tracked `.claude/settings.json`**, which ships to every install and
+must keep pointing at `$CLAUDE_PROJECT_DIR/.game_loop/bin/`. `.game_loop_self/` is gitignored for the
+same reason: which commit you pin is a local decision. `game_loop self` prints the block to paste;
+hooks are read at session start, so reload afterwards.
+
+**What this does not catch (INV6).** It protects the session from code *you* are editing in this
+checkout. It does nothing about a pinned copy that is itself broken, a bad commit you deliberately
+pin, or a `verify.yaml` rule that is a tautology — the pin decides *which* code runs, never whether
+that code is correct. And it cannot make a stale pin visible to anything but a human reading `status`:
+nothing refuses because the pin is old.

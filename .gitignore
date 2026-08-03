@@ -26,3 +26,6 @@ NEXT_SESSION.md
 
 # showrunner: per-Crawler git worktrees (local only)
 .worktrees/
+
+# llm_chat identity for this project
+.llm_chat/

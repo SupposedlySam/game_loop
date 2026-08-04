@@ -341,8 +341,14 @@ def candidates(src):
     always returns a value cannot report by silence. It is the pair that makes a producer able to
     decline, and declining is the state an assertion cannot tell from working.
     """
+    # WALK THE WHOLE TREE, not `tree.body`. Module level is not the same question as "every
+    # function", and the difference is invisible until someone adds a class: the candidate set
+    # silently shrinks while the accounting still reports 0 unaccounted. That is the SHORT
+    # DENOMINATOR bug one level further out again — reported by a second downstream maintainer
+    # after it reached their own enumerator, and live here rather than hypothetical: `limits_lock`
+    # is a class and its two methods were outside the scan entirely.
     found = []
-    for fn in [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)]:
+    for fn in [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)]:
         rets = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
         if any(_returns_nothing(r) for r in rets) and any(not _returns_nothing(r) for r in rets):
             found.append(fn.name)

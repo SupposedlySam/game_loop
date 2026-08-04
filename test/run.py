@@ -3438,6 +3438,58 @@ def main():
     # so it gets checked here rather than trusted. It is far too slow to RUN from the suite (one
     # unmutated pass plus one per producer), and it does not need to be: what can rot is its
     # verdict line and its list of targets, and both are readable without running it.
+    # THE HOUSE VOICE (#33). This repo bans one word, for the Dungeon-Crawler-Carl theme. Until now
+    # the rule lived ONLY in a gitignored scratch file, which is to say it did not exist: it reached
+    # nobody who cloned the repo, and the tool's own output broke it in four places — including the
+    # success line of `harden`, the verb whose whole purpose is converting a learning into something
+    # enforced rather than remembered. A rule held up by whoever happens to be reviewing is the
+    # exact shape INV1 exists to refuse.
+    #
+    # The needle is BUILT rather than written, so this file does not contain the thing it forbids
+    # and cannot flag itself — the same trick mutation_sweep.py uses for the here-doc operator.
+    print("the house voice is enforced, not remembered (#33):")
+    _w = "sys" + "tem"
+    _banned = re.compile(r"\b" + _w + r"s?\b", re.I)
+    _MARK = "theme-word-" + "ok"
+
+    def _offending_lines(text):
+        """Word-boundary, so SystemExit and filesystem are DIFFERENT words and pass untouched —
+        a rule that fired on those would be reworded away rather than obeyed."""
+        return [i for i, ln in enumerate(text.split("\n"), 1)
+                if _banned.search(ln) and _MARK not in ln]
+
+    check("the scanner catches the word, in both singular and plural, and ignores the compounds "
+          "that merely contain it",
+          _offending_lines("a " + _w + " here") == [1]
+          and _offending_lines("two " + _w + "s") == [1]
+          and _offending_lines("raise " + _w.capitalize() + "Exit(2)") == []
+          and _offending_lines("the file" + _w + " path") == [])
+    check("...and an explicitly marked line is skipped, so an exception is greppable rather than "
+          "an argument with the check",
+          _offending_lines(f"a {_w} here  # {_MARK}") == [])
+
+    _tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)
+    _files = [f for f in _tracked.stdout.split("\n") if f.strip()]
+    _viol = []
+    for _f in _files:
+        try:
+            with open(os.path.join(REPO, _f)) as fh:
+                _txt = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        _viol += [f"{_f}:{i}" for i in _offending_lines(_txt)]
+    check("NO tracked file uses the banned word — the rule now holds over the whole repo, including "
+          "the shipped payload and the docs, not just the files someone re-read",
+          not _viol)
+    if _viol:
+        print("       offenders: " + ", ".join(_viol[:8]))
+    check("...and the scan actually looked at the repo, so an empty answer is a verdict rather "
+          "than a walk that found no files",
+          len(_files) > 20 and "CLAUDE.md" in _files)
+    check("the rule itself lives in a TRACKED file now, not in gitignored scratch — a rule that "
+          "does not reach a fresh clone is an oral tradition",
+          _MARK in open(os.path.join(REPO, "CLAUDE.md")).read())
+
     print("producer mutation sweep (test/mutation_sweep.py):")
     _spec = importlib.util.spec_from_file_location(          # the real file, not a copy of it
         "mutation_sweep", os.path.join(REPO, "test", "mutation_sweep.py"))

@@ -43,7 +43,7 @@ once is disabled forever. Every guard needs a legitimate path through it. Here t
 
 ## INV6 — ENCODE, don't remember; and state what a guard misses
 
-A learning is a bug in the system with a countdown. Its deliverable is an **artifact**, not a
+A learning is a bug in the harness with a countdown. Its deliverable is an **artifact**, not a
 sentence: `game_loop harden --learning ".." --artifact <real path> --mechanism ".." --rung N`. Take the
 highest rung that applies — **1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMATED · 5 VISIBLE · 6
 doc/memory** (last resort). And a guard that overstates its reach buys false confidence: say what it

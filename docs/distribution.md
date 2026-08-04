@@ -28,7 +28,7 @@ elsewhere with `GAME_LOOP_REPO=owner/repo` / `GAME_LOOP_REF=branch|tag`.
 
 ## Option B — Claude Code plugin (the most idiomatic fit)
 
-game_loop *is* a bundle of Claude Code hooks. Claude Code's plugin system distributes exactly that — hooks
+game_loop *is* a bundle of Claude Code hooks. Claude Code's plugin mechanism distributes exactly that — hooks
 plus commands/skills — via a marketplace:
 
 ```

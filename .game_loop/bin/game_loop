@@ -21,7 +21,7 @@ THE ONE DESIGN RULE (everything follows from it)
     native skill. "Point at a file on disk" is the one check prose cannot satisfy.
 
 LINEAGE
-    Extracted from two systems that already ran unattended for real: an on-device firmware loop where
+    Extracted from two projects that already ran unattended for real: an on-device firmware loop where
     the expensive gated action was a human button-press, and a trading loop where it was a real-money
     order. Same arm->gate->consume primitive, same VERIFIED/RULED-OUT/OPEN ledger vocabulary, two
     unrelated domains. game_loop is that pattern with the domain specifics removed. See docs/.
@@ -4448,13 +4448,13 @@ HARDEN_LADDER = [
     "2 LOUD       — assert/guard AT the point of misuse (fails in 1s, not 3h later, with the reason)",
     "3 CHECKED    — a build/CI/test check that fails on regression",
     "4 AUTOMATED  — the tool just does it (no step left to remember)",
-    "5 VISIBLE    — the system REPORTS the fact, so it's read, never guessed",
+    "5 VISIBLE    — the harness REPORTS the fact, so it's read, never guessed",
     "6 (doc/memo) — LAST resort only; you must say why 1-5 genuinely don't apply",
 ]
 
 
 def cmd_harden(s, a):
-    """Record a learning converted into an artifact the system enforces.
+    """Record a learning converted into an artifact the harness enforces.
 
     Same keystone as `claim --read`: the ungameable part is naming a REAL file. Prose is a promise to
     remember, and long sessions + compaction break promises. Docs are the INDEX; the artifact is the
@@ -4482,7 +4482,7 @@ def cmd_harden(s, a):
         f"  artifact : {', '.join(paths)}",
         f"  mechanism: {a.mechanism}",
         f"  rung     : {a.rung or '(unspecified — which ladder rung?)'}",
-        f"→ enforced by the system now, not by memory. (hardened so far: {s['hardened_count']})")
+        f"→ enforced by the harness now, not by memory. (hardened so far: {s['hardened_count']})")
     if general:
         out(f"  general  : {general}")
     elif triggers_for("harden"):
@@ -4562,7 +4562,7 @@ def cmd_stepback(s, a):
         out(inv_oneline())
     out("",
         "RETRO — ENCODE, DON'T REMEMBER. For EACH learning this chapter, ask the only question that",
-        "matters: **how does the SYSTEM enforce this now?** A learning that lives in prose (a note,",
+        "matters: **how does the HARNESS enforce this now?** A learning that lives in prose (a note,",
         "INVARIANTS.md, CLAUDE.md, memory) is a promise to remember — and long sessions + compaction",
         "break promises. Climb to the highest rung that applies:",
         *["  " + r for r in HARDEN_LADDER],

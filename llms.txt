@@ -101,7 +101,7 @@ It does not license a turn-end: the Stop gate rules still apply.
 ## When you learn something, encode it — don't write it down
 
 A learning kept in prose is a promise you will break under compaction. Convert it into an artifact the
-system enforces, and name the real file that now enforces it:
+harness enforces, and name the real file that now enforces it:
 
 ```
 ./.game_loop/bin/game_loop harden --learning ".." --artifact <real path> --mechanism ".." --rung N
@@ -114,7 +114,7 @@ resort — say why 1–5 don't apply).
 ## What the guards will stop you doing (and the escape hatch)
 
 - **Writes outside this repo are denied.** Everything outside the project (other repos, your home dir,
-  system files) is read-only. Reading elsewhere is fine; copying *into* the repo (`cp <there> <here>`)
+  the OS's own files) is read-only. Reading elsewhere is fine; copying *into* the repo (`cp <there> <here>`)
   is fine. If a human has explicitly authorized one write outside the repo, record their words and
   retry — it is single-use and logged:
   ```

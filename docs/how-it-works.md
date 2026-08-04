@@ -155,7 +155,7 @@ claim and the last point at which the claim is cheap to check.
 
 A `PreToolUse` hook enforcing an **allowlist**: writes are permitted only under the repo, the OS temp
 dir, this project's agent-memory dir, and anything in `config.json → allow_write_roots`. Everything
-else — other projects, your home directory, system files — is read-only by default. It covers
+else — other projects, your home directory, the OS's own files — is read-only by default. It covers
 `Write`/`Edit`/`NotebookEdit` and Bash mutators (`rm`, `mv`, redirects, `git` writes, `sed -i`, …),
 resolving paths with realpath and tracking `cd` across a command. It also blocks configured
 deploy/publish verbs anywhere. It states what it does *not* catch (interpreter one-liners, paths built
@@ -460,7 +460,7 @@ What it **does not catch**, stated in the code and in the verb's own output: tha
 ### harden — `game_loop harden`
 
 The meta-guard. When you learn something, you don't write it down — you `harden` it into an artifact
-the system enforces, and the command refuses unless you name the real file that now enforces it. Docs
+the harness enforces, and the command refuses unless you name the real file that now enforces it. Docs
 are the index; the artifact is the enforcement. Take the highest rung that applies (IMPOSSIBLE > LOUD
 > CHECKED > AUTOMATED > VISIBLE > doc-of-last-resort).
 

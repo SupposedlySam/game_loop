@@ -3584,6 +3584,47 @@ def _latest_version(repo, api_base):
     return cache.get("latest")   # stale-but-better-than-nothing, or None
 
 
+BEHAVIOUR_F = os.path.join(ROOT, "behaviour.json")
+
+
+def behaviour_changes(blob):
+    """The entries in a behaviour record, ordered by seq. Tolerant by design: a malformed or
+    truncated record is NO INFORMATION — never a crash, and never a confident 'nothing changed'."""
+    try:
+        d = json.loads(blob) if isinstance(blob, str) else blob
+        entries = d.get("changes") if isinstance(d, dict) else None
+        return sorted((e for e in (entries or [])
+                       if isinstance(e, dict) and isinstance(e.get("seq"), int)),
+                      key=lambda e: e["seq"])
+    except (ValueError, AttributeError, TypeError):
+        return []
+
+
+def installed_behaviour_seq():
+    """The highest seq this install SHIPPED with. A missing file means an install from before the
+    record existed, which is 0 — it has seen none of them, and that is the honest reading."""
+    try:
+        with open(BEHAVIOUR_F) as f:
+            return max((e["seq"] for e in behaviour_changes(f.read())), default=0)
+    except OSError:
+        return 0
+
+
+def _remote_behaviour(repo, raw_base):
+    """The record on main, or None. Best effort and bounded, exactly like the sha check: a status
+    line must never stall on the network, and 'could not fetch' must not read as 'nothing changed'.
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{raw_base.rstrip('/')}/{repo}/main/.game_loop/behaviour.json",
+            headers={"User-Agent": "game_loop-update-check"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            return resp.read().decode()
+    except Exception:  # noqa: BLE001 — offline, 404, parse error: no information, never a crash
+        return None
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -3597,10 +3638,27 @@ def update_notice():
                              cfg.get("update_api_base", "https://api.github.com"))
     if not latest or inst.startswith(latest) or latest.startswith(inst):
         return None
-    return (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
+    repo = cfg.get("update_repo", "SupposedlySam/game_loop")
+    note = (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
             f"  Re-install to update (bin/ is refreshed; no session restart):\n"
-            f"    curl -fsSL https://raw.githubusercontent.com/{cfg.get('update_repo', 'SupposedlySam/game_loop')}"
+            f"    curl -fsSL https://raw.githubusercontent.com/{repo}"
             f"/main/install.sh | bash -s -- .")
+    # WHAT changed, not merely THAT something did (#37). "An update is available" is true and
+    # useless for deciding whether to care. A new verb costs nothing until you reach for it; an
+    # existing verb that starts costing minutes, or refusing where it used to warn, changes
+    # behaviour for someone who asked for nothing — and only that earns the interruption.
+    remote = _remote_behaviour(repo, cfg.get("update_raw_base", "https://raw.githubusercontent.com"))
+    if remote is None:
+        return note                      # could not fetch: say nothing rather than 'nothing changed'
+    seen = installed_behaviour_seq()
+    fresh = [e for e in behaviour_changes(remote) if e["seq"] > seen]
+    if not fresh:
+        return note
+    lines = [note, "",
+             f"  ⚠ {len(fresh)} BEHAVIOUR CHANGE(S) to verbs you already use — not new features:"]
+    for e in fresh:
+        lines.append(f"    · {e.get('verb', '?')}: {e.get('change', '(unstated)')}")
+    return "\n".join(lines)
 
 
 RULED_OUT_SHOWN = 5          # newest N printed in full; the rest are counted and pointed at

@@ -75,6 +75,11 @@
 # installer through its real interface, so it owes the suite like every other gate.
 "install.sh":
   - "python3 test/run.py"
+# The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --
+# the notice would report nothing and look exactly like an install with nothing to report. That is
+# the failure class this repo keeps paying for, so the shipped file owes the suite too.
+".game_loop/behaviour.json":
+  - "python3 test/run.py"
 
 # Deliberately unchecked, and it stays visible here. Prose, licence text, editor config and the
 # payload copied verbatim into other projects: no command exists that fails when they are "broken".

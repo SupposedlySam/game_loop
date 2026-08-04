@@ -772,7 +772,20 @@ def main():
 
         class FakeGH(http.server.BaseHTTPRequestHandler):
             sha = "a" * 40
+            behaviour = None            # set per-assertion; None = 404, i.e. "could not fetch"
             def do_GET(self):
+                if "behaviour.json" in self.path:
+                    if FakeGH.behaviour is None:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    body = FakeGH.behaviour.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 body = json.dumps({"sha": FakeGH.sha}).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
@@ -813,6 +826,59 @@ def main():
         os.remove(ver_f)
         check("no VERSION file → update check stays silent (and hits no network)",
               "update available" not in fresh_status())
+        # The SHIPPED record is data the notice reads, and a malformed one degrades to silence: the
+        # notice reports nothing and looks exactly like an install with nothing to report. So the
+        # file itself is checked, not just the parser.
+        with open(os.path.join(REPO, ".game_loop", "behaviour.json")) as f:
+            _shipped = f.read()
+        _entries = sweep_free_behaviour = json.loads(_shipped).get("changes")
+        check("the shipped behaviour record parses and every entry carries seq, verb and change",
+              isinstance(_entries, list) and _entries
+              and all(isinstance(e.get("seq"), int) and str(e.get("verb", "")).strip()
+                      and str(e.get("change", "")).strip() for e in _entries))
+        check("...and its seqs are unique and ascending — seq IS the ordering, since shas have none",
+              [e["seq"] for e in _entries] == sorted({e["seq"] for e in _entries}))
+
+        # #37 — WHAT changed, not merely THAT something did. "An update is available" is true and
+        # useless for deciding whether to care. A new verb costs nothing until you reach for it; an
+        # existing verb that starts costing minutes, or refusing where it used to warn, changes
+        # behaviour for somebody who asked for nothing. Only that earns the interruption.
+        _bhv_f = os.path.join(proj, ".game_loop", "behaviour.json")
+        _rec = lambda *seqs: json.dumps({"changes": [
+            {"seq": n, "verb": f"v{n}", "change": f"c{n}"} for n in seqs]})
+        set_cfg(update_raw_base=ghbase)
+        open(ver_f, "w").write("b" * 40 + "\n")
+        FakeGH.behaviour = _rec(1, 2)
+
+        with open(_bhv_f, "w") as f:
+            f.write(_rec(1))
+        _one = fresh_status()
+        check("an update names the behaviour changes this install has NOT seen, and only those",
+              "BEHAVIOUR CHANGE" in _one and "v2: c2" in _one and "v1: c1" not in _one)
+
+        # PAIRED: caught up must be SILENT about behaviour, or every update carries the same
+        # paragraph forever and the one that matters is the one nobody reads.
+        with open(_bhv_f, "w") as f:
+            f.write(_rec(1, 2))
+        _caught = fresh_status()
+        check("...and an install already carrying every entry says nothing about behaviour at all",
+              "update available" in _caught and "BEHAVIOUR CHANGE" not in _caught)
+
+        # An install predating the record has seen NONE of them — 0, not "unknown, assume fine".
+        os.remove(_bhv_f)
+        check("an install from before the record existed is told about all of them",
+              "v1: c1" in fresh_status() and "v2: c2" in fresh_status())
+
+        # COULD NOT FETCH must never read as NOTHING CHANGED. This is the silence family again:
+        # an absent answer and a clean answer are different, and only one of them is reassuring.
+        FakeGH.behaviour = None
+        _unfetched = fresh_status()
+        check("an unreachable record leaves the plain update notice, claiming nothing either way",
+              "update available" in _unfetched and "BEHAVIOUR CHANGE" not in _unfetched)
+        FakeGH.behaviour = "}not json at all{"
+        check("...and so does a malformed one — garbage is no information, not a clean bill",
+              "BEHAVIOUR CHANGE" not in fresh_status())
+
         ghsrv.shutdown()
         open(cf, "w").write(cf_orig)
 

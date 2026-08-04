@@ -228,6 +228,15 @@ chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
          "$TARGET/.game_loop/bin/verify"
 echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, guard-mcp.sh + -impl, verify, flair.py, notify.py)"
 
+# The behaviour record ships and is ALWAYS refreshed — it is tool data, not one of the project's own
+# files. Refreshing it is what makes the installed copy mean "the record as of your install", which
+# is what `status` diffs against main to name changes you have not seen (#37). Seeding it once and
+# leaving it would freeze the baseline at the first install and the notice would repeat forever.
+if [ -f "$SRC/.game_loop/behaviour.json" ]; then
+  cp "$SRC/.game_loop/behaviour.json" "$TARGET/.game_loop/behaviour.json"
+  echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/behaviour.json (what an existing verb now costs or refuses differently)"
+fi
+
 # Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
 # clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.
 GL_SHA=""

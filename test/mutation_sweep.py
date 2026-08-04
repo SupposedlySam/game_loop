@@ -244,6 +244,23 @@ MUTANTS = [
      # watchdog cannot tell a parked run from a working one -- which is the entire premise of the
      # autonomy engine -- and exactly one named assertion notices.
      "one assertion carries it; the watchdog's own idleness measurement deserves a companion", 1),
+    # #37's two, measured at 2 each against a baseline of 543.
+    ("behaviour_changes -> the update notice never has anything to report",
+     ".game_loop/bin/game_loop::behaviour_changes", "    return []\n",
+     ["behaviour", "update", "changed", "cost"],
+     # THIN at 2, and honestly so: the parser is exercised through the notice rather than directly,
+     # so its ORDERING and its tolerance of a malformed record rest on the same two assertions that
+     # cover the notice itself. A companion asserting seq order on a scrambled record is what is owed.
+     "exercised only through the notice; ordering and malformed-input tolerance share its assertions",
+     2),
+    ("_remote_behaviour -> the record on main can never be fetched",
+     ".game_loop/bin/game_loop::_remote_behaviour", "    return None\n",
+     ["behaviour", "update", "fetch", "unreachable"],
+     # THIN at 2 by construction: an unreachable record is DESIGNED to be indistinguishable from a
+     # quiet one in everything except that it must not claim 'nothing changed'. There is little
+     # surface to assert beyond that, which is the point rather than a gap.
+     "an unreachable record is meant to be quiet; only its refusal to claim 'nothing changed' shows",
+     2),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

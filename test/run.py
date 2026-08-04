@@ -3071,6 +3071,115 @@ def main():
           found and "def aggregate_tell(text):\n    return None\n" in mutated
           and "_AGGREGATE_TELLS" in mutated and mutated != gl_src)
 
+    # .game_loop/config.json is TRACKED — correct, it is project config — and two of its fields take
+    # filesystem paths. A downstream project filled allow_write_roots with an absolute path under the
+    # author's home and pushed to a public repo: every cloner inherited a WRITE ROOT outside their
+    # repo, aimed at a directory only the author had. `expanduser` is already applied to these entries
+    # (bin/guard-writes-impl.sh), so the tilde form was portable and correct all along and nothing
+    # anywhere said so. status now says it. Every silence below is a DIFFERENTIAL against a run of the
+    # same check, in the same sandbox, that was seen to SPEAK — a check that has stopped working is
+    # quiet for the tilde form, quiet for an untracked config and quiet for everything else.
+    print("config paths (a tracked config granting a write root on ONE machine):")
+    cp = make_sandbox()
+    cpcfg = os.path.join(cp, ".game_loop", "config.json")
+    cphome = os.path.expanduser("~")
+    cpabs = os.path.join(cphome, "gl-cfgpath-scratch")
+
+    def cpgit(*args):
+        return subprocess.run(["git", "-c", "user.email=t@example.invalid", "-c", "user.name=tester",
+                               "-c", "commit.gpgsign=false", *args],
+                              cwd=cp, capture_output=True, text=True)
+
+    def cpset(**fields):
+        base = {"project_name": "t", "update_check": False}   # never reach the network from here
+        base.update(fields)
+        with open(cpcfg, "w") as f:
+            json.dump(base, f)
+
+    def cpstatus(env=None):
+        return subprocess.run([os.path.join(cp, ".game_loop", "bin", "game_loop"), "status"],
+                              capture_output=True, text=True, env=env or _env())
+
+    cpgit("init", "-q")
+    cpset(allow_write_roots=[cpabs])
+    cpgit("add", ".game_loop/config.json")
+    warned = cpstatus().stdout
+    check("a TRACKED config with a home-absolute allow_write_roots warns, and names the entry",
+          "CONFIG PATHS" in warned and f"⚠ allow_write_roots: {cpabs}" in warned)
+    check("...and says what it MEANS: committed, so every cloner inherits a write root they never "
+          "chose",
+          "EVERY clone of this repo inherits it" in warned
+          and "allowlisted WRITE" in warned and "INV3" in warned)
+    check("...and names the remedy that already works — the tilde form, resolved by expanduser",
+          "→ write it as  ~/gl-cfgpath-scratch" in warned and "expanduser" in warned
+          and "guard-writes-impl.sh" in warned)
+    check("...and rules OUT the plausible wrong fix: a relative entry resolves against the cwd",
+          "a RELATIVE entry is NOT the fix" in warned)
+    check("...and states its own reach rather than implying it is complete (INV6)",
+          "NOT checked:" in warned and "published" in warned)
+
+    cpset(allow_write_roots=["~/gl-cfgpath-scratch"])
+    tilde = cpstatus().stdout
+    check("the TILDE form of the same path does not warn — and the absolute one did, so that "
+          "silence is a verdict",
+          "CONFIG PATHS" not in tilde and "CONFIG PATHS" in warned)
+
+    cpset(allow_write_roots=[], read_roots=[])
+    empty = cpstatus().stdout
+    check("empty arrays do not warn — the shipped default is not a finding",
+          "CONFIG PATHS" not in empty and "CONFIG PATHS" in warned)
+
+    cpset(read_roots=[os.path.join(cphome, "gl-cfgpath-notes")])
+    readonly = cpstatus().stdout
+    check("a home-absolute read_roots is reported MILDLY — same shape, no permission in it",
+          "· read_roots: " in readonly and "no permission in it" in readonly
+          and "⚠ allow_write_roots" not in readonly)
+    check("...and its remedy cites the reader that actually expands it, not the write guard",
+          "claim --read, .game_loop/bin/game_loop" in readonly
+          and "guard-writes-impl.sh" not in readonly and "guard-writes-impl.sh" in warned)
+
+    other = os.path.join(os.path.dirname(cphome), "gl-cfgpath-nobody", "scratch")
+    cpset(allow_write_roots=[other])
+    foreign = cpstatus().stdout
+    check("an entry under ANOTHER account's home warns too — that is the cloner's view of this bug",
+          'home of "gl-cfgpath-nobody"' in foreign and "NOT this account" in foreign
+          and f"⚠ allow_write_roots: {other}" in foreign)
+
+    # The whole point of gating on TRACKED: a project that gitignores .game_loop/ has no exposure,
+    # and a warning that fires where there is no hazard is the one that gets tuned out (INV5 from
+    # the other side). Same file, same contents, only the tracking changes.
+    cpset(allow_write_roots=[cpabs])
+    still = cpstatus().stdout
+    cpgit("rm", "--cached", "-q", ".game_loop/config.json")
+    untracked = cpstatus().stdout
+    check("an UNTRACKED config does not warn regardless of contents — nothing is published",
+          "CONFIG PATHS" not in untracked and "CONFIG PATHS" in still
+          and f"⚠ allow_write_roots: {cpabs}" in still)
+
+    # A git that fails must degrade to silence, never a traceback: this is status output.
+    cpgit("add", ".game_loop/config.json")
+    fakebin = tempfile.mkdtemp(prefix="gameloop-nogit-")
+    with open(os.path.join(fakebin, "git"), "w") as f:
+        f.write("#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(fakebin, "git"), 0o755)
+    nogit_env = _env()
+    nogit_env["PATH"] = fakebin + os.pathsep + nogit_env["PATH"]
+    broke = cpstatus(env=nogit_env)
+    speaks = cpstatus().stdout
+    check("a failing git degrades to silence — no warning, no traceback, and status still runs",
+          "CONFIG PATHS" not in broke.stdout and "Traceback" not in broke.stderr
+          and broke.returncode == 0 and "=== game_loop" in broke.stdout)
+    check("...and the same config on a working git DOES warn, so that silence was git, not a dead "
+          "check",
+          "CONFIG PATHS" in speaks and f"⚠ allow_write_roots: {cpabs}" in speaks)
+
+    # The moment someone is about to fill these fields in is the cheapest place to say it.
+    with open(os.path.join(REPO, "install.sh")) as f:
+        inst_src = f.read()
+    check("install.sh's next steps teach the tilde convention where config.json is introduced",
+          "allow_write_roots" in inst_src and "as ~/..." in inst_src
+          and "COMMITTED" in inst_src)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

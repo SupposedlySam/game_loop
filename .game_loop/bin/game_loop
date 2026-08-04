@@ -3817,6 +3817,113 @@ def pinned_report():
     return lines
 
 
+def _home_keyed(entry):
+    """(tilde form, whose home) for an absolute path living under SOME account's home — the one
+    shape a path cannot survive being committed in. None for anything else.
+
+    Two cases, and both are the same mistake seen from opposite ends. Under THIS account's home,
+    the tilde form IS the entry rewritten correctly, so it is returned. Under ANOTHER account's —
+    which is precisely what someone who cloned the repo sees — the path does not exist here at all
+    and there is no rewrite to offer, only the account name that gives the mistake away.
+    """
+    if not isinstance(entry, str) or not os.path.isabs(entry):
+        return None
+    p = os.path.normpath(entry)
+    home = os.path.expanduser("~")
+    if os.path.isabs(home) and (p == home or p.startswith(home + os.sep)):
+        return ("~" if p == home else "~/" + p[len(home) + 1:]), None
+    # Where accounts' homes sit (/Users, /home). Never os.sep itself: with home=/root that would
+    # read every absolute path on the disk as somebody's home directory.
+    holder = os.path.dirname(home)
+    if os.path.isabs(holder) and holder != os.sep and p.startswith(holder + os.sep):
+        account = p[len(holder) + 1:].split(os.sep)[0]
+        if account:
+            return None, account
+    return None
+
+
+def config_paths_report():
+    """The CONFIG PATHS block for `status` — a TRACKED config granting a write on ONE machine.
+
+    `.game_loop/config.json` is project config and belongs in git; the installer's inner .gitignore
+    lists runtime state only, so it is tracked in every target. Two of its fields take filesystem
+    paths, and the natural thing to type in them is an absolute one under the author's home. For
+    `read_roots` that is merely useless to a stranger. For `allow_write_roots` it is a permission:
+    the file is committed, so everyone who clones the repo inherits an allowlisted write root
+    OUTSIDE the repo — the exact thing INV3 says there are none of by default — aimed at a path
+    keyed to one account. That is what happened to the project that reported this.
+
+    The remedy already works and nothing said so, which is why this is a check and not a docs note
+    (INV6: take the highest rung that applies). `expanduser` is applied to every entry before it is
+    matched (bin/guard-writes-impl.sh), so the tilde form resolves to EACH user's own home and is
+    correct for all of them.
+
+    Silent unless the file is genuinely TRACKED: a project that gitignores .game_loop/ has no
+    exposure, and a warning that fires where there is no hazard is the kind that gets tuned out
+    (INV5's argument from the other side). Silent on any git failure, missing or unreadable config
+    too — it is `status` output, and it never blocks anything.
+    """
+    if not _git("ls-files", "--", CONFIG_F):   # untracked, or no git at all: nothing to leak
+        return []
+    cfg = config()
+    repo_real = os.path.realpath(REPO_ROOT)
+    found = []
+    # Each field names WHO expands it, because they are different readers and a remedy that cites the
+    # wrong file is a remedy nobody can check.
+    for field, mark, expander in (
+            ("allow_write_roots", "⚠", "the write guard, .game_loop/bin/guard-writes-impl.sh"),
+            ("read_roots", "·", "claim --read, .game_loop/bin/game_loop")):
+        entries = cfg.get(field)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            keyed = _home_keyed(entry)
+            if not keyed:
+                continue
+            real = os.path.realpath(os.path.expanduser(entry))
+            if real == repo_real or real.startswith(repo_real + os.sep):
+                continue      # inside the repo: non-portable, but it grants nothing new
+            found.append((field, mark, expander, entry, keyed))
+    if not found:
+        return []
+    lines = ["", "CONFIG PATHS — .game_loop/config.json is TRACKED, and these entries name ONE "
+             "machine:"]
+    for field, mark, expander, entry, (tilde, account) in found:
+        lines.append(f"  {mark} {field}: {entry}")
+        if field == "allow_write_roots":
+            lines.append("      This file is committed, so EVERY clone of this repo inherits it — an "
+                         "allowlisted WRITE")
+            lines.append("      ROOT outside the repo, which INV3 says there are none of by default, "
+                         "granted to people")
+            lines.append("      who never chose it.")
+        else:
+            lines.append("      Committed and keyed to one account: no permission in it, just a read "
+                         "root that is")
+            lines.append("      useless to everyone else who clones this.")
+        if tilde:
+            lines.append(f"      → write it as  {tilde}  — every entry is run through expanduser "
+                         "before use, so")
+            lines.append("        the tilde form resolves to EACH user's own home and is correct "
+                         "for all of them.")
+        else:
+            lines.append(f'      It is under the home of "{account}", which is NOT this account: it '
+                         "came from")
+            lines.append("      whoever committed the config, and names nothing that exists here.")
+            lines.append("      → if it meant \"the user's own home\", write it with a leading ~ — "
+                         "every entry is run")
+            lines.append("        through expanduser before use, so the tilde form is correct for "
+                         "every clone.")
+        lines.append(f"        expanded by: {expander}")
+    lines.append("  → a RELATIVE entry is NOT the fix: those resolve against the process's working "
+                 "directory,")
+    lines.append("    not the repo root, so the allowlist quietly differs per caller instead of "
+                 "failing.")
+    lines.append("  → NOT checked: whether this repo is published anywhere, whether an absolute path "
+                 "OUTSIDE a")
+    lines.append("    home directory is one you meant to share, or what any of these paths hold.")
+    return lines
+
+
 def cmd_self(s, a):
     """`game_loop self` — run the harness from a pinned checkout, so editing it cannot break it.
 
@@ -4008,6 +4115,7 @@ def cmd_status(s, a):
     out(*fixes_report(s))   # which fixes were exercised through their OWN output — not their repro
     out(*coverage_report(s))   # what the rails are NOT looking at — silence from a rail is not safety
     out(*worktree_report(s))   # …and whether the rails in THIS tree are the project's at all (#30)
+    out(*config_paths_report())   # a TRACKED config handing every cloner a write root on ONE machine
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has
         # already been ruled out?" — so it is answered before it is asked.

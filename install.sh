@@ -467,6 +467,8 @@ elif [ "$FRESH" = 1 ]; then
   echo "Done — fresh install. Next:"
   echo "  1. Edit  $TARGET/.game_loop/INVARIANTS.md   — your project's north star"
   echo "  2. Edit  $TARGET/.game_loop/config.json     — read_roots / allow_write_roots / deploy_verbs"
+  echo "     Paths under your home go in as ~/... — the guard expands the tilde, and this file is"
+  echo "     COMMITTED, so an absolute /home/you/... hands every clone a write root only you have."
   echo "  3. START A NEW CLAUDE CODE SESSION. Hooks are read at session start, so the hooks this"
   echo "     installer just wrote are NOT active in the session you ran it from — every gate is"
   echo "     registered on disk and silently never invoked. \`game_loop status\` will warn you."

@@ -291,6 +291,26 @@ if [ -z "$GL_SHA" ]; then
   echo "    VERSION, so nothing here knows which commit these files came from. Leaving it UNSET is"
   echo "    the honest answer — a wrong sha would make the update check confidently wrong."
 fi
+# WHAT LEVEL WAS THE SOURCE AT? A clone gives you whatever was on main that morning, so the sha
+# alone does not say whether the author stands behind it. Carried into the target so `status` can
+# say it later, when nobody remembers which commit they installed from.
+GL_LEVEL="alpha"
+if [ "$SRC_OWN" = 1 ]; then
+  for _t in $(git -C "$SRC" tag --points-at HEAD 2>/dev/null); do
+    case "$_t" in
+      stable-*) GL_LEVEL="stable" ;;
+      beta-*)   [ "$GL_LEVEL" = "stable" ] || GL_LEVEL="beta" ;;
+    esac
+  done
+fi
+printf '%s\n' "$GL_LEVEL" > "$TARGET/.game_loop/CONFIDENCE"
+if [ "$GL_LEVEL" = "alpha" ]; then
+  echo "  ⚠ installed from an ALPHA commit — nothing marks it, which is the DEFAULT rather than a"
+  echo "    judgement. The author pushes while features are half-landed. For something they stand"
+  echo "    behind: git tag -l 'beta-*' 'stable-*'"
+else
+  echo "  level   $GL_LEVEL — the source commit carries a $GL_LEVEL mark"
+fi
 if [ -n "$GL_SHA" ]; then
   printf '%s\n' "$GL_SHA" > "$TARGET/.game_loop/VERSION"
   echo "  stamped .game_loop/VERSION ($(printf '%s' "$GL_SHA" | cut -c1-8)) — status flags when a re-install is due"

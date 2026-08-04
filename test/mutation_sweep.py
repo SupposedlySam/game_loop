@@ -329,6 +329,20 @@ MUTANTS = [
      # gates nothing by design, so there is little else to assert about it yet -- which is the
      # point, not a gap.
      "one log line, read by both arms; it deliberately gates nothing yet", 2),
+    ("pinned_sha -> stable can never be evidenced", ".game_loop/bin/game_loop::pinned_sha",
+     "    return None\n", ["confidence", "stable", "pinned", "dogfood"],
+     # THIN at 2 by construction, and honestly so: this producer feeds exactly one decision -- can
+     # `confidence --mark stable` prove the owning agent is running on this commit -- and that
+     # decision has two arms, refused-without-pin and allowed-with. There is no third thing to
+     # assert about it, which is the shape of the check rather than a gap in it.
+     "one decision, two arms: stable refused without a pin, permitted with one", 2),
+    ("installed_confidence_report -> an install never says what level it came from",
+     ".game_loop/bin/game_loop::installed_confidence_report", "    return []\n",
+     ["confidence", "alpha", "installed", "mid-flight"],
+     # THIN at 2: the alpha warning and the marked-level line. The third arm — an older install that
+     # recorded nothing — asserts ABSENCE and correctly survives a producer neutered to silence,
+     # which is the pairing working rather than a hole.
+     "two speaking arms; the third asserts absence and survives silence by design", 2),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

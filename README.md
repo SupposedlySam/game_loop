@@ -163,6 +163,31 @@ watchdog parks rather than burning retries against a wall, and wakes the session
 session that renders no status line these gates cannot arm — and `status` tells you so in plain terms
 rather than staying quiet and letting you assume you are covered.
 
+## How much do we stand behind a given commit?
+
+game_loop is developed in the open, so `main` moves while features are half-landed. A clone gives you
+whatever was there that morning. Three levels say how much confidence a specific commit has earned —
+and each one is an **artifact**, not a claim we typed:
+
+| level | what it means | what makes it markable |
+|---|---|---|
+| **alpha** | the default. Nothing marks this commit. Treat it as mid-flight. | nothing — it is the *absence* of a mark, so silence can never read as confidence |
+| **beta** | the full suite passed on this exact tree | a clean tree and every owed check already run; refused otherwise |
+| **stable** | our own agent was running its harness on this commit | the above, plus the pin equalling it — dogfooding as a fact, not a promise |
+
+```bash
+./.game_loop/bin/game_loop confidence      # what is this commit, and on what evidence
+git tag -l 'beta-*' 'stable-*'             # commits we stand behind
+```
+
+Levels ride annotated **git tags**, so they arrive with an ordinary `git clone` and the evidence
+travels in the tag message. `install.sh` records the level it installed from, and `status` says so
+later, when nobody remembers which commit they took.
+
+**What no level means:** none of them say the code is correct — only what was *checked*, and by whom.
+`beta` says a suite passed. `stable` says we were running on it. Neither is a promise about your
+project, and `confidence` tells you how to re-check rather than trust the tag.
+
 ## The guardrails, briefly
 
 Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees as runnable checks in

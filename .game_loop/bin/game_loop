@@ -4038,6 +4038,159 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
     return {"output_tokens": total, "records": seen, "window_sec": window_sec} if seen else None
 
 
+# ── confidence ───────────────────────────────────────────────────────────────────────────────────
+#
+# A consumer cloning this repo gets whatever was on main that morning -- mid-refactor included. The
+# author pushes while a feature is half-landed, because that is what working in the open looks like,
+# and nothing in a clone distinguishes "I am partway through a refactor" from "this is the commit I
+# run my own agent on".
+#
+# A SELF-DECLARED LEVEL WOULD BE PROSE, which is the thing this project refuses everywhere else. So
+# each level is an ARTIFACT the marker cannot fabricate and the consumer can re-check:
+#
+#   alpha   the DEFAULT, applied by nobody. It is the ABSENCE of a mark, so silence can never read
+#           as confidence -- the failure mode every other gate here exists to prevent.
+#   beta    the full suite passed on this exact tree, with nothing uncommitted. Refused otherwise.
+#   stable  beta, AND the owning agent has been running its own harness on this commit. That is
+#           dogfooding as a fact rather than a promise, and it is the strongest thing this project
+#           can honestly say about a sha.
+#
+# Carried by annotated git TAGS: they travel with an ordinary clone, cost nothing, touch no file,
+# and are per-commit rather than a list that rots. The annotation carries the evidence, so a reader
+# gets the reasoning and not just the verdict.
+CONFIDENCE_LEVELS = ("alpha", "beta", "stable")
+
+
+def _tags_at(ref="HEAD"):
+    out = _git("tag", "--points-at", ref)
+    return [t.strip() for t in (out or "").split("\n") if t.strip()]
+
+
+def confidence_of(ref="HEAD"):
+    """(level, tag, evidence-text). ALPHA when nothing marks it — never an error, never a guess."""
+    best, tag = "alpha", None
+    for t in _tags_at(ref):
+        for lvl in ("stable", "beta"):
+            if t.startswith(lvl + "-") and CONFIDENCE_LEVELS.index(lvl) > \
+                    CONFIDENCE_LEVELS.index(best):
+                best, tag = lvl, t
+    body = _git("tag", "-l", tag, "--format=%(contents)") if tag else ""
+    return best, tag, (body or "").strip()
+
+
+def cmd_confidence(s, a):
+    """Report what this project is willing to say about a commit — or mark one, with the evidence.
+
+    The reader half is for CONSUMERS and answers the question a clone cannot: is this commit
+    something the author stands behind, or a Tuesday afternoon?
+    """
+    ref = a.ref or "HEAD"
+    sha = _git("rev-parse", ref) or "?"
+    if not a.mark:
+        lvl, tag, body = confidence_of(ref)
+        out(f"CONFIDENCE: {lvl.upper()} — {sha[:8]}" + (f"  ({tag})" if tag else ""))
+        if lvl == "alpha":
+            out("  Nothing marks this commit, and that is the default rather than a judgement.",
+                "  Treat it as MID-FLIGHT: the author pushes while features are half-landed, and a",
+                "  clone gives you whatever was on main that morning.",
+                "  → For something the author stands behind, check out a tag: `git tag -l 'beta-*' "
+                "'stable-*'`")
+        else:
+            out(*["  " + l for l in body.splitlines()] or ["  (no evidence recorded)"])
+            out("  → Re-check it yourself rather than trusting the tag: "
+                "`game_loop confidence --recheck`")
+        out("",
+            "  WHAT NO LEVEL MEANS (INV6): none of these say the code is correct, only what was",
+            "  CHECKED and by whom. beta says a suite passed; stable says the author's own agent ran",
+            "  on it. Neither is a promise about your project.")
+        return
+
+    if a.mark not in ("beta", "stable"):
+        die(f"--mark takes beta or stable. alpha is the ABSENCE of a mark: it is what every "
+            "unmarked commit already is, so marking one would say nothing.")
+    if _git("status", "--porcelain"):
+        die("the working tree has uncommitted changes.\n"
+            "A confidence mark describes a COMMIT, not a desk. What you would be marking is not "
+            "what anyone else can check out.")
+    stale = run_verify_check()
+    if stale:
+        die("this commit's owed checks have not run since its last change:\n  " + stale + "\n"
+            "beta means THE SUITE PASSED ON THIS TREE. Run `./.game_loop/bin/verify`, then mark.")
+    pin = pinned_sha()
+    if a.mark == "stable" and (not pin or not sha.startswith(pin[:8])):
+        die("stable means the owning agent has been RUNNING on this commit, and it is not.\n"
+            f"  pinned : {pin[:8] if pin else '(nothing pinned)'}\n"
+            f"  this   : {sha[:8]}\n"
+            "Run `game_loop self --pin " + sha[:8] + "`, work on it, then mark it stable. "
+            "Dogfooding is the evidence; there is no way to assert it without doing it.")
+    tag = f"{a.mark}-{sha[:8]}"
+    lines = [f"{a.mark} — marked {now()}",
+             "",
+             "evidence:",
+             "  tree clean at mark time (this describes the commit, not a working copy)",
+             "  verify: every owed check had run since the last change to a gated file"]
+    if a.mark == "stable":
+        lines.append("  dogfooded: the owning agent's own harness was pinned to this commit")
+    if a.notes:
+        lines += ["", "notes: " + a.notes]
+    lines += ["", "this says what was CHECKED, never that the code is correct."]
+    msg = "\n".join(lines)
+    r = subprocess.run(["git", "tag", "-a", tag, "-m", msg], cwd=REPO_ROOT,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        die("could not create the tag: " + (r.stderr or "").strip())
+    logline({"kind": "confidence", "level": a.mark, "sha": sha, "tag": tag, "notes": a.notes})
+    out(f"✓ MARKED {a.mark.upper()} — {tag}",
+        *["  " + l for l in lines],
+        "",
+        "→ push it, or nobody else can see it:  git push origin " + tag)
+
+
+def pinned_sha():
+    """The sha the owning agent's harness is pinned to, or None."""
+    try:
+        with open(os.path.join(REPO_ROOT, PINNED_DIRNAME, ".game_loop", "VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def run_verify_check():
+    """'' when nothing is owed, else the text of what is stale. Never raises."""
+    v = os.path.join(ROOT, "bin", "verify")
+    if not os.path.isfile(v):
+        return ""
+    try:
+        r = subprocess.run([v, "--check"], cwd=REPO_ROOT, capture_output=True, text=True,
+                           timeout=120)
+    except Exception:  # noqa: BLE001 — cannot check is not the same as clean, but it must not crash
+        return "verify --check could not run"
+    return "" if r.returncode == 0 else (r.stdout or r.stderr or "stale").strip()[:400]
+
+
+def installed_confidence_report():
+    """What level the installed harness came from. Silent when nothing recorded it (an older install).
+
+    ALPHA is stated OUT LOUD rather than left blank, because the whole scheme fails if absence reads
+    as reassurance -- which is the failure every other gate in this file exists to prevent.
+    """
+    try:
+        with open(os.path.join(ROOT, "CONFIDENCE")) as f:
+            lvl = f.read().strip()
+    except OSError:
+        return []
+    if lvl == "alpha":
+        return ["⚠ INSTALLED FROM AN ALPHA COMMIT — nothing marked it, which is the DEFAULT rather "
+                "than a judgement.",
+                "  The author pushes while features are half-landed, so treat this copy as "
+                "mid-flight.",
+                "  → For a commit they stand behind: `git tag -l 'beta-*' 'stable-*'` in the source "
+                "clone, then re-install."]
+    return [f"confidence: installed from a {lvl.upper()} commit — "
+            + ("a suite passed on it" if lvl == "beta"
+               else "the author's own agent was running on it") + "."]
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -4998,6 +5151,7 @@ def cmd_status(s, a):
     if (w := hooks_live_warning()):
         out(w)
     out(*session_start_warning())
+    out(*installed_confidence_report())
     if (w := legacy_mandate_warning()):
         out(w)
     try:
@@ -5302,6 +5456,12 @@ def main():
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart/PostCompact entrypoint; not for humans
+    cf = sub.add_parser("confidence")
+    cf.add_argument("--mark", help="beta | stable — refused unless the evidence for it exists")
+    cf.add_argument("--ref", help="the commit to report on (default HEAD)")
+    cf.add_argument("--notes", help="what landed, in your words")
+    cf.add_argument("--recheck", action="store_true",
+                    help="do not trust the tag: run the gate the level claims")
 
     a = p.parse_args()
     if a.cmd in ("stopgate", "limitgate", "statusline", "sessionstart"):
@@ -5325,7 +5485,7 @@ def main():
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix, "owned": cmd_owned,
-     "worktree": cmd_worktree, "self": cmd_self,
+     "worktree": cmd_worktree, "self": cmd_self, "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure}[a.cmd](s, a)
 
 

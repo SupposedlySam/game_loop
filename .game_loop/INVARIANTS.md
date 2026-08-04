@@ -49,6 +49,17 @@ highest rung that applies — **1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMAT
 doc/memory** (last resort). And a guard that overstates its reach buys false confidence: say what it
 does *not* catch, in the guard itself. Silence from a guard is not evidence of safety.
 
+**Writing a rule does not install it, and the author is not exempt.** The intuition is that whoever
+just articulated a rule is the last person who would break it; the evidence runs the other way, and
+it is worth knowing because it removes the excuse that the next violation was carelessness. Two
+agents on one afternoon: one hardened "pair every non-event assertion with the case that fires", then
+shipped a coverage tool that inspected 6 of 30 candidates — the same default-to-unprotected shape it
+had fixed elsewhere and filed as an issue against someone else. The other wrote "test traffic belongs
+in its own room", then tested in a shared one for six more hours. Both rules were right, both authors
+believed them, neither was protected by having written them. That is the case FOR the artifact, made
+by the people most convinced already. Take the rung honestly — and when the honest rung is 6, say so
+rather than dressing a paragraph as enforcement.
+
 ## INV7 — A sum is not a distribution
 
 An aggregate hides its own shape, and a run optimizing against one will read structure into a single

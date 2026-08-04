@@ -2,8 +2,9 @@
 
 The non-negotiables `game_loop stepback` re-injects. This is the template that ships with game_loop —
 **edit it to your project's north star.** Keep the general ones (INV1–INV6); add your own as observed
-failures demand. Each should earn its place from a real mistake, not from wanting a tidy list — INV7 is
-the worked example: it exists because one session shipped three false findings off one event.
+failures demand. Each should earn its place from a real mistake, not from wanting a tidy list — INV7
+and INV8 are the worked examples, both added from this project's own logged failures and kept because
+they generalise past it. Delete them if they do not fit yours; that is the point of the file.
 
 ---
 
@@ -60,6 +61,30 @@ finding. One event of thirty carried 96% of it, and it was an artifact already i
 earlier in the same session. Corrected: 1.5 per event against 0 — no effect at that sample size. Nothing
 about the totals revealed this; only printing the per-event values did, and the same event produced
 three findings before anyone did. Enforced by `claim --metric --aggregate`, not by this paragraph.
+
+## INV8 — A pass that is silence proves nothing on its own
+
+A check whose success looks like *nothing happening* cannot tell being **satisfied** from **never
+having run**. That is one shape, not three: a guard that goes quiet when it permits, a path that is
+never examined, an observation that comes back empty. Each is satisfied by a producer that has
+stopped working, and the tell is identical to the one it gives when everything is fine.
+
+The asymmetry is the useful half: **a refusal cannot be produced by absence** — it takes a working
+check to say no — so the blocking half of any rail validates itself, and it is the permissive half
+that needs a second bit. Choose that bit by what the check has on its happy path: a **reason** if it
+speaks, a **mark it advances** if it is silent, a **positive control** if it is a pure observation.
+And when you assert that something did *not* happen, pair it in the same observation with the case
+where it *does*. That costs one extra capture while writing and cannot be retrofitted cheaply.
+
+Find them by **mutation**: neuter the producer — make the guard permit everything, the detector find
+nothing, the validator have no opinions — and see what still passes. It manufactures the absence you
+cannot otherwise observe, and what survives is what was never being checked.
+
+The failure, three times in one session: a syntax error made the write guard allow everything with no
+output at all, so "outside this repo is read-only" stopped being enforced and nothing said so.
+Sixteen permissive assertions passed against a guard mutated to check nothing. Four producers that
+report by staying silent were barely tested — one of them noticed by a single assertion out of 431.
+None of it was visible while every suite was green.
 
 ---
 

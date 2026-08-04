@@ -2872,6 +2872,40 @@ def main():
     finally:
         shutil.rmtree(_tp, ignore_errors=True)
 
+    # PROSE THAT MENTIONS A REDIRECT IS NOT A REDIRECT (#46). An interpreter here-doc body is kept
+    # in the scan on purpose — it executes — but it is PYTHON, not shell, so a comment inside it
+    # mentioning `cat >` yielded a target with the backtick and following punctuation glued on. The
+    # sink test then missed, and ordinary work was refused. This fired on the very edit that was
+    # writing another guard's tests, and a false positive here has no escape but `authorize`, which
+    # is single-use and logged: spending the one hatch on a non-event is the wrong use of it.
+    print("a mentioned redirect is not a redirect (#46):")
+    bt = chr(96)
+    gp = make_sandbox()
+    try:
+        def _bash(cmd):
+            return denied(guard(gp, {"tool_name": "Bash", "tool_input": {"command": cmd}}))
+
+        check("a comment INSIDE an interpreter here-doc that mentions a redirect is not a write",
+              not _bash("python3 - <<'PY'\n# ended " + bt + "else cat >/dev/null" + bt +
+                        ", so it was silent\nprint(1)\nPY"))
+        # The three arms that must NOT move, or the fix is a hole rather than a correction.
+        check("...while a REAL redirect out of the repo is still refused",
+              _bash("echo x > /var/tmp/gl46-real.txt"))
+        check("...and a literal path with a substitution glued after it still refuses on the "
+              "literal part",
+              _bash("echo x > /var/tmp/gl46" + bt + "whoami" + bt))
+        check("...and a discard sink is still not a write target at all",
+              not _bash("echo hi >/dev/null") and not _bash("echo hi 2>/dev/null"))
+        # STATED, NOT FIXED. A target that STARTS with a substitution is captured up to the space
+        # inside it, resolves INSIDE the repo, and is allowed — a pre-existing hole of the same
+        # family as #40 (a target the guard cannot resolve escapes it). Asserted here so the #46
+        # fix is proved not to have moved it, and so the hole is recorded rather than assumed gone.
+        check("a target that STARTS with a substitution is still allowed — pre-existing, #40's "
+              "family, and pinned here so this fix is shown not to have touched it",
+              not _bash("echo x > " + bt + "echo /var/tmp/gl46-sub.txt" + bt))
+    finally:
+        shutil.rmtree(gp, ignore_errors=True)
+
     # LINKED WORKTREES ARE THIS PROJECT (#47). Tree identity resolved from the BINARY's location, so
     # an agent working in a sibling worktree — invoking a main checkout's game_loop by absolute path,
     # which is what an unprovisioned worktree does — had its writes denied as "outside this repo".

@@ -1004,6 +1004,19 @@ def redirect_targets(seg):
             else:
                 k = j
                 while k < n and seg[k] not in " \t;&|<>)":
+                    # An unquoted command substitution ENDS the literal word: everything after it is
+                    # a different thing entirely. Without this, prose that merely MENTIONS a redirect
+                    # (a comment inside an interpreter here-doc, which is scanned because its body
+                    # executes) yielded a target with the backtick and the following punctuation
+                    # glued on, so the sink test missed and ordinary work was refused.
+                    #
+                    # `k > j` is load-bearing, not defensive. A target that STARTS with a
+                    # substitution has no literal prefix to keep, and breaking there would append
+                    # nothing at all — turning a refusal into SILENCE and handing back a bypass.
+                    # Captured whole, it resolves to a nonexistent out-of-repo path and is denied,
+                    # which is the honest answer until #40 gives unresolvable targets a real verdict.
+                    if seg[k] == chr(96) and k > j:
+                        break
                     k += 1
                 if k > j:
                     targets.append(seg[j:k])

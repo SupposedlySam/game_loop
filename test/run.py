@@ -3254,6 +3254,49 @@ def main():
           set(sweep.NOT_SWEPT) <= set(real_cands) and rc_good == 0
           and rc_stale == 1 and any("STALE EXCLUSION" in ln for ln in stale_said))
 
+    # The owning agent runs the harness it would SHIP, not the one it is editing: every game_loop
+    # hook prefers a pinned checkout when one exists and falls back to the repo's own bin/ when it
+    # does not. The dispatch is INLINE in the hook command on purpose — a separate shim file would
+    # be one more script sitting in the edit zone, which is the exposure this exists to remove.
+    #
+    # These assert the SELECTION, not the verdict. Both arms deny an out-of-repo write, so "it
+    # denied" cannot tell which copy ran — the same discrimination failure this suite spent #41 on.
+    print("pinned dispatch (the agent runs what it would ship):")
+    with open(os.path.join(REPO, ".claude", "settings.json")) as f:
+        _hooks = json.load(f)["hooks"]
+    _cmds = [h["command"] for v in _hooks.values() for e in v for h in e.get("hooks", [])
+             if ".game_loop" in h.get("command", "")]
+    check("every game_loop hook dispatches through the pin check, not straight at bin/",
+          _cmds and all(".game_loop_self" in c and "GAME_LOOP_HOME=" in c for c in _cmds))
+    check("...and each still names the script it runs, so the wiring stays readable",
+          all(any(t in c for t in ("guard-writes.sh", "guard-mcp.sh", "game_loop limitgate",
+                                   "game_loop stopgate", "watchdog")) for c in _cmds))
+
+    def _select(root, pinned):
+        """Run only the dispatcher's path-resolution half and report which tree it chose."""
+        sel = ('d="$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop"; '
+               '[ -x "$d/bin/game_loop" ] || d="$CLAUDE_PROJECT_DIR/.game_loop"; echo "$d"')
+        return subprocess.run(["bash", "-c", sel], capture_output=True, text=True,
+                              env=_env(root)).stdout.strip()
+
+    _disp = make_sandbox()
+    try:
+        _pin = os.path.join(_disp, ".game_loop_self", ".game_loop", "bin")
+        os.makedirs(_pin)
+        with open(os.path.join(_pin, "game_loop"), "w") as f:
+            f.write("#!/usr/bin/env python3\n")
+        os.chmod(os.path.join(_pin, "game_loop"), 0o755)
+        _with = _select(_disp, True)
+        check("a pinned checkout present → the hook runs the PIN, not the repo copy",
+              _with.endswith(os.path.join(".game_loop_self", ".game_loop")))
+        shutil.rmtree(os.path.join(_disp, ".game_loop_self"))
+        _without = _select(_disp, False)
+        check("...and with no pin it falls back to the repo — a fresh clone is still guarded",
+              _without.endswith(".game_loop") and ".game_loop_self" not in _without
+              and _with != _without)
+    finally:
+        shutil.rmtree(_disp, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

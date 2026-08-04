@@ -163,6 +163,57 @@ fi
 # are not this session's work, exactly as a sibling's mandate is not its mandate.
 EDITED_F="$(dirname "$STATE_F")/edited.txt"
 
+# THE PROBE — a mark this guard advances on EVERY invocation, so that "it allowed the tool" and "it
+# never ran" stop being the same observation.
+#
+# WHY. A refusal cannot be produced by absence: it takes a working guard to say no, so every BLOCK
+# assertion validates itself. An ALLOW here is SILENCE — exit 0, no output — which is byte-for-byte
+# what a guard that checked nothing produces. That was measured, not supposed (#41): replacing this
+# file with a script that merely parses and exits 0 left roughly sixteen "allows…" assertions in
+# test/run.py green, and every surviving one was permissive. The generalisation is worth stating,
+# because any suite with a guard in it has this shape:
+#
+#     a guard that SPEAKS when it permits    -> assert the REASON it gave
+#     a guard that is SILENT when it permits -> make it carry a MARK, and assert the mark ADVANCED
+#
+# Both are one requirement: A PERMISSIVE ASSERTION MUST OBSERVE EVIDENCE OF WORK, because the verdict
+# alone is also what absence produces. This is the probe `cmd_stopgate` already writes
+# (probe/stop-payload.json, whose absence `hooks_live_warning` reads as "no record of the hook
+# firing") turned on the guard that never had one.
+#
+# BEFORE THE FIRST EARLY RETURN, and that is the detail the whole thing turns on. The cheapest allows
+# return SOONEST — an empty file_path, an in-repo write, an empty command, a tool this case statement
+# does not name — and those are exactly the assertions that were weak. A mark written further down
+# would leave precisely the uncovered cases uncovered while LOOKING like the pattern had been applied.
+# Everything above this line is variable assignment or a REFUSAL (a bad GAME_LOOP_HOME, a pinned
+# checkout with no home), and a refusal already validates itself.
+#
+# CHEAP AND BOUNDED. This runs on EVERY tool call, where the Stop hook runs once per turn, so it is a
+# decimal counter in one small file — never a payload dump. Bash builtins only (`read`, arithmetic,
+# `printf`, `[`): no process is forked in the steady state, against the several python3 interpreters
+# this script already starts per call. `mkdir` runs only the first time a session's directory is
+# needed. Cost is one small read plus one small write per tool call, and the file never grows past a
+# handful of bytes.
+#
+# IT MUST NEVER MAKE THE GUARD FAIL. Every step is silenced and its status discarded: a read-only
+# mount, a missing directory or a garbage counter costs THE MARK, never the guarding. A probe
+# that can break the thing it observes is worse than no probe, and a guard that dies here would be a
+# guard blocking its own repair (INV5).
+#
+# WHAT IT DOES NOT PROVE (INV6). It says this script RAN and got this far — not that any particular
+# check downstream was correct, and not that the verdict was right. Concurrent tool calls can also
+# read the same value and write the same increment, so the count is a liveness mark, not an audit
+# tally; "advanced" is what may be relied on, never "advanced by exactly one".
+PROBE_D="${STATE_F%/*}"                     # parameter expansion, not `dirname`: no fork on the hot path
+PROBE_F="$PROBE_D/write-guard-probe"
+{
+  _probe_n=0
+  [ -r "$PROBE_F" ] && read -r _probe_n < "$PROBE_F"
+  case "$_probe_n" in ''|*[!0-9]*) _probe_n=0 ;; esac      # truncated or clobbered: start over, never die
+  [ -d "$PROBE_D" ] || mkdir -p "$PROBE_D"
+  printf '%s\n' "$((_probe_n + 1))" > "$PROBE_F"
+} 2>/dev/null || true
+
 # deny() is defined ABOVE, before the home is resolved — a bad GAME_LOOP_HOME has to be able to
 # refuse, and it is the first thing this script decides.
 

@@ -2,6 +2,7 @@
 .game_loop/state.json
 .game_loop/sessions/
 .game_loop/edited.txt
+.game_loop/write-guard-probe
 .game_loop/log.jsonl
 .game_loop/verified.json
 .game_loop/probe/

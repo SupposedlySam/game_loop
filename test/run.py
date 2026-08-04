@@ -6,6 +6,7 @@ of .game_loop, so a regression in any gate fails here instead of in production. 
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -83,6 +84,49 @@ def denied(res):
     return '"permissionDecision":"deny"' in res.stdout or '"permissionDecision": "deny"' in res.stdout
 
 
+def _probe_f(proj, payload, sid=None):
+    """Where the write guard's invocation mark lives — beside the state it is scoped to, exactly
+    like edited.txt. Mirrors the SID resolution in guard-writes-impl.sh: the payload's session_id
+    wins, then the environment's, then the repo-global fallback."""
+    raw = (payload.get("session_id") or sid or "")
+    s = re.sub(r"[^A-Za-z0-9._-]", "-", raw.strip())[:64]
+    base = os.path.join(proj, ".game_loop")
+    return os.path.join(base, "sessions", s, "write-guard-probe") if s \
+        else os.path.join(base, "write-guard-probe")
+
+
+def _probe_count(f):
+    try:
+        with open(f) as fh:
+            return int(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def allowed(proj, payload, sid=None):
+    """THE PERMISSIVE ASSERTION, with the second bit it needs (#41).
+
+    `not denied(...)` is not enough here, and that was measured rather than argued: replacing
+    guard-writes-impl.sh with a script that parses and exits 0 — a guard present, wired, live and
+    checking nothing — left sixteen "allows…" assertions in this file green. A refusal cannot be
+    produced by absence, so every BLOCK assertion validates itself; but this guard's ALLOW is
+    SILENCE, and silence is exactly what a dead guard emits. `allowed` and `never ran` were the same
+    observation.
+
+    The fix a downstream project used for the same defect — assert the guard's REASON instead of its
+    verdict — needs a guard that SPEAKS when it permits. This one does not, so the guard carries a
+    MARK it advances before its first early return, and a permissive assertion requires the mark to
+    have MOVED as well as the tool to have been allowed. Neither a no-op impl nor a shim that failed
+    open can produce that.
+
+    So: allowed == the guard ran AND it did not deny.
+    """
+    f = _probe_f(proj, payload, sid)
+    before = _probe_count(f)
+    res = guard(proj, payload, sid)
+    return _probe_count(f) > before and not denied(res)
+
+
 def main():
     proj = make_sandbox()
     try:
@@ -120,8 +164,11 @@ def main():
 
         print("write guard:")
         inside = os.path.join(proj, "file.txt")
+        # `allowed`, not `not denied`: for a guard whose allow is silence, the verdict alone is also
+        # what a guard that never ran produces, so each of these requires the guard's mark to have
+        # advanced too (#41 — see allowed()).
         check("allows a write inside the repo",
-              not denied(guard(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}})))
+              allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
         check("denies a write to another dir",
               denied(guard(proj, {"tool_name": "Write",
                                   "tool_input": {"file_path": os.path.expanduser("~/evil.txt")}})))
@@ -129,23 +176,23 @@ def main():
               denied(guard(proj, {"tool_name": "Bash",
                                   "tool_input": {"command": "cd ~ && rm -rf somedir"}})))
         check("allows normal in-repo bash",
-              not denied(guard(proj, {"tool_name": "Bash",
-                                      "tool_input": {"command": "rm -f file.txt && echo hi > b.txt"}})))
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "rm -f file.txt && echo hi > b.txt"}}))
         check("allows cp OUT of another tree into the repo",
-              not denied(guard(proj, {"tool_name": "Bash",
-                                      "tool_input": {"command": "cp ~/.bashrc ./copy"}})))
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "cp ~/.bashrc ./copy"}}))
         check("allows redirecting to /dev/null (a discard device)",
-              not denied(guard(proj, {"tool_name": "Bash",
-                                      "tool_input": {"command": "grep x file.txt 2>/dev/null"}})))
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "grep x file.txt 2>/dev/null"}}))
         check("allows redirecting to a std stream (/dev/stderr)",
-              not denied(guard(proj, {"tool_name": "Bash",
-                                      "tool_input": {"command": "echo hi >/dev/stderr"}})))
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "echo hi >/dev/stderr"}}))
         # #7: a DATA heredoc body (fed to cat/tee) is not executed shell — redirect-like prose in it
         # must not be flagged. But a CODE heredoc body (fed to bash/sh/...) DOES run and must stay
         # guarded, or the fix would open a bypass. Both directions are asserted.
         check("allows out-of-repo redirect text inside a cat (data) heredoc body",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": "cat <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}}))
         check("still denies rm of an out-of-repo path inside a bash (code) heredoc body",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\nrm -rf ~/outside\nEOF"}})))
@@ -172,11 +219,67 @@ def main():
         with open(impl_f, "w") as f:                 # restore so later checks use the real guard
             f.write(impl_src)
 
+        # #41: the check above catches a guard that will not PARSE. It cannot catch a guard that
+        # parses fine and checks nothing — the shim execs that one, so #39's notice never fires and
+        # the tool is allowed in silence, exactly as a working guard allows it. Measured, not
+        # supposed: neutering the impl to `exit 0` left sixteen "allows…" assertions here green.
+        # A refusal validates itself, because absence cannot produce one; a silent allow does not.
+        # So the guard carries a MARK it advances before its first early return, and these assert the
+        # mark's contract — the thing every permissive assertion above now leans on.
+        print("write guard (a silent allow must still carry evidence the guard ran — #41):")
+        probe_f = _probe_f(proj, {})
+        n0 = _probe_count(probe_f)
+        guard(proj, {"tool_name": "Write", "tool_input": {}})
+        check("the mark advances on a Write with no file_path — the guard's EARLIEST early return",
+              _probe_count(probe_f) > n0)
+        n0 = _probe_count(probe_f)
+        guard(proj, {"tool_name": "Read", "tool_input": {"file_path": inside}})
+        check("...and on a tool the guard's case statement never names",
+              _probe_count(probe_f) > n0)
+        n0 = _probe_count(probe_f)
+        d = guard(proj, {"tool_name": "Write",
+                         "tool_input": {"file_path": os.path.expanduser("~/evil2.txt")}})
+        check("...and on a DENY: the mark says the guard RAN, never what it decided",
+              denied(d) and _probe_count(probe_f) > n0)
+        sprobe = _probe_f(proj, {}, sid="sess-probe")
+        guard(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}, sid="sess-probe")
+        check("the mark is per-session, beside that session's state — scoped like edited.txt",
+              _probe_count(sprobe) > 0
+              and os.path.dirname(sprobe) == os.path.dirname(
+                  os.path.join(proj, ".game_loop", "sessions", "sess-probe", "state.json")))
+
+        # THE DEFECT ITSELF, encoded so it cannot come back: a guard that is present, wired, live and
+        # checking nothing. It PARSES, so the shim execs it and the fail-open notice stays silent —
+        # and the tool is allowed. `not denied(...)` passes here; `allowed(...)` must not.
+        with open(impl_f, "w") as f:
+            f.write("#!/usr/bin/env bash\nexit 0\n")
+        os.chmod(impl_f, 0o755)
+        dead = guard(proj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
+        check("a guard that PARSES and checks nothing still allows, and says nothing (the defect)",
+              not denied(dead) and "WRITE GUARD IS NOT RUNNING" not in dead.stdout)
+        check("...but it CANNOT advance the mark, so a permissive assertion now fails on it",
+              not allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
+        with open(impl_f, "w") as f:                 # restore so later checks use the real guard
+            f.write(impl_src)
+        os.chmod(impl_f, 0o755)
+        check("...and the real guard passes that same assertion (the probe is not always-false)",
+              allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
+
+        # INV5: a probe that can break the thing it observes is worse than no probe. Make the mark
+        # unwritable in the only way no permission bit can undo — the path is a DIRECTORY — and the
+        # guard must go on guarding.
+        os.makedirs(_probe_f(proj, {}, sid="sess-noprobe"), exist_ok=True)
+        blocked = guard(proj, {"tool_name": "Write",
+                               "tool_input": {"file_path": os.path.expanduser("~/evil3.txt")}},
+                        sid="sess-noprobe")
+        check("a mark that cannot be written costs the MARK, never the guarding (INV5)",
+              blocked.returncode == 0 and denied(blocked))
+
         print("write guard (authorize → consume):")
         gl(proj, "authorize", "--path", os.path.expanduser("~/authztest"),
                "--reason", "user said ok")
         p = {"tool_name": "Bash", "tool_input": {"command": "touch ~/authztest/x"}}
-        check("authorized path allowed once", not denied(guard(proj, p)))
+        check("authorized path allowed once", allowed(proj, p))
         check("authorization is single-use (spent → denied)", denied(guard(proj, p)))
         # #1: the escape hatch must work for the Write/Edit tools too, not just Bash mutators —
         # the deny message points at `authorize`, so `authorize` has to unblock this path.
@@ -184,7 +287,7 @@ def main():
                "--reason", "user said ok")
         pw = {"tool_name": "Write",
               "tool_input": {"file_path": os.path.expanduser("~/authztest-write/x.md")}}
-        check("authorized path allowed once via Write", not denied(guard(proj, pw)))
+        check("authorized path allowed once via Write", allowed(proj, pw))
         check("Write authorization is single-use (spent → denied)", denied(guard(proj, pw)))
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
@@ -260,14 +363,14 @@ def main():
         # regex let it through). Interpreter args are not message flags and stay guarded.
         print("write guard (quoted text is data):")
         check("allows a redirect mentioned inside a commit -m message",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": 'git commit -m "note: echo x > ~/outside.txt"'}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'git commit -m "note: echo x > ~/outside.txt"'}}))
         check("allows a deploy verb mentioned inside a commit -m message",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": 'git commit -m "docs: describe the npm publish flow"'}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'git commit -m "docs: describe the npm publish flow"'}}))
         check("allows a redirect char inside a sed script",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}}))
         check("still denies a real redirect to a QUOTED out-of-repo target",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo x > "$HOME/gl_outside.txt"'}})))
@@ -275,8 +378,8 @@ def main():
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash -c 'npm publish'"}})))
         check("allows a data heredoc whose opener also has a redirect (consumer is cat, not the target)",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": "cat > out.md <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat > out.md <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}}))
 
         # #4: the commit gate applies only to commits that TARGET this repo — verify.yaml describes
         # THIS repo's owed checks; a commit in some other repository owes that repo's checks, not ours.
@@ -294,9 +397,9 @@ def main():
         elsewhere = tempfile.mkdtemp(prefix="gameloop-other-")
         try:
             check("allows a commit made in a DIFFERENT repo (cwd elsewhere)",
-                  not denied(guard(proj, {"tool_name": "Bash",
-                                          "tool_input": {"command": "git commit -m x"},
-                                          "cwd": elsewhere})))
+                  allowed(proj, {"tool_name": "Bash",
+                                 "tool_input": {"command": "git commit -m x"},
+                                 "cwd": elsewhere}))
             check("still blocks a commit targeting this repo via git -C from elsewhere",
                   denied(guard(proj, {"tool_name": "Bash",
                                       "tool_input": {"command": f"git -C {proj} commit -m x"},
@@ -334,15 +437,15 @@ def main():
         # with a CLEAN path in the message.
         print("write guard (redirect targets stop at shell metacharacters):")
         check("allows the live case: 2>/dev/null inside a $(...) loop header",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
                   "command": 'for source in $(find /a /b -type f -name "*.rs" 2>/dev/null); '
-                             'do echo $source; done'}})))
+                             'do echo $source; done'}}))
         check("allows >/dev/stdout inside a command substitution",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": "echo $(cat file.txt >/dev/stdout)"}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo $(cat file.txt >/dev/stdout)"}}))
         check("allows 2>/dev/tty inside a command substitution",
-              not denied(guard(proj, {"tool_name": "Bash", "tool_input": {
-                  "command": "echo $(grep -c x file.txt 2>/dev/tty)"}})))
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo $(grep -c x file.txt 2>/dev/tty)"}}))
         r = guard(proj, {"tool_name": "Bash", "tool_input": {
             "command": "echo $(cat file.txt > ~/gl_paren_outside.txt)"}})
         check("still denies a real out-of-repo redirect inside a command substitution",
@@ -1988,9 +2091,17 @@ def main():
                 return subprocess.run([os.path.join(tree, ".game_loop", "bin", "verify")],
                                       cwd=tree, capture_output=True, text=True, env=_env())
 
+            def _wpayload(cwd, sid=None):
+                return {"tool_name": "Bash", "cwd": cwd, "session_id": sid or "",
+                        "tool_input": {"command": "git commit -m x"}}
+
             def wcommit(cwd, sid=None):
-                return guard(wmain, {"tool_name": "Bash", "cwd": cwd, "session_id": sid or "",
-                                     "tool_input": {"command": "git commit -m x"}}, sid=sid)
+                return guard(wmain, _wpayload(cwd, sid), sid=sid)
+
+            def wallowed(cwd, sid=None):
+                """The permissive half of the commit gate, with the second bit (#41): a commit this
+                gate ALLOWS is silence, and so is a gate that never ran."""
+                return allowed(wmain, _wpayload(cwd, sid), sid=sid)
 
             def wwrite(tree, rel, when):
                 """Write a file and PIN its mtime: staleness here is a comparison against a recorded
@@ -2025,16 +2136,14 @@ def main():
             r = wcommit(wmain)
             check("the main tree is genuinely stale, and refuses its own commit (the control)",
                   denied(r) and "VERIFY REFUSED" in r.stdout and "unrelated.txt" in r.stdout)
-            r = wcommit(wt)
             check("a verified worktree commit is allowed while the main tree is stale (#28)",
-                  not denied(r))
+                  wallowed(wt))
 
             # FALSE PASS — the defect. Main green from a run that never saw the worktree's files.
             os.utime(os.path.join(wmain, "unrelated.txt"), (_t.time() - 5, _t.time() - 5))
             wverify(wmain)
-            r = wcommit(wmain)
             check("the main tree passes once its own checks have run (the control)",
-                  not denied(r))
+                  wallowed(wmain))
             wwrite(wt, "late.txt", +5)
             r = wcommit(wt)
             check("a STALE worktree commit is refused though the main record is green (#28)",
@@ -2082,9 +2191,8 @@ def main():
                   denied(r) and "VERIFY REFUSED" in r.stdout and "second.txt" in r.stdout)
             os.utime(os.path.join(wmain, "second.txt"), (_t.time() - 5, _t.time() - 5))
             wverify(wmain)
-            r = wcommit(wmain)
             check("and passes again once the project's own checks have run",
-                  not denied(r))
+                  wallowed(wmain))
         finally:
             shutil.rmtree(wmain, ignore_errors=True)
 
@@ -2759,11 +2867,15 @@ def main():
         plain = run("game_loop", "status", code=home)
         check("unset: status says nothing about pinning (passes in both states)",
               plain.returncode == 0 and "PINNED CODE" not in plain.stdout)
+        # The probe under the HOME this guard resolves to (code == home, GAME_LOOP_HOME unset), for
+        # the session hook() names: an allow here is silence, so the mark is what says it ran (#41).
+        pin_probe = os.path.join(home, "sessions", "sess-pin", "write-guard-probe")
+        pin_before = _probe_count(pin_probe)
         pw = hook("guard-writes.sh", {"tool_name": "Write",
                                       "tool_input": {"file_path": os.path.join(sp, "f.txt")}},
                   code=home)
         check("unset: the write guard still allows an in-repo write (passes in both states)",
-              not denied(pw))
+              not denied(pw) and _probe_count(pin_probe) > pin_before)
 
         # `game_loop self` — a verb rather than a paragraph, because the checkout is two git commands
         # but the WIRING is what a human writes by hand, and the one wiring that recreates the trap

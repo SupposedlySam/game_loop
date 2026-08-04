@@ -165,6 +165,30 @@ states its limits.
 The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
 "<their words>"`.
 
+**It leaves a mark, so that "allowed" and "never ran" stop being the same observation** (#41). A deny
+is loud, but an allow is *silence* — and silence is exactly what a guard that checks nothing emits.
+Replacing `guard-writes-impl.sh` with a script that parses and exits 0 (present, wired, live,
+checking nothing — so the fail-open notice never fires either) left sixteen "allows…" assertions in
+the suite green. A refusal cannot be produced by absence, so every *block* assertion validates
+itself; it is specifically the permissive half that needs a second bit. So the guard advances a
+counter at `sessions/<sid>/write-guard-probe` on **every** invocation, **before its first early
+return** — the cheapest allows return soonest, and a mark written after them would leave exactly the
+unproven cases unproven while looking like the pattern had been applied. Tests then require the mark
+to have *advanced* as well as the tool to have been allowed. It costs one small read and one small
+write per tool call, all bash builtins, and every step is silenced: a probe that cannot be written
+costs the mark, never the guarding (INV5). It proves the script ran and got that far — not that any
+particular check downstream was correct (INV6).
+
+The generalisation is the reusable part, for any suite with a guard in it:
+
+| the guard, when it permits | what a permissive test must assert |
+|---|---|
+| **speaks** (gives a reason) | the reason, not the verdict |
+| **is silent** | that a mark it carries **advanced** |
+
+Both are one requirement: a permissive assertion must observe evidence of *work*, because the verdict
+alone is also what absence produces.
+
 ### The blast-radius warning — the same guard, at `git commit`
 
 The commit gate below asks whether a change was *verified*. It never asked whether it was
@@ -593,6 +617,7 @@ Everything lives in `.game_loop/`:
 | `sessions/<id>/HANDOFF.md` | the limit gate's demanded handoff, PER SESSION (git-ignored; delete after re-absorbing it) |
 | `sessions/<id>/state.json` | counters, phase, mandate, arms — PER Claude Code session (atomic writes; git-ignored) |
 | `sessions/<id>/edited.txt` | the paths this session wrote through Write/Edit, for the commit blast-radius warning (git-ignored) |
+| `sessions/<id>/write-guard-probe` | a counter the write guard advances on every invocation, before its first early return — the evidence a *permissive* assertion needs, since an allow is silence (git-ignored) |
 | `state.json` | the no-session fallback state (a human terminal, an older harness) |
 | `log.jsonl` | append-only event log, shared across sessions; each line carries the writing session's `sid` (git-ignored) |
 | `INVARIANTS.md` | your north star; re-injected by `game_loop stepback` |

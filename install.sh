@@ -393,6 +393,7 @@ if [ ! -e "$GI" ]; then
 state.json
 sessions/
 edited.txt
+write-guard-probe
 log.jsonl
 verified.json
 probe/
@@ -424,6 +425,11 @@ else
   if ! grep -q '^edited.txt$' "$GI"; then
     echo "edited.txt" >> "$GI"
     echo "  updated .game_loop/.gitignore (+ edited.txt — what this session actually wrote)"
+  fi
+  # the write guard's invocation mark, same fallback shape: runtime state, never committed.
+  if ! grep -q '^write-guard-probe$' "$GI"; then
+    echo "write-guard-probe" >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ write-guard-probe — the write guard's run mark)"
   fi
 fi
 

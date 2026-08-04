@@ -575,7 +575,10 @@ or commit with --no-verify to skip the gate out loud and on the record."
       # Unchanged whenever the target resolves to this script's own tree.
       TARGET_TREE="$REPO_REAL"
       [ "$GAMELOOP_TARGET" != "$GAMELOOP_DIR" ] && TARGET_TREE="$(dirname "$GAMELOOP_TARGET")"
-      if ! run_verify "$GAMELOOP_TARGET" --check >/tmp/.game_loop_verify 2>&1; then
+      # Per-repo, not a fixed name: the previous /tmp/.game_loop_verify was shared by every project
+      # on the machine, so two of them committing at once would read each other's refusal.
+      VERIFY_OUT="/tmp/.game_loop_verify.${SLUG:-default}"
+      if ! run_verify "$GAMELOOP_TARGET" --check >"$VERIFY_OUT" 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
         # `verify` and `git commit` in ONE call can never pass — the check runs before your verify
         # line does. Run them as two separate calls.
@@ -597,10 +600,13 @@ This gate runs BEFORE the command body, so NONE of them executed. When you retry
 WHOLE command — retrying only the commit silently loses the rest, while the commit message
 still describes it."
         fi
-        deny "$(cat /tmp/.game_loop_verify)
-
-A green check from BEFORE your change is evidence about code that no longer exists.
-Run ./.game_loop/bin/verify, or commit with --no-verify to skip it on the record.$chained_hint"
+        # `verify --check` already ends with the WHY ("a green check from before your change is
+        # evidence about code that no longer exists") and with how to re-run it. Repeating both here
+        # printed the persuading sentence twice, back to back, which reads as a formatting bug at
+        # exactly the moment the guard is asking to be taken seriously. Append ONLY what is specific
+        # to a commit: the escape hatch.
+        deny "$(cat "$VERIFY_OUT")
+Or commit with --no-verify to skip it on the record.$chained_hint"
       fi
 
       # The gate above asks whether the change was VERIFIED. It never asks whether it was INTENDED,

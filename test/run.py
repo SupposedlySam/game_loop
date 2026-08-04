@@ -3294,6 +3294,15 @@ def main():
         check("the commit gate, run from pinned code, still refuses the repo's unverified change",
               denied(cm) and "VERIFY REFUSED" in cm.stdout
               and ".game_loop/bin/game_loop" in cm.stdout)
+        # #36: the sentence doing the actual persuading appeared TWICE, back to back — once from
+        # `verify --check` and once appended by the gate. It reads as a formatting bug at exactly
+        # the moment the guard is asking to be taken seriously, which is the same currency #34 was
+        # about. Counted, not eyeballed: "appears" would pass just as happily at two.
+        _why = "evidence about code that no longer exists"
+        check("...and the sentence that does the persuading appears exactly ONCE, not twice",
+              cm.stdout.count(_why) == 1)
+        check("...while the commit-specific escape it appends is still there",
+              cm.stdout.count("--no-verify") == 1 and "./.game_loop/bin/verify" in cm.stdout)
 
         # THE COMMON PATH — variable unset, code and home the same directory. Every existing install
         # depends on this being untouched. These three PASS IN BOTH STATES by construction, and that

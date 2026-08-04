@@ -4258,31 +4258,48 @@ def cmd_self(s, a):
 
 
 def self_hooks_block(code):
-    """The wiring, generated. Printed for .claude/settings.local.json — never for settings.json."""
+    """The wiring, generated — an INLINE dispatcher for the TRACKED settings.json.
+
+    The obvious route, a second copy of every hook in settings.local.json, is wrong and was tried
+    first: Claude Code MERGES the two files rather than overriding, so every gate ran TWICE — two
+    write guards, two stop gates, two watchdogs polling. Measured, not predicted: one commit printed
+    the same blast-radius warning verbatim two times. Nothing breaks loudly, which is the problem.
+
+    Deleting the tracked hooks to compensate is worse: a guard that exists but is not wired in is
+    not a guard, and this repo's own suite refuses that state.
+
+    So one entry decides at call time, and it is safe to track because it degrades to the ordinary
+    wiring: no pin present, no behaviour change, and a fresh clone is fully guarded. It is also
+    INLINE rather than a shim script, because another script would be one more file sitting in the
+    edit zone — which is the exposure a pin exists to remove.
+    """
+    d = "$CLAUDE_PROJECT_DIR/" + PINNED_DIRNAME + "/.game_loop"
+    def wire(script):
+        return (f'    d="{d}"; [ -x "$d/bin/{script.split()[0]}" ] || '
+                f'd="$CLAUDE_PROJECT_DIR/.game_loop"; '
+                f'{HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" exec "$d"/bin/{script}')
     return [
-        "WIRE IT IN .claude/settings.local.json (gitignored, machine-local) — NOT in the tracked",
-        ".claude/settings.json, which ships to every install and must keep pointing at",
-        "$CLAUDE_PROJECT_DIR/.game_loop/bin/. Replace each game_loop hook command with:",
+        "WIRE IT IN THE TRACKED .claude/settings.json. Replace each game_loop hook command with the",
+        "matching line below — one entry that prefers the pin and falls back to the repo's own bin/:",
         "",
-        f'    {HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" "{code}"/bin/guard-writes.sh',
-        f'    {HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" "{code}"/bin/guard-mcp.sh',
-        f'    {HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" "{code}"/bin/game_loop limitgate',
-        f'    {HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" "{code}"/bin/game_loop stopgate',
-        f'    {HOME_ENV}="$CLAUDE_PROJECT_DIR/.game_loop" "{code}"/bin/watchdog',
+        wire("guard-writes.sh"),
+        wire("guard-mcp.sh"),
+        wire("game_loop limitgate"),
+        wire("game_loop stopgate"),
+        wire("watchdog"),
         "",
         f"{HOME_ENV} is not optional in any of those: it is what keeps verify.yaml, the record of "
         "what",
-        "was checked, and every byte of state in the REPO.",
+        "was checked, and every byte of state in the REPO rather than in the copy, which the next",
+        "re-pin destroys.",
         "",
-        "THEN REMOVE THE GAME_LOOP HOOKS FROM .claude/settings.json — the two files MERGE, they do",
-        "not override. Leaving both wired runs EVERY gate twice: two write guards, two stop gates,",
-        "two watchdogs polling. Measured, not predicted: a commit under both printed the same",
-        "blast-radius warning verbatim two times. Nothing breaks loudly, which is the problem —",
-        "duplicate output reads as the tool repeating itself rather than as two of it running.",
-        "  In THIS repo the tracked file carries no hooks for exactly that reason; `./install.sh .`",
-        "  puts the unpinned wiring back whenever you want to stop running pinned.",
+        "DO NOT also wire these in .claude/settings.local.json. The two files MERGE, they do not",
+        "override, and leaving both wired runs every gate twice — measured: one commit printed the",
+        "same blast-radius warning verbatim two times. Duplicate output reads as the tool repeating",
+        "itself rather than as two of it running.",
         "",
-        "Then reload — hooks are read at session start, so none of this takes effect until you do.",
+        "Re-pinning takes effect immediately — the hook execs whatever the pin directory holds now.",
+        "A RELOAD is needed only when these command lines themselves change.",
     ]
 
 

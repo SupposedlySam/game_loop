@@ -3299,17 +3299,24 @@ def main():
                           for o in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md")))
         check("...keeps the binaries executable, or the hooks would silently not run at all",
               os.access(os.path.join(selfcode, "bin", "guard-writes.sh"), os.X_OK))
-        check("...and prints wiring that SETS the home, for settings.local.json — not the tracked one",
-              'GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop"' in r.stdout
-              and "settings.local.json" in r.stdout and "NOT in the tracked" in r.stdout)
-        # Measured, not predicted: settings.json and settings.local.json MERGE. Wiring the pin
-        # without unwiring the tracked file ran every gate twice — a commit printed the same
-        # blast-radius warning verbatim two times. It fails quietly, since duplicate output reads
-        # as the tool repeating itself rather than as two copies of it running, so the instructions
-        # have to say it. This pins that they do.
-        check("...and says to REMOVE the tracked hooks, because the two files merge rather than override",
-              "REMOVE THE GAME_LOOP HOOKS" in r.stdout and "MERGE" in r.stdout
-              and "twice" in r.stdout and "install.sh ." in r.stdout)
+        check("...and prints wiring that SETS the home — without it a pinned run checks the COPY",
+              'GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop"' in r.stdout)
+        # The wiring goes in the TRACKED settings.json now, as ONE dispatching entry. The earlier
+        # advice — a second copy in settings.local.json — was withdrawn because the two files MERGE
+        # rather than override: every gate ran twice, and a commit printed the same blast-radius
+        # warning verbatim two times. It fails quietly, duplicate output reading as the tool
+        # repeating itself, so the instructions still have to say it.
+        check("...as ONE dispatching entry in the tracked settings, not a second copy elsewhere",
+              "TRACKED .claude/settings.json" in r.stdout
+              and ".game_loop_self/.game_loop" in r.stdout and "|| d=" in r.stdout)
+        check("...and still warns that the two settings files MERGE, which ran every gate twice",
+              "MERGE" in r.stdout and "twice" in r.stdout
+              and "DO NOT also wire" in r.stdout)
+        # A dispatcher is only safe to TRACK because it degrades: no pin, no behaviour change. If
+        # that stopped being true, shipping it would guard a fresh clone with a directory that is
+        # not there.
+        check("...and says the fallback is what makes tracking it safe",
+              "falls back to the repo" in r.stdout)
         fresh = run("verify", "--check", code=selfcode)
         check("...and what it produced refuses to run blind, end to end",
               fresh.returncode == 2 and "PINNED code checkout" in fresh.stderr)
@@ -3609,6 +3616,13 @@ def main():
              if ".game_loop" in h.get("command", "")]
     check("every game_loop hook dispatches through the pin check, not straight at bin/",
           _cmds and all(".game_loop_self" in c and "GAME_LOOP_HOME=" in c for c in _cmds))
+    # The guidance `self` PRINTS must be the wiring this repo actually ships. Two hand-maintained
+    # copies of one command line drift, and the copy that drifts is the one nobody runs — so the
+    # generated text is asserted equal to the tracked settings, not merely similar to it.
+    _gen = sorted(l.strip() for l in gl(REPO, "self").stdout.splitlines()
+                  if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/'))
+    check("the wiring `self` prints is byte-identical to the wiring settings.json carries",
+          _gen and _gen == sorted(_cmds))
     check("...and each still names the script it runs, so the wiring stays readable",
           all(any(t in c for t in ("guard-writes.sh", "guard-mcp.sh", "game_loop limitgate",
                                    "game_loop stopgate", "watchdog")) for c in _cmds))

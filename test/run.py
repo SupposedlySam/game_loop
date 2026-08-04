@@ -773,7 +773,20 @@ def main():
         class FakeGH(http.server.BaseHTTPRequestHandler):
             sha = "a" * 40
             behaviour = None            # set per-assertion; None = 404, i.e. "could not fetch"
+            compare = "behind"          # where the INSTALLED sha sits relative to latest (#49)
             def do_GET(self):
+                if "/compare/" in self.path:
+                    if FakeGH.compare is None:
+                        self.send_response(500)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    body = json.dumps({"status": FakeGH.compare}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if "behaviour.json" in self.path:
                     if FakeGH.behaviour is None:
                         self.send_response(404)
@@ -826,6 +839,32 @@ def main():
         os.remove(ver_f)
         check("no VERSION file → update check stays silent (and hits no network)",
               "update available" not in fresh_status())
+        # #49 — INEQUALITY IS NOT STALENESS. "installed != latest" is true both when the install
+        # is behind (a real update) and when it is AHEAD of a cached check, and those are opposite
+        # conditions. A tree updated twice in one session was told it was behind, and the remedy it
+        # was given was a no-op that left the notice in place.
+        set_cfg()
+        open(ver_f, "w").write("b" * 40 + "\n")
+        FakeGH.compare = "ahead"
+        check("an install AHEAD of the cached latest is not told to update — it is not behind",
+              "update available" not in fresh_status())
+        FakeGH.compare = "identical"
+        check("...nor is one that is identical by ancestry though the shas were compared unequal",
+              "update available" not in fresh_status())
+        # PAIRED: the real case must still fire, or the fix above is just a mute button.
+        FakeGH.compare = "behind"
+        check("...while an install genuinely behind still gets the notice",
+              "update available" in fresh_status())
+        FakeGH.compare = "diverged"
+        check("...and a diverged history is reported too, since it is not at-or-past latest either",
+              "update available" in fresh_status())
+        # COULD NOT DETERMINE is a third answer, and it must not be spoken as either of the others.
+        FakeGH.compare = None
+        _undet = fresh_status()
+        check("an undeterminable comparison says the direction is unknown and implies no re-install",
+              "could NOT be determined" in _undet and "update available" not in _undet)
+        FakeGH.compare = "behind"
+
         # The SHIPPED record is data the notice reads, and a malformed one degrades to silence: the
         # notice reports nothing and looks exactly like an install with nothing to report. So the
         # file itself is checked, not just the parser.
@@ -878,6 +917,13 @@ def main():
         FakeGH.behaviour = "}not json at all{"
         check("...and so does a malformed one — garbage is no information, not a clean bill",
               "BEHAVIOUR CHANGE" not in fresh_status())
+
+        # An install is the thing that INVALIDATES the update cache, so it must not leave it: the
+        # cached `latest` predates the sha just stamped, and comparing them is wrong for the whole
+        # TTL — exactly the window in which somebody runs status to confirm the update worked.
+        _inst_src = open(os.path.join(REPO, "install.sh")).read()
+        check("install.sh removes the update cache it invalidates by definition",
+              'rm -f "$TARGET/.game_loop/.update_cache.json"' in _inst_src)
 
         ghsrv.shutdown()
         open(cf, "w").write(cf_orig)

@@ -3625,6 +3625,30 @@ def _remote_behaviour(repo, raw_base):
         return None
 
 
+def _compare_versions(repo, api_base, base, head):
+    """Where `head` sits relative to `base` upstream: 'identical' / 'ahead' / 'behind' / 'diverged',
+    or None when it cannot be determined.
+
+    Ancestry is the question the update notice is actually asking, and INEQUALITY IS NOT IT (#49):
+    installed != latest is true both when the install is behind (a real update) and when it is ahead
+    (a false alarm), and those are opposite conditions. An install that runs ahead of a cached check
+    reported backwards, and the suggested remedy was a no-op that left the notice in place.
+
+    Best effort and bounded, like every other network call here: an answer nobody could fetch must
+    not become a confident one in either direction.
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{api_base.rstrip('/')}/repos/{repo}/compare/{base}...{head}",
+            headers={"User-Agent": "game_loop-update-check",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            return (json.loads(resp.read().decode() or "{}") or {}).get("status")
+    except Exception:  # noqa: BLE001 — offline, rate-limited, unknown sha: no information
+        return None
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -3639,6 +3663,18 @@ def update_notice():
     if not latest or inst.startswith(latest) or latest.startswith(inst):
         return None
     repo = cfg.get("update_repo", "SupposedlySam/game_loop")
+    api = cfg.get("update_api_base", "https://api.github.com")
+    # Differing shas are not evidence of being BEHIND. Ask which way (#49).
+    rel = _compare_versions(repo, api, latest, inst)
+    if rel in ("identical", "ahead"):
+        return None                    # at or past the latest this check knows about — nothing owed
+    if rel is None:
+        # Could not determine is not the same as behind. Say what is known and no more, rather than
+        # sending somebody to re-install over a difference that may be their own copy running ahead.
+        return (f"⬆ game_loop: installed {inst[:8]} differs from the latest this check saw "
+                f"({latest[:8]}).\n"
+                f"  Which is newer could NOT be determined — no re-install is implied by this line "
+                f"alone.")
     note = (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
             f"  Re-install to update (bin/ is refreshed; no session restart):\n"
             f"    curl -fsSL https://raw.githubusercontent.com/{repo}"

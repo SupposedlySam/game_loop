@@ -261,6 +261,13 @@ MUTANTS = [
      # surface to assert beyond that, which is the point rather than a gap.
      "an unreachable record is meant to be quiet; only its refusal to claim 'nothing changed' shows",
      2),
+    ("_compare_versions -> the update check can never tell ahead from behind",
+     ".game_loop/bin/game_loop::_compare_versions", "    return None\n",
+     ["update", "ahead", "behind", "ancestry", "determined"],
+     # 7 against a baseline of 560. Neutered, every comparison degrades to "could not determine",
+     # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
+     # which is exactly what #49 was about.
+     None, 7),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

@@ -249,6 +249,11 @@ fi
 if [ -n "$GL_SHA" ]; then
   printf '%s\n' "$GL_SHA" > "$TARGET/.game_loop/VERSION"
   echo "  stamped .game_loop/VERSION ($(printf '%s' "$GL_SHA" | cut -c1-8)) — status flags when a re-install is due"
+  # #49: this install is the thing that INVALIDATES the update cache, so it must not leave it
+  # behind. The cached `latest` was recorded before the sha just stamped existed, and comparing the
+  # two guarantees a wrong answer for the whole TTL — precisely the window in which somebody runs
+  # `status` to confirm the update worked.
+  rm -f "$TARGET/.game_loop/.update_cache.json"
 fi
 
 # Seed the user-owned files only if absent — never clobber their config or notes. With an adoption

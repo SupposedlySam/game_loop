@@ -450,8 +450,12 @@ def main():
             "command": "echo $(cat file.txt > ~/gl_paren_outside.txt)"}})
         check("still denies a real out-of-repo redirect inside a command substitution",
               denied(r) and "gl_paren_outside.txt" in r.stdout)
+        # An absence assertion needs something to be absent FROM, or an empty stdout satisfies it
+        # forever: this line passed against a guard that had been mutated to check nothing, because
+        # nothing is not there either. So require the CLEAN form to be present in the same breath —
+        # then "no trailing paren" is a claim about a path the guard actually named.
         check("the denied target carries no trailing paren (the offender is a usable path)",
-              "gl_paren_outside.txt)" not in r.stdout)
+              "gl_paren_outside.txt" in r.stdout and "gl_paren_outside.txt)" not in r.stdout)
         # #5 must not regress: a QUOTED target after a real redirect is still a genuine write,
         # command substitution or not.
         check("still denies a QUOTED out-of-repo redirect target inside a command substitution",

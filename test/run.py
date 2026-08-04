@@ -3680,6 +3680,63 @@ def main():
                   for e in _tpl.get(ev, []) for h in e.get("hooks", []))
               for ev in ("SessionStart", "PostCompact")))
 
+    # THE ESCAPE HATCH MUST NAME SOMETHING THAT EXISTS (#52). Every refusal told the agent to run
+    # `game_loop authorize`, and game_loop is NEVER on PATH — it is a project-local binary. A
+    # session that arrived through a global slash command, so it had never read CLAUDE.md or
+    # llms.txt, checked PATH and the usual bin dirs, found nothing, and concluded the hatch was not
+    # installed. It handed back to the human with a finished code review unposted, while the hatch
+    # sat at ./.game_loop/bin/game_loop the whole time.
+    #
+    # Rung 2, not 6: the message already exists and is already read at exactly the right moment. It
+    # only needed to name the real entry point. Documenting it harder would help only the sessions
+    # that loaded CLAUDE.md — which are precisely the population that was never affected.
+    print("a refusal names a hatch that exists (#52):")
+    hp52 = make_sandbox()
+    try:
+        _gl52 = os.path.join(hp52, ".game_loop", "bin", "game_loop")
+
+        def _reason(res):
+            try:
+                return json.loads(res.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+            except Exception:  # noqa: BLE001
+                return res.stdout
+
+        _w = _reason(guard(hp52, {"tool_name": "Write",
+                                  "tool_input": {"file_path": os.path.expanduser("~/evil52.txt")}}))
+        _b = _reason(guard(hp52, {"tool_name": "Bash",
+                                  "tool_input": {"command": "rm -rf ~/gone52"}}))
+        _m = subprocess.run([os.path.join(hp52, ".game_loop", "bin", "guard-mcp.sh")],
+                            input=json.dumps({"tool_name": "mcp__x__createThing",
+                                              "tool_input": {"body": "b"}}),
+                            capture_output=True, text=True, env=_env(hp52))
+        _mr = _reason(_m)
+
+        check("all three refusals name a PATH to the hatch, not a bare command that is on nobody's "
+              "PATH",
+              all("/bin/game_loop authorize" in r for r in (_w, _b, _mr)))
+        # THE KEYSTONE, and the only one that could not be satisfied by rewording: the path printed
+        # has to be a file that exists and runs. Extracted from the message and executed.
+        _paths = []
+        for r in (_w, _b, _mr):
+            for tok in r.split():
+                if tok.endswith("/bin/game_loop"):
+                    _paths.append(tok)
+                    break
+        check("...and the path each one prints is a real executable — extracted from the message "
+              "and run, rather than eyeballed",
+              len(_paths) == 3
+              and all(os.access(p, os.X_OK) for p in _paths)
+              and all(subprocess.run([p, "authorize", "--help"], capture_output=True).returncode == 0
+                      for p in _paths))
+        check("...and it is the PROJECT's binary, so a pinned session authorises into the project's "
+              "own record rather than the copy it happens to be running",
+              all(os.path.realpath(p) == os.path.realpath(_gl52) for p in _paths))
+        check("...and --uses is surfaced where it is needed, so a human who authorised a RUN of "
+              "calls is asked once rather than once per call",
+              all("--uses" in r for r in (_w, _b, _mr)))
+    finally:
+        shutil.rmtree(hp52, ignore_errors=True)
+
     print("a deploy verb is a WORD, not a substring (#51):")
     dp = make_sandbox()
     try:

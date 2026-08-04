@@ -347,8 +347,11 @@ else:
 print("DENY")
 print(body + "\n\n"
       "If the human has explicitly authorized this one call, record their words and try again:\n"
-      "  game_loop authorize --path " + tool + " --reason \"<their exact words>\"\n"
-      "One authorization, one call, logged permanently. That is the only escape hatch, by design.")
+      "  " + os.environ.get("GAMELOOP_DIR", ".game_loop") + "/bin/game_loop authorize --path "
+      + tool + " --reason \"<their exact words>\" [--uses N]\n"
+      "One authorization per USE, logged permanently. Pass --uses N when the human authorised a run\n"
+      "of several calls, rather than interrupting them once per call. That is the only escape hatch,\n"
+      "by design.")
 PY
 )
 

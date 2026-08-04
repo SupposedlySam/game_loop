@@ -381,7 +381,8 @@ PY
 
 Everything outside this project is READ-ONLY by default (this is the guardrail that makes unattended
 runs safe). If the repo genuinely needs that content, COPY it in and edit the copy. If the human has
-explicitly authorized this path:  game_loop authorize --path <prefix> --reason \"<their words>\""
+explicitly authorized this path:
+  $GAMELOOP_DIR/bin/game_loop authorize --path <prefix> --reason \"<their words>\" [--uses N]"
     ;;
 
   Bash)
@@ -1154,7 +1155,7 @@ Everything outside this project is READ-ONLY by default. READING elsewhere is fi
 OUT of it: \`cp <their path> <repo path>\` is allowed. Copy what you need in and work on the copy.
 
 If the human has explicitly authorized this specific path, record their words and try again:
-  game_loop authorize --path <prefix> --reason \"<their exact words>\"
+  $GAMELOOP_DIR/bin/game_loop authorize --path <prefix> --reason \"<their exact words>\" [--uses N]
 One authorization, one mutation, logged permanently. That is the only escape hatch, by design."
     fi
 

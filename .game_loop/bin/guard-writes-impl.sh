@@ -605,8 +605,22 @@ still describes it."
         # printed the persuading sentence twice, back to back, which reads as a formatting bug at
         # exactly the moment the guard is asking to be taken seriously. Append ONLY what is specific
         # to a commit: the escape hatch.
+        # WHICH tree (#35). The gate resolved the target tree in order to read its record at all,
+        # so a bare "Run: ./.game_loop/bin/verify" is withholding something it already computed.
+        # A human infers "the one I'm in"; an unattended agent with N worktrees guesses, runs verify
+        # in a tree that was already green, sees success, retries, and is refused again by the same
+        # unqualified advice — a loop with no new information in it.
+        # Silent whenever the target IS this script's own tree, which is the common path and was
+        # never ambiguous.
+        tree_hint=""
+        if [ "$GAMELOOP_TARGET" != "$GAMELOOP_DIR" ]; then
+          tree_hint="
+THIS COMMIT LANDS IN $TARGET_TREE, and that is the tree whose rules were read and whose record
+must be refreshed. Verify run in any other tree passes without touching this one:
+    $GAMELOOP_TARGET/bin/verify"
+        fi
         deny "$(cat "$VERIFY_OUT")
-Or commit with --no-verify to skip it on the record.$chained_hint"
+Or commit with --no-verify to skip it on the record.$tree_hint$chained_hint"
       fi
 
       # The gate above asks whether the change was VERIFIED. It never asks whether it was INTENDED,

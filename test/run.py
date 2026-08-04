@@ -2198,6 +2198,9 @@ def main():
             r = wcommit(wmain)
             check("the main tree is genuinely stale, and refuses its own commit (the control)",
                   denied(r) and "VERIFY REFUSED" in r.stdout and "unrelated.txt" in r.stdout)
+            check("...and a single-tree refusal says NOTHING about trees — the common path is "
+                  "unchanged, which is what makes the worktree line meaningful",
+                  "THIS COMMIT LANDS IN" not in r.stdout)
             check("a verified worktree commit is allowed while the main tree is stale (#28)",
                   wallowed(wt))
 
@@ -2210,6 +2213,14 @@ def main():
             r = wcommit(wt)
             check("a STALE worktree commit is refused though the main record is green (#28)",
                   denied(r) and "VERIFY REFUSED" in r.stdout and "late.txt" in r.stdout)
+            # #35: it denied correctly but told an agent to run a RELATIVE command without saying
+            # where. With N worktrees exactly one of them clears the gate, and guessing wrong runs
+            # verify in a tree that was already green — success, retry, same refusal, no new
+            # information. The gate knew the answer; it was withholding it.
+            check("...and the refusal NAMES the tree the commit lands in, not just the file",
+                  wt in r.stdout and "THIS COMMIT LANDS IN" in r.stdout)
+            check("...and gives an ABSOLUTE verify path, so there is nothing left to guess",
+                  os.path.join(wt, ".game_loop", "bin", "verify") in r.stdout)
             # denied() is asserted again on purpose: without it this reads as satisfied by a commit
             # that was never refused at all, which is exactly the broken behaviour.
             check("and the refusal names the worktree's file, not the main tree's",

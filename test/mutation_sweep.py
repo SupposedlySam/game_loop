@@ -208,6 +208,42 @@ MUTANTS = [
      None, 3),
     ("working_tree_report -> never says you are in a different tree", ".game_loop/bin/game_loop::working_tree_report",
      "    return []\n", ["worktree", "tree", "harness answers"], None, 3),
+    # THE TWO #44 SURFACED THAT MATTER, now measured rather than described. Both were entirely
+    # OUTSIDE the denominator until the file list came from git — not excluded, absent.
+    ("verify.owed -> nothing ever owes a check", ".game_loop/bin/verify::owed",
+     "    return None\n", ["verify", "owes", "stale", "commit"],
+     # 23 against a baseline of 534, the highest in this file, and it should be: an always-empty
+     # return means `verify --check` reports clean and the commit gate passes EVERYTHING -- #25's
+     # failure verbatim, in the function that decides it.
+     None, 23),
+    ("watchdog.exhausted_windows -> no usage window is ever exhausted",
+     ".game_loop/bin/watchdog::exhausted_windows", "    return None\n",
+     ["watchdog", "park", "limit", "exhaust"],
+     # 4. Neutered, the run never parks and never rings itself awake at the reset -- which is
+     # exactly the live state #45 found, so the mutation and the real defect are the same thing.
+     None, 4),
+    # The rest of #44's ten, measured against a baseline of 534 once the file list came from git.
+    # Eight of the ten turned out to be genuinely well protected; the surprise was how well, which
+    # is worth saying because the issue's framing (and mine) assumed the opposite.
+    ("verify.changed_files -> no file ever looks changed", ".game_loop/bin/verify::changed_files",
+     "    return None\n", ["verify", "changed", "stale", "owes"], None, 55),
+    ("verify.staged_files -> nothing is ever staged", ".game_loop/bin/verify::staged_files",
+     "    return []\n", ["staged", "blast", "commit"], None, 5),
+    ("notify.send -> a page is never actually sent", ".game_loop/bin/notify.py::send",
+     "    return None\n", ["notify", "slack", "page", "send"], None, 11),
+    ("watchdog.claim_pidfile -> the watchdog can never claim the pidfile",
+     ".game_loop/bin/watchdog::claim_pidfile", "    return False\n",
+     ["watchdog", "pidfile", "quiet", "ring"], None, 9),
+    ("watchdog.limits_snapshot -> the watchdog never sees a usage snapshot",
+     ".game_loop/bin/watchdog::limits_snapshot", "    return None\n",
+     ["watchdog", "limit", "park", "snapshot"], None, 4),
+    ("watchdog.transcript_size -> idleness becomes unmeasurable",
+     ".game_loop/bin/watchdog::transcript_size", "    return None\n",
+     ["watchdog", "idle", "transcript", "ring"],
+     # THIN at 1, and the shape is familiar: one assertion carries the whole producer. Neutered, the
+     # watchdog cannot tell a parked run from a working one -- which is the entire premise of the
+     # autonomy engine -- and exactly one named assertion notices.
+     "one assertion carries it; the watchdog's own idleness measurement deserves a companion", 1),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this
@@ -348,34 +384,21 @@ NOT_SWEPT = {
     # mutations hangs the suite rather than failing it, which is its own finding and has to be
     # chased before a floor recorded here would mean anything. Recording an unmeasured floor would
     # be the exact target-making this file's header warns about.
-    ".game_loop/bin/verify::owed":
-        "KNOWN GAP — the one that matters most. An always-empty return means NOTHING OWES A CHECK, "
-        "so `verify --check` reports clean and the commit gate passes everything: issue #25's "
-        "failure verbatim, in the function that decides it. Owed a sweep and an assertion.",
-    ".game_loop/bin/watchdog::exhausted_windows":
-        "KNOWN GAP — an always-empty means no usage window is ever exhausted, so the run never "
-        "parks and never rings itself awake at the reset. Same consequence as binding_windows, in "
-        "the other half of the same feature, and #45 just showed what that costs in practice.",
     ".game_loop/bin/watchdog::superseded":
-        "KNOWN GAP — a non-event several ring decisions branch on; an always-None makes the "
-        "watchdog believe no newer run has taken over.",
+        "KNOWN GAP, and now a MEASURED one: 0 kills against a baseline of 534. Nothing in the "
+        "suite notices if it stops working, so every ring decision that branches on -- has a newer "
+        "watchdog taken over? -- is unasserted. Not listed in MUTANTS only because a standing "
+        "UNPROTECTED entry makes the sweep exit 1 with no path to green (INV5); the remedy is an "
+        "assertion nobody has written yet. Same standing debt as retro_nudge, same shape.",
     ".game_loop/bin/notify.py::replies":
-        "KNOWN GAP — same shape: an always-empty reads as 'the human has said nothing'.",
-    ".game_loop/bin/notify.py::send":
-        "KNOWN GAP — a send that silently does nothing is indistinguishable from one nobody "
-        "answered, which is the whole failure mode of paging.",
-    ".game_loop/bin/verify::changed_files":
-        "KNOWN GAP — feeds owed(); an empty return reaches the same end by a different road.",
-    ".game_loop/bin/verify::staged_files":
-        "KNOWN GAP — an empty staged set makes every blast-radius question answer 'nothing'.",
-    ".game_loop/bin/watchdog::claim_pidfile":
-        "KNOWN GAP — its falsy return is a real branch (another watchdog holds the pidfile).",
-    ".game_loop/bin/watchdog::limits_snapshot":
-        "KNOWN GAP — an always-None is exactly the state #45 found in the wild, so the mutation "
-        "and the live defect are the same thing; worth a sweep precisely because it HAPPENED.",
-    ".game_loop/bin/watchdog::transcript_size":
-        "KNOWN GAP — an always-None makes idleness unmeasurable, so the watchdog cannot tell a "
-        "parked run from a working one.",
+        "KNOWN GAP of a different kind: this producer cannot be measured by this tool AT ALL. "
+        "Neutered to its own nothing-literal the suite HANGS rather than fails -- 300s cap hit, "
+        "the whole baseline reported as killed because no assertion finished. watchdog's "
+        "poll_slack_replies is a `while True:` whose three exits all wait on a reply arriving, so "
+        "a producer that never produces spins forever. That is right in production and wrong for "
+        "a test, which has no bound of its own. A hang is worse than a failure: it yields no "
+        "verdict, and from outside it looks like a slow machine. Tracked as issue #50 -- and it "
+        "is why an earlier sweep of these ten stalled with no output at all.",
 }
 
 

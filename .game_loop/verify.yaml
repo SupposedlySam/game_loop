@@ -62,6 +62,11 @@
 # owe the suite. Named because `verify --coverage` reported them unchecked — the report working.
 "test/run.py":
   - "python3 test/run.py"
+# The sweep decides whether the suite's silence-shaped assertions are worth anything (#42), and it
+# now FAILS a run rather than only printing. Its verdict line and its list of producers are checked
+# by the suite — cheaply, without running the sweep, which is one full pass per producer.
+"test/mutation_sweep.py":
+  - "python3 test/run.py"
 ".game_loop/verify.yaml":
   - "python3 test/run.py"
 # install.sh was deliberately unlisted while it only copied files — nothing could fail. It now DECIDES

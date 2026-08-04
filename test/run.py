@@ -4,6 +4,7 @@
 Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) inside a throwaway copy
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
+import importlib.util
 import json
 import os
 import re
@@ -837,16 +838,23 @@ def main():
             subprocess.run(["git", "init", "--bare", "-q", remote], capture_output=True)
             ug("remote", "add", "origin", remote)
             ug("push", "-q", "-u", "origin", "HEAD")
-            r = gl(up, "checkpoint", "--notes", "still on the parser")
+            # #42: a warner that has stopped working is quiet for an up-to-date branch, quiet for a
+            # branch with no upstream, and quiet for everything else — "stays quiet" and "is broken"
+            # are the same observation. So every silence asserted below is a DIFFERENTIAL against a
+            # run of the same warner, in this same sandbox, that was seen to SPEAK. (fix_warning's
+            # handback checks further down were already built this way; these were not.)
+            synced = gl(up, "checkpoint", "--notes", "still on the parser")
             check("up to date with upstream → checkpoint stays quiet",
-                  r.returncode == 0 and "UNPUSHED" not in r.stdout)
+                  synced.returncode == 0 and "UNPUSHED" not in synced.stdout)
             for f in ("b.txt", "c.txt", "d.txt"):
                 ucommit(f)
             r = gl(up, "checkpoint", "--notes", "still on the parser")
             check("ahead of upstream → checkpoint warns, and says by how much",
                   r.returncode == 0 and "UNPUSHED" in r.stdout and "3 commits" in r.stdout)
+            check("...so the up-to-date run's silence was a verdict, not a warner that never fires",
+                  "UNPUSHED" in r.stdout and "UNPUSHED" not in synced.stdout)
             check("the unpushed warning never blocks the checkpoint",
-                  "✓ CHECKPOINT" in r.stdout)
+                  "UNPUSHED" in r.stdout and "✓ CHECKPOINT" in r.stdout)
             gl(up, "mandate", "--set", "land the parser")
             r = gl(up, "mandate", "--clear", "--notes", "parser landed")
             check("mandate --clear warns about unpushed work too",
@@ -863,6 +871,14 @@ def main():
             r = gl(up, "checkpoint", "--notes", "all done — deploying for the team")
             check("a branch with NO upstream stays quiet",
                   r.returncode == 0 and "UNPUSHED" not in r.stdout)
+            # ...and its control, on the SAME branch and the same notes: give it an upstream, put a
+            # commit past it, and the warner has to speak. Without this, the silence above is
+            # satisfied for free by a warner that was never going to say anything at all.
+            ug("push", "-q", "--set-upstream", "origin", "side-quest")
+            ucommit("f.txt")
+            tracked = gl(up, "checkpoint", "--notes", "all done — deploying for the team")
+            check("...and the same branch, once tracked, warns — the silence was the missing upstream",
+                  "UNPUSHED" in tracked.stdout and "UNPUSHED" not in r.stdout)
         finally:
             shutil.rmtree(up, ignore_errors=True)
             shutil.rmtree(remote, ignore_errors=True)
@@ -1145,6 +1161,12 @@ def main():
               "CANNOT CHECK" in r.stdout)
         check("a claim filed WITH a scope is not also nudged about one",
               r.returncode == 0 and "reads category-shaped" not in r.stdout)
+        # #42: the control for the line above, in the same observation. "The nudge stood down because
+        # a scope was filed" and "the detector never fires" print identically, so the IDENTICAL
+        # sentence goes back in without --scope and has to come out flagged.
+        bare = gl(proj, "claim", "--assert", "only the events table refuses deletes", "--read", real)
+        check("...and the identical sentence with NO scope IS nudged — the silence was the scope",
+              "reads category-shaped" in bare.stdout and "reads category-shaped" not in r.stdout)
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("both probes are recorded, in the log a later session inherits",
@@ -1154,15 +1176,21 @@ def main():
         # The detector is a NUDGE, never a gate: enforcement that depends on reading English is not
         # enforcement (INV1), and a guard that blocked on a false positive would block its own fix
         # (INV5). So a set-shaped assertion filed as an instance is admitted — and made loud.
-        r = gl(proj, "claim", "--assert", "deletes are restricted on the events table", "--read", real)
+        flagged = gl(proj, "claim", "--assert", "deletes are restricted on the events table",
+                     "--read", real)
         check("a category-shaped assertion filed as an instance is FLAGGED, not blocked",
-              r.returncode == 0 and "reads category-shaped" in r.stdout)
+              flagged.returncode == 0 and "reads category-shaped" in flagged.stdout)
         check("the nudge names the workaround as the tell",
-              "WORKAROUND" in r.stdout)
+              "WORKAROUND" in flagged.stdout)
         r = gl(proj, "claim", "--assert", "the retry helper sleeps 2s between attempts",
                "--read", real)
         check("an ordinary instance claim is untouched — no nudge, nothing owed",
               r.returncode == 0 and "CLAIM sourced" in r.stdout
+              and "reads category-shaped" not in r.stdout)
+        # #42 again: a detector that never fires also leaves an ordinary claim alone. The pair is
+        # the evidence — one sentence through, one sentence flagged, one detector, two verdicts.
+        check("...and the detector that let it through had just fired on a set-shaped sibling",
+              "reads category-shaped" in flagged.stdout
               and "reads category-shaped" not in r.stdout)
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
@@ -1874,19 +1902,47 @@ def main():
         # exist yet is trivially absent. It earns its place in the GREEN state, where it is the only
         # thing standing between the tell and an ordinary observation, and it asserts the claim was
         # accepted rather than merely silent.
+        # #42 SINCE: that declaration explained why the negative case cannot go RED, and left it
+        # resting on nothing in the green state either — neutering aggregate_tell to `return None`
+        # killed exactly one assertion in the whole suite. So the negative case now carries a control
+        # from the SAME instrument one call earlier, and the nudge's body is asserted rather than
+        # merely its first line: an advisory whose text is unchecked can rot into a bare label.
         gl(proj, "instrument", "--register", "latency", "--measures", "waits the player notices",
            "--connects", "a long frame is a visible hitch", "--null", "0,0", "--positive", "0,8",
            sid=SD)
         gl(proj, "measure", "--instrument", "latency", "--before", "10", "--after", "40", sid=SD)
-        r = gl(proj, "claim", "--assert", "latency fell 30% in total", "--metric", "latency", sid=SD)
+        loud_agg = gl(proj, "claim", "--assert", "latency fell 30% in total", "--metric", "latency",
+                      sid=SD)
         check("an aggregate-shaped sentence with no shape behind it is made LOUD, never refused",
-              r.returncode == 0 and 'reads aggregate-shaped ("30%")' in r.stdout
-              and "Wording only" in r.stdout)
+              loud_agg.returncode == 0 and 'reads aggregate-shaped ("30%")' in loud_agg.stdout
+              and "Wording only" in loud_agg.stdout)
+        check("the nudge carries the incident, not just the rule — the 96% one event hid in a total",
+              "A SUM IS NOT A DISTRIBUTION" in loud_agg.stdout
+              and "96% of a total" in loud_agg.stdout)
+        check("the nudge hands back the exact command that fixes it, with THIS instrument named",
+              "--instrument latency --before <n> --after <n>" in loud_agg.stdout
+              and "--metric latency --aggregate sum" in loud_agg.stdout)
+        check("the aggregate nudge says what it does NOT catch, in the incident's own words (INV6)",
+              "walked straight past it" in loud_agg.stdout
+              and "A single-quantity reading owes nothing here" in loud_agg.stdout)
         r = gl(proj, "claim", "--assert", "the counter read 40 on this build", "--metric",
                "latency", sid=SD)
         check("a plain observation claim gets no aggregate nudge — the tell stays quiet",
               r.returncode == 0 and "CLAIM sourced" in r.stdout
               and "reads aggregate-shaped" not in r.stdout)
+        check("...against a sibling on the same instrument that DID fire one call earlier",
+              "reads aggregate-shaped" in loud_agg.stdout
+              and "reads aggregate-shaped" not in r.stdout)
+        # The third arm, and the one the comment above only asserted in prose: a reading that already
+        # CARRIES its events suppresses the nudge on its own, whatever the wording. Same tell ("30%"),
+        # same claim shape, shaped reading — and the control is loud_agg, which is that sentence
+        # against a shapeless one. Silence here is the shape doing its job, not the detector's.
+        shaped = gl(proj, "claim", "--assert", "crashes fell 30% in total", "--metric", "crashes",
+                    "--aggregate", "sum", sid=SD)
+        check("the same tell over a reading that CARRIES its events is not nudged — the shape "
+              "answers it",
+              shaped.returncode == 0 and "reads aggregate-shaped" not in shaped.stdout
+              and "reads aggregate-shaped" in loud_agg.stdout)
         # REGRESSION GUARDS, passing in BOTH states by construction: the shape check ADDS a rung to
         # the metric path; it must not touch the document keystone INV2 rests on, or the reading
         # shape #14 built.
@@ -2974,6 +3030,40 @@ def main():
               r.returncode != 0 and "same directory" in r.stderr and REPO in r.stderr)
     finally:
         shutil.rmtree(ibug, ignore_errors=True)
+
+    # #42: the mutation sweep is the thing that decides whether the checks above are worth anything,
+    # so it gets checked here rather than trusted. It is far too slow to RUN from the suite (one
+    # unmutated pass plus one per producer), and it does not need to be: what can rot is its
+    # verdict line and its list of targets, and both are readable without running it.
+    print("producer mutation sweep (test/mutation_sweep.py):")
+    _spec = importlib.util.spec_from_file_location(          # the real file, not a copy of it
+        "mutation_sweep", os.path.join(REPO, "test", "mutation_sweep.py"))
+    sweep = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sweep)
+    check("zero kills is UNPROTECTED — the case the sweep exists for, and the only fatal one",
+          sweep.verdict(0) == sweep.UNPROTECTED)
+    check("one kill is THIN, not unprotected — it noticed, but on a single assertion",
+          sweep.verdict(1) == sweep.THIN)
+    check(f"the thin line is a boundary, not a slope: {sweep.THIN_AT - 1} thin, "
+          f"{sweep.THIN_AT} ok",
+          sweep.verdict(sweep.THIN_AT - 1) == sweep.THIN
+          and sweep.verdict(sweep.THIN_AT) == sweep.OK)
+    check("THIN and UNPROTECTED are distinct verdicts — thin argues, only zero blocks",
+          sweep.THIN != sweep.UNPROTECTED and sweep.OK not in (sweep.THIN, sweep.UNPROTECTED))
+    # A producer renamed out from under the sweep is the quiet failure it could most easily have:
+    # neuter() would not find it, the entry would report nothing, and the count would look fine.
+    with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
+        gl_src = f.read()
+    missing = [fn for _, fn, _, _, _ in sweep.MUTANTS
+               if not sweep.neuter(gl_src, fn, "    pass\n")[1]]
+    check("every producer the sweep names still exists in the real script — no silent no-op entry",
+          not missing)
+    # neuter() is the whole mechanism: if it returned the source unchanged while reporting success,
+    # every producer would come back perfectly protected and nothing would have been mutated.
+    mutated, found = sweep.neuter(gl_src, "aggregate_tell", "    return None\n")
+    check("neuter actually replaces the body it claims to — the sweep's one load-bearing edit",
+          found and "def aggregate_tell(text):\n    return None\n" in mutated
+          and "_AGGREGATE_TELLS" in mutated and mutated != gl_src)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

@@ -1,32 +1,103 @@
 """Producer mutation sweep: neuter one silence-on-pass producer at a time and see which
-assertions survive.
+assertions survive.  Run:  python3 test/mutation_sweep.py
 
 A guard's "allow" is silence; so is a detector that finds nothing, a validator with no
 complaints, and a nudge that declines to fire. Every "stays quiet" / "gets no nudge" /
 "passes untouched" assertion is satisfied by a producer that has stopped working.
 
-Each entry rewrites one function's body to the neutered form, runs the suite, and reports
-the checks that STILL PASS whose text suggests they are about that producer's silence.
+Each entry rewrites one function's body to the neutered form, runs the suite, and reports how
+many named assertions the mutation KILLED — a set difference against an unmutated baseline run,
+not a guess. It also prints the checks that STILL PASS whose text suggests they are about that
+producer's silence; that filter is a crude keyword match and pulls in unrelated assertions, so
+the KILL COUNTS are the reliable signal and the survivor list is a lead to follow by hand.
+
+BASELINE TO BEAT (#42, measured — before → after the companion assertions that issue added):
+
+    producer            before   after
+    unpushed_warning       4    →   7
+    fix_warning            9    →   9     already paired; nothing was owed
+    category_tell          2    →   4
+    aggregate_tell         1    →   7
+    dominance             10    →  10     not touched by #42
+    ruled_out              1    →   1     still THIN; see its entry in MUTANTS
+
+(suite total 431 → 446 over the same change.)
+
+A run that comes back BELOW those numbers is drift, not noise. A run above them is fine —
+provided the assertions are companions and not this sweep's own metric being farmed. See THIN_AT.
+
+The named restraint assertions — "up to date with upstream → checkpoint stays quiet", "a branch
+with NO upstream stays quiet", "a claim filed WITH a scope is not also nudged about one", "an
+ordinary instance claim is untouched", "a plain observation claim gets no aggregate nudge" — STILL
+SURVIVE, and are meant to. They were never false, only unsupported, and each one now sits beside a
+companion, in the same observation, that dies. Deleting or rewriting one to clear it from the
+survivor list would remove the restraint claim and leave the count looking better.
+
+WHAT THIS DOES NOT CATCH (INV6). It measures whether an assertion NOTICES a producer that has
+stopped producing. It says nothing about whether the producer is RIGHT: a wrong message and a
+correct one are killed identically, because both are non-empty. It cannot see a producer whose
+broken form is not the neutered one written here — a validator that wrongly ACCEPTS, a detector
+that fires on everything. And a high count is not coverage: ten assertions against one line of
+output kill together and count ten.
 """
-import os, re, shutil, subprocess, sys, tempfile
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = ".game_loop/bin/game_loop"
 
-# (label, function name, neutered body, substrings that mark an assertion as being about it)
+# The line between "report it" and "fail the run".
+#
+# UNPROTECTED (zero kills) FAILS. A producer whose absence nothing in the suite notices is the case
+# this sweep exists for, and it is not a matter of taste.
+#
+# THIN is reported and does NOT fail. A producer that reports by silence needs a PAIR per behaviour
+# — the message, and the control proving the silence was a verdict — and it has at least two
+# behaviours worth naming: it fires, and it declines. Under 3 kills at least one of those is resting
+# on nothing. But that is a heuristic about a suite, and some entries are thin for reasons that
+# "fixing" would make worse (a test isolating one component from another on purpose). A sweep that
+# nags on every acceptable-thin entry is a warning that fires every time: it gets run with its output
+# ignored, and then the zero-coverage case it exists for goes unseen too. Thin argues; zero blocks.
+THIN_AT = 3
+
+UNPROTECTED, THIN, OK = "UNPROTECTED", "THIN", "ok"
+
+
+def verdict(killed):
+    """How a producer's kill count should be read. Pure, so the suite can check this line itself."""
+    if killed == 0:
+        return UNPROTECTED
+    return THIN if killed < THIN_AT else OK
+
+
+# (label, function name, neutered body, substrings that mark an assertion as being about it,
+#  a note saying WHY this entry is thin — written next to the number, because a thin entry with no
+#  reason attached invites the one bad fix: un-isolating a test to move the count, which is exactly
+#  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
+#  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
     ("unpushed_warning -> never warns", "unpushed_warning", "    return None\n",
-     ["unpushed", "upstream", "quiet"]),
+     ["unpushed", "upstream", "quiet"], None),
     ("fix_warning -> never warns", "fix_warning", "    return None\n",
-     ["fix", "quiet", "silence"]),
+     ["fix", "quiet", "silence"], None),
     ("category_tell -> never detects", "category_tell", "    return None\n",
-     ["nudge", "category", "scope"]),
+     ["nudge", "category", "scope"], None),
     ("aggregate_tell -> never detects", "aggregate_tell", "    return None\n",
-     ["nudge", "aggregate", "sum"]),
+     ["nudge", "aggregate", "sum"], None),
     ("dominance -> never finds an outlier", "dominance", "    return None\n",
-     ["dominan", "distribution", "spread", "event"]),
+     ["dominan", "distribution", "spread", "event"], None),
     ("ruled_out -> finds no refutations", "ruled_out", "    return []\n",
-     ["ruled", "refut"]),
+     ["ruled", "refut"],
+     # KNOWN GAP, not a decision. Its survivors all belong to the WRITE side (`--outcome refuted`
+     # refusing prose evidence, the log entry) which is separately and well covered; ruled_out() is
+     # the READ side, and exactly one assertion — status reprinting the standing list — notices when
+     # it returns nothing. #42 scoped itself to the four nudge/warning producers and did not touch
+     # this. Fixing it means asserting a later session INHERITS the list, not deleting this note.
+     "the read side of the refutation path; #42 scoped itself elsewhere and left it unfixed"),
 ]
 
 
@@ -52,33 +123,61 @@ def passing(out):
     return [m.group(1) for m in re.finditer(r"^  ok   (.*)$", out, re.M)]
 
 
-base = tempfile.mkdtemp(prefix="sweep-base-")
-subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {base}", shell=True, check=True)
-with open(os.path.join(base, BIN)) as f:
-    original = f.read()
+def main():
+    base = tempfile.mkdtemp(prefix="sweep-base-")
+    subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {base}", shell=True, check=True)
+    with open(os.path.join(base, BIN)) as f:
+        original = f.read()
 
-print("producer mutation sweep — assertions that SURVIVE a neutered producer\n")
-for label, fn, body, marks in MUTANTS:
-    t = tempfile.mkdtemp(prefix="sweep-")
-    try:
-        shutil.copytree(base, t, dirs_exist_ok=True)
-        mutated, found = neuter(original, fn, body)
-        if not found:
-            print(f"  !! {fn}: not found, skipped\n")
-            continue
-        with open(os.path.join(t, BIN), "w") as f:
-            f.write(mutated)
-        os.chmod(os.path.join(t, BIN), 0o755)
-        out = run(t)
-        tail = out.strip().split("\n")[-1]
-        survivors = [c for c in passing(out)
-                     if any(m in c.lower() for m in marks)]
-        print(f"{label}\n  suite: {tail}")
-        for c in survivors:
-            print(f"    SURVIVED: {c[:96]}")
-        if not survivors:
-            print("    (nothing in this producer's domain survived)")
-        print()
-    finally:
-        shutil.rmtree(t, ignore_errors=True)
-shutil.rmtree(base, ignore_errors=True)
+    print("producer mutation sweep — assertions that SURVIVE a neutered producer")
+    print(f"(the tree under test is HEAD, not the working copy; thin under {THIN_AT} kills, "
+          "only ZERO fails)\n")
+    # The unmutated run, so a kill is a named assertion that FLIPPED rather than a count that moved.
+    baseline = set(passing(run(base)))
+    print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
+
+    verdicts = []
+    for label, fn, body, marks, thin_note in MUTANTS:
+        t = tempfile.mkdtemp(prefix="sweep-")
+        try:
+            mutated, found = neuter(original, fn, body)
+            if not found:
+                # Not a skip. A producer named here that no longer exists is zero evidence about
+                # zero code, and a sweep that shrugs at that is a check that cannot fail.
+                print(f"  !! {fn}: NOT FOUND in {BIN} — renamed, or gone. Nothing was swept.\n")
+                verdicts.append((fn, None, UNPROTECTED))
+                continue
+            shutil.copytree(base, t, dirs_exist_ok=True)
+            with open(os.path.join(t, BIN), "w") as f:
+                f.write(mutated)
+            os.chmod(os.path.join(t, BIN), 0o755)
+            out = run(t)
+            still = set(passing(out))
+            killed = len(baseline - still)
+            v = verdict(killed)
+            verdicts.append((fn, killed, v))
+            tail = out.strip().split("\n")[-1]
+            print(f"{label}\n  suite: {tail}\n  killed: {killed}   [{v}]")
+            if thin_note:
+                print(f"  why it is thin: {thin_note}")
+            for c in sorted(s for s in still if any(m in s.lower() for m in marks)):
+                print(f"    SURVIVED: {c[:96]}")
+            print(flush=True)   # one full suite per entry: show progress even when redirected
+        finally:
+            shutil.rmtree(t, ignore_errors=True)
+    shutil.rmtree(base, ignore_errors=True)
+
+    thin = [f"{fn} ({k})" for fn, k, v in verdicts if v == THIN]
+    bad = [fn for fn, _, v in verdicts if v == UNPROTECTED]
+    if thin:
+        print("THIN — reported, not fatal: " + " · ".join(thin))
+    if bad:
+        print("UNPROTECTED — neutering these killed NOTHING: " + " · ".join(bad))
+        print("Nothing in the suite notices when they stop working. That is the failure.")
+        return 1
+    print("no producer is unprotected.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

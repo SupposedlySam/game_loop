@@ -3690,6 +3690,46 @@ def main():
     # Rung 2, not 6: the message already exists and is already read at exactly the right moment. It
     # only needed to name the real entry point. Documenting it harder would help only the sessions
     # that loaded CLAUDE.md — which are precisely the population that was never affected.
+    # A PROMISE IN SHIPPED FILES MUST BE KEPT (#55). install.sh's closing tips and the seeded
+    # templates/CLAUDE.md both told the operator to add "the shell function in the README", and the
+    # README shipped no such function — two references, zero definitions, on one of the
+    # highest-traffic lines in the project. Same shape as #52 one layer out: an instruction pointing
+    # at something that is not there. So the promise is asserted, and the function is RUN rather
+    # than eyeballed.
+    print("the shell function two shipped files promise actually exists (#55):")
+    with open(os.path.join(REPO, "README.md")) as f:
+        _rm = f.read()
+    _fn = re.search(r"```bash\n(game_loop\(\) \{.*?\n\})\n```", _rm, re.S)
+    check("the README defines the function install.sh and templates/CLAUDE.md send people to",
+          _fn is not None)
+    with open(os.path.join(REPO, "install.sh")) as f:
+        _ish55 = f.read()
+    with open(os.path.join(REPO, "templates", "CLAUDE.md")) as f:
+        _tcm = f.read()
+    check("...and both files still point at it, so this stays a checked promise rather than a "
+          "coincidence",
+          "shell function" in _ish55 and "shell function" in _tcm)
+    if _fn:
+        _fd = tempfile.mkdtemp(prefix="glfn-")
+        try:
+            _fs = os.path.join(_fd, "fn.sh")
+            with open(_fs, "w") as f:
+                f.write(_fn.group(1) + "\n")
+            _deep = os.path.join(_fd, "a", "b")
+            os.makedirs(_deep)
+            _miss = subprocess.run(["bash", "-c", f". {_fs}; game_loop status"], cwd=_deep,
+                                   capture_output=True, text=True)
+            check("...and with no harness above it, it FAILS with a named reason rather than "
+                  "silently doing nothing",
+                  _miss.returncode == 127 and "not a global command" in _miss.stderr)
+            _hit = subprocess.run(["bash", "-c", f". {_fs}; game_loop confidence"],
+                                  cwd=os.path.join(REPO, "docs"), capture_output=True, text=True)
+            check("...and from a SUBDIRECTORY of a guarded repo it resolves that repo's binary — "
+                  "walking up is what keeps it correct in a subdir and in a linked worktree",
+                  _hit.returncode == 0 and "CONFIDENCE:" in _hit.stdout)
+        finally:
+            shutil.rmtree(_fd, ignore_errors=True)
+
     print("a refusal names a hatch that exists (#52):")
     hp52 = make_sandbox()
     try:

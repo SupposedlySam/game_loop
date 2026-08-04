@@ -163,6 +163,44 @@ watchdog parks rather than burning retries against a wall, and wakes the session
 session that renders no status line these gates cannot arm — and `status` tells you so in plain terms
 rather than staying quiet and letting you assume you are covered.
 
+## Optional: let bare `game_loop` work anywhere in the repo
+
+game_loop is a **project-local binary** (`./.game_loop/bin/game_loop`), never a global command — one
+machine can hold several projects on different versions, and a global `game_loop` would run the wrong
+one. If you want to type `game_loop ...` from anywhere inside a guarded repo, add this to your shell
+profile:
+
+```bash
+game_loop() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    if [ -x "$d/.game_loop/bin/game_loop" ]; then
+      "$d/.game_loop/bin/game_loop" "$@"
+      return $?
+    fi
+    d="$(dirname "$d")"
+  done
+  {
+    printf 'game_loop: no .game_loop/bin/game_loop found from %s upward.\n' "$PWD"
+    printf '  This is a project-local harness, not a global command. cd into a guarded repo.\n'
+  } >&2
+  return 127
+}
+```
+
+It walks **up** from wherever you are rather than assuming a repo root, which is what keeps it correct
+in a subdirectory and inside a linked git worktree — each tree carries its own harness, and a function
+hardcoded to one checkout would silently run a different tree's binary.
+
+It finds the **nearest** harness walking up, which is what you want — and does mean a stray
+`.game_loop/` in a parent directory wins over nothing at all. (Found while testing this: an old
+harness left in `/tmp` made every path under `/tmp` resolve to it. Harmless, but surprising if you
+have forgotten it is there.)
+
+A shell function cannot reach non-interactive shells that skip your profile, so this is a convenience
+for you and never something the tool relies on. Everything game_loop prints names the explicit path
+for exactly that reason.
+
 ## How much do we stand behind a given commit?
 
 game_loop is developed in the open, so `main` moves while features are half-landed. A clone gives you

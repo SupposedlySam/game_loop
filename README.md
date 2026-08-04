@@ -197,7 +197,11 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 ## Configure
 
 Everything lives in `.game_loop/config.json` — read roots, extra write roots, deploy verbs to block,
-watchdog timing, usage-limit thresholds. It ships with sane defaults and comments; see
+watchdog timing, usage-limit thresholds. One worth knowing about if you fan work out to subagents:
+`watchdog.waiting_probe` is a command you supply that answers *"is this run waiting on work it
+dispatched?"* — exit 0 for yes. Without it, a run that has correctly handed out all its work looks
+identical to one that fell asleep, and eventually pages you about it. It is config-only on purpose:
+a wait the agent could declare for itself would be an off switch for the watchdog. It ships with sane defaults and comments; see
 [docs/how-it-works.md](docs/how-it-works.md) for what each knob changes.
 
 Your project's own rules live in three files the installer seeds once and never overwrites:

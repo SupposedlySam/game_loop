@@ -3768,6 +3768,40 @@ def _compare_versions(repo, api_base, base, head):
         return None
 
 
+def waiting_report():
+    """What the watchdog last concluded about a declared wait. Silent unless a probe is configured.
+
+    "What is this run blocked on" is the first question a resumed session asks, and before #32 there
+    was nowhere to read it. Shown from the LOG rather than by re-running the probe: status must stay
+    cheap, and the interesting fact is what the watchdog acted on, not what a fresh run would decide.
+    """
+    if not str(((config().get("watchdog") or {}).get("waiting_probe") or "")).strip():
+        return []
+    last = None
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                if '"watchdog_wait' not in ln:
+                    continue
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("kind") in ("watchdog_waiting", "watchdog_wait_held"):
+                    last = r
+    except OSError:
+        return []
+    if not last:
+        return ["waiting: a probe is configured, but the watchdog has not run it yet — its verdict "
+                "appears here once it does."]
+    verdict = "WAITING on dispatched work" if last.get("waiting") or \
+              last.get("kind") == "watchdog_wait_held" else "not waiting"
+    detail = last.get("detail") or ""
+    return [f"waiting: {verdict} — as of {last.get('t', '?')}" + (f" · {detail}" if detail else ""),
+            "  (the watchdog's own last verdict, not a fresh one; it is conservative toward NOT "
+            "waiting)"]
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -4622,6 +4656,7 @@ def cmd_status(s, a):
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     out(*triggers_report())  # attached ≠ working: one that never fired looks just like one that does
     out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for
+    out(*waiting_report())       # what this run is blocked on — the first question a resume asks
     snap = load_limits()
     lim = limits_summary(snap) if snap else None
     if lim:

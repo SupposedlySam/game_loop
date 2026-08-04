@@ -290,6 +290,13 @@ MUTANTS = [
      # shipped in all but name, since a pin only the registering session could see never reached
      # the run that tidies it away.
      None, 9),
+    ("waiting_report -> status never says what the run is blocked on",
+     ".game_loop/bin/game_loop::waiting_report", "    return []\n",
+     ["waiting", "blocked", "dispatched", "probe"],
+     # 1 when first written -- one assertion carried the whole producer -- and 3 after the other
+     # three arms were added: NOT WAITING, configured-but-never-run, and the silent no-probe case.
+     # Strengthened rather than recorded thin, which is what the ordering in this file is FOR.
+     None, 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

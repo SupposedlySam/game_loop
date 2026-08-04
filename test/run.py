@@ -3094,6 +3094,111 @@ def main():
     # The narrowness is the hard part, and it is empirical rather than tidy: failing closed on any
     # unparseable fragment was tried in the field and refused two legitimate messages in one
     # afternoon, both of them BUG REPORTS about this guard. Prose about a commit is not a commit.
+    # WAITING ON DISPATCHED WORK (#32). Idleness is transcript growth, and a subagent's output does
+    # not grow the parent's transcript — so a run that has correctly handed out every piece of work
+    # and is waiting for results it cannot hurry is byte-for-byte identical to one asleep. The ring
+    # is cheap; the ESCALATION pages the human, which is a T3 spend on a run behaving perfectly.
+    #
+    # The argument needs no incident: the cap counts CONSECUTIVE UNPRODUCTIVE rings, so the only
+    # protection today is the agent finding filler while it waits. A safety property that degrades
+    # as the agent gets more disciplined is broken in a way that looks like working.
+    print("a declared wait holds the ring cap, and cannot become an off switch (#32):")
+    wp = make_sandbox()
+    try:
+        _wcfg = os.path.join(wp, ".game_loop", "config.json")
+        _wsd = os.path.join(wp, ".game_loop", "sessions", "sess-wait")
+        os.makedirs(_wsd, exist_ok=True)
+        _wlog = os.path.join(wp, ".game_loop", "log.jsonl")
+
+        def _probe(cmd):
+            with open(_wcfg) as f:
+                c = json.load(f)
+            c["watchdog"] = dict(c.get("watchdog") or {}, waiting_probe=cmd)
+            with open(_wcfg, "w") as f:
+                json.dump(c, f)
+
+        def _at_cap():
+            """A session already at the ring cap, mandate bound, nothing else to explain the idle."""
+            with open(os.path.join(_wsd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                           "watchdog_rings": 99, "watchdog_last_ring_size": 10 ** 9}, f)
+
+        _tp = os.path.join(wp, "transcript.jsonl")
+        with open(_tp, "w") as f:
+            f.write("{}\n")
+
+        def _run():
+            return run_watchdog(os.path.join(wp, ".game_loop", "bin", "watchdog"),
+                                {"session_id": "sess-wait", "transcript_path": _tp},
+                                WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+
+        # PAIRED FIRST, so "held" means something: with no probe the cap escalates as it always has.
+        _at_cap()
+        _run()
+        with open(_wlog) as f:
+            check("with no probe configured the cap still stands the watchdog down — unchanged",
+                  '"watchdog_exhausted"' in f.read())
+
+        open(_wlog, "w").close()
+        _probe("echo 'two crawlers still live'; exit 0")
+        _at_cap()
+        _run()
+        with open(_wlog) as f:
+            _log = f.read()
+        check("a verifying wait HOLDS the cap — the human is not paged about a healthy run",
+              '"watchdog_wait_held"' in _log and '"watchdog_exhausted"' not in _log)
+        check("...and the verdict is logged with its detail, so 'how often did this silence the "
+              "watchdog' is a fact rather than a hunch",
+              '"watchdog_waiting"' in _log and "two crawlers still live" in _log)
+
+        # THE OFF-SWITCH CONTROLS. Each of these must still escalate, or the verb has handed the
+        # agent's own judgement back to it — which is the thing the watchdog exists not to trust.
+        for _name, _cmd in (("a probe that says NOT waiting", "exit 1"),
+                            ("a probe that cannot run at all", "/nonexistent/probe/xyz"),
+                            ("a probe that hangs past its bound", "sleep 60")):
+            open(_wlog, "w").close()
+            _probe(_cmd)
+            _at_cap()
+            _run()
+            with open(_wlog) as f:
+                _l = f.read()
+            check(f"...{_name} escalates — conservative toward NOT waiting, since a false 'waiting' "
+                  "silences the watchdog on exactly the wedged run it was built to catch",
+                  '"watchdog_exhausted"' in _l and '"watchdog_wait_held"' not in _l)
+
+        # CONFIG-AUTHORED ONLY. A wait the agent can declare for itself is the off switch.
+        _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        check("no verb can set the probe — it is config-authored only, never runtime-settable",
+              "waiting_probe" not in _bin_src.split("def main(")[-1])
+        _probe("echo held; exit 0")
+        _at_cap()
+        _run()
+        check("status reports what the run is blocked on — the first question a resume asks",
+              "WAITING on dispatched work" in gl(wp, "status", sid="sess-wait").stdout)
+        # The other three arms of the same report, since one assertion covering a producer is how a
+        # producer ends up unprotected while looking covered.
+        _probe("exit 1")
+        _at_cap()
+        _run()
+        check("...and says NOT WAITING when that was the last verdict, rather than going quiet — "
+              "silence would read as 'no probe configured', which is a different fact",
+              "not waiting" in gl(wp, "status", sid="sess-wait").stdout)
+        open(_wlog, "w").close()
+        check("...and with a probe configured but never yet run, says exactly that",
+              "has not run it yet" in gl(wp, "status", sid="sess-wait").stdout)
+        # PAIRED: no probe, no line at all. Most installs fan nothing out and want none of this.
+        with open(_wcfg) as f:
+            _c = json.load(f)
+        _c["watchdog"] = {k: v for k, v in (_c.get("watchdog") or {}).items()
+                          if k != "waiting_probe"}
+        with open(_wcfg, "w") as f:
+            json.dump(_c, f)
+        check("...and with no probe configured it is silent — the feature announces nothing to the "
+              "installs that never asked for it",
+              "waiting:" not in gl(wp, "status", sid="sess-wait").stdout)
+    finally:
+        shutil.rmtree(wp, ignore_errors=True)
+
     print("an unreadable commit target fails closed (#40):")
     up40 = make_sandbox()
     try:

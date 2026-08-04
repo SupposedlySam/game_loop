@@ -5,6 +5,11 @@
 > has a `.game_loop/` directory, this file tells you how to operate. Everything below is a command you
 > run, not a rule you remember.
 
+**This file is for you; [README.md](README.md) is for the human.** The README explains what problems
+game_loop solves and why somebody would put an agent on it — read it if you have been asked to
+evaluate or describe game_loop to a person. For operating inside a guarded repo, stay here: this is
+the complete set of commands and the gates you will hit.
+
 The design rule everything follows from: **enforcement lives in tools and artifacts, never in
 instructions.** Test any guard by asking — *if I ignored every instruction, would it still hold?* The
 keystone check is always the same shape: **name a real file that exists.** You cannot satisfy it by

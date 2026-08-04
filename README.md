@@ -1,285 +1,215 @@
 # game_loop
 
-**Guardrails that let a Claude Code session run unattended — safely.**
+**Your AI coding agent can work while you're not watching. This is what makes that safe.**
 
-Think of it as a dungeon-crawl loop for your AI: `game_loop` doesn't play the game for the agent — it
-keeps the run alive and stops it from wiping. It gives a Claude Code session two things it needs to
-work without a human sitting over it:
+You already know it can write code. The question this answers is different: *can you walk away?*
 
-- **an autonomy engine** that keeps the session moving instead of stopping the moment there's nobody to
-  press "continue"; and
-- **guardrails** that make running unattended *safe* rather than reckless.
+---
 
-All of it is enforced through Claude Code **hooks** — never through instructions to the model. The one
-rule everything follows from:
+## What actually happens when you walk away
 
-> **Enforcement lives in tools and artifacts, never in instructions.** Test any guard by asking: *if
-> the agent ignored every instruction, would this still hold?* If no, it isn't enforcement — it's a
-> wish, and long sessions and context compaction break wishes.
+Not hypotheticals. These are the failures that produced every guard in this repo — each one observed
+in a real run, usually while somebody was asleep or in a meeting.
 
-That's why the keystone check is always the same shape: **name a real file that exists.** An LLM
-defeats any check on the mere *presence* of a string by writing a plausible string — that's its native
-skill. Pointing at a file on disk is the one check prose can't satisfy.
+**It stops.** You come back after an hour and it has been idle for fifty-five minutes, waiting for a
+"continue" nobody typed. The work it promised is exactly where you left it.
 
-> 🤖 **If you're an AI agent**, read [`llms.txt`](llms.txt) — it's the operational brief: the exact
-> commands to run and the gates you'll hit.
+**It says it's finished when it isn't.** Tests pass — because they tested nothing. A bug is "fixed"
+because the thing that used to crash no longer crashes, which is not the same as the feature working.
+
+**It states things that are confidently, plausibly false.** *"The library handles retries
+internally."* It doesn't. Three files are now built on that sentence, and it reads exactly like the
+sentences that were true.
+
+**It touches things it shouldn't.** An agent running unattended with shell access, tidying up, is a
+sentence that should worry you. Most of the time it's fine. You don't get to see the times it isn't
+until afterwards.
+
+**It burns your usage window and dies mid-thought.** No handoff, no notes, nothing written down. The
+next session starts from nothing and re-derives what the last one already knew.
+
+**It forgets what you told it.** Long sessions get compacted. The rule you gave it two hours ago is
+gone — and it has no way of knowing it's gone.
+
+**It commits more than it changed.** A formatter ran across a directory, `git add -A` swept it up, and
+the commit message describes something else entirely.
+
+---
+
+## What game_loop does about each
+
+| When this happens | What stops it |
+|---|---|
+| It stops early | A watchdog notices the session went quiet while work is outstanding, and starts it again. |
+| It quits mid-task | A gate refuses the turn-end unless it reports progress, asks a real question, or the work is genuinely done. |
+| It asks you something it could look up | A question costs it something: it must name the file it already read that failed to answer. |
+| It asserts something false | It cannot claim anything about the outside world without naming a real file it read. Prose cannot satisfy that check. |
+| It says "fixed" too early | A fix must be proved by exercising what the fix *produces* — re-running the thing that used to break does not count. |
+| It edits outside the project | Everything outside the repo is read-only. The exception is one-time, spelled out by you, and logged. |
+| It hits your usage limit | It is required to write a handoff before the window closes, then parks and wakes itself when the limit resets. |
+| It forgets a rule | Rules become artifacts — a check, a test, a gate — rather than something it has to remember. |
+| It commits work nobody looked at | The commit names files this session never touched, so a widened diff is visible before it lands. |
+
+None of this is advice given to the model. Every one is a **hook** — code that runs whether or not the
+agent cooperates, agrees, or remembers.
+
+> **The rule everything follows from:** if the agent ignored every instruction you gave it, would this
+> still hold? If no, it isn't a guardrail — it's a wish. Long sessions break wishes.
+
+---
+
+## Why you'd want this
+
+**You get the hours back.** The realistic alternative to an unattended agent isn't a faster agent —
+it's you, checking on it. game_loop is what makes *"go do this, I'll read it later"* a reasonable
+thing to say.
+
+**You can trust the report.** The expensive failure isn't an agent that gets stuck; it's one that
+tells you it succeeded. Most of these guards exist to make "done" mean something.
+
+**It gets stricter as it learns.** When something goes wrong, the fix isn't a note in a document
+nobody re-reads — it becomes a check that fails next time. The harness gets harder to fool the longer
+you run it.
+
+**It's small, and it's yours.** Python standard library and bash. No services, no accounts, no
+telemetry, nothing phoning home. You can read the whole thing in an afternoon.
+
+## What it does not do
+
+Stated plainly, because a tool that oversells its guarantees is worse than one that makes none.
+
+- **It is not a sandbox.** It reduces blast radius; it does not contain a determined process. Run
+  genuinely untrusted work in a VM.
+- **It cannot see everything.** A mutation made through an interpreter one-liner, or through a path
+  built from a shell variable, is outside what the write guard reads. It says so in its own output
+  rather than implying coverage it does not have.
+- **It does not make the agent smarter.** It makes it honest and persistent. A confused agent guarded
+  by game_loop is a confused agent that has stopped claiming to be finished.
+- **Some parts need a terminal.** Usage-limit survival reads data Claude Code exposes only to a
+  terminal status line. In editor-embedded sessions it says so out loud rather than pretending to
+  protect you.
 
 ---
 
 ## Requirements
 
-- **Python 3** (standard library only — no packages to install)
-- **[Claude Code](https://claude.com/claude-code)** (the hooks are Claude Code hooks)
+- **Python 3** — standard library only, nothing to install
+- **[Claude Code](https://claude.com/claude-code)** — the guards are Claude Code hooks
 - macOS or Linux (`bash` + POSIX tools)
 
-## Quickstart for humans
+## Install
 
-One-liner — no clone needed (the installer fetches the payload from GitHub itself):
+One line, in the project you want guarded — no clone needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
 ```
 
-`bash -s -- .` installs into the current directory; pass any path in its place. Or, from a clone:
+Then **restart Claude Code** (hooks are read when a session starts) and confirm:
 
 ```bash
-git clone https://github.com/SupposedlySam/game_loop.git
-cd game_loop
-./install.sh /path/to/your/project
+./.game_loop/bin/game_loop status
 ```
 
-Either way, `install.sh` copies `.game_loop/` into your project and merges the hooks into its
-`.claude/settings.json` (it won't clobber existing settings or duplicate on re-run). Then:
+Installing adds a `.game_loop/` directory and merges its hooks into `.claude/settings.json`. It never
+overwrites files you own.
 
-> **Installing into a git worktree?** A linked worktree is a second working copy of *one* project,
-> so it must carry that project's rules — seeding the blank `verify.yaml` there would leave the
-> commit gate owing nothing and reporting success while checking nothing. `install.sh` detects the
-> case and copies the **main checkout's** `config.json`, `INVARIANTS.md`, `verify.yaml` and
-> `LEDGER.md` instead; if that checkout has no harness it refuses rather than substituting defaults
-> (`--fresh` overrides). For trees git can't connect — a sibling clone, a copied directory — say it
-> by hand: `./install.sh --same-as /path/to/main /path/to/tree`. `game_loop status` re-checks it
-> every session, and `game_loop worktree --porcelain` is the same answer as JSON for a spawn script.
+## Your first unattended run
 
-> **Start a new Claude Code session before step 3.** Claude Code reads hook configuration when a
-> session *starts*, and `install.sh` writes `.claude/settings.json` after yours already did — so in
-> the install session every gate is registered on disk and silently never invoked. Nothing errors;
-> the gate is just as quiet as a gate that's running and content. `game_loop status` prints a
-> `HOOKS NOT LIVE` warning until the Stop gate has actually fired once.
+Three steps. This is genuinely most of what a human does.
 
 ```bash
-cd /path/to/your/project
-$EDITOR .game_loop/INVARIANTS.md      # 1. your project's north star (edit the template)
-$EDITOR .game_loop/config.json        # 2. read roots, allowed write roots, deploy verbs, timing
-./.game_loop/bin/game_loop status        # 3. sanity check — you should see the dashboard
+# 1. Give it a job it isn't allowed to abandon
+./.game_loop/bin/game_loop mandate --set "get the integration tests passing"
+
+# 2. Walk away. The agent works; the gates keep it moving and honest.
+
+# 3. When you're back
+./.game_loop/bin/game_loop status
 ```
 
-That's it. The gates are inert until you bind a mandate, so day-to-day work is unchanged — the guards
-only ever stop you from writing outside the repo or firing a configured deploy verb.
-
-## Quickstart for agents (bots)
-
-If you're a Claude Code agent working in a repo that already has `.game_loop/`, your whole operating
-manual is [`llms.txt`](llms.txt). The short version:
+While a mandate is bound the agent cannot end its turn by drifting off — it has to report progress,
+ask you something it has earned the right to ask, or finish. Release it when the work is done:
 
 ```bash
-./.game_loop/bin/game_loop status                                    # first thing, every session
-./.game_loop/bin/game_loop claim --assert "X does Y" --read <path>   # before asserting external facts
+./.game_loop/bin/game_loop mandate --clear --notes "tests green, flaky one quarantined"
 ```
 
-If `.game_loop/` isn't there yet, install it from a clone of this repo: `./install.sh <this-project>`.
+Called away mid-run? `mandate --park --reason "..."` pauses without pretending the work is finished.
 
-### Optional: let bare `game_loop` resolve without the path
+With **no mandate bound every gate is inert** — game_loop never sits between you and an ordinary
+conversation. A mandate also binds only the session that set it, so another window on the same repo is
+never conscripted into this one's work.
 
-The binary is intentionally **project-local** (`./.game_loop/bin/game_loop`) — there is no global
-install, so an agent that assumes `game_loop` is on `PATH` (e.g. one arriving through a global slash
-command that never loaded the project's `CLAUDE.md`) hits `command not found`. If you'd like bare
-`game_loop …` to work from anywhere inside a game_loop repo, add this to your shell profile
-(`~/.zshrc` / `~/.bashrc`):
+> 🤖 **Pointing an agent at this repo?** Send it to **[`llms.txt`](llms.txt)** — the operational brief:
+> the exact commands, the gates it will hit, and what each one wants. This README is for you; that
+> file is for it.
 
-```bash
-game_loop() {
-  if [ -x "./.game_loop/bin/game_loop" ]; then ./.game_loop/bin/game_loop "$@"
-  else command game_loop "$@"; fi
-}
-```
+---
 
-It resolves to the **local** binary whenever you're in a game_loop repo, so it stays project-scoped —
-no global binary that could point at the wrong project. This is opt-in on purpose: game_loop never
-writes to your shell profile or puts anything on `PATH` for you.
+## Page your phone, not your terminal (optional)
 
-## Run unattended
+If the agent genuinely needs you, it can reach you on Slack rather than blocking on a terminal nobody
+is looking at — and if you reply from your phone, your answer is carried back into the run and it
+keeps going. Configure in `.game_loop/notify.json`; see [`bin/notify.py`](.game_loop/bin/notify.py).
 
-A human (or the agent, if the human said "work autonomously") binds a mandate:
+## Surviving usage limits
 
-```bash
-./.game_loop/bin/game_loop mandate --set "Finish the timeline feature; pick the highest-value item and keep going."
-```
+As a usage window approaches its limit, the agent is required to write a handoff before doing anything
+else, so the run ends with its state on disk instead of mid-sentence. When the window is exhausted the
+watchdog parks rather than burning retries against a wall, and wakes the session when the limit resets.
 
-While a mandate is bound:
+**The honest caveat:** Claude Code exposes usage data to a terminal status line and nowhere else. In a
+session that renders no status line these gates cannot arm — and `status` tells you so in plain terms
+rather than staying quiet and letting you assume you are covered.
 
-- The **Stop gate** refuses turn-ends that ask a question, or that claim "continuing now" and then
-  stop. The session either keeps working or explicitly `checkpoint`s / `arm`s / `clear`s.
-- The **watchdog** notices when the session goes idle with work still outstanding and rings it back to
-  work — so it resumes with no human present.
+## The guardrails, briefly
 
-A mandate binds **the session that set it** — state lives per Claude Code session
-(`.game_loop/sessions/<id>/state.json`), so two sessions sharing one checkout never see each other's
-mandate, checkpoint, arm, or authorizations. Your other session opening the same repo will not be
-conscripted into this one's work. Outside any session (your own terminal), state falls back to the
-repo-global `.game_loop/state.json`.
+Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees as runnable checks in
+**[`test/run.py`](test/run.py)**.
 
-When the work is genuinely done:
-
-```bash
-./.game_loop/bin/game_loop mandate --clear --notes "timeline shipped + verified"
-```
-
-With no mandate bound, every gate is inert — game_loop never sits between you and a normal conversation.
-
-## Page your phone, not your terminal (Slack, optional)
-
-An unattended run is autonomous enough that nobody should babysit it — so when it *does* need you,
-the signal must reach where you actually are. Give game_loop a Slack channel and the tools (never the
-model's memory) page it at exactly the moments that matter:
-
-- **`arm`** — the run has a genuine T3 question, or needs your physical presence
-- **watchdog stand-down** — the ring cap is exhausted; the run is stuck
-- **`mandate --clear`** — the work is done
-- **usage limits** — a window is nearly exhausted (handoff demanded), the run parks, the run resumes
-
-Setup: create `.game_loop/notify.json` (gitignored — credentials never land in git):
-
-```jsonc
-{ "slack": { "bot_token": "xoxb-...", "channel": "C0123456789" } }   // send + read replies
-// or send-only: { "slack": { "webhook_url": "https://hooks.slack.com/services/..." } }
-```
-
-then verify with `./.game_loop/bin/game_loop notify --test`. The bot-token form needs `chat:write` +
-`channels:history` scopes and the bot invited to the channel; full schema and per-event tuning live in
-the [`notify.py`](.game_loop/bin/notify.py) docstring.
-
-**Replies flow back.** On the bot-token path, an `arm` page keeps its Slack thread: while the arm is
-live, the watchdog polls that thread, and when you answer *from your phone*, it clears the arm and
-rings your answer straight into the run. The desk is optional. (Webhooks are write-only, so there the
-page is one-way.) A notification failure never takes down a gate — same contract as flair: Slack being
-down means less decoration, never less enforcement.
-
-## Survive Claude Code usage limits
-
-Subscription usage is gated by rolling windows (a ~5-hour block and a 7-day block). Without help, a
-run that hits one dies **mid-action** — everything it knew evaporates — and nothing restarts it when
-the window resets. game_loop closes both holes, using the one place Claude Code actually exposes the
-numbers: the statusline payload.
-
-1. **The tap** — the installer wires `game_loop statusline` as your status line (only if you have
-   none). Besides rendering a row (`🎮 model · ctx 45% · 5h 23% ↺14:32 · 7d 41% ↺Mon 09:00`), it
-   snapshots `rate_limits` to `.game_loop/limits.json` on every refresh.
-2. **The handoff gate** — a `PreToolUse` hook (`game_loop limitgate`) watches the snapshot. When a
-   window crosses `limits.threshold_pct` (default 98%), ordinary tool calls are refused until the
-   session writes its handoff — where it is, what's verified, what was planned next. The keystone is
-   the usual one: a real file must exist. Handoffs are per session
-   (`.game_loop/sessions/<id>/HANDOFF.md`; the gate's message names the exact path), so concurrent
-   runs sharing a checkout never overwrite each other's, and one session's handoff never opens the
-   gate for a sibling. Then work continues until the wall actually hits.
-3. **The wake-up** — when the snapshot shows a window at `limits.exhausted_pct` (default 99%), the
-   watchdog stops ringing (a ring is an API call into the very wall that killed the run), pages you
-   that it parked, sleeps until `resets_at`, and then rings the session awake pointing at the handoff.
-   The run continues on its own, minutes after the window resets.
-
-Honest limits of the mechanism: the data exists only for Claude.ai subscribers (API-key auth exposes
-nothing — every gate fails open), the per-model weekly limit is not in the payload, and the wake-up
-revives a rate-limited *session*, not a quit app or a closed laptop. `game_loop status` shows the
-current snapshot, and the handoff doubles as a human-readable "where did the run land" note — useful
-even if you never automate the resume.
+- **Claim gate** — no assertion about a dependency, a harness, or another repo without naming the real
+  file that backs it.
+- **Write guard** — an allowlist: the repo, the OS temp dir, and roots you configure. Everything else
+  is read-only, including sibling projects. The escape hatch is you — single-use, and logged.
+- **MCP guard** — a connected MCP server can delete or force-push with no shell command at all. Calls
+  are classified before they run, and anything unclassifiable is refused.
+- **Commit blast radius** — names the staged files this session never wrote, so a widened commit is
+  visible before it lands.
+- **verify** — your own map from "you changed X" to "these checks must pass". Refuses a commit when the
+  evidence is older than the change. Ships empty; it does nothing until you add rules.
 
 ## The verbs
 
-| Command | What it does |
+`status` and `mandate` are the two you will type. The rest are the agent's, and every one is
+documented for it in [`llms.txt`](llms.txt). The short version:
+
+| Command | What it's for |
 |---|---|
-| `game_loop status` | Rehydrate the loop after compaction. Run first, every session. |
-| `game_loop mandate --set ".."` / `--clear` | Bind / release an autonomy mandate (arms the Stop gate + watchdog). |
-| `game_loop mandate --park --reason ".."` / `--resume` | A HUMAN called a break: pause without closing. The mandate stays open work; one turn-end, consumed. |
-| `game_loop checkpoint --notes ".."` | End a turn to *report* progress (no question). One turn-end, consumed. |
-| `game_loop arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
-| `game_loop claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
-| `game_loop claim --assert ".." --outcome refuted --evidence <path>` | Retract it: a first-class negative result. Must name the control that killed it; `status` keeps the RULED-OUT list. |
-| `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N [--general ".."] | Turn a learning into an enforced artifact. `--general` is the transferable form — what another agent could use without knowing this codebase — and is handed to any `harden` trigger. |
-| `game_loop pin --fact .. --reason .. --path <path> [--expect ..]` | Carry a load-bearing environment fact (a pinned dep commit, a toolchain, an SDK path) in resume state, so a later tidy-up can't silently revert it. `--list` / `--release <id> --notes ".."`. |
-| `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
-| `game_loop attribute --merge <ref> [--merge <ref>] --reason ".."` | Declare that the next commit lands work a named REF carries, so the blast-radius warning reports only what *nothing* accounts for. Takes refs, never filenames — the files are recomputed from the ref. One commit, consumed, logged. |
-| `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
-| `game_loop stepback --notes ".."` | Retro; re-injects your invariants, fires any `stepback` trigger **first**, and reports what the previous retro actually yielded. |
-| `game_loop note --text ".."` | Append a note to the log. |
-| `game_loop notify --text ".."` / `--test` | Page the configured Slack channel by hand / verify the channel works. |
-| `game_loop worktree [--porcelain]` | Does this linked worktree carry the *project's* rules? Names the files that drifted. `--porcelain` answers both questions as JSON — `rules` (differ ⇒ the trees enforce different things) and `harness` (every owned file). Exit 0 **only** when it compared and matched; 1 rules drifted, 3 notes drifted, 2 could not determine — never read a 2 as clean. |
-| `game_loop owned [--porcelain]` | The files a project owns (seeded once, never overwritten), split into `rule_files` and `notes_files`. Provisioning trees? Read this instead of hardcoding the list. |
-
-## The guardrails
-
-- **Claim gate** — can't assert about a dependency / harness / other repo without naming the real file
-  you read.
-- **Write guard** (`guard-writes.sh`, a `PreToolUse` hook) — an *allowlist*: writes are permitted only
-  inside the repo, the OS temp dir, and configured roots. Everything else is read-only. Covers
-  `Write`/`Edit` and Bash mutators, blocks configured deploy verbs, and states what it *doesn't* catch.
-  Escape hatch is the human (`game_loop authorize`), single-use and logged — never an env var.
-- **Blast-radius warning** (same guard, at `git commit`) — names the staged files this session never
-  wrote, so a directory-wide formatter or `git add -A` can't quietly widen a commit past the work.
-  A warning, never a block, and it says which edits it cannot see (Bash heredocs, `sed -i`, scripts).
-  A commit's *provenance* can be declared by REF (`game_loop attribute --merge <ref>`) — game_loop
-  recomputes what that ref carries, and then only what **nothing** accounts for is reported.
-- **MCP guard** (`guard-mcp.sh`, a `PreToolUse` hook on `mcp__.*`) — the write guard reads Bash, but a
-  connected MCP server can delete, send or force-push with no shell command at all. This classifies the
-  call *before* it runs, on the tool name and the argument shape: read-only verbs pass; mutating verbs,
-  a `DELETE FROM` in a SQL argument, or a truthy `force` flag are refused. It fails **closed** on
-  anything it can't classify — safe to do here, because it gates only `mcp__.*` and so can never block
-  its own fix. Same human escape hatch, spelled with the tool name.
-- **verify** — optional map from "you changed X" to "these checks must pass"; refuses a `git commit`
-  when the evidence is older than the change. Ships empty (a no-op) until you add rules.
-
-See **[docs/how-it-works.md](docs/how-it-works.md)** for the full design, and **[`test/run.py`](test/run.py)**
-for the guarantees as runnable checks (`python3 test/run.py`).
+| `status` | Rehydrate after compaction. The agent runs this first, every session. |
+| `mandate --set` / `--clear` / `--park` | Bind, release, or pause a job it cannot abandon. `--park` is you calling a break. |
+| `checkpoint --notes ".."` | Report progress and hand back without asking anything. |
+| `arm --question .. --read .. --predict ..` | Spend one interruption of you, backed by a file it already read. |
+| `claim --assert ".." --read <path>` | Assert something about the outside world, with the receipt. |
+| `harden --learning .. --artifact <path>` | Turn a lesson into something enforced instead of remembered. |
+| `authorize --path <prefix> --reason ".."` | Your one-time, logged permission for a single write outside the repo. |
 
 ## Configure
 
-`.game_loop/config.json`:
+Everything lives in `.game_loop/config.json` — read roots, extra write roots, deploy verbs to block,
+watchdog timing, usage-limit thresholds. It ships with sane defaults and comments; see
+[docs/how-it-works.md](docs/how-it-works.md) for what each knob changes.
 
-```jsonc
-{
-  "project_name": "my_project",
-  "read_roots": [],          // extra bases for RELATIVE `claim --read` paths (deps, reference repos);
-                             // absolute paths to real files already pass — the check is existence, not containment
-  "allow_write_roots": [],   // extra dirs the write guard permits (beyond repo + OS temp)
-  "deploy_verbs": [],        // extra irreversible verbs to block anywhere, e.g. "firebase deploy"
-  "mcp_read_only_tools": [], // MCP tools/servers the MCP guard may treat as read-only when it cannot
-                             // classify them, e.g. "mcp__docs__" or "mcp__db__explainPlan". Resolves
-                             // ambiguity ONLY — it can never silence a mutating verb or argument.
-  "trans_nudge_every": 12,   // phase transitions between retro nudges
-  "work_nudge_every": 8,     // evidence work (claims, hardens, fix proofs) between retro nudges.
-                             // The transitions counter above cannot fire on its own — it counts an
-                             // OPTIONAL verb. This one counts work that logs itself either way.
-  "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 },
-  "limits": {                // usage-limit survival (see "Survive Claude Code usage limits")
-    "threshold_pct": 98,     // handoff gate closes here
-    "exhausted_pct": 99,     // watchdog parks here and wakes the run at the window reset
-    "handoff_file": "HANDOFF.md"   // resolved relative to .game_loop/
-  },
-  "update_check": true,      // status flags when the installed game_loop is behind main (re-install due)
-  "update_repo": "SupposedlySam/game_loop",   // source repo the check compares against
-  "flair": {                 // fun celebration lines (see below) — set enabled:false to silence
-    "enabled": true,
-    "support_name": "SupposedlySam",
-    "support_url": "https://github.com/sponsors/SupposedlySam"
-  }
-}
-```
+Your project's own rules live in three files the installer seeds once and never overwrites:
+`.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and
+`.game_loop/config.json`.
 
 ## Flair 🎮 (fun, opt-out)
 
 `game_loop` narrates the run like the game master of a dungeon crawl — your AI is the **Crawler**. When
-a guard helps (the watchdog drags the Crawler back in, the Stop gate refuses a rage-quit, a claim gets
-sourced) it hands the agent a first-person line to repeat back, like *"🎮 GameLoop yanked me back onto
-the path before the walls closed in. Back to it."* At milestones it hands out achievements and, like
-any decent dungeon, runs a sponsor read:
+a guard helps, it hands the agent a first-person line to repeat back, like *"🎮 GameLoop yanked me back
+onto the path before the walls closed in. Back to it."* At milestones it hands out achievements and,
+like any decent dungeon, runs a sponsor read:
 
 ```
 🎮🏆 GameLoop has kept your Crawler alive and moving for 4h — not one game-over!
@@ -287,40 +217,33 @@ any decent dungeon, runs a sponsor read:
    tribute → https://github.com/sponsors/SupposedlySam
 ```
 
-Milestones fire once each: uptime under a mandate (1h, 2h, 4h, 8h, …), total assists (5, 10, 25, 50,
-…), claims sourced, and learnings hardened. The announcements and the sponsor reads are drawn from
-rotating pools in a Dungeon-Crawler-Carl-style announcer register, so the ask never reads like the
-same canned banner twice. It's pure decoration, isolated in `.game_loop/bin/flair.py`, never touches
-the gate logic, and is completely disabled by `flair.enabled: false` — set `support_name` /
-`support_url` to point the sponsor link wherever you like.
+Pure decoration, isolated in `.game_loop/bin/flair.py`, never touching gate logic, and completely
+disabled by `flair.enabled: false` — set `support_name` / `support_url` to point the sponsor link
+wherever you like.
 
 ## Migrating from an existing `.loop/`-style harness
 
-game_loop is the generalized descendant of hand-rolled loop harnesses. To switch one over:
-
 1. `./install.sh /path/to/that/project` — adds `.game_loop/` and merges game_loop's hooks.
-2. Move any project-specific rules into `.game_loop/INVARIANTS.md`, `.game_loop/config.json` (read/write
-   roots), and `.game_loop/verify.yaml`.
+2. Move project-specific rules into `.game_loop/INVARIANTS.md`, `.game_loop/config.json`, and
+   `.game_loop/verify.yaml`.
 3. Delete the old `.loop/` directory **and its hook entries** from `.claude/settings.json`. The
-   installer *adds* game_loop's hooks; it does not remove yours, so old Stop/PreToolUse hooks must be
-   pulled out by hand or they'll run alongside game_loop's.
+   installer *adds* game_loop's hooks; it does not remove yours, so old ones would run alongside.
 4. `./.game_loop/bin/game_loop status` to confirm.
 
 ## Installing / distribution
 
-Today game_loop is distributed as this **GitHub repo**: clone it and run `install.sh` against your
-project. See [docs/distribution.md](docs/distribution.md) for the other channels under consideration
-(a `curl | bash` one-liner, a Claude Code plugin, PyPI/`pipx`) and the tradeoffs.
+Distributed as this GitHub repo: clone it and run `install.sh` against your project, or use the
+one-liner above. See [docs/distribution.md](docs/distribution.md) for the other channels under
+consideration and the tradeoffs.
 
 ## Lineage & credit
 
 game_loop is extracted from two harnesses that already ran unattended for real work — one where the
 expensive gated action was a physical device flash (a human button-press), and one where it was a
 real-money trade. Same `arm → gate → consume` primitive, same `VERIFIED / RULED-OUT / OPEN` ledger
-vocabulary, two unrelated domains. game_loop is that pattern with the domain specifics removed so
+vocabulary, two unrelated domains. game_loop is that pattern with the domain specifics removed, so
 anyone can drop it into any project.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-# game_loop

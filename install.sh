@@ -294,14 +294,34 @@ fi
 # WHAT LEVEL WAS THE SOURCE AT? A clone gives you whatever was on main that morning, so the sha
 # alone does not say whether the author stands behind it. Carried into the target so `status` can
 # say it later, when nobody remembers which commit they installed from.
-GL_LEVEL="alpha"
+# THE LEVEL RIDES TAGS, AND AN EXTRACTION HAS NO TAGS. A `git archive` of a marked commit carries
+# none of them, so the resolver correctly finds no mark and correctly applies the default -- and a
+# commit tagged stable installs itself as ALPHA. Measured end to end by a packager an hour after the
+# scheme shipped, and it is the worse half of the same gap as the VERSION stamp: alpha is the
+# DEFAULT, so the failure is silent by construction and reads as an honest answer.
+#
+# So the level travels as a FILE when there are no tags to read. Deliberately the SAME file this
+# installer writes, rather than any packager's own format: a vendored tree that carries
+# .game_loop/CONFIDENCE (and .game_loop/VERSION) is honoured, whoever produced it. game_loop names
+# no package manager, and any of them can satisfy this with two lines and no coupling either way.
+GL_LEVEL=""
 if [ "$SRC_OWN" = 1 ]; then
+  GL_LEVEL="alpha"
   for _t in $(git -C "$SRC" tag --points-at HEAD 2>/dev/null); do
     case "$_t" in
       stable-*) GL_LEVEL="stable" ;;
       beta-*)   [ "$GL_LEVEL" = "stable" ] || GL_LEVEL="beta" ;;
     esac
   done
+elif [ -f "$SRC/.game_loop/CONFIDENCE" ]; then
+  GL_LEVEL="$(tr -d '[:space:]' < "$SRC/.game_loop/CONFIDENCE")"
+  case "$GL_LEVEL" in
+    alpha|beta|stable) echo "  note    the source is not its own checkout; carried its recorded level ($GL_LEVEL) forward" ;;
+    *) GL_LEVEL="" ;;
+  esac
+fi
+if [ -z "$GL_LEVEL" ]; then
+  GL_LEVEL="alpha"
 fi
 printf '%s\n' "$GL_LEVEL" > "$TARGET/.game_loop/CONFIDENCE"
 if [ "$GL_LEVEL" = "alpha" ]; then

@@ -184,6 +184,21 @@ Levels ride annotated **git tags**, so they arrive with an ordinary `git clone` 
 travels in the tag message. `install.sh` records the level it installed from, and `status` says so
 later, when nobody remembers which commit they took.
 
+**Vendoring game_loop into another project?** An extracted copy has no git tags, so the level cannot
+be read from it — and because `alpha` is the default, the failure would be silent and would look like
+an honest answer. Carry two files into the extraction and `install.sh` honours them:
+
+```
+.game_loop/VERSION       the sha the extraction came from
+.game_loop/CONFIDENCE    alpha | beta | stable
+```
+
+That is the whole contract. game_loop names no package manager and needs nothing from one at runtime;
+whoever produces the tree is the only party that knows which commit it holds, so they are the only
+party that can honestly say. Read the tags **live** when you write it rather than snapshotting at
+publish time: a commit is usually marked *after* it exists, so a snapshot would record it unmarked
+forever.
+
 **What no level means:** none of them say the code is correct — only what was *checked*, and by whom.
 `beta` says a suite passed. `stable` says we were running on it. Neither is a promise about your
 project, and `confidence` tells you how to re-check rather than trust the tag.

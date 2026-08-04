@@ -3447,6 +3447,34 @@ def main():
                 check("...while a vendored source that DOES carry a recorded VERSION has it carried "
                       "forward — the packager is the only party that knows which commit it extracted",
                       f.read().strip() == "c" * 40)
+            # THE LEVEL HAS THE SAME TRANSPORT GAP, and it is the worse half: an extraction has no
+            # tags, so the resolver correctly finds no mark and correctly applies the default —
+            # meaning a commit tagged stable installs itself as ALPHA, silently, because alpha IS
+            # the default. Measured end to end by a packager an hour after the scheme shipped.
+            with open(os.path.join(_vend, ".game_loop", "CONFIDENCE"), "w") as f:
+                f.write("stable\n")
+            _tgt3 = os.path.join(_van, "target3")
+            os.makedirs(_tgt3)
+            _g(_tgt3, "init", "-q", ".")
+            subprocess.run([os.path.join(_vend, "install.sh"), _tgt3],
+                           capture_output=True, text=True, env=_env(_tgt3))
+            with open(os.path.join(_tgt3, ".game_loop", "CONFIDENCE")) as f:
+                check("a vendored source carrying a recorded LEVEL has it honoured — the same file "
+                      "this installer writes, so no package manager is named on either side",
+                      f.read().strip() == "stable")
+            # PAIRED: a level nobody recorded, or one that is not a level, must fall back to alpha
+            # rather than to whatever the file happened to contain.
+            with open(os.path.join(_vend, ".game_loop", "CONFIDENCE"), "w") as f:
+                f.write("totally-blessed\n")
+            _tgt4 = os.path.join(_van, "target4")
+            os.makedirs(_tgt4)
+            _g(_tgt4, "init", "-q", ".")
+            subprocess.run([os.path.join(_vend, "install.sh"), _tgt4],
+                           capture_output=True, text=True, env=_env(_tgt4))
+            with open(os.path.join(_tgt4, ".game_loop", "CONFIDENCE")) as f:
+                check("...while a value that is not one of the three levels falls back to alpha, so "
+                      "a packager cannot invent a level by writing one",
+                      f.read().strip() == "alpha")
         finally:
             shutil.rmtree(_van, ignore_errors=True)
     finally:
@@ -3483,7 +3511,9 @@ def main():
             # corrections in a row here, and every one of them was the product correctly refusing.
             f.write("__pycache__/\n*.pyc\n.game_loop_self/\n"
                     ".game_loop/log.jsonl\n.game_loop/sessions/\n.game_loop/state.json\n"
-                    ".game_loop/verified.json\n.game_loop/probe/\n.game_loop/HANDOFF.md\n")
+                    ".game_loop/verified.json\n.game_loop/probe/\n.game_loop/HANDOFF.md\n"
+                    ".game_loop/triggers.json\n.game_loop/triggers.d/\n"
+                    ".game_loop/CONFIDENCE\n.game_loop/VERSION\n")
         _cg("add", "-A")
         _cg("commit", "-q", "-m", "one")
 
@@ -3534,6 +3564,22 @@ def main():
               _st.returncode == 0 and "dogfooded" in _st.stdout)
         check("...and stable outranks beta when both mark the same commit",
               "CONFIDENCE: STABLE" in _conf().stdout)
+
+        # MARKING IS A TRIGGER MOMENT. `confidence --mark` is the exact instant "ready for
+        # consumers" stops being an intention and becomes a fact about a sha, so anything that
+        # distributes this project belongs HERE rather than in a habit. Left to memory it does not
+        # happen: the first stable mark was published by a downstream maintainer who happened to be
+        # watching, not by the person who marked it.
+        with open(os.path.join(cd, ".game_loop", "triggers.json"), "w") as f:
+            json.dump({"confidence": [{"name": "pub", "command": "cat; echo PUBLISHED"}]}, f)
+        _cg("commit", "-q", "--allow-empty", "-m", "another")
+        _m2 = _conf("--mark", "beta", "--notes", "second")
+        check("marking fires a confidence trigger, so distribution happens AT the moment rather "
+              "than whenever somebody remembers",
+              "PUBLISHED" in _m2.stdout and "triggers · confidence" in _m2.stdout)
+        check("...and the payload carries the LEVEL and the sha, so a publisher can decide for "
+              "itself what bar it ships at",
+              '"level": "beta"' in _m2.stdout and '"tag":' in _m2.stdout)
 
         # THE INSTALLED SIDE. A consumer who took a copy months ago cannot run `confidence` against
         # a clone they no longer have, so the level is recorded at install time and status says it.
@@ -3919,7 +3965,9 @@ def main():
               "tp-never" in _st and "CONFIGURED BUT NEVER FIRED" in _st)
         check("...and status names the moments nothing is attached to, so an unused one is a "
               "CHOICE rather than an oversight",
-              "nothing attached to: harden" in _st or "nothing attached: harden" in _st)
+              # matched on the LINE, not a fixed neighbour: adding a moment reorders the list, and
+              # an assertion pinned to "harden" being first fails for a reason that is not a defect.
+              any("nothing attached" in ln and "harden" in ln for ln in _st.splitlines()))
         _run("stepback", "--notes", "n")
         _st2 = _run("status").stdout
         check("...and once it has fired, status shows it as fired instead — the pair that makes the "

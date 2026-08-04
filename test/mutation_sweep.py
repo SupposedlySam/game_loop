@@ -276,6 +276,13 @@ MUTANTS = [
      # SUITE's watchdog runs (never the product loop, where waiting on the human is correct) turned
      # an un-measurable producer into a measured one. See #50.
      None, 4),
+    ("_hooks_stale_warning -> a dead Stop hook is never noticed",
+     ".game_loop/bin/game_loop::_hooks_stale_warning", "    return None\n",
+     ["hook", "probe", "stale", "stop gate", "listening"],
+     # 3 against a baseline of 568. Neutered, a Stop hook that fired once and then died reads
+     # exactly like a healthy one for the rest of the session -- which is the defect #43 named:
+     # registered, fired, and listening now are three different claims.
+     None, 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

@@ -2907,6 +2907,42 @@ def main():
         with open(probe, "w") as f:
             f.write("{}")
         check("a recorded firing silences it", "HOOKS NOT LIVE" not in status_with("claude-vscode"))
+
+        # #43 — REGISTERED, FIRED and LISTENING NOW are three different claims, and the check tested
+        # only the second. A Stop hook that fired an hour ago and has since died left its probe on
+        # disk, so `isfile` stayed true and the check stayed silent for the rest of the session. The
+        # mtime was available and used nowhere.
+        _stale = "STOP GATE MAY HAVE STOPPED"
+        check("a FRESH probe stays silent — the run is healthy and must not be nagged",
+              _stale not in status_with("cli"))
+
+        # Age it past the slack while the session's own activity stays recent. Judged against THIS
+        # RUN'S behaviour, not a constant: an idle session moves neither marker and triggers nothing.
+        _old = time.time() - (3 * 3600)
+        os.utime(probe, (_old, _old))
+        _sd = os.path.join(hp, ".game_loop", "sessions", "sess-hooks")
+        os.makedirs(_sd, exist_ok=True)
+        for _f in (os.path.join(_sd, "state.json"), os.path.join(hp, ".game_loop", "log.jsonl")):
+            if not os.path.exists(_f):
+                with open(_f, "w") as fh:
+                    fh.write("{}\n")
+            os.utime(_f, None)                      # this session worked just now
+        _said = status_with("cli")
+        check("a probe far older than the session's own activity IS caught — a hook that died is "
+              "not a quiet run",
+              _stale in _said)
+        check("...and it says both ages, so the reader can judge rather than trust the verdict",
+              "min old" in _said and "min ago" in _said)
+        check("...and states the limit it still has: fired then is not listening now (INV6)",
+              "never that it will run at the next one" in _said)
+
+        # PAIRED THE OTHER WAY: an IDLE session must not be accused. Nothing re-arms a hook while
+        # idle, so age alone would flag every quiet run — the comparison is what makes it evidence.
+        for _f in (os.path.join(_sd, "state.json"), os.path.join(hp, ".game_loop", "log.jsonl")):
+            os.utime(_f, (_old - 60, _old - 60))
+        check("an IDLE session whose work is as old as its probe is NOT accused — age alone would "
+              "flag every quiet run",
+              _stale not in status_with("cli"))
     finally:
         shutil.rmtree(hp, ignore_errors=True)
 

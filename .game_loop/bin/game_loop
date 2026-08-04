@@ -3341,6 +3341,60 @@ def cmd_trans(s, a):
         out(n)
 
 
+def _hooks_stale_warning(probe_f):
+    """The probe EXISTS — but existence is a fact about history, and the question is present tense.
+
+    REGISTERED, FIRED and LISTENING NOW are three different claims (#43). The check tested `isfile`
+    and nothing else, so a Stop hook that fired an hour ago and has since died read exactly like a
+    healthy one, for the rest of the session. The mtime was sitting right there, unused.
+
+    Judged against THIS RUN'S OWN activity rather than an invented constant: a Stop hook fires at
+    every turn-end, so a probe much older than the work this session is doing is evidence of a hook
+    that stopped, not of a quiet run. An idle session moves neither marker and correctly triggers
+    nothing. The slack is there because one long turn is the honest false positive — activity with
+    no turn-end yet is not a dead hook.
+
+    Nothing re-arms a long-lived hook while a session is idle: only a turn-end or a session start
+    does, and an idle agent produces neither. So the window this covers is exactly the one an
+    unattended run spends most of its time in.
+
+    WHAT IT STILL CANNOT PROVE (INV6): a probe shows the hook ran AT THAT MOMENT, never that it will
+    run at the next one. No check makes a live process a guarantee. The goal is "you would find
+    out", not "it cannot happen" — which is why this reports and never blocks.
+    """
+    try:
+        probe_age = time.time() - os.path.getmtime(probe_f)
+    except OSError:
+        return None
+    acts = []
+    for f in (STATE_F, LOG_F):          # both are written by ordinary work, so they track the RUN
+        try:
+            acts.append(time.time() - os.path.getmtime(f))
+        except OSError:
+            pass
+    if not acts:
+        return None
+    activity_age = min(acts)
+    slack = float(config().get("hooks_probe_slack_sec", 1800))
+    if probe_age <= activity_age + slack:
+        return None
+    return (
+        "\u26a0 THE STOP GATE MAY HAVE STOPPED FIRING \u2014 its probe is "
+        f"{probe_age / 60:.0f} min old, while this\n"
+        f"  session was working {activity_age / 60:.0f} min ago. A Stop hook fires at EVERY "
+        "turn-end, so a probe much\n"
+        "  older than the work is evidence of a hook that died, not of a quiet run. Nothing "
+        "re-arms a\n"
+        "  long-lived hook while a session is idle \u2014 only a turn-end or a session start does "
+        "\u2014 so this is\n"
+        "  the window an unattended run spends most of its time in.\n"
+        "  \u2192 Reload the window (VSCode) or start a new session to re-register, then re-read "
+        "this line.\n"
+        "  (It proves the hook ran AT THAT MOMENT, never that it will run at the next one. One long "
+        "turn\n"
+        "   with no turn-end yet is the honest false positive: widen hooks_probe_slack_sec.)")
+
+
 def hooks_live_warning():
     """Are the hooks actually WIRED IN to the running session, not merely on disk?
 
@@ -3371,7 +3425,11 @@ def hooks_live_warning():
     remedy really IS a restart, and it is unset here entirely — so keying off it does not merely
     misdirect, it detects nothing and falls through, which is the silent failure again.
     """
-    if not os.path.isfile(os.path.join(ROOT, "probe", "stop-payload.json")):
+    probe_f = os.path.join(ROOT, "probe", "stop-payload.json")
+    if os.path.isfile(probe_f):
+        # It fired at least once. That answers "registered" and "has fired" — never "listening now".
+        return _hooks_stale_warning(probe_f)
+    if True:
         vscode = os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-vscode"
         remedy = ("Reload the VSCode window — the extension registers hooks at window load, so a\n"
                   "  hook written mid-session stays inert until then (a restart also works, and "

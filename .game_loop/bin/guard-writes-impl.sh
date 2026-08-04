@@ -306,7 +306,7 @@ case "$tool" in
     # Prints "yes" when the target is inside an allow root, else the resolved realpath — which is
     # what an authorization is matched against (authorize records real prefixes, not raw tool input).
     verdict=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" FP="$fp" python3 <<'PY'
-import json, os
+import json, os, subprocess
 repo = os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
 allow = [repo, "/tmp", "/private/tmp", "/var/folders",
@@ -317,8 +317,56 @@ try:
 except (OSError, ValueError):
     pass
 allow = [os.path.realpath(p) for p in allow]
+
+
+def _git_common(p):
+    """The shared .git dir of the tree containing p, or None. Bounded, and never raises."""
+    try:
+        r = subprocess.run(["git", "-C", p, "rev-parse", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    g = r.stdout.strip()
+    if not g:
+        return None
+    if not os.path.isabs(g):
+        g = os.path.join(p, g)
+    return os.path.realpath(g)
+
+
+def same_project(real, repo):
+    """True when `real` lies in a LINKED WORKTREE of this same repository (issue #47).
+
+    A worktree is not another project; it is this project checked out twice, and an agent spawned to
+    work in one is doing this project's work. Scoping "this repo" to the directory the BINARY happens
+    to live in denied exactly that work: one reported session bought TWELVE single-use authorizations
+    to write the files it was created to change. A gate that fires on all normal work gets routed
+    around rather than respected, so this is a correctness fix, not a convenience.
+
+    Deliberately narrow. The two trees must share ONE git common dir, so a different repository
+    nested anywhere is still outside. It cannot be bootstrapped either: creating a worktree outside
+    the repo is itself a mutating command this guard denies, so nothing can mint its own permission.
+
+    Only ever reached on the path that is otherwise about to DENY, which keeps the git call off the
+    hot path -- an ordinary in-repo write never pays for it.
+    """
+    d = real
+    while not os.path.isdir(d):
+        nd = os.path.dirname(d)
+        if nd == d:
+            return False
+        d = nd
+    mine = _git_common(repo)
+    return bool(mine and _git_common(d) == mine)
+
+
 real = os.path.realpath(os.environ["FP"])
-print("yes" if any(real == a or real.startswith(a + os.sep) for a in allow) else real)
+if any(real == a or real.startswith(a + os.sep) for a in allow) or same_project(real, repo):
+    print("yes")
+else:
+    print(real)
 PY
 )
     if [ "$verdict" = "yes" ]; then
@@ -828,12 +876,13 @@ hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)"
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.
     offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
-import json, os, re, shlex, sys
+import json, os, re, shlex, subprocess, sys
 
 payload = json.loads(sys.argv[1])
 cmd = os.environ.get("SCAN_CMD", "")          # here-doc DATA bodies already stripped (see scan_cmd)
 cwd = payload.get("cwd") or os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
+repo = os.path.realpath(os.environ["REPO_REAL"])
 
 allow = [os.environ["REPO_REAL"], "/tmp", "/private/tmp", "/var/folders",
          os.path.join(home, ".claude", "projects", os.environ["SLUG"])]
@@ -850,6 +899,48 @@ GIT_WRITES = {"commit", "push", "reset", "rebase", "checkout", "clean", "apply",
 
 def under(path, root):
     return path == root or path.startswith(root + os.sep)
+
+def _git_common(p):
+    """The shared .git dir of the tree containing p, or None. Bounded, and never raises."""
+    try:
+        r = subprocess.run(["git", "-C", p, "rev-parse", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    g = r.stdout.strip()
+    if not g:
+        return None
+    if not os.path.isabs(g):
+        g = os.path.join(p, g)
+    return os.path.realpath(g)
+
+
+def same_project(real, repo):
+    """True when `real` lies in a LINKED WORKTREE of this same repository (issue #47).
+
+    A worktree is not another project; it is this project checked out twice, and an agent spawned to
+    work in one is doing this project's work. Scoping "this repo" to the directory the BINARY happens
+    to live in denied exactly that work: one reported session bought TWELVE single-use authorizations
+    to write the files it was created to change. A gate that fires on all normal work gets routed
+    around rather than respected, so this is a correctness fix, not a convenience.
+
+    Deliberately narrow. The two trees must share ONE git common dir, so a different repository
+    nested anywhere is still outside. It cannot be bootstrapped either: creating a worktree outside
+    the repo is itself a mutating command this guard denies, so nothing can mint its own permission.
+
+    Only ever reached on the path that is otherwise about to DENY, which keeps the git call off the
+    hot path -- an ordinary in-repo write never pays for it.
+    """
+    d = real
+    while not os.path.isdir(d):
+        nd = os.path.dirname(d)
+        if nd == d:
+            return False
+        d = nd
+    mine = _git_common(repo)
+    return bool(mine and _git_common(d) == mine)
 
 
 # Standard character devices: discard sinks and the console/std streams. A redirect to one of these
@@ -875,7 +966,9 @@ def offends(raw, cwd):
     if is_sink(p):
         return None
     real = os.path.realpath(p)
-    return None if any(under(real, a) for a in allow) else real
+    if any(under(real, a) for a in allow) or same_project(real, repo):
+        return None
+    return real
 
 
 def redirect_targets(seg):

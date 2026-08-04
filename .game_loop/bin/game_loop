@@ -3748,7 +3748,10 @@ def coverage_report(s):
                  f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
     lines.append("           written. Everything else is denied WITHOUT being named, so nothing "
                  "goes unprotected for")
-    lines.append("           want of remembering it.")
+    lines.append("           want of remembering it. 'This repo' includes its LINKED WORKTREES — "
+                 "one project checked")
+    lines.append("           out twice is still one project (#47) — and nothing else that shares a "
+                 "parent directory.")
     extra = cfg.get("deploy_verbs") or []
     shown = ", ".join(DEPLOY_VERB_DEFAULTS[:2]) + f", +{len(DEPLOY_VERB_DEFAULTS) - 2} built-in"
     lines.append(f"  deploy : DENYLIST — {len(DEPLOY_VERB_DEFAULTS) + len(extra)} verb(s) blocked "
@@ -3791,6 +3794,78 @@ def main_checkout():
     except OSError:
         return None
     return path
+
+
+def working_tree():
+    """(toplevel, git-common-dir) of the tree the CALLER is standing in — or (None, None).
+
+    Deliberately NOT `_git`, which runs with cwd=REPO_ROOT and can therefore only ever describe the
+    binary's own tree. That single detail is the whole of #47: every answer was about the checkout
+    the CODE lives in, never the checkout the agent is working in, and the two are different exactly
+    when it matters most.
+    """
+    try:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception:  # noqa: BLE001 — no git, no repo, a hung index: all mean "nothing to say"
+        return (None, None)
+    if r.returncode != 0:
+        return (None, None)
+    parts = r.stdout.strip().splitlines()
+    if len(parts) < 2:
+        return (None, None)
+    top, common = parts[0].strip(), parts[1].strip()
+    if not os.path.isabs(common):
+        common = os.path.join(top, common)
+    try:
+        return (os.path.realpath(top), os.path.realpath(common))
+    except OSError:
+        return (None, None)
+
+
+def working_tree_report():
+    """LOUD when the tree being worked IN is not the tree this harness answers FOR (#47).
+
+    Silent in the ordinary case — the binary's tree and the caller's tree are the same — which is
+    every normal invocation, so this costs nobody a line they do not need.
+
+    It exists because the failure was silent rather than wrong-looking. An agent in a sibling
+    worktree, invoking a main checkout's binary by absolute path, got confident answers about a tree
+    it was not in: `worktree` said "not a linked worktree" while `.git` proved otherwise, state
+    landed in the other checkout's sessions/, and before the write-scope fix its writes were denied
+    outright — twelve authorizations spent on ordinary work, with nothing anywhere saying why.
+    """
+    top, common = working_tree()
+    if not top:
+        return []
+    try:
+        here = os.path.realpath(REPO_ROOT)
+    except OSError:
+        return []
+    if top == here:
+        return []
+    mine = _git("rev-parse", "--git-common-dir")
+    if mine and not os.path.isabs(mine):
+        mine = os.path.join(here, mine)
+    try:
+        mine = os.path.realpath(mine) if mine else None
+    except OSError:
+        mine = None
+    kin = "a LINKED WORKTREE of this same project" if (mine and mine == common) else \
+          "a DIFFERENT repository"
+    return [
+        f"⚠ YOU ARE NOT IN THE TREE THIS HARNESS ANSWERS FOR — the working tree is {kin}.",
+        f"    working tree : {top}",
+        f"    harness tree : {here}",
+        "  Identity, state, rules and the log all belong to the harness tree, so `status`, "
+        "`worktree`",
+        "  and the verbs describe THAT tree — not the one you are editing. The write guard does "
+        "reach a",
+        "  linked worktree of the same project (#47), so ordinary work is not blocked; everything "
+        "else",
+        "  still reports on the other tree.",
+        f"  → Give this tree its own harness:  <game_loop>/install.sh {top}",
+    ]
 
 
 def _same_bytes(a, b):
@@ -4316,6 +4391,7 @@ def cmd_status(s, a):
                 ".game_loop/log.jsonl")
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     out(*triggers_report())  # attached ≠ working: one that never fired looks just like one that does
+    out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for
     snap = load_limits()
     lim = limits_summary(snap) if snap else None
     if lim:

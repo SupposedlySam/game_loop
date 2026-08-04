@@ -206,6 +206,8 @@ MUTANTS = [
      # Also 2 at first, both about hardens. A chapter can be all evidence and no encoding, and the
      # ledger has to show that SHAPE rather than one number, so the claims/triggers arm was added.
      None, 3),
+    ("working_tree_report -> never says you are in a different tree", "working_tree_report",
+     "    return []\n", ["worktree", "tree", "harness answers"], None, 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

@@ -2872,6 +2872,94 @@ def main():
     finally:
         shutil.rmtree(_tp, ignore_errors=True)
 
+    # LINKED WORKTREES ARE THIS PROJECT (#47). Tree identity resolved from the BINARY's location, so
+    # an agent working in a sibling worktree — invoking a main checkout's game_loop by absolute path,
+    # which is what an unprovisioned worktree does — had its writes denied as "outside this repo".
+    # One reported session bought TWELVE single-use authorizations to write the files it was spawned
+    # to change. A gate that fires on all normal work gets routed around rather than respected, so
+    # this is a correctness fix and not a convenience.
+    #
+    # Fixtures live under /var/tmp ON PURPOSE. It is writable and it is the one temp location NOT on
+    # the guard's allow list (/tmp, /private/tmp and /var/folders all are), so a worktree there has
+    # to be allowed BY BEING A WORKTREE rather than by sitting in a temp dir. Anywhere else the
+    # assertion would pass without the fix and prove nothing.
+    print("a linked worktree is the same project (#47):")
+    wtbase = os.path.join("/var/tmp", f"gl47-{os.getpid()}")
+    try:
+        def _mkproj(path):
+            os.makedirs(os.path.join(path, ".game_loop", "bin"))
+            for f in ("game_loop", "guard-writes.sh", "guard-writes-impl.sh", "guard-mcp.sh",
+                      "guard-mcp-impl.sh", "watchdog", "verify", "flair.py", "notify.py"):
+                shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f),
+                            os.path.join(path, ".game_loop", "bin", f))
+                os.chmod(os.path.join(path, ".game_loop", "bin", f), 0o755)
+            for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
+                shutil.copy(os.path.join(SRC_GAME_LOOP, f), os.path.join(path, ".game_loop", f))
+            for a in (["init", "-q", path], ["-C", path, "config", "user.email", "t@t"],
+                      ["-C", path, "config", "user.name", "t"]):
+                subprocess.run(["git", *a], capture_output=True)
+            with open(os.path.join(path, "seed.txt"), "w") as f:
+                f.write("x\n")
+            subprocess.run(["git", "-C", path, "add", "-A"], capture_output=True)
+            subprocess.run(["git", "-C", path, "commit", "-qm", "seed"], capture_output=True)
+            return path
+
+        os.makedirs(wtbase)
+        wproj = _mkproj(os.path.join(wtbase, "proj"))
+        wtree = os.path.join(wtbase, "wt")
+        subprocess.run(["git", "-C", wproj, "worktree", "add", "-q", wtree], capture_output=True)
+        wother = _mkproj(os.path.join(wtbase, "other"))     # a DIFFERENT repo, same parent dir
+
+        def _v(payload):
+            return denied(guard(wproj, payload))
+
+        check("a worktree fixture was really created (else every verdict below is vacuous)",
+              os.path.isdir(wtree) and os.path.isfile(os.path.join(wtree, ".git")))
+        check("a write into a LINKED WORKTREE is allowed — it is this project, checked out twice",
+              not _v({"tool_name": "Write",
+                      "tool_input": {"file_path": os.path.join(wtree, "a.txt")}}))
+        # THE NARROWNESS CONTROL. Without this, "allow the worktree" is indistinguishable from
+        # "allow anything next door", and the guard would have been widened into uselessness.
+        check("...while a DIFFERENT repository in the same parent dir is still denied",
+              _v({"tool_name": "Write",
+                  "tool_input": {"file_path": os.path.join(wother, "a.txt")}}))
+        check("...and a loose out-of-repo path is still denied",
+              _v({"tool_name": "Write",
+                  "tool_input": {"file_path": os.path.join(wtbase, "loose.txt")}}))
+        check("the same holds for a mutating BASH command aimed at the worktree",
+              not _v({"tool_name": "Bash", "tool_input": {"command": f"touch {wtree}/b.txt"}}))
+        check("...and for one aimed at the other repository, which stays denied",
+              _v({"tool_name": "Bash", "tool_input": {"command": f"touch {wother}/b.txt"}}))
+        check("the two guard paths agree — Write and Bash are separate interpreters carrying their "
+              "own copy of the rule, so they are asserted against the same pair of trees",
+              not _v({"tool_name": "Write", "tool_input": {"file_path": os.path.join(wtree, "c")}})
+              and not _v({"tool_name": "Bash", "tool_input": {"command": f"touch {wtree}/d"}}))
+        check("status says the write rail reaches linked worktrees, so the widening is not silent",
+              "LINKED WORKTREES" in gl(wproj, "status").stdout)
+
+        # THE MISREPORT HALF. The harm was never that it answered wrongly; it was that it answered
+        # CONFIDENTLY about a tree the agent was not in, with nothing anywhere saying so.
+        def _status_from(cwd):
+            return subprocess.run([os.path.join(wproj, ".game_loop", "bin", "game_loop"), "status"],
+                                  capture_output=True, text=True, cwd=cwd,
+                                  env=_env(wproj, sid="sess-wt")).stdout
+
+        check("run from its OWN tree the harness says nothing — this is every normal invocation",
+              "NOT IN THE TREE" not in _status_from(wproj))
+        _from_wt = _status_from(wtree)
+        check("run from a linked worktree it SAYS the tree it answers for is a different one",
+              "NOT IN THE TREE" in _from_wt and "LINKED WORKTREE of this same project" in _from_wt)
+        check("...naming BOTH trees, since a warning you cannot act on is just noise",
+              wtree in _from_wt and wproj in _from_wt and "install.sh" in _from_wt)
+        _from_other = _status_from(wother)
+        check("...and it tells a different REPOSITORY apart from a worktree of this one — the two "
+              "have different remedies",
+              "DIFFERENT repository" in _from_other)
+    finally:
+        subprocess.run(["git", "-C", os.path.join(wtbase, "proj"), "worktree", "remove",
+                        "--force", os.path.join(wtbase, "wt")], capture_output=True)
+        shutil.rmtree(wtbase, ignore_errors=True)
+
     # TRIGGERS. Some things worth doing at a moment in the loop cannot ship as a rule, because
     # they need infrastructure most installs do not have — the one that prompted this is a shared
     # channel other agents read. So the harness owns the MOMENT, and the project owns what happens

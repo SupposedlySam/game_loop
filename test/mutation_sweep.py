@@ -297,6 +297,13 @@ MUTANTS = [
      # three arms were added: NOT WAITING, configured-but-never-run, and the silent no-probe case.
      # Strengthened rather than recorded thin, which is what the ordering in this file is FOR.
      None, 3),
+    ("code_files -> two trees always look like they run the same code",
+     ".game_loop/bin/game_loop::code_files", "    return []\n",
+     ["harness", "code", "worktree", "drift"],
+     # 3 against a baseline of 587. Neutered, the code comparison is empty on both sides, so every
+     # pair of trees reports matching harnesses -- which is the state #38 found shipped, where the
+     # field was named `harness` and contained only rules.
+     None, 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

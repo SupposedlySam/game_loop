@@ -4148,6 +4148,52 @@ def _compare(names, pdir):
     return res
 
 
+def code_files(root):
+    """Every executable in a harness's bin/, sorted. The set is game_loop's own, so a byte
+    comparison needs no per-file semantics — same names, same bytes, same harness."""
+    d = os.path.join(root, "bin")
+    try:
+        # FILES only: __pycache__ is a directory and read as an unreadable file it made every
+        # comparison report "unreadable", which is the answer that must never be a false alarm.
+        return sorted(f for f in os.listdir(d)
+                      if not f.startswith(".") and os.path.isfile(os.path.join(d, f)))
+    except OSError:
+        return []
+
+
+def _compare_code(pdir):
+    """bin/ here against bin/ there (#38).
+
+    `harness` used to be computed over OWNED_FILES only -- config.json, INVARIANTS.md, verify.yaml,
+    LEDGER.md -- and bin/ is not in that set. So `harness.drifted == []` meant "the same RULES", and
+    the field name promised something strictly larger. A downstream orchestrator reported to its own
+    users, in good faith, that a spawn was "verified by the harness itself", which was true and
+    narrower than it read. Two trees could match on every owned file and be running different code.
+
+    Same defect class as the probe wording (#34) and the unnamed tree (#35): a report claiming more
+    reach than its evidence supports. Widened rather than renamed, because "are these two trees
+    running the same harness" is a legitimate question a caller previously had no way to ask -- and
+    widening can only ever report MORE drift, never less.
+    """
+    res = {"matched": [], "drifted": [], "unreadable": []}
+    for name in sorted(set(code_files(ROOT)) | set(code_files(pdir))):
+        same = _same_bytes(os.path.join(ROOT, "bin", name), os.path.join(pdir, "bin", name))
+        res["unreadable" if same is None else "matched" if same else "drifted"].append(name)
+    return res
+
+
+def pin_status(root):
+    """(is this tree running pinned code, the pinned sha or None) -- for the tree at `root`."""
+    marker = os.path.join(os.path.dirname(root), PINNED_DIRNAME, ".game_loop")
+    if not os.path.isdir(marker):
+        return False, None
+    try:
+        with open(os.path.join(marker, "VERSION")) as f:
+            return True, f.read().strip()
+    except OSError:
+        return True, None
+
+
 def worktree_drift():
     """Compare THIS tree's owned files against the main checkout's. Never raises.
 
@@ -4177,8 +4223,22 @@ def worktree_drift():
                 "detail": f"the main checkout ({parent}) carries no .game_loop/ — this tree's rules "
                           "are compared against nothing"}
     rules = _compare(RULE_FILES, pdir)
-    harness = _compare([o["path"] for o in OWNED_FILES], pdir)
-    base = {**base, "rules": rules, "harness": harness}
+    owned = _compare([o["path"] for o in OWNED_FILES], pdir)
+    code = _compare_code(pdir)
+    # `harness` now means what its name says: owned files AND the code. Widening only ever reports
+    # MORE drift, so a caller that trusted the old narrower answer is not newly misled by this one.
+    harness = {k: owned[k] + ["bin/" + n for n in code[k]] for k in owned}
+    here_pinned, here_sha = pin_status(ROOT)
+    there_pinned, there_sha = pin_status(pdir)
+    base = {**base, "rules": rules, "owned_files": owned, "code": code, "harness": harness,
+            # Say exactly what was compared, so a consumer never has to infer it from a field name
+            # again -- which is the whole of this issue.
+            "compares": {"rules": list(RULE_FILES),
+                         "owned_files": [o["path"] for o in OWNED_FILES],
+                         "code": ["bin/" + n for n in code["matched"] + code["drifted"]
+                                  + code["unreadable"]]},
+            "pinned": {"this_tree": here_pinned, "this_sha": here_sha,
+                       "main_checkout": there_pinned, "main_sha": there_sha}}
     if rules["drifted"]:
         return {**base, "status": "drifted",
                 "detail": f"{len(rules['drifted'])} RULE file(s) differ from the main checkout — "
@@ -4187,15 +4247,34 @@ def worktree_drift():
         return {**base, "status": "unreadable",
                 "detail": "rule file(s) could not be read, so they are NOT known to match: "
                           + ", ".join(rules["unreadable"])}
-    if harness["drifted"]:
+    # These two ask about the OWNED files specifically. Testing `harness` here once `harness`
+    # included code meant a drifted SCRIPT returned "notes-drifted" and never reached its own
+    # branch -- the widening silently swallowing the finding it was added to surface.
+    if owned["drifted"]:
         return {**base, "status": "notes-drifted",
                 "detail": "the rules match; these owned-but-not-rule file(s) differ, which is "
-                          "ordinary for per-tree notes: " + ", ".join(harness["drifted"])}
-    if harness["unreadable"]:
+                          "ordinary for per-tree notes: " + ", ".join(owned["drifted"])}
+    if owned["unreadable"]:
         return {**base, "status": "unreadable",
-                "detail": "owned file(s) could not be read: " + ", ".join(harness["unreadable"])}
-    return {**base, "status": "clean",
-            "detail": "every owned file is byte-identical to the main checkout's"}
+                "detail": "owned file(s) could not be read: " + ", ".join(owned["unreadable"])}
+    if code["drifted"]:
+        return {**base, "status": "code-drifted",
+                "detail": "the rules and notes match, but these harness SCRIPTS differ, so the two "
+                          "trees do not enforce them the same way: " + ", ".join(code["drifted"])}
+    pin_note = ""
+    if there_pinned and not here_pinned:
+        # STATED, NOT AUTO-FIXED (#38). A pin is deliberately not carried into a worktree: a
+        # worktree is where the harness gets EDITED, and pinning it would hide the change under
+        # test. But an agent editing a gate is exactly what pinning protects, and it is more exposed
+        # here than the orchestrator ever was -- so the verdict says so instead of leaving a caller
+        # to infer it from a gitignore.
+        pin_note = ("  NOTE: the main checkout runs PINNED code and this tree does not, so this "
+                    "tree runs the harness it may be editing. Deliberate, not an oversight -- "
+                    "pinning a worktree would hide the change under test. Run "
+                    "`game_loop self --pin <ref>` here if this tree is editing gates.")
+    return {**base, "status": "clean", "pin_note": pin_note,
+            "detail": "every owned file AND every harness script is byte-identical to the main "
+                      "checkout's" + (" " + pin_note if pin_note else "")}
 
 
 def worktree_report(s):
@@ -4249,13 +4328,15 @@ def worktree_report(s):
     if unreadable:
         lines.append("  ? UNREADABLE — cannot be compared, so treat them as UNKNOWN, not matching: "
                      + ", ".join(f".game_loop/{n}" for n in unreadable))
-    lines.append("  → NOT compared: bin/ · .claude/settings.json · any OTHER worktree · whether a "
-                 "matching rule is real")
-    lines.append("  → provisioning trees? `game_loop worktree --porcelain` answers BOTH questions as "
-                 "JSON —")
-    lines.append("    `rules` (differ ⇒ stop the spawn) and `harness` (differ ⇒ worth a warning), "
-                 "plus the")
-    lines.append("    owned-file set itself. Read those instead of hardcoding a list.")
+    lines.append("  → NOT compared: .claude/settings.json · any OTHER worktree · whether a matching "
+                 "rule is real")
+    lines.append("  → provisioning trees? `game_loop worktree --porcelain` answers all of it as JSON "
+                 "— `rules`")
+    lines.append("    (differ ⇒ stop the spawn), `code` (bin/, differ ⇒ the trees do not enforce the "
+                 "rules the")
+    lines.append("    same way), `harness` (both), and `compares` listing exactly what was looked at "
+                 "— so no")
+    lines.append("    caller ever has to infer reach from a field name again (#38).")
     return lines
 
 

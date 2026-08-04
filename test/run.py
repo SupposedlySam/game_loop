@@ -2751,8 +2751,37 @@ def main():
             check("an adopted worktree reports clean — and clean is the ONLY verdict that exits 0",
                   r.returncode == 0 and d["status"] == "clean" and not d["rules"]["drifted"]
                   and d["rules"]["matched"] == ["config.json", "INVARIANTS.md", "verify.yaml"]
-                  and d["harness"]["matched"] == ["config.json", "INVARIANTS.md", "verify.yaml",
-                                                  "LEDGER.md"])
+                  and d["owned_files"]["matched"] == ["config.json", "INVARIANTS.md",
+                                                      "verify.yaml", "LEDGER.md"])
+            # #38 — `harness` used to be computed over OWNED_FILES only, and bin/ is not in that
+            # set. So `harness.drifted == []` meant "the same RULES" while the field name promised
+            # something strictly larger; a downstream orchestrator told its users a spawn was
+            # "verified by the harness itself", which was true and narrower than it read. Widened
+            # rather than renamed: "are these two trees running the same harness" is a legitimate
+            # question a caller had no way to ask, and widening can only report MORE drift.
+            check("...and `harness` now actually contains the harness — the owned files AND the code",
+                  any(n.startswith("bin/") for n in d["harness"]["matched"])
+                  and set(d["owned_files"]["matched"]) <= set(d["harness"]["matched"]))
+            check("...and the code comparison is its own answer, so a caller can ask only that",
+                  d["code"]["matched"] and not d["code"]["drifted"]
+                  and all(not n.startswith("bin/") for n in d["code"]["matched"]))
+            check("...and `compares` lists exactly what was looked at, so reach is never inferred "
+                  "from a field name again",
+                  sorted(d["compares"]) == ["code", "owned_files", "rules"]
+                  and all(n.startswith("bin/") for n in d["compares"]["code"]))
+            # Drifting one SCRIPT must change the verdict — otherwise the widening is decorative.
+            _script = os.path.join(wt, ".game_loop", "bin", "flair.py")
+            with open(_script, "a") as f:
+                f.write("\n# drifted\n")
+            _cd = json.loads(gl(wt, "worktree", "--porcelain").stdout)
+            check("a drifted harness SCRIPT is caught and named, with a status of its own — two "
+                  "trees can match on every owned file and still not enforce them the same way",
+                  _cd["status"] == "code-drifted" and "flair.py" in _cd["code"]["drifted"]
+                  and not _cd["rules"]["drifted"])
+            with open(_script) as f:
+                _restored = f.read().replace("\n# drifted\n", "")
+            with open(_script, "w") as f:
+                f.write(_restored)
 
             # TWO questions, two answers. A ledger of findings is a record of ONE tree's work, so it
             # is owned but is not a gate: two trees keeping different ones is what they are for.
@@ -2887,8 +2916,8 @@ def main():
                   len(pub["rule_files"]) == 3 and len(owned) == 4
                   and sorted(wd["rules"]["matched"] + wd["rules"]["drifted"]
                              + wd["rules"]["unreadable"]) == sorted(pub["rule_files"])
-                  and sorted(wd["harness"]["matched"] + wd["harness"]["drifted"]
-                             + wd["harness"]["unreadable"])
+                  and sorted(wd["owned_files"]["matched"] + wd["owned_files"]["drifted"]
+                             + wd["owned_files"]["unreadable"])
                   == sorted(o["path"] for o in owned))
         finally:
             shutil.rmtree(adopt, ignore_errors=True)

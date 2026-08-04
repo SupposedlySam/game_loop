@@ -102,15 +102,15 @@ def verdict(killed):
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
     ("unpushed_warning -> never warns", "unpushed_warning", "    return None\n",
-     ["unpushed", "upstream", "quiet"], None),
+     ["unpushed", "upstream", "quiet"], None, 7),
     ("fix_warning -> never warns", "fix_warning", "    return None\n",
-     ["fix", "quiet", "silence"], None),
+     ["fix", "quiet", "silence"], None, 9),
     ("category_tell -> never detects", "category_tell", "    return None\n",
-     ["nudge", "category", "scope"], None),
+     ["nudge", "category", "scope"], None, 4),
     ("aggregate_tell -> never detects", "aggregate_tell", "    return None\n",
-     ["nudge", "aggregate", "sum"], None),
+     ["nudge", "aggregate", "sum"], None, 7),
     ("dominance -> never finds an outlier", "dominance", "    return None\n",
-     ["dominan", "distribution", "spread", "event"], None),
+     ["dominan", "distribution", "spread", "event"], None, 10),
     ("ruled_out -> finds no refutations", "ruled_out", "    return []\n",
      ["ruled", "refut"],
      # KNOWN GAP, not a decision. Its survivors all belong to the WRITE side (`--outcome refuted`
@@ -118,7 +118,7 @@ MUTANTS = [
      # the READ side, and exactly one assertion — status reprinting the standing list — notices when
      # it returns nothing. #42 scoped itself to the four nudge/warning producers and did not touch
      # this. Fixing it means asserting a later session INHERITS the list, not deleting this note.
-     "the read side of the refutation path; #42 scoped itself elsewhere and left it unfixed"),
+     "the read side of the refutation path; #42 scoped itself elsewhere and left it unfixed", 1),
 ]
 
 
@@ -158,7 +158,7 @@ def main():
     print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
 
     verdicts = []
-    for label, fn, body, marks, thin_note in MUTANTS:
+    for label, fn, body, marks, thin_note, floor in MUTANTS:
         t = tempfile.mkdtemp(prefix="sweep-")
         try:
             mutated, found = neuter(original, fn, body)
@@ -176,9 +176,11 @@ def main():
             still = set(passing(out))
             killed = len(baseline - still)
             v = verdict(killed)
-            verdicts.append((fn, killed, v))
+            verdicts.append((fn, killed, v, floor))
             tail = out.strip().split("\n")[-1]
-            print(f"{label}\n  suite: {tail}\n  killed: {killed}   [{v}]")
+            drift = "  ↓ BELOW FLOOR" if killed < floor else ""
+            print(f"{label}\n  suite: {tail}\n  killed: {killed}   [{v}]"
+                  f"   floor {floor}{drift}")
             if thin_note:
                 print(f"  why it is thin: {thin_note}")
             for c in sorted(s for s in still if any(m in s.lower() for m in marks)):
@@ -188,15 +190,27 @@ def main():
             shutil.rmtree(t, ignore_errors=True)
     shutil.rmtree(base, ignore_errors=True)
 
-    thin = [f"{fn} ({k})" for fn, k, v in verdicts if v == THIN]
-    bad = [fn for fn, _, v in verdicts if v == UNPROTECTED]
+    thin = [f"{fn} ({k})" for fn, k, v, _ in verdicts if v == THIN]
+    bad = [fn for fn, _, v, _ in verdicts if v == UNPROTECTED]
+    # A recorded floor that is not checked is prose. THIN is a standing acceptable state, so it
+    # reports; DRIFT is never that — it means coverage that existed has been lost, which is the
+    # exact regression this tool exists to catch, so it fails. The remedy is not to edit the number
+    # quietly: re-record it WITH the reason, the way ruled_out's thinness carries its own.
+    drifted = [f"{fn} ({k} < {fl})" for fn, k, v, fl in verdicts
+               if k is not None and k < fl]
     if thin:
         print("THIN — reported, not fatal: " + " · ".join(thin))
+    if drifted:
+        print("BELOW THE RECORDED FLOOR: " + " · ".join(drifted))
+        print("Coverage that existed is gone. If the drop is legitimate — assertions consolidated,")
+        print("a producer genuinely simplified — re-record the floor WITH the reason. Do not just")
+        print("lower the number: an unexplained floor is the target-making this file warns about.")
     if bad:
         print("UNPROTECTED — neutering these killed NOTHING: " + " · ".join(bad))
         print("Nothing in the suite notices when they stop working. That is the failure.")
+    if bad or drifted:
         return 1
-    print("no producer is unprotected.")
+    print("no producer is unprotected, and none is below its recorded floor.")
     return 0
 
 

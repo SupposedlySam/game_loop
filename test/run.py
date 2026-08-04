@@ -3054,10 +3054,16 @@ def main():
     # neuter() would not find it, the entry would report nothing, and the count would look fine.
     with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
         gl_src = f.read()
-    missing = [fn for _, fn, _, _, _ in sweep.MUTANTS
-               if not sweep.neuter(gl_src, fn, "    pass\n")[1]]
+    missing = [m[1] for m in sweep.MUTANTS
+               if not sweep.neuter(gl_src, m[1], "    pass\n")[1]]
     check("every producer the sweep names still exists in the real script — no silent no-op entry",
           not missing)
+    # Every entry must carry a recorded FLOOR, or its count is prose again: the sweep compares
+    # against it and fails on a drop, which is the difference between a number that is checked and
+    # one that is merely written down. Indexing rather than unpacking above, so adding a field to
+    # MUTANTS cannot break this check — which is exactly how it broke when the floor was added.
+    check("every producer carries a recorded floor, so a drop in coverage is caught not narrated",
+          all(len(m) >= 6 and isinstance(m[5], int) and m[5] >= 0 for m in sweep.MUTANTS))
     # neuter() is the whole mechanism: if it returned the source unchanged while reporting success,
     # every producer would come back perfectly protected and nothing would have been mutated.
     mutated, found = sweep.neuter(gl_src, "aggregate_tell", "    return None\n")

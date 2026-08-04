@@ -343,6 +343,14 @@ MUTANTS = [
      # recorded nothing — asserts ABSENCE and correctly survives a producer neutered to silence,
      # which is the pairing working rather than a hole.
      "two speaking arms; the third asserts absence and survives silence by design", 2),
+    ("notify.cfg_source -> status never says WHICH notify.json is paging",
+     ".game_loop/bin/notify.py::cfg_source", "    return None\n",
+     ["notify", "user-level", "slack", "configured"],
+     # THIN at 1, and honestly so rather than padded: this producer feeds exactly one line of
+     # status, and its companions assert the OTHER arm -- that a project-level config stops citing
+     # the user file -- which survives a producer neutered to silence, by design. Reporting-only:
+     # it decides nothing, which is why there is little to kill.
+     "one status line; its companion asserts absence and survives silence by design", 1),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

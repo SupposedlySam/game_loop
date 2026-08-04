@@ -91,12 +91,51 @@ def _log(rec):
         pass
 
 
+def user_notify_path():
+    """The one-per-machine config: $XDG_CONFIG_HOME/game_loop/notify.json, else ~/.config/…"""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "game_loop", "notify.json")
+
+
 def _cfg():
-    try:
-        with open(NOTIFY_F) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    """The project's notify.json, else the user's one-per-machine file (#54).
+
+    Anyone running game_loop across several checkouts -- worktrees of one project, or unrelated
+    projects -- had to hand-copy the same bot token and channel into a gitignored notify.json in
+    every .game_loop/. One Slack app, N copies of a credential, and N places to rotate it.
+
+    THE PROJECT'S FILE STILL WINS, whole. Not merged key-by-key: a half-inherited credential is the
+    worst outcome available here -- a project that deliberately points at its own channel would
+    silently borrow the user's token, and a paging path that works for the wrong reason is harder to
+    notice than one that does not work at all.
+
+    WHAT THIS WIDENS, stated rather than left to be discovered (INV6): a user-level file applies to
+    EVERY project on this machine, including ones installed later that never asked for it. That is
+    the point, and it is also the whole of the risk -- `game_loop status` names which file is in
+    use, so "where is this paging" is answerable without guessing.
+    """
+    for p in (NOTIFY_F, user_notify_path()):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                return d
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def cfg_source():
+    """Which file _cfg() would use, or None. For reporting -- never a decision."""
+    for p in (NOTIFY_F, user_notify_path()):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                return p
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _slack():

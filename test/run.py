@@ -3696,6 +3696,50 @@ def main():
     # highest-traffic lines in the project. Same shape as #52 one layer out: an instruction pointing
     # at something that is not there. So the promise is asserted, and the function is RUN rather
     # than eyeballed.
+    # ONE SLACK APP, N REPOS (#54). notify.json was read only from the project's own .game_loop/,
+    # so anyone running game_loop across several checkouts hand-copied the same bot token into every
+    # one — N copies of a credential and N places to rotate it.
+    print("notify config falls back to a user-level file (#54):")
+    nf = make_sandbox()
+    _xdg = tempfile.mkdtemp(prefix="glxdg-")
+    try:
+        _uf = os.path.join(_xdg, "game_loop", "notify.json")
+        os.makedirs(os.path.dirname(_uf))
+        with open(_uf, "w") as f:
+            json.dump({"slack": {"webhook_url": "https://example.invalid/user"}}, f)
+
+        def _nstatus():
+            return subprocess.run([os.path.join(nf, ".game_loop", "bin", "game_loop"), "status"],
+                                  capture_output=True, text=True,
+                                  env=_env(nf, sid="sess-nf", XDG_CONFIG_HOME=_xdg)).stdout
+
+        _u = _nstatus()
+        check("with no project notify.json, the USER-level file is used — one app, N repos",
+              "Slack configured" in _u)
+        check("...and status names WHICH file, since a user-level config pages for every project on "
+              "the machine and 'where is this going' must be answerable",
+              "user-level, shared by every project here" in _u)
+
+        # THE PROJECT STILL WINS, WHOLE. Not merged key-by-key: a half-inherited credential is the
+        # worst outcome here — a project pointing at its own channel would silently borrow the
+        # user's token, and a paging path that works for the wrong reason is the hardest to notice.
+        with open(os.path.join(nf, ".game_loop", "notify.json"), "w") as f:
+            json.dump({"slack": {"webhook_url": "https://example.invalid/project"}}, f)
+        _p = _nstatus()
+        check("...while a project notify.json overrides it entirely, and status stops citing the "
+              "user file",
+              "Slack configured" in _p and "user-level" not in _p)
+
+        # PAIRED: neither file, and it must still say so rather than looking configured.
+        os.remove(os.path.join(nf, ".game_loop", "notify.json"))
+        os.remove(_uf)
+        _n = _nstatus()
+        check("...and with neither file it reports NOT configured, naming both places to put one",
+              "not configured" in _n and ".config/game_loop/notify.json" in _n)
+    finally:
+        shutil.rmtree(nf, ignore_errors=True)
+        shutil.rmtree(_xdg, ignore_errors=True)
+
     print("the shell function two shipped files promise actually exists (#55):")
     with open(os.path.join(REPO, "README.md")) as f:
         _rm = f.read()

@@ -5154,9 +5154,16 @@ def cmd_status(s, a):
     if (w := limits_inert_warning(snap)):   # says what is OFF, not merely that a file is missing
         out(w)
     if notify:
+        _nsrc = notify.cfg_source() if hasattr(notify, "cfg_source") else None
+        # WHICH file, not just "configured": a user-level config applies to every project on the
+        # machine, so "where is this paging" must be answerable without guessing (#54).
+        _nwhere = ""
+        if _nsrc and os.path.dirname(_nsrc) != ROOT:
+            _nwhere = f"  ← from {_nsrc} (user-level, shared by every project here)"
         out("notify: " + ("Slack configured — replies readable (bot token)" if notify.can_read_replies()
                           else "Slack configured — send-only (webhook)" if notify.configured()
-                          else "not configured (.game_loop/notify.json; see bin/notify.py)"))
+                          else "not configured (.game_loop/notify.json or "
+                               "~/.config/game_loop/notify.json; see bin/notify.py)") + _nwhere)
     if (w := hooks_live_warning()):
         out(w)
     out(*session_start_warning())

@@ -926,7 +926,19 @@ cmd = os.environ["CMD"]
 for v in verbs:
     # The boundary class includes quote chars: a deploy verb at the start of an interpreter arg
     # (a -c script) executes just the same, and message-flag strings were already blanked upstream.
-    pat = r"(^|[\s;&|'\"])" + r"\s+".join(re.escape(w) for w in v.split())
+    #
+    # BOTH SIDES (#51). There was a boundary before the verb and none after, so the verb matched as
+    # a SUBSTRING and ordinary English refused the call: "file surgery" contains " surge", "docker
+    # pushed" contains "docker push". The refusal is loud and correct-sounding and names a verb the
+    # user never typed, so the natural response is to rephrase and move on -- never learning the
+    # guard was wrong. That is how a guard trains people to work around it.
+    #
+    # WHAT THIS STILL MATCHES, stated rather than implied (INV6): the bare verb as a WHOLE WORD in
+    # prose -- "we used docker push last year" -- still trips it. Narrowing further would mean
+    # matching only at command position, which loses a real deploy nested inside an interpreter
+    # argument, and missing a real publish is the expensive direction.
+    pat = (r"(^|[\s;&|'\"])" + r"\s+".join(re.escape(w) for w in v.split())
+           + r"($|[\s;&|'\"])")
     if re.search(pat, cmd):
         print(v)
         break

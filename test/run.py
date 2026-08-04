@@ -3228,6 +3228,47 @@ def main():
     finally:
         shutil.rmtree(wp, ignore_errors=True)
 
+    # A DEPLOY VERB NEEDS A BOUNDARY ON BOTH SIDES (#51). There was one before the verb and none
+    # after, so it matched as a SUBSTRING and ordinary English refused the call: "file surgery"
+    # contains " surge"; "docker pushed" contains the default verb. The refusal is loud and
+    # correct-sounding and names a verb nobody typed, so the natural response is to rephrase and
+    # move on — never learning the guard was wrong. That is how a guard trains people around it.
+    print("a deploy verb is a WORD, not a substring (#51):")
+    dp = make_sandbox()
+    try:
+        _dcfg = os.path.join(dp, ".game_loop", "config.json")
+        with open(_dcfg) as f:
+            _dc = json.load(f)
+        _dc["deploy_verbs"] = ["surge"]          # the reporter's verb, so their repro is exercised
+        with open(_dcfg, "w") as f:
+            json.dump(_dc, f)
+        _D, _P = "docker" + " push", "surge"
+
+        def _dep(cmd):
+            r = guard(dp, {"tool_name": "Bash", "cwd": dp, "tool_input": {"command": cmd}})
+            return "deploy/publish verb" in r.stdout
+
+        check("ordinary English containing a verb as a SUBSTRING is not a deploy — the reporter's "
+              "own sentence, which their chat message and then their test both died on",
+              not _dep("echo I do most file " + _P + "ry with a heredoc")
+              and not _dep("echo the " + _D + "ed image was fine"))
+        # THE PAIRED HALF. Without these, "stop matching substrings" is indistinguishable from
+        # "stop matching", and missing a real publish is the expensive direction.
+        check("...while a real deploy verb is still refused, alone and mid-chain",
+              _dep(_D + " myimage:latest") and _dep("make build && " + _D))
+        check("...and a configured verb is refused with its own arguments after it",
+              _dep(_P + " --domain example.com"))
+        check("...and one nested inside an interpreter argument still counts, since it executes "
+              "just the same",
+              _dep('bash -c "' + _D + ' x"'))
+        # Already correct before the fix, and asserted so a later narrowing cannot silently lose it:
+        # a leading word character means the verb was never at a boundary at all.
+        check("a verb embedded mid-word was already not a match, and stays that way",
+              not _dep("echo a re" + _P + "nce of interest")
+              and not _dep("echo the in" + _P + "nt branch"))
+    finally:
+        shutil.rmtree(dp, ignore_errors=True)
+
     print("an unreadable commit target fails closed (#40):")
     up40 = make_sandbox()
     try:

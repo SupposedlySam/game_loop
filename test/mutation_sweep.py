@@ -36,6 +36,20 @@ and the real predictor turned out to be simply whether a non-event assertion eve
 
 (suite total 431 → 446 over the same change.)
 
+The four the ENUMERATION added, measured the same way against the HEAD that introduced it:
+
+    producer               kills
+    hooks_live_warning       6
+    config_paths_report     12
+    worktree_report          2    THIN — see its entry
+    update_notice            1    THIN — see its entry
+
+Two more the enumeration named came back at ZERO and are NOT listed in MUTANTS — retro_nudge and
+legacy_mandate_warning, both measured, both recorded in NOT_SWEPT with the number. They are a
+standing debt, not a clean bill: the sweep would exit 1 forever on them and the remedy is an
+assertion nobody has written yet, so parking them with the measurement attached is the honest
+state. Do not read their absence from MUTANTS as a verdict that they are covered.
+
 A run that comes back BELOW those numbers is drift, not noise. A run ABOVE them proves nothing on
 its own: check that the added assertions are companions in the same observation, and not this
 sweep's own metric being farmed. See THIN_AT.
@@ -54,13 +68,42 @@ SURVIVE, and are meant to. They were never false, only unsupported, and each one
 companion, in the same observation, that dies. Deleting or rewriting one to clear it from the
 survivor list would remove the restraint claim and leave the count looking better.
 
+DEFAULT-DENY, BECAUSE THE LIST WAS A DENYLIST. For its first six entries this file's coverage was
+whatever somebody remembered to type into MUTANTS — the shape that `bin/guard-writes-impl.sh`'s
+header and #25 both argue against: a denylist defaults to UNPROTECTED and silently misses whatever
+nobody listed, an allowlist defaults to PROTECTED. The tool built to find unprotected things was
+unprotected in exactly that way, and it showed. Every weakness it found was in a producer somebody
+already suspected; `hooks_live_warning`, `config_paths_report`, `worktree_report` and
+`update_notice` were each found weak by somebody who had pointed something ELSE at them.
+
+So the sweep now ENUMERATES ITS OWN CANDIDATES. candidates() parses the script and returns every
+module-level function that can return a finding OR a nothing — the silence-on-pass shape. Each one
+must appear in MUTANTS or in NOT_SWEPT with a reason, and an unaccounted-for candidate FAILS the
+run, before the slow part starts, in the same spirit as UNPROTECTED: a producer nobody decided
+about is the whole case this file exists for.
+
+NOT_SWEPT IS NOT A WAIVER LIST. Two kinds of entry live in it and they are meant to read
+differently: a genuine exclusion (a helper whose "nothing" means git failed and which is swept
+through its callers; a formatter whose silence is a configured opt-out, not a verdict) and a KNOWN
+GAP — "should be swept, is not yet", said plainly, the shape ruled_out's note already uses.
+Sweeping everything is not the goal and would not be an improvement: each entry costs a full suite
+run, and a check too slow to run is a check nobody runs. What is not allowed is an exclusion that
+is not true.
+
 WHAT THIS DOES NOT CATCH (INV6). It measures whether an assertion NOTICES a producer that has
 stopped producing. It says nothing about whether the producer is RIGHT: a wrong message and a
 correct one are killed identically, because both are non-empty. It cannot see a producer whose
 broken form is not the neutered one written here — a validator that wrongly ACCEPTS, a detector
 that fires on everything. And a high count is not coverage: ten assertions against one line of
 output kill together and count ten.
+
+The DISCOVERY has its own edge, and it is the same kind: it reads the SHAPE of a return, never the
+meaning of one. A producer that signals nothing-found with an empty string, a zero, an empty dict
+or a sentinel object is not a candidate — and unlike a producer nobody listed, it will not be
+missed loudly, it will simply never be enumerated. Default-deny over the shapes named here is
+strictly better than a hand list; it is not the same thing as complete.
 """
+import ast
 import os
 import re
 import shutil
@@ -119,7 +162,246 @@ MUTANTS = [
      # it returns nothing. #42 scoped itself to the four nudge/warning producers and did not touch
      # this. Fixing it means asserting a later session INHERITS the list, not deleting this note.
      "the read side of the refutation path; #42 scoped itself elsewhere and left it unfixed", 1),
+    # The four the hand-written list had never been pointed at. Each was found weak by somebody who
+    # was looking at something else, which is the denylist argument stated as history rather than as
+    # a principle — they are here because the enumeration named them, not because anyone suspected
+    # them. Their floors were MEASURED against this HEAD, not chosen.
+    ("hooks_live_warning -> never warns", "hooks_live_warning", "    return None\n",
+     ["hook", "probe", "live", "wired"], None, 6),
+    ("config_paths_report -> reports no keyed path", "config_paths_report", "    return []\n",
+     ["config path", "tracked", "write root", "tilde", "read_roots"], None, 12),
+    ("worktree_report -> prints no worktree block", "worktree_report", "    return []\n",
+     ["worktree", "drift", "rules"],
+     # KNOWN GAP. #30's coverage went almost entirely to `worktree --porcelain`, which reads
+     # worktree_drift() — a DIFFERENT producer — so the STATUS block this renders is asserted twice
+     # and the rest of it by nothing: "✓ RULES MATCH", the no-parent-harness warning, the UNREADABLE
+     # line and the "NOT compared" reach statement can all vanish unnoticed. Fixing it means
+     # asserting the matched and unreadable arms of the block, not deleting this note.
+     "coverage went to `worktree --porcelain` (a different producer); the status block has two", 2),
+    ("update_notice -> never announces an update", "update_notice", "    return None\n",
+     ["update", "newer", "sha", "version"],
+     # Thin, and defensibly so — but say which. Its two silences ("update_check:false silences the
+     # notice", "no VERSION → silent") are real restraint assertions and they DO have a companion
+     # that dies. What is thin is the other side: one assertion carries the entire message, so its
+     # content — both shas, the re-install command — rests on a single string match.
+     "its silences are properly paired; the MESSAGE rests on one assertion, and that is the gap", 1),
 ]
+
+# Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this
+# mapping nor MUTANTS fails the run.
+#
+# A reason here is load-bearing prose and the one thing a reader can check. Two kinds live here:
+#
+#   EXCLUDED — the "nothing" is not a withheld finding. A helper whose None means "git failed" and
+#   whose behaviour is swept through its callers; a resolver whose None is a LOUD refusal; a
+#   formatter whose empty list is a configured opt-out. These are correct and stay.
+#
+#   KNOWN GAP — it is a producer, it should be swept, and it is not. Say that. An honest "not yet"
+#   is worth more than a false exclusion, and the false exclusion is the failure mode this whole
+#   default-deny shape exists to prevent: it looks identical to a decision and never gets revisited.
+#
+# Writing "not a real producer" for something that is one clears the list and re-creates the bug.
+NOT_SWEPT = {
+    # --- EXCLUDED: pure git helpers. Their None means "git failed / no such ref / no repo", which
+    # is a mechanical outcome, not a verdict about the project. Each is swept through the producer
+    # that calls it — the config-paths block already asserts BOTH arms in one observation ("a
+    # failing git degrades to silence" beside "the same config on a working git DOES warn").
+    "_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
+            "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
+            "git-failed arm beside the git-worked one",
+    "_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
+                "mechanical outcome. Its callers are attribution_tree, merge_files and "
+                "cmd_attribute, which turn every one of those Nones into a STATED refusal that "
+                "`game_loop attribute` is asserted on; none of them can report by silence",
+    "_git_sha": "pure git helper — None is 'no HEAD here'. Its two callers are running_version and "
+                "pinned_report, and pinned_report's own entry below is the honest one to read: "
+                "sweeping THAT would sweep this, and it has not been done yet",
+    "_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
+            "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
+
+    # --- EXCLUDED: the "nothing" is the LOUD direction. These resolvers refuse by returning None,
+    # and the refusal is a die() in the caller that the suite asserts many times over. Neutering
+    # them makes every claim refuse — noisy, not silent. The silent failure here is the INVERSE
+    # (resolving a path it should not), and that mutation is outside this sweep's shape (INV6).
+    "resolve_read": "its None is the REFUSAL, and the refusal is loud — `claim --read` dies on it "
+                    "and that death is asserted repeatedly. The silent direction is the inverse "
+                    "(resolving what it should not), which is the mutation this sweep cannot make",
+    "resolve_env": "same as resolve_read, for a pin's anchor: None makes the command die, which is "
+                   "asserted; the dangerous direction is accepting an anchor that does not exist",
+
+    # --- EXCLUDED: loaders and normalizers. Their "nothing" is a state the caller branches on, not
+    # a report that was withheld.
+    "sanitize_session": "a normalizer, not a detector — None means 'not a usable session id' and "
+                        "the caller branches to repo-global state. Neutering it changes WHICH "
+                        "state file is used, which fails loudly across the session-scoping tests",
+    "load_limits": "a loader — None is 'no limits file yet', the ordinary first-run state, and the "
+                   "callers already treat it as empty ((load_limits() or {}))",
+    "installed_version": "a loader — None is 'no VERSION file', which is documented as the "
+                         "game_loop source repo's own state. The producer that turns this into a "
+                         "verdict is update_notice, and that IS swept",
+    "_scan_text": "None is a STATED skip ('too big to grep'), not a finding withheld; --expect "
+                  "reports UNCHECKED rather than ✓ when it gets nothing, and that is asserted",
+
+    # --- EXCLUDED: a formatter whose silence is configured, and helpers of producers now swept.
+    "flair_lines": "a formatter, and its empty list is a configured opt-out (no flair module) "
+                   "rather than a verdict about anything. Silence here is the shipped default",
+    "_home_keyed": "helper of config_paths_report — its None is 'not under anyone's home', the "
+                   "ordinary case for every entry. config_paths_report is a MUTANTS entry and "
+                   "sweeps both of this helper's arms",
+    "main_checkout": "helper of worktree_drift — its None is 'this IS the main checkout', the "
+                     "ordinary case. worktree_report is a MUTANTS entry",
+    "_same_bytes": "helper of worktree_drift — its None is UNREADABLE, which worktree_report turns "
+                   "into an explicit UNKNOWN line rather than 'matching'; swept there",
+    "admit_distribution": "its verdict is delivered by die(), not by this return value — the "
+                          "return is the record it writes afterwards. Neutering the body deletes "
+                          "those refusals and would re-measure the dominance gate, which already "
+                          "has its own MUTANTS entry",
+
+    # --- KNOWN GAPS. Real producers. Should be swept. Are not, and the reason is cost, not merit:
+    # each MUTANTS entry is one full suite run (~1 min), and this change spent its budget on the
+    # four report producers that were actually found weak. These are the queue, in this order.
+    "retro_nudge": "KNOWN GAP, and the sharp kind. A real nudge producer, category_tell's exact "
+                   "shape. MEASURED at 0 kills against this HEAD: nothing in the suite notices if "
+                   "the retro nudge stops firing. It is not listed above only because a standing "
+                   "UNPROTECTED entry makes the sweep exit 1 with no path to green (INV5), and the "
+                   "fix is an assertion this change did not write. Write it, then move this up",
+    "legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
+                              "warning producer of unpushed_warning's shape, MEASURED at 0 kills "
+                              "against this HEAD — the legacy-mandate warning can stop firing and "
+                              "this suite says nothing. Owed an assertion, then a MUTANTS entry",
+    "pinned_report": "KNOWN GAP. A real report producer (the PINNED CODE block) whose empty list "
+                     "is the common path, which is precisely the silence-on-pass shape. Left out "
+                     "for run time; it should be swept",
+    "metric_movement": "KNOWN GAP. A real detector — 'has this metric moved, and by how much' — "
+                       "and its None is a non-event that several commands print around. Left out "
+                       "for run time; it should be swept",
+    # --- FOUND ONLY BY THE SECOND SIGNATURE. Both were invisible while the discriminator looked
+    # for a literal empty return, which is why the accounting read "0 unaccounted" over a short
+    # denominator. Neither is excluded on merit; both are queued.
+    "binding_windows": "KNOWN GAP, and the sharpest one here. It decides which usage windows are "
+                       "BINDING, and an always-empty return means no window ever binds — the "
+                       "limitgate stops firing and a run sails into an exhausted limit with no "
+                       "handoff written, silently. Exactly the shape this file distrusts, and it "
+                       "was invisible to the first signature. Owed an assertion, then a MUTANTS "
+                       "entry, ahead of the other gaps",
+    "parse_events": "KNOWN GAP. Parses the per-event distribution behind the dominance refusal "
+                    "(INV7). An always-empty return means no distribution is ever seen, so the "
+                    "one-event-dominates check cannot fire. `dominance` IS swept and would catch "
+                    "some of this, but not a parse that silently yields nothing",
+    "_asked_the_user": "KNOWN GAP. A real detector whose False is a non-event ('this turn did not "
+                       "ask the user'), which is the shape this file exists to distrust. Left out "
+                       "for run time; it should be swept",
+}
+
+
+def _returns_nothing(ret):
+    """Is this `return` handing back a NOTHING — bare, None, [], False?
+
+    Deliberately crude, and conservative in the direction that matters: it is better to enumerate a
+    function that is not really a producer than to miss one. A false candidate costs one line in
+    NOT_SWEPT; a missed one is the entire bug default-deny exists to prevent.
+    """
+    v = ret.value
+    if v is None:                                    # a bare `return`
+        return True
+    if isinstance(v, ast.Constant) and (v.value is None or v.value is False):
+        return True
+    return isinstance(v, ast.List) and not v.elts    # `return []`
+
+
+def _accumulates_then_returns(fn):
+    """Does this build into an empty local and return it?
+
+    The FIRST signature — a literal empty return beside a non-empty one — misses this entirely,
+    and this is how most real producers are written: seed a list, append findings, return it. There
+    is one Return node and it hands back a Name, so nothing about it looks like "nothing".
+
+    Reported by a downstream maintainer who applied the same design to their own library: the
+    unfailable predicate that started this whole family lived in exactly this shape, in a validator
+    that accumulated errors and returned the accumulator. Missing it here made THIS file's
+    "0 unaccounted" vacuous in the worst direction — the accounting looked complete because the
+    DENOMINATOR was short, which is a gap in the candidate set rather than in the exclusions and so
+    shows up nowhere.
+    """
+    empties = set()
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assign) and isinstance(n.value, (ast.List, ast.Dict, ast.Set)) \
+           and not getattr(n.value, "elts", getattr(n.value, "keys", [1])):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    empties.add(t.id)
+    return any(isinstance(n, ast.Return) and isinstance(n.value, ast.Name)
+               and n.value.id in empties for n in ast.walk(fn))
+
+
+def candidates(src):
+    """Module-level functions that can return a FINDING or a NOTHING — the silence-on-pass shape.
+
+    Both arms are required. A function that only ever returns nothing reports nothing; one that
+    always returns a value cannot report by silence. It is the pair that makes a producer able to
+    decline, and declining is the state an assertion cannot tell from working.
+    """
+    found = []
+    for fn in [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)]:
+        rets = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
+        if any(_returns_nothing(r) for r in rets) and any(not _returns_nothing(r) for r in rets):
+            found.append(fn.name)
+        elif _accumulates_then_returns(fn):
+            found.append(fn.name)
+    return sorted(found)
+
+
+def unaccounted(src, mutants=None, not_swept=None):
+    """Candidates that are neither swept nor explicitly excluded — the default-deny failure."""
+    mutants = MUTANTS if mutants is None else mutants
+    not_swept = NOT_SWEPT if not_swept is None else not_swept
+    decided = {m[1] for m in mutants} | set(not_swept)
+    return [n for n in candidates(src) if n not in decided]
+
+
+def unreasoned(not_swept=None):
+    """Exclusions with no reason attached. An exclusion with no reason is just a name on a list —
+    unreadable, uncheckable, and indistinguishable from someone clearing the run."""
+    not_swept = NOT_SWEPT if not_swept is None else not_swept
+    return sorted(n for n, why in not_swept.items() if not (why or "").strip())
+
+
+def decided_twice(mutants=None, not_swept=None):
+    """Names that are BOTH swept and excluded. A contradiction, and a quiet one: the sweep would
+    dutifully mutate the producer while the mapping says it was decided not to."""
+    mutants = MUTANTS if mutants is None else mutants
+    not_swept = NOT_SWEPT if not_swept is None else not_swept
+    return sorted({m[1] for m in mutants} & set(not_swept))
+
+
+def coverage_gate(src, out=print):
+    """Default-deny over the producers in `src`. Returns an exit code, and says what to do.
+
+    Runs BEFORE the mutation runs, deliberately. This is a list-hygiene failure fixable in one line,
+    and making somebody wait out a full sweep to be told about it is how a check earns a --skip.
+    """
+    contradictions, blank = decided_twice(), unreasoned()
+    orphans = unaccounted(src)
+    # An exclusion that outlives the function it excused is the denylist bug returning by the side
+    # door: the name stays decided forever while nothing it referred to is in the script any more.
+    stale = sorted(set(NOT_SWEPT) - set(candidates(src)))
+    if not (orphans or contradictions or blank or stale):
+        return 0
+    if orphans:
+        out(f"UNACCOUNTED PRODUCERS — {len(orphans)} function(s) in {BIN} can return a finding or a")
+        out("nothing, and this sweep has no position on any of them: "
+            + " · ".join(orphans))
+        out("That is the denylist failure this file's own header argues against. Decide about each:")
+        out("add it to MUTANTS, or to NOT_SWEPT with a reason — including the honest reason 'it is a")
+        out("producer, it should be swept, it is not yet'. What is not allowed is silence about it.")
+    for n in contradictions:
+        out(f"DECIDED TWICE — {n} is in MUTANTS *and* NOT_SWEPT. One of them is a leftover.")
+    for n in blank:
+        out(f"EXCLUDED WITHOUT A REASON — NOT_SWEPT[{n!r}] is blank. The reason is the deliverable.")
+    for n in stale:
+        out(f"STALE EXCLUSION — NOT_SWEPT[{n!r}] names nothing {BIN} still produces. Renamed, or "
+            "gone: either way the exclusion now excuses a function nobody can read.")
+    return 1
 
 
 def neuter(src, fn, body):
@@ -150,6 +432,14 @@ def main():
     with open(os.path.join(base, BIN)) as f:
         original = f.read()
 
+    # Default-deny first, and before the slow part: a producer nobody decided about is the case
+    # this file exists for, and it is answerable in one line rather than in ten minutes.
+    if coverage_gate(original):
+        shutil.rmtree(base, ignore_errors=True)
+        return 1
+    print(f"{len(candidates(original))} candidate producers in {BIN}: "
+          f"{len(MUTANTS)} swept, {len(NOT_SWEPT)} excluded with a reason, 0 undecided.\n")
+
     print("producer mutation sweep — assertions that SURVIVE a neutered producer")
     print(f"(the tree under test is HEAD, not the working copy; thin under {THIN_AT} kills, "
           "only ZERO fails)\n")
@@ -166,7 +456,7 @@ def main():
                 # Not a skip. A producer named here that no longer exists is zero evidence about
                 # zero code, and a sweep that shrugs at that is a check that cannot fail.
                 print(f"  !! {fn}: NOT FOUND in {BIN} — renamed, or gone. Nothing was swept.\n")
-                verdicts.append((fn, None, UNPROTECTED))
+                verdicts.append((fn, None, UNPROTECTED, floor))   # 4-wide: the tallies unpack it
                 continue
             shutil.copytree(base, t, dirs_exist_ok=True)
             with open(os.path.join(t, BIN), "w") as f:

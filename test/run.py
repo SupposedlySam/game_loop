@@ -5,6 +5,7 @@ Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) ins
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -3179,6 +3180,79 @@ def main():
     check("install.sh's next steps teach the tilde convention where config.json is introduced",
           "allow_write_roots" in inst_src and "as ~/..." in inst_src
           and "COMMITTED" in inst_src)
+
+    # The sweep above was a DENYLIST — six hand-written entries, and its coverage was whatever
+    # somebody remembered to type. That is the shape bin/guard-writes-impl.sh's header and #25 both
+    # argue against: a denylist defaults to UNPROTECTED and misses whatever nobody listed, and the
+    # tool built to find unprotected things was unprotected in exactly that way. It now enumerates
+    # its own candidates out of the script and refuses to run while any of them is undecided. What
+    # is checked here is the ENUMERATION and the REFUSAL, because those are what can rot; the sweep
+    # itself is still far too slow to run from this suite.
+    print("mutation sweep coverage (default-deny over the producers it can find):")
+    synth = ("def decides(x):\n"
+             "    if x:\n"
+             "        return 'a finding'\n"
+             "    return None\n"
+             "def always(x):\n"
+             "    return 'a finding'\n"
+             "def never(x):\n"
+             "    return []\n"
+             "def empties(x):\n"
+             "    if x:\n"
+             "        return [x]\n"
+             "    return []\n")
+    check("discovery names the functions that can report OR decline, and neither of the ones that "
+          "cannot — a silence is only a shape when a non-silence sits beside it",
+          sweep.candidates(synth) == ["decides", "empties"])
+    real_cands = sweep.candidates(gl_src)
+    check("...and on the real script it finds the known producers, including the ones the "
+          "hand-written list had never been pointed at — while a report that cannot decline is not "
+          "swept up with them",
+          {"unpushed_warning", "hooks_live_warning", "config_paths_report", "worktree_report",
+           "update_notice"} <= set(real_cands)
+          and "pins_report" not in real_cands)
+
+    # The gate is the whole point of the change: a producer nobody decided about has to FAIL the
+    # run, not be quietly absent from it. Checked in BOTH directions in one observation, because "the
+    # gate passed" and "the gate is dead" produce the same output.
+    said = []
+    orphaned = gl_src + ("\n\ndef gl_test_undecided_producer(x):\n"
+                         "    if x:\n"
+                         "        return 'a finding'\n"
+                         "    return None\n")
+    rc_bad = sweep.coverage_gate(orphaned, out=said.append)
+    rc_good = sweep.coverage_gate(gl_src, out=said.append)
+    check("a candidate in neither MUTANTS nor NOT_SWEPT fails the sweep and is NAMED in the "
+          "refusal — while the real script, fully decided, passes the same gate",
+          rc_bad == 1 and rc_good == 0
+          and any("UNACCOUNTED PRODUCERS" in ln for ln in said)
+          and any("gl_test_undecided_producer" in ln for ln in said))
+    check("...and main() actually runs that gate, rather than defining it next to a sweep that "
+          "never calls it",
+          "coverage_gate(" in inspect.getsource(sweep.main))
+
+    # An exclusion with no reason is a name on a list: unreadable, uncheckable, and exactly what
+    # somebody clearing the run to get a green would leave behind.
+    check("every exclusion carries a reason — and the same check catches a blank one, so its "
+          "silence on the real mapping is a verdict rather than a dead comprehension",
+          sweep.unreasoned() == []
+          and sweep.unreasoned({"blank": "", "spaces": "   ", "given": "a real reason"})
+          == ["blank", "spaces"])
+    check("no producer is decided about twice — and the same check names one when it is, so the "
+          "empty answer above is not a check that cannot fire",
+          sweep.decided_twice() == []
+          and sweep.decided_twice(mutants=[("l", "unpushed_warning", "b", [], None, 1)],
+                                  not_swept={"unpushed_warning": "r"}) == ["unpushed_warning"])
+    # A renamed producer whose exclusion outlives it is the denylist bug coming back by the side
+    # door: the name stays decided forever while the function it excused is gone. Driven through the
+    # gate against a script those names have LEFT, so the clean answer above is a verdict.
+    stale_said = []
+    rc_stale = sweep.coverage_gate("def cannot_decline(x):\n    return 1\n",
+                                   out=stale_said.append)
+    check("every excluded name is a producer the script still HAS — and the same gate refuses a "
+          "script they have left, naming the stale exclusion",
+          set(sweep.NOT_SWEPT) <= set(real_cands) and rc_good == 0
+          and rc_stale == 1 and any("STALE EXCLUSION" in ln for ln in stale_said))
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

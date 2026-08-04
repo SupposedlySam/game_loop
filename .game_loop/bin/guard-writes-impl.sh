@@ -488,6 +488,14 @@ home = os.path.expanduser("~")
 found = False
 target = None
 others = []
+cwd_dynamic = False        # a `cd` into a variable — every later commit lands somewhere unnameable
+unresolved = ""            # the raw fragment that made a COMMIT's target unreadable, if any
+
+# A path we cannot resolve without EXECUTING it, which this guard must never do. $HOME is substituted
+# before this runs, so an ordinary ~ or $HOME path stays resolvable and is not caught here.
+# The class is built rather than written: a literal backtick inside python inside a $( ) breaks
+# the SHELL parse, which bricks the guard before any of its logic runs. Learned the hard way.
+_DYNAMIC = re.compile("[$" + chr(96) + "]")
 
 
 def tree_of(path):
@@ -515,14 +523,36 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
     verb = os.path.basename(argv[0])
     args = argv[1:]
     if verb == "cd" and args:
+        if _DYNAMIC.search(args[0].replace("$HOME", "")):
+            cwd_dynamic, cwd_raw = True, args[0]
         nxt = os.path.expanduser(args[0].replace("$HOME", home))
         cwd = nxt if os.path.isabs(nxt) else os.path.join(cwd, nxt)
         continue   # a bare cd is navigation, not lost work — track it, don't report it
     if verb == "git" and "commit" in args and "--no-verify" not in args:
-        tgt = cwd
+        # #40: FAIL CLOSED when the target cannot be READ, not merely when it is elsewhere.
+        # A variable resolves to nothing this scan can match against the repo, so the commit used to
+        # read as "targets some other project" and pass unexamined — and an orchestrator reaches
+        # every worktree through a variable, which makes the gate escaped BY DEFAULT under fan-out
+        # rather than occasionally. The guard cannot expand it and must not try; it does not need
+        # the value, only the knowledge that the target is UNKNOWN.
+        #
+        # DELIBERATELY NARROW: this fires only where a commit IS present and ITS OWN target is
+        # unreadable. Failing closed on any unparseable fragment was tried in the field and refused
+        # two legitimate messages in one afternoon — prose ABOUT a commit is not a commit, and the
+        # agents most likely to write such prose are the ones reporting guard defects. A guard that
+        # refuses too much is the one that gets switched off (INV5).
+        tgt, dyn, raw = cwd, cwd_dynamic, (cwd_raw if cwd_dynamic else "")
         if "-C" in args and args.index("-C") + 1 < len(args):
-            c = os.path.expanduser(args[args.index("-C") + 1].replace("$HOME", home))
+            raw_c = args[args.index("-C") + 1]
+            if _DYNAMIC.search(raw_c.replace("$HOME", "")):
+                dyn, raw = True, raw_c
+            c = os.path.expanduser(raw_c.replace("$HOME", home))
             tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
+        if dyn:
+            found = True
+            if not unresolved:
+                unresolved = raw
+            continue
         if os.path.realpath(tgt).startswith(os.path.realpath(repo).rstrip(os.sep) + os.sep) \
                 or os.path.realpath(tgt) == os.path.realpath(repo):
             found = True
@@ -532,7 +562,9 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
     others.append(seg if len(seg) <= 70 else seg[:67] + "...")
 
 answerable = ""
-if found:
+if unresolved:
+    answerable = "unresolvable:" + unresolved
+elif found:
     own = "root:" + os.environ["GAMELOOP_DIR"]
     root = os.path.realpath(repo).rstrip(os.sep)
     top = tree_of(target)
@@ -555,6 +587,20 @@ PY
     chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +3 | grep -v '^$' || true)
     if [ "$commit_here" = "yes" ]; then
       case "$commit_root" in
+        unresolvable:*)
+          deny "BLOCKED: this commit's target tree is built from a variable, so the gate cannot tell
+which tree it lands in — and therefore cannot read the owed checks that describe it.
+
+    the unreadable target:  ${commit_root#unresolvable:}
+
+Resolving it would mean EXECUTING it, which this guard must never do. So it fails CLOSED here rather
+than reading an unresolvable target as 'some other project, not my business' — which is how it used to
+pass, silently, with no output distinguishing 'checked and fine' from 'never looked'. An orchestrator
+reaches every worktree through a variable, so that silence was the DEFAULT under fan-out, not an edge.
+
+Commit from the tree you are already in, or name the path literally. Either is one line, and both
+leave a gate that actually ran."
+          ;;
         undetermined:*)
           deny "BLOCKED: this commit lands in a tree that carries no game_loop, so its owed checks cannot be read.
 

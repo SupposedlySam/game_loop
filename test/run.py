@@ -2949,6 +2949,59 @@ def main():
     finally:
         shutil.rmtree(_tp, ignore_errors=True)
 
+    # AN UNREADABLE COMMIT TARGET FAILS CLOSED (#40). The blind spot was documented; its blast
+    # radius under fan-out was not. A variable resolves to nothing the scan can match against the
+    # repo, so the commit read as "targets some other project" and passed UNEXAMINED — and an
+    # orchestrator reaches every worktree through a variable, which makes the gate escaped by
+    # DEFAULT there rather than occasionally, with no output telling "checked and fine" apart from
+    # "never looked".
+    #
+    # The narrowness is the hard part, and it is empirical rather than tidy: failing closed on any
+    # unparseable fragment was tried in the field and refused two legitimate messages in one
+    # afternoon, both of them BUG REPORTS about this guard. Prose about a commit is not a commit.
+    print("an unreadable commit target fails closed (#40):")
+    up40 = make_sandbox()
+    try:
+        _CM = "commit"
+
+        def _c(cmd):
+            return guard(up40, {"tool_name": "Bash", "cwd": up40,
+                                "tool_input": {"command": cmd}})
+
+        def _unreadable(r):
+            return denied(r) and "target tree is built from a variable" in r.stdout
+
+        _var = "git -C \"$WT\" " + _CM + " -m x"
+        check("a commit whose -C target is a variable is REFUSED, not passed as someone else's tree",
+              _unreadable(_c(_var)))
+        check("...and the refusal names the unreadable fragment, so it can be acted on",
+              "$WT" in _c(_var).stdout)
+        check("...and a cd into a variable poisons the commits that follow it, which is the shape "
+              "fan-out actually generates",
+              _unreadable(_c("cd \"$WT\" && git " + _CM + " -m x")))
+        check("...and a command substitution counts as unreadable too, not only a $VAR",
+              _unreadable(_c("git -C " + chr(96) + "pwd" + chr(96) + " " + _CM + " -m x")))
+
+        # THE NARROWNESS CONTROLS. Without these, "fails closed" is indistinguishable from "refuses
+        # anything with a dollar sign in it" — the version that gets a guard switched off (INV5).
+        check("a NON-commit command carrying a variable is untouched: the trigger is a commit whose "
+              "OWN target is unreadable, never any unparseable fragment",
+              not denied(_c("ls \"$WT\" && echo hi")))
+        check("...and prose ABOUT such a commit, inside a message flag, is not read as one",
+              "target tree is built from a variable" not in
+              _c("git " + _CM + " -m \"describes " + _CM + " -C $WT failing\"").stdout)
+        check("...and --no-verify still opts out out loud, exactly as before",
+              not _unreadable(_c("git -C \"$WT\" " + _CM + " --no-verify -m x")))
+        check("...and an ordinary literal in-repo commit never sees this refusal",
+              "target tree is built from a variable"
+              not in _c("git " + _CM + " -m x").stdout)
+        # $HOME is substituted before the check, so an ordinary home path stays RESOLVABLE — a rule
+        # that refused those would be reworded around rather than obeyed.
+        check("a $HOME path is resolvable and is not caught by the dynamic-target check",
+              not _unreadable(_c("git -C \"$HOME/nope\" " + _CM + " -m x")))
+    finally:
+        shutil.rmtree(up40, ignore_errors=True)
+
     # PROSE THAT MENTIONS A REDIRECT IS NOT A REDIRECT (#46). An interpreter here-doc body is kept
     # in the scan on purpose — it executes — but it is PYTHON, not shell, so a comment inside it
     # mentioning `cat >` yielded a target with the backtick and following punctuation glued on. The

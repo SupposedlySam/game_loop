@@ -3802,6 +3802,81 @@ def waiting_report():
             "waiting)"]
 
 
+SESSION_START_PROBE = os.path.join(ROOT, "probe", "session-start.json")
+
+
+def cmd_sessionstart(s, a, payload):
+    """Run `status` at session start (and after a compaction), and inject it into the session.
+
+    THE GAP THIS CLOSES is discoverability, not enforcement. The PreToolUse guards already fire
+    without being asked, so the write guard and the MCP guard were never subject to this. What was
+    subject to it is everything behind a VERB -- the claim gate, harden, the mandate machinery, the
+    retro, and `status` itself. A tree could carry a perfectly provisioned harness and still run
+    completely bare, because nothing made the entry point run.
+
+    A BANNER WOULD HAVE BEEN THE WRONG FIX. "The harness is here, run status" holds only while the
+    agent chooses to act on it, which is rung 6 of the ladder applied to the gap that decides whether
+    any other rung runs at all (INV1). So this runs the verb, not an advertisement for it.
+
+    PostCompact matters as much as SessionStart: compaction is exactly when a run loses the mandate,
+    the pins and the invariants, and this repo's own instruction has always been "run status every
+    session AND after any compaction". Now the harness does it.
+
+    THREE THINGS IT HAS TO GET RIGHT, or it becomes the defect it fixes:
+      * NEVER BLOCKS. A first impression that bricks a session is one nobody gives a second chance,
+        so every failure path exits 0 with no output.
+      * IT MUST BE OBSERVABLE THAT IT FIRED, or this is the statusline tap (#45) and the Stop probe
+        (#43) again -- a check whose silence is indistinguishable from never having run.
+      * IT DEGRADES DURING INSTALL AND UPGRADE. Mid-install, or on a branch with no .game_loop/, it
+        says nothing rather than erroring: a guard must never block its own fix (INV5).
+    """
+    if not config().get("session_start", True):
+        return                       # a project that wants silence gets silence, opt-out not opt-in
+    try:
+        os.makedirs(os.path.dirname(SESSION_START_PROBE), exist_ok=True)
+        with open(SESSION_START_PROBE, "w") as f:
+            json.dump({"at": now(), "session": SESSION,
+                       "source": payload.get("source") or payload.get("hook_event_name") or ""}, f)
+    except OSError:
+        pass                         # the probe is evidence, never a precondition
+    try:
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_status(s, a)
+        text = buf.getvalue().strip()
+    except Exception:  # noqa: BLE001 — mid-install, half-written state, anything: say nothing
+        return
+    if not text:
+        return
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": payload.get("hook_event_name") or "SessionStart",
+        "additionalContext": text}}))
+
+
+def session_start_warning():
+    """Silent unless a session start SHOULD have been seen and was not (#48).
+
+    Same shape as the Stop probe's age check (#43), and for the same reason: registered, fired, and
+    firing now are three different claims. A SessionStart hook that silently stops firing takes the
+    whole entry point with it, and nothing else would notice.
+    """
+    if not config().get("session_start", True):
+        return []
+    if os.path.isfile(SESSION_START_PROBE):
+        return []
+    return ["⚠ NO SESSION START RECORDED — the SessionStart hook has not fired in this checkout, so "
+            "nothing runs",
+            "  `status` for you automatically and a fresh session learns none of this exists. It is "
+            "registered by",
+            "  install.sh; hooks are read when a session starts, so reload the window (VSCode) or "
+            "start a new",
+            "  session. (This tracks the PROBE's lifetime, not the hook's — a checkout that fired "
+            "before probing",
+            "   shipped reads the same until its next start.)"]
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -4614,6 +4689,7 @@ def self_hooks_block(code):
         wire("guard-mcp.sh"),
         wire("game_loop limitgate"),
         wire("game_loop stopgate"),
+        wire("game_loop sessionstart"),
         wire("watchdog"),
         "",
         f"{HOME_ENV} is not optional in any of those: it is what keeps verify.yaml, the record of "
@@ -4751,6 +4827,7 @@ def cmd_status(s, a):
                           else "not configured (.game_loop/notify.json; see bin/notify.py)"))
     if (w := hooks_live_warning()):
         out(w)
+    out(*session_start_warning())
     if (w := legacy_mandate_warning()):
         out(w)
     try:
@@ -5054,9 +5131,10 @@ def main():
     sub.add_parser("stopgate")    # Stop-hook entrypoint; not for humans
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
+    sub.add_parser("sessionstart")  # SessionStart/PostCompact entrypoint; not for humans
 
     a = p.parse_args()
-    if a.cmd in ("stopgate", "limitgate", "statusline"):
+    if a.cmd in ("stopgate", "limitgate", "statusline", "sessionstart"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses
         # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
         try:
@@ -5065,7 +5143,8 @@ def main():
             payload = {}
         set_session(payload.get("session_id") or env_session())
         {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate,
-         "statusline": cmd_statusline}[a.cmd](load(), a, payload)
+         "statusline": cmd_statusline,
+         "sessionstart": cmd_sessionstart}[a.cmd](load(), a, payload)
         return
     set_session(env_session())
     s = load()

@@ -3233,6 +3233,88 @@ def main():
     # contains " surge"; "docker pushed" contains the default verb. The refusal is loud and
     # correct-sounding and names a verb nobody typed, so the natural response is to rephrase and
     # move on — never learning the guard was wrong. That is how a guard trains people around it.
+    # THE ENTRY POINT RUNS ITSELF (#48). A tree could carry a perfectly provisioned harness and
+    # still run completely bare: the PreToolUse guards fire without being asked, but everything
+    # behind a VERB — the claim gate, harden, the mandate machinery, the retro, `status` itself —
+    # only exists for an agent that goes looking. A banner saying "run status" would have been rung
+    # 6 of the ladder applied to the gap that decides whether any other rung runs (INV1), so this
+    # runs the verb rather than advertising it.
+    print("the session entry point runs itself (#48):")
+    ss = make_sandbox()
+    try:
+        _sscfg = os.path.join(ss, ".game_loop", "config.json")
+        _ssprobe = os.path.join(ss, ".game_loop", "probe", "session-start.json")
+
+        def _start(event="SessionStart", sid="sess-ss"):
+            return subprocess.run([os.path.join(ss, ".game_loop", "bin", "game_loop"),
+                                   "sessionstart"],
+                                  input=json.dumps({"session_id": sid, "hook_event_name": event,
+                                                    "source": "startup"}),
+                                  capture_output=True, text=True, env=_env(ss, sid=sid))
+
+        r = _start()
+        _out = json.loads(r.stdout)["hookSpecificOutput"]
+        check("it returns STATUS as injected context, not a banner telling the agent to run it",
+              _out["hookEventName"] == "SessionStart"
+              and "INV:" in _out["additionalContext"]
+              and "COST LADDER" in _out["additionalContext"])
+        check("...and it never blocks: a first impression that bricks a session gets no second one",
+              r.returncode == 0)
+        check("...and PostCompact is served by the same verb, because compaction is exactly when a "
+              "run loses the mandate, the pins and the invariants",
+              json.loads(_start(event="PostCompact").stdout)["hookSpecificOutput"]["hookEventName"]
+              == "PostCompact")
+        check("...and the firing is RECORDED, or this is the statusline tap again — a check whose "
+              "silence cannot be told from never having run",
+              os.path.isfile(_ssprobe))
+
+        # OPT-OUT, not opt-in: a project that wants silence gets it, but installing the harness is
+        # taken as asking for the harness.
+        with open(_sscfg) as f:
+            _c = json.load(f)
+        _c["session_start"] = False
+        with open(_sscfg, "w") as f:
+            json.dump(_c, f)
+        _off = _start()
+        check("session_start:false silences it completely — no output, no probe, still exit 0",
+              _off.returncode == 0 and not _off.stdout.strip())
+
+        # THE OBSERVABILITY PAIR. A SessionStart hook that stops firing takes the whole entry point
+        # with it, and nothing else would notice.
+        _c["session_start"] = True
+        with open(_sscfg, "w") as f:
+            json.dump(_c, f)
+        os.remove(_ssprobe)
+        _warn = gl(ss, "status", sid="sess-ss").stdout
+        check("with no session start ever recorded, status SAYS so",
+              "NO SESSION START RECORDED" in _warn)
+        check("...and names the remedy, since hooks are read at session start and a warning you "
+              "cannot act on is just noise",
+              "reload the window" in _warn.lower() and "install.sh" in _warn)
+        check("...and states the limit it keeps (INV6): this tracks the PROBE's lifetime, not the "
+              "hook's — registered, fired and firing now stay three different claims",
+              "PROBE's lifetime" in _warn)
+        _start()
+        check("...and once one is recorded it goes quiet — the pair that makes the warning mean "
+              "something rather than being a permanent banner",
+              "NO SESSION START RECORDED" not in gl(ss, "status", sid="sess-ss").stdout)
+        _c["session_start"] = False
+        with open(_sscfg, "w") as f:
+            json.dump(_c, f)
+        os.remove(_ssprobe)
+        check("...and a project that opted OUT is never nagged about the thing it turned off",
+              "NO SESSION START RECORDED" not in gl(ss, "status", sid="sess-ss").stdout)
+    finally:
+        shutil.rmtree(ss, ignore_errors=True)
+
+    # Registered where it ships, not only where this repo runs it.
+    with open(os.path.join(REPO, "templates", "settings.hooks.json")) as f:
+        _tpl = json.load(f)["hooks"]
+    check("the shipped template registers BOTH moments, so an install gets them without asking",
+          all(any("sessionstart" in h.get("command", "")
+                  for e in _tpl.get(ev, []) for h in e.get("hooks", []))
+              for ev in ("SessionStart", "PostCompact")))
+
     print("a deploy verb is a WORD, not a substring (#51):")
     dp = make_sandbox()
     try:
@@ -4210,11 +4292,14 @@ def main():
     # generated text is asserted equal to the tracked settings, not merely similar to it.
     _gen = sorted(l.strip() for l in gl(REPO, "self").stdout.splitlines()
                   if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/'))
+    # Compared as SETS: one command legitimately serves two events (SessionStart and PostCompact
+    # run the same verb), so a list comparison would fail on the duplicate rather than on drift.
     check("the wiring `self` prints is byte-identical to the wiring settings.json carries",
-          _gen and _gen == sorted(_cmds))
+          _gen and sorted(set(_gen)) == sorted(set(_cmds)))
     check("...and each still names the script it runs, so the wiring stays readable",
           all(any(t in c for t in ("guard-writes.sh", "guard-mcp.sh", "game_loop limitgate",
-                                   "game_loop stopgate", "watchdog")) for c in _cmds))
+                                   "game_loop stopgate", "game_loop sessionstart",
+                                   "watchdog")) for c in _cmds))
 
     def _select(root, pinned):
         """Run only the dispatcher's path-resolution half and report which tree it chose."""

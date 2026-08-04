@@ -58,6 +58,30 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop\"; [ -x \"$d/bin/game_loop\" ] || d=\"$CLAUDE_PROJECT_DIR/.game_loop\"; GAME_LOOP_HOME=\"$CLAUDE_PROJECT_DIR/.game_loop\" exec \"$d\"/bin/game_loop sessionstart",
+            "timeout": 20,
+            "statusMessage": "game_loop: rehydrating the loop"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop\"; [ -x \"$d/bin/game_loop\" ] || d=\"$CLAUDE_PROJECT_DIR/.game_loop\"; GAME_LOOP_HOME=\"$CLAUDE_PROJECT_DIR/.game_loop\" exec \"$d\"/bin/game_loop sessionstart",
+            "timeout": 20,
+            "statusMessage": "game_loop: rehydrating the loop"
+          }
+        ]
+      }
     ]
   }
 }

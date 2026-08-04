@@ -304,6 +304,15 @@ MUTANTS = [
      # pair of trees reports matching harnesses -- which is the state #38 found shipped, where the
      # field was named `harness` and contained only rules.
      None, 3),
+    ("session_start_warning -> a harness that never announces itself is never noticed",
+     ".game_loop/bin/game_loop::session_start_warning", "    return []\n",
+     ["session start", "entry point", "bare", "rehydrat"],
+     # THIN at 2, and honestly so rather than padded. The producer emits ONE message, and three of
+     # its five assertions are ABSENCE arms -- recorded-and-quiet, opted-out-and-quiet -- which
+     # correctly survive a producer neutered to permanent silence. Only the presence arm and its
+     # content checks die. Adding more assertions against the same string would raise the number
+     # without protecting a single extra behaviour, which is the farming this file warns about.
+     "one message, and its companions are absence arms that survive silence by design", 2),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

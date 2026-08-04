@@ -4,6 +4,7 @@
 Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) inside a throwaway copy
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
+import datetime
 import importlib.util
 import inspect
 import json
@@ -3247,6 +3248,102 @@ def main():
     #
     # NOT REFUSED, MARKED: installing from a work-in-progress checkout is legitimate — it is how
     # this repo is developed. Recording it as though it were a commit is not.
+    # #45 — NEVER BE FAR FROM THE EDGE. The limit gate's purpose was never "know the number"; it
+    # was "do not die with your state only in your head". Warning was one way to buy that, and it is
+    # the way that depends on a number this host cannot have — rate_limits rides the statusline
+    # payload and nothing else. So the handoff is REFRESHED at every turn-end instead: a limit death
+    # then costs at most one turn, in any host, with no configured budget standing for nothing.
+    print("the handoff is maintained, not demanded at the cliff (#45):")
+    hf = make_sandbox()
+    try:
+        _hsid = "sess-handoff"
+        _hp = os.path.join(hf, ".game_loop", "sessions", _hsid, "HANDOFF.md")
+        _tp = os.path.join(hf, "transcript.jsonl")
+        with open(_tp, "w") as f:
+            f.write("{}\n")
+
+        def _turn_end():
+            return subprocess.run([os.path.join(hf, ".game_loop", "bin", "game_loop"), "stopgate"],
+                                  input=json.dumps({"session_id": _hsid, "transcript_path": _tp}),
+                                  capture_output=True, text=True, env=_env(hf, sid=_hsid))
+
+        gl(hf, "mandate", "--set", "land the parser", sid=_hsid)
+        gl(hf, "checkpoint", "--notes", "parser lexes; the emitter is next", sid=_hsid)
+        _turn_end()
+        check("a turn-end leaves a usable handoff on disk without anyone asking for one",
+              os.path.isfile(_hp) and os.path.getsize(_hp) > 0)
+        _h = ""
+        if os.path.isfile(_hp):
+            with open(_hp) as f:
+                _h = f.read()
+        check("...and it carries the job and the last reported progress — the two things a dead "
+              "run's successor has to re-derive",
+              "land the parser" in _h and "the emitter is next" in _h)
+
+        # THE TRAP THIS CLOSES. The limit gate is satisfied by a fresh handoff, so a file the
+        # harness writes every turn would make that gate pass forever without the agent doing
+        # anything — a check turned vacuous by the safety net added to help it.
+        with open(os.path.join(hf, ".game_loop", "config.json")) as f:
+            _hc = json.load(f)
+        _hc["limits"] = dict(_hc.get("limits") or {}, threshold_pct=1)
+        with open(os.path.join(hf, ".game_loop", "config.json"), "w") as f:
+            json.dump(_hc, f)
+        with open(os.path.join(hf, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"captured_at": time.time(), "windows": {"five_hour": {
+                "used_percentage": 99.0, "resets_at": time.time() + 3600,
+                "crossed_at": time.time() - 60, "notified": True}}}, f)
+        _turn_end()                                    # refresh the AUTO handoff after the crossing
+        _gate = subprocess.run([os.path.join(hf, ".game_loop", "bin", "game_loop"), "limitgate"],
+                               input=json.dumps({"session_id": _hsid, "tool_name": "Bash",
+                                                 "tool_input": {"command": "echo hi"}}),
+                               capture_output=True, text=True, env=_env(hf, sid=_hsid))
+        check("the AUTO handoff does NOT satisfy the limit gate — the generated file is the floor, "
+              "the agent's own account is still owed",
+              '"deny"' in _gate.stdout.replace(" ", ""))
+        # PAIRED: a handoff the agent actually wrote DOES open it, or the gate is unsatisfiable.
+        with open(_hp, "w") as f:
+            f.write("where I got to, in my own words\n")
+        _gate2 = subprocess.run([os.path.join(hf, ".game_loop", "bin", "game_loop"), "limitgate"],
+                                input=json.dumps({"session_id": _hsid, "tool_name": "Bash",
+                                                  "tool_input": {"command": "echo hi"}}),
+                                capture_output=True, text=True, env=_env(hf, sid=_hsid))
+        check("...while a handoff somebody actually WROTE opens it, so the gate stays satisfiable",
+              '"deny"' not in _gate2.stdout.replace(" ", ""))
+        _turn_end()
+        check("...and a hand-written handoff is never overwritten by the next turn-end",
+              os.path.isfile(_hp)
+              and open(_hp).read().strip() == "where I got to, in my own words")
+
+        # THE EVIDENCE HALF. Recorded, gating nothing — INV4 applied to ourselves, since a threshold
+        # invented today would be a number standing for nothing.
+        _tp2 = os.path.join(hf, "t2.jsonl")
+        _now = datetime.datetime.now(datetime.timezone.utc)
+        _old = _now - datetime.timedelta(hours=9)
+        with open(_tp2, "w") as f:
+            for _when, _tok in ((_now, 100), (_now, 50), (_old, 999999)):
+                f.write(json.dumps({"timestamp": _when.isoformat().replace("+00:00", "Z"),
+                                    "message": {"usage": {"output_tokens": _tok}}}) + "\n")
+        subprocess.run([os.path.join(hf, ".game_loop", "bin", "game_loop"), "stopgate"],
+                       input=json.dumps({"session_id": _hsid, "transcript_path": _tp2}),
+                       capture_output=True, text=True, env=_env(hf, sid=_hsid))
+        with open(os.path.join(hf, ".game_loop", "log.jsonl")) as f:
+            _uw = [json.loads(l) for l in f if '"usage_window"' in l]
+        check("the trailing window's consumption is RECORDED as evidence",
+              bool(_uw) and _uw[-1]["output_tokens"] == 150 and _uw[-1]["records"] == 2)
+        check("...and the window actually windows — a record outside it is excluded, so this is a "
+              "measurement rather than a running total",
+              bool(_uw) and _uw[-1]["output_tokens"] == 150)
+        # It must gate NOTHING. A threshold today would be invented, which is the defect the landed
+        # half of #45 fixed; this is the evidence a real one would need first.
+        with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
+            _gsrc = f.read()
+        check("...and nothing compares it against a threshold: no gate without a logged, observed "
+              "failure, and there is not one yet",
+              "usage_window" in _gsrc
+              and "output_tokens" not in _gsrc.split("def _limitgate_verdict")[1][:3000])
+    finally:
+        shutil.rmtree(hf, ignore_errors=True)
+
     print("an install records what it actually installed:")
     ds = make_sandbox()
     try:
@@ -3303,13 +3400,22 @@ def main():
             _consumer_sha = _g(_van, "rev-parse", "HEAD").stdout.strip()
             _vend = os.path.join(_van, "vendored")
             os.makedirs(_vend)
-            subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {_vend}",
-                           shell=True, capture_output=True)
-            # The archive is HEAD, so it carries the COMMITTED installer. Overlay the working copy:
-            # this suite must test the installer it is being run against, not the last released one.
-            # (Discovering that took a debug pass — the archived installer silently exercised the
-            # old code path and the assertion failed for the right reason.)
+            # COPIED, not `git archive`d. The suite must run in a tree that is NOT a git checkout —
+            # which is exactly the shape a packager gates, an extraction of a blessed commit. With
+            # `git archive` the fixture silently produced nothing there and the next open() died,
+            # so the suite was unrunnable in the distribution shape and read as "this commit fails
+            # its own gate". Found by a downstream packager doing precisely that, and it is the same
+            # assumption this whole block is about: asking git a question about a tree it does not
+            # own. Copying needs no .git and tests the working copy, which is what is wanted anyway.
+            shutil.copytree(os.path.join(REPO, ".game_loop"), os.path.join(_vend, ".game_loop"),
+                            ignore=shutil.ignore_patterns("sessions", "probe", "*.pid", "log.jsonl",
+                                                          "triggers.d", "triggers.json"))
             shutil.copy(os.path.join(REPO, "install.sh"), os.path.join(_vend, "install.sh"))
+            os.makedirs(os.path.join(_vend, "templates"), exist_ok=True)
+            shutil.copy(os.path.join(REPO, "templates", "settings.hooks.json"),
+                        os.path.join(_vend, "templates", "settings.hooks.json"))
+            shutil.copy(os.path.join(REPO, "templates", "verify.yaml"),
+                        os.path.join(_vend, "templates", "verify.yaml"))
             os.chmod(os.path.join(_vend, "install.sh"), 0o755)
             # VERSION is UNTRACKED, so `git archive` never carries it — a vendored tree starts with
             # no stamp at all, which is precisely the case that used to reach for the consumer's
@@ -3329,6 +3435,7 @@ def main():
             check("...and the consumer's own sha appears nowhere in what was written",
                   _consumer_sha and _consumer_sha not in _r.stdout)
             # PAIRED: a packager that DID record the commit has its record carried forward.
+            os.makedirs(os.path.join(_vend, ".game_loop"), exist_ok=True)
             with open(os.path.join(_vend, ".game_loop", "VERSION"), "w") as f:
                 f.write("c" * 40 + "\n")
             _tgt2 = os.path.join(_van, "target2")
@@ -4087,6 +4194,14 @@ def main():
 
     _tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)
     _files = [f for f in _tracked.stdout.split("\n") if f.strip()]
+    if not _files:
+        # Same reason as the sweep's denominator: in an EXTRACTED tree git answers nothing, and a
+        # scan over an empty file list passes in perfect silence — the rule would read as enforced
+        # everywhere precisely where nobody could check it.
+        _skip = {".git", "__pycache__", ".worktrees", ".game_loop_self", "node_modules"}
+        for _r, _ds, _fs in os.walk(REPO):
+            _ds[:] = [d for d in _ds if d not in _skip]
+            _files += [os.path.relpath(os.path.join(_r, x), REPO) for x in _fs]
     _viol = []
     for _f in _files:
         try:
@@ -4359,6 +4474,24 @@ def main():
     _srcs = sweep.source_files()
     check("the source set is asked of git and spans the whole repo, not one file",
           len(_srcs) > 1 and ".game_loop/bin/game_loop" in _srcs)
+    # AND IT DOES NOT COLLAPSE WHERE GIT CANNOT ANSWER. An EXTRACTED tree — the shape a packager
+    # gates, with no .git — used to fall back to the single file, so the accounting reported
+    # "0 unaccounted" over a set of one, silently, exactly where it mattered most. That is #44
+    # reintroduced by environment. Driven against a real extraction rather than reasoned about.
+    _ex = tempfile.mkdtemp(prefix="gl-extract-")
+    try:
+        shutil.copytree(os.path.join(REPO, ".game_loop"), os.path.join(_ex, ".game_loop"),
+                        ignore=shutil.ignore_patterns("sessions", "probe", "*.pid", "log.jsonl",
+                                                      "triggers.d", "triggers.json"))
+        shutil.copytree(os.path.join(REPO, "test"), os.path.join(_ex, "test"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        check("...and a tree with NO .git enumerates the same source set by walking, so the "
+              "denominator cannot shrink to one file wherever git happens to be absent",
+              not os.path.exists(os.path.join(_ex, ".git"))
+              and sorted(sweep.source_files(_ex)) == sorted(
+                  f for f in _srcs if os.path.exists(os.path.join(_ex, f))))
+    finally:
+        shutil.rmtree(_ex, ignore_errors=True)
     check("...including the EXTENSIONLESS scripts, which a *.py glob would have missed entirely — "
           "and they hold the producers that matter most",
           {".game_loop/bin/verify", ".game_loop/bin/watchdog"} <= set(_srcs))

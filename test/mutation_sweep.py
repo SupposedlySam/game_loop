@@ -313,6 +313,22 @@ MUTANTS = [
      # content checks die. Adding more assertions against the same string would raise the number
      # without protecting a single extra behaviour, which is the farming this file warns about.
      "one message, and its companions are absence arms that survive silence by design", 2),
+    ("refresh_handoff -> no handoff is ever maintained", ".game_loop/bin/game_loop::refresh_handoff",
+     "    return False\n", ["handoff", "turn-end", "cliff", "limit"],
+     # THIN at 2, and the first measurement said 164 — which was a CRASH CASCADE, not coverage. The
+     # tests read the handoff unguarded, so a neutered producer made them raise, the run aborted,
+     # and every later assertion counted as killed. A test must survive the thing it tests being
+     # ABSENT, because that is exactly what this sweep does to it; an inflated number is worse than
+     # a small one, since it reads as protection nobody has.
+     "two arms: the file appears, and a hand-written one survives. Its CONTENT is built elsewhere",
+     2),
+    ("trailing_usage -> the window's consumption is never recorded",
+     ".game_loop/bin/game_loop::trailing_usage", "    return None\n",
+     ["usage", "window", "evidence", "consumption"],
+     # Also 2, and also honest: the producer feeds one log line, and both assertions read it. It
+     # gates nothing by design, so there is little else to assert about it yet -- which is the
+     # point, not a gap.
+     "one log line, read by both arms; it deliberately gates nothing yet", 2),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this
@@ -542,10 +558,20 @@ def source_files(tree=None):
     """
     tree = tree or REPO
     r = subprocess.run(["git", "-C", tree, "ls-files"], capture_output=True, text=True)
-    if r.returncode != 0:
-        return [BIN]                      # no git: fall back to the one file, and say nothing false
+    names = [ln.strip() for ln in r.stdout.split("\n") if ln.strip()] if r.returncode == 0 else []
+    if not names:
+        # NO GIT, NO SHORT DENOMINATOR. Falling back to the one file was the #44 bug reintroduced by
+        # environment: an EXTRACTED tree -- which is exactly the shape a packager gates, and has no
+        # .git -- would report "0 unaccounted" over a set of one, silently, in the place where the
+        # accounting matters most. Walk instead. A tracked-file list and a walk of a clean
+        # extraction are the same set, and the walk needs nothing.
+        skip = {".git", "__pycache__", ".worktrees", ".game_loop_self", "node_modules", ".venv"}
+        for root, dirs, files in os.walk(tree):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for f in files:
+                names.append(os.path.relpath(os.path.join(root, f), tree))
     out = []
-    for rel in (ln.strip() for ln in r.stdout.split("\n")):
+    for rel in names:
         if not rel:
             continue
         try:

@@ -785,7 +785,15 @@ def _limitgate_verdict(s, payload, now_epoch):
     crossed = min((w.get("crossed_at") or snap.get("captured_at") or now_epoch) for _, w in over)
     try:
         if os.path.getsize(hp) > 0 and os.path.getmtime(hp) >= float(crossed):
-            return True, None
+            with open(hp) as f:
+                head = f.read(200)
+            # THE AUTO HANDOFF DOES NOT SATISFY THIS GATE (#45). It is refreshed at every turn-end,
+            # so accepting it would make this check pass forever without the agent doing anything —
+            # a gate quietly turned vacuous by a safety net added to help it. The generated file is
+            # the FLOOR (a limit death costs at most one turn); the agent's own account of where it
+            # got to is still owed, and only `checkpoint --notes` or a hand-written file provides it.
+            if AUTO_HANDOFF_MARK not in head:
+                return True, None
     except OSError:
         pass
     tool = payload.get("tool_name") or ""
@@ -3336,6 +3344,11 @@ def cmd_stopgate(s, a, payload):
             f.write("\n")
     except OSError:
         pass  # a probe that fails must never take the gate down with it
+    # #45: the handoff is maintained HERE, at every turn-end, rather than demanded at the cliff.
+    # A limit death then costs at most one turn, in any host, with no number to invent.
+    refresh_handoff(s)
+    if (_u := trailing_usage(payload.get("transcript_path"))):
+        logline({"kind": "usage_window", **_u})   # evidence for a future gate; gates nothing today
 
     # Remember where the live transcript is. The gate fires every turn-end, so this is the reliable
     # way `status` can later count the harness's own tool-denials; the watchdog records the same key.
@@ -3875,6 +3888,154 @@ def session_start_warning():
             "  session. (This tracks the PROBE's lifetime, not the hook's — a checkout that fired "
             "before probing",
             "   shipped reads the same until its next start.)"]
+
+
+AUTO_HANDOFF_MARK = "<!-- game_loop:auto -->"
+
+
+def build_handoff(s):
+    """The run's state as a handoff, assembled from what the harness already knows.
+
+    #45's real fix. The usage-limit gate's purpose was never "know the number" -- it was "do not die
+    with your state only in your head". Warning was one way to buy that, and it is the way that
+    depends on a number this host cannot have: rate_limits rides the statusline payload and nothing
+    else, so in an editor session the gauge can never arm.
+
+    So instead of predicting the cliff, never be far from the edge. A handoff refreshed at every
+    turn-end means a limit death costs at most one turn, in ANY host, with no calibration and no
+    configured budget standing for nothing.
+
+    Assembled rather than written: everything here is already recorded, so this cannot go stale the
+    way prose does, and it costs the agent nothing to maintain. WHAT IT IS NOT (INV6): it is not
+    the agent's own account of its reasoning. It says what the run was DOING, not why -- a
+    hand-written handoff is still better, and `checkpoint --notes` is what puts words in this one.
+    """
+    m = s.get("mandate") or {}
+    ph = s.get("phase") or {}
+    lines = [AUTO_HANDOFF_MARK,
+             "# HANDOFF — written automatically at every turn-end",
+             "",
+             f"_Generated {now()} by game_loop. Overwritten each turn; edit `checkpoint --notes` to",
+             "put your own words in it, not this file._",
+             "",
+             "## The job"]
+    lines.append(f"- mandate: {m.get('text') or '(none bound)'}")
+    if ph.get("milestone") or ph.get("doing"):
+        lines.append(f"- phase: {ph.get('milestone') or '?'} · {ph.get('doing') or '?'}")
+    last = None
+    kinds = {"checkpoint": "checkpoint", "mandate_set": "mandate bound",
+             "stepback": "retro", "harden": "hardened", "claim": "claim"}
+    recent = []
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("kind") in kinds:
+                    recent.append(r)
+                    if r.get("kind") == "checkpoint":
+                        last = r
+    except OSError:
+        pass
+    # STATE first, log second. A checkpoint is logged by the Stop gate when it CONSUMES it, and
+    # this runs earlier in the same invocation — so the freshest report is the one still pending in
+    # state, and reading only the log would always be one turn behind.
+    pending = s.get("stop_ok_notes")
+    lines += ["", "## Last reported progress",
+              ("- " + pending) if pending else
+              ("- " + (last.get("notes") or "(no notes)")) if last
+              else "- no checkpoint recorded yet in this checkout"]
+    if recent:
+        lines += ["", "## The last few recorded moves"]
+        for r in recent[-8:]:
+            what = r.get("notes") or r.get("learning") or r.get("assert") or r.get("text") or ""
+            lines.append(f"- {r.get('t', '?')} · {kinds[r['kind']]}: {str(what)[:110]}")
+    pins = shared_pins()
+    if pins:
+        lines += ["", "## Do NOT tidy these away"]
+        lines += [f"- [{p.get('id')}] {p.get('fact')} — {p.get('reason')}" for p in pins]
+    ahead, branch, upstream = ahead_of_upstream()
+    if ahead:
+        lines += ["", f"## Unpushed: {ahead} commit(s) on {branch} not on {upstream}"]
+    lines += ["", "## Where to pick up",
+              "- `./.game_loop/bin/game_loop status` first: it re-injects the invariants, the "
+              "mandate, the pins and the ruled-out list."]
+    return "\n".join(lines) + "\n"
+
+
+def refresh_handoff(s):
+    """Write the handoff, unless a HUMAN-authored one is sitting there.
+
+    A generated file must never overwrite somebody's own words. The marker is how it tells its own
+    output apart from a hand-written file -- absent marker, absent write.
+    """
+    p = handoff_path()
+    try:
+        if os.path.isfile(p):
+            with open(p) as f:
+                if AUTO_HANDOFF_MARK not in f.read(200):
+                    return False        # somebody wrote this by hand; it outranks anything generated
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(build_handoff(s))
+        return True
+    except OSError:
+        return False                    # a handoff that cannot be written must not break the gate
+
+
+_USAGE_TAIL_BYTES = 2 * 1024 * 1024
+
+
+def trailing_usage(transcript_path, window_sec=5 * 3600):
+    """Output tokens recorded in the transcript's trailing window, or None.
+
+    EVIDENCE, GATING NOTHING. There is no honest threshold to compare this against: the raw counts
+    do not map to the account's real limit -- one session showed 1.59M output against 766G
+    cache-read, weighted server-side in ways nothing local can see -- and a limit being hit leaves
+    no trace in any transcript, so it cannot learn the number by watching itself get cut off.
+
+    Recording it anyway is INV4 applied to ourselves: no gate without a logged, observed failure. A
+    threshold invented today would be a number standing for nothing, which is exactly the defect the
+    landed half of #45 fixed. A threshold in a few weeks would be measured.
+
+    Bounded: only the transcript's tail is read, so a long session does not pay for its own history.
+    """
+    if not transcript_path:
+        return None
+    try:
+        with open(transcript_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            start = max(0, f.tell() - _USAGE_TAIL_BYTES)
+            f.seek(start)
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    if start and lines:
+        lines = lines[1:]               # a tail read can slice a line in half
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=window_sec)
+    total, seen = 0, 0
+    for ln in lines:
+        if '"usage"' not in ln:
+            continue
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        u = (r.get("message") or {}).get("usage") or {}
+        ts = r.get("timestamp")
+        if not u or not ts:
+            continue
+        try:
+            when = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when < cutoff:
+            continue
+        total += int(u.get("output_tokens") or 0)
+        seen += 1
+    return {"output_tokens": total, "records": seen, "window_sec": window_sec} if seen else None
 
 
 def update_notice():

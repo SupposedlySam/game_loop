@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_GAME_LOOP = os.path.join(REPO, ".game_loop")
@@ -2760,6 +2761,116 @@ def main():
         check("a recorded firing silences it", "HOOKS NOT LIVE" not in status_with("claude-vscode"))
     finally:
         shutil.rmtree(hp, ignore_errors=True)
+
+    # USAGE-LIMIT INERTNESS (reported: two agents burned to their session limit with no page, no
+    # hard stop, and no restart when the window reset). One cause under all three symptoms: the
+    # snapshot is fed ONLY by the statusline payload — `rate_limits` lives in no hook payload, which
+    # was verified against the shipped CLI binary — and this host renders no terminal statusline, so
+    # the file is never written. limitgate, the park, and the reset ring then all fail open at once.
+    #
+    # Failing open is right (absence of signal is not evidence of headroom). Failing open in SILENCE
+    # is the defect: nothing could tell "plenty of headroom" from "this gate cannot arm".
+    print("usage-limit inertness is announced, not silent:")
+    lp = make_sandbox()
+    try:
+        _limits = os.path.join(lp, ".game_loop", "limits.json")
+        _bin = os.path.join(lp, ".game_loop", "bin", "game_loop")
+
+        def _status(entrypoint="cli"):
+            return subprocess.run([_bin, "status"], capture_output=True, text=True,
+                                  env=_env(lp, sid="sess-lim",
+                                           CLAUDE_CODE_ENTRYPOINT=entrypoint)).stdout
+
+        # The keystone: the tap writes the snapshot even when the payload carries NO windows. That
+        # is what makes "no file" mean "never ran" rather than "ran and had nothing to say" — the
+        # inference the whole diagnosis rests on, so it is asserted rather than assumed.
+        if os.path.exists(_limits):
+            os.remove(_limits)
+        subprocess.run([_bin, "statusline"], input="{}", capture_output=True, text=True,
+                       env=_env(lp, sid="sess-lim"))
+        check("the tap writes a snapshot even for an EMPTY payload — so a missing file proves the "
+              "tap never ran",
+              os.path.isfile(_limits))
+        os.remove(_limits)
+
+        _none = _status()
+        check("no snapshot → the inertness is stated, not left as a missing file",
+              "USAGE-LIMIT PROTECTION IS INERT" in _none)
+        check("...and it names all three gates that are off, not just the file",
+              "no page at the threshold" in _none and "no park at exhaustion" in _none
+              and "no ring when the" in _none)
+        check("...and it no longer reads as a benign not-yet",
+              "fills on the first API response" not in _none)
+        _vs = _status("claude-vscode")
+        check("under the VSCode extension it says UNAVAILABLE rather than pending",
+              "UNAVAILABLE here rather than pending" in _vs and "no terminal statusline" in _vs)
+        check("...and names the host where the tap does fire, since that is the only remedy",
+              "`claude` in a shell" in _vs)
+        check("under any other host the remedy is the wiring, not the host",
+              "statusLine` is registered" in _none and "UNAVAILABLE here" not in _none)
+
+        # A snapshot that exists but carries no windows is JUST AS INERT. For the human waiting on
+        # a page the two are the same event, so they must not report differently.
+        with open(_limits, "w") as f:
+            json.dump({"captured_at": time.time(), "windows": {}}, f)
+        _empty = _status()
+        check("a snapshot with no windows is inert too, and says which cause it is",
+              "USAGE-LIMIT PROTECTION IS INERT" in _empty and "API-key auth" in _empty)
+
+        # PAIRED NEGATIVE (INV8): without this, a build that warned unconditionally would pass every
+        # assertion above. The warning must be ABSENT exactly when the gates can actually arm.
+        with open(_limits, "w") as f:
+            json.dump({"captured_at": time.time(), "windows": {"five_hour": {
+                "used_percentage": 12.0, "resets_at": time.time() + 3600,
+                "crossed_at": None, "notified": False}}}, f)
+        _live = _status()
+        check("a snapshot carrying a real window silences the warning entirely",
+              "USAGE-LIMIT PROTECTION IS INERT" not in _live)
+        check("...and the ordinary limits row is what appears instead",
+              "limits: " in _live and "5h" in _live)
+    finally:
+        shutil.rmtree(lp, ignore_errors=True)
+
+    # THE TAP'S OWN FAILURE, which was the other half of the same silence. The registered command
+    # resolves its own path; the old form discarded stdin and printed nothing when it could not, so
+    # a mis-resolved path exited 0 and wrote no snapshot — identical, from outside, to a healthy tap
+    # feeding healthy gates. A statusline is the one surface guaranteed to be read where one is
+    # rendered, so that is where it now says what is wrong.
+    print("the statusline tap announces its own absence:")
+    import re as _re
+    _isrc = open(os.path.join(REPO, "install.sh")).read()
+    _m = _re.search(r"GL_STATUSLINE = \((.*?)\)\n", _isrc, _re.S)
+    _cmd = "".join(_re.findall(r"'([^']*)'", _m.group(1)))
+    with open(os.path.join(REPO, ".claude", "settings.json")) as f:
+        _wired = json.load(f)["statusLine"]["command"]
+    check("the wired statusLine is the SAME string install.sh ships — so the two cannot drift",
+          _wired == _cmd)
+    check("...and it dispatches through the pin and sets GAME_LOOP_HOME, exactly as the hooks do",
+          ".game_loop_self" in _cmd and "GAME_LOOP_HOME=" in _cmd)
+
+    _tp = make_sandbox()
+    try:
+        def _tap(root):
+            return subprocess.run(["bash", "-c", _cmd], input="{}", capture_output=True, text=True,
+                                  env=_env(root))
+
+        _ok = _tap(_tp)
+        _snap = os.path.join(_tp, ".game_loop", "limits.json")
+        check("with the tap present it RUNS — the snapshot appears and no complaint is printed",
+              os.path.isfile(_snap) and "tap not found" not in _ok.stdout)
+
+        # PAIRED (INV8): move the tap out of reach. Without this arm, the assertion above passes
+        # against a command that can only ever succeed, and the swallow would be invisible again.
+        os.remove(_snap)
+        os.rename(os.path.join(_tp, ".game_loop", "bin", "game_loop"),
+                  os.path.join(_tp, ".game_loop", "bin", "game_loop.moved"))
+        _gone = _tap(_tp)
+        check("with the tap unreachable it SAYS SO rather than exiting 0 in silence",
+              "tap not found" in _gone.stdout and "inert" in _gone.stdout)
+        check("...and it still exits 0 and writes nothing — a statusline must never break the UI",
+              _gone.returncode == 0 and not os.path.exists(_snap))
+    finally:
+        shutil.rmtree(_tp, ignore_errors=True)
 
     # PINNED HARNESS. game_loop dogfoods itself: the hooks guarding a session run the very bin/ that
     # session is editing, so a half-finished gate is live in the same breath it is written. A merge

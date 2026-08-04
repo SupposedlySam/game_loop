@@ -3243,6 +3243,47 @@ def hooks_live_warning():
     return None
 
 
+def limits_inert_warning(snap):
+    """The usage-limit family has exactly ONE source of truth, and it can go missing in silence.
+
+    `rate_limits` is carried by the statusline payload and nothing else — verified against the
+    shipped CLI binary, where the field is built as `(v.five_hour||v.seven_day)&&{rate_limits:v}`
+    beside `context_window` and `vim.mode`, and appears nowhere near `hook_event_name`. So when no
+    snapshot exists, THREE gates fail open at once and none of them says a word: `limitgate` never
+    demands a handoff, the watchdog never parks, and nothing rings the run awake when the window
+    resets. A run can burn to its limit and stop dead while every check reports fine.
+
+    That is the whole reason this speaks. Absence of the snapshot is absence of SIGNAL, never
+    evidence of headroom, and the old status line ("the tap hasn't fired ... it fills on the first
+    API response") read as a benign not-yet — the failure it describes is indistinguishable from
+    success until the limit arrives, which is the one moment nothing can be done about it.
+
+    Returns None only when a snapshot actually carries a window; both "no file" and "file with no
+    windows" are inert and say so, because for the human waiting on a page they are the same thing.
+    """
+    if snap and (snap.get("windows") or {}):
+        return None
+    cost = ("  While this is true: no page at the threshold, no park at exhaustion, and no ring "
+            "when the\n  window resets — a limit will stop the run silently.")
+    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-vscode":
+        return ("⚠ USAGE-LIMIT PROTECTION IS INERT — no limits snapshot, and this host is the "
+                "VSCode\n  extension (CLAUDE_CODE_ENTRYPOINT=claude-vscode), whose UI renders no "
+                "terminal statusline.\n" + cost + "\n"
+                "  → Treat it as UNAVAILABLE here rather than pending. A session run from a "
+                "terminal\n    (`claude` in a shell) does fire the tap; in this window, hand off "
+                "on your own clock.")
+    if snap is None:
+        return ("⚠ USAGE-LIMIT PROTECTION IS INERT — the statusline tap has never fired in this "
+                "checkout,\n  so no snapshot exists.\n" + cost + "\n"
+                "  → Check that `statusLine` is registered in .claude/settings.json (install.sh "
+                "wires it)\n    and that this host renders one. It fills on the first statusline "
+                "refresh.")
+    return ("⚠ USAGE-LIMIT PROTECTION IS INERT — the tap fired, but the payload carried no usage "
+            "windows.\n  That is what API-key auth looks like: limits are exposed to subscription "
+            "sessions only.\n" + cost + "\n"
+            "  → Nothing to fix if this account is API-key based; the gates simply cannot arm.")
+
+
 SESSION_TTL_DAYS = 30
 
 
@@ -4129,13 +4170,12 @@ def cmd_status(s, a):
                 ".game_loop/log.jsonl")
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     snap = load_limits()
-    if snap:
-        lim = limits_summary(snap) or "snapshot present but empty (API-key auth exposes no limits)"
+    lim = limits_summary(snap) if snap else None
+    if lim:
         over = binding_windows(snap, float(limits_cfg()["threshold_pct"]), time.time())
         out("limits: " + lim + ("  ⚠ HANDOFF DUE — the limitgate is closed" if over else ""))
-    else:
-        out("limits: no snapshot — the statusline tap hasn't fired (subscribers only; "
-            "install.sh wires it, then it fills on the first API response)")
+    if (w := limits_inert_warning(snap)):   # says what is OFF, not merely that a file is missing
+        out(w)
     if notify:
         out("notify: " + ("Slack configured — replies readable (bot token)" if notify.can_read_replies()
                           else "Slack configured — send-only (webhook)" if notify.configured()

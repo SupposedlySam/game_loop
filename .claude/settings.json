@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "gl=\"${CLAUDE_PROJECT_DIR:-.}/.game_loop/bin/game_loop\"; if [ -x \"$gl\" ]; then exec \"$gl\" statusline; else cat >/dev/null; fi",
+    "command": "p=\"${CLAUDE_PROJECT_DIR:-.}\"; gl=\"$p/.game_loop_self/.game_loop/bin/game_loop\"; [ -x \"$gl\" ] || gl=\"$p/.game_loop/bin/game_loop\"; if [ -x \"$gl\" ]; then GAME_LOOP_HOME=\"$p/.game_loop\" exec \"$gl\" statusline; else cat >/dev/null; echo \"\ud83c\udfae game_loop: statusline tap not found \u2014 usage-limit gates are inert\"; fi",
     "refreshInterval": 60
   },
   "hooks": {

@@ -185,6 +185,14 @@ MUTANTS = [
      # that dies. What is thin is the other side: one assertion carries the entire message, so its
      # content — both shas, the re-install command — rests on a single string match.
      "its silences are properly paired; the MESSAGE rests on one assertion, and that is the gap", 1),
+    ("limits_inert_warning -> never announces that the limit gates are inert",
+     "limits_inert_warning", "    return None\n",
+     ["limit", "inert", "snapshot", "tap"],
+     # Measured at 6 against a baseline of 480. The paired negative — "a real window silences the
+     # warning entirely" — correctly does NOT flip here: neutering to `return None` makes the
+     # producer silent everywhere, which is the arm that assertion already permits. That is the
+     # pairing behaving as designed rather than a hole, and it is why the count is 6 and not 7.
+     None, 6),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

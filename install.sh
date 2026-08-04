@@ -370,8 +370,15 @@ print("  merged  .claude/settings.json (PreToolUse guard + limitgate + Stop gate
 # The statusline is the ONLY place Claude Code exposes subscription rate limits, so it is the tap
 # that feeds the limitgate and the watchdog's limit-park. Set it only when the project has none —
 # a statusline is the user's front yard, and clobbering theirs to install a tap earns a rip-out.
-GL_STATUSLINE = ('gl="${CLAUDE_PROJECT_DIR:-.}/.game_loop/bin/game_loop"; '
-                 'if [ -x "$gl" ]; then exec "$gl" statusline; else cat >/dev/null; fi')
+# Prefers a pinned checkout exactly as the hooks do, and — where it cannot find the tap at all —
+# SAYS SO in the one place a statusline is guaranteed to be read. The old `else cat >/dev/null`
+# exited 0, printed nothing and wrote nothing, so a mis-resolved path was indistinguishable from a
+# healthy tap; the usage-limit gates it feeds all fail open, and would have done it in silence.
+GL_STATUSLINE = ('p="${CLAUDE_PROJECT_DIR:-.}"; gl="$p/.game_loop_self/.game_loop/bin/game_loop"; '
+                 '[ -x "$gl" ] || gl="$p/.game_loop/bin/game_loop"; '
+                 'if [ -x "$gl" ]; then GAME_LOOP_HOME="$p/.game_loop" exec "$gl" statusline; '
+                 'else cat >/dev/null; '
+                 'echo "🎮 game_loop: statusline tap not found — usage-limit gates are inert"; fi')
 sl = settings.get("statusLine")
 if not sl:
     settings["statusLine"] = {"type": "command", "command": GL_STATUSLINE, "refreshInterval": 60}

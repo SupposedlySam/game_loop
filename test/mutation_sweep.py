@@ -144,17 +144,17 @@ def verdict(killed):
 #  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
-    ("unpushed_warning -> never warns", "unpushed_warning", "    return None\n",
+    ("unpushed_warning -> never warns", ".game_loop/bin/game_loop::unpushed_warning", "    return None\n",
      ["unpushed", "upstream", "quiet"], None, 7),
-    ("fix_warning -> never warns", "fix_warning", "    return None\n",
+    ("fix_warning -> never warns", ".game_loop/bin/game_loop::fix_warning", "    return None\n",
      ["fix", "quiet", "silence"], None, 9),
-    ("category_tell -> never detects", "category_tell", "    return None\n",
+    ("category_tell -> never detects", ".game_loop/bin/game_loop::category_tell", "    return None\n",
      ["nudge", "category", "scope"], None, 4),
-    ("aggregate_tell -> never detects", "aggregate_tell", "    return None\n",
+    ("aggregate_tell -> never detects", ".game_loop/bin/game_loop::aggregate_tell", "    return None\n",
      ["nudge", "aggregate", "sum"], None, 7),
-    ("dominance -> never finds an outlier", "dominance", "    return None\n",
+    ("dominance -> never finds an outlier", ".game_loop/bin/game_loop::dominance", "    return None\n",
      ["dominan", "distribution", "spread", "event"], None, 10),
-    ("ruled_out -> finds no refutations", "ruled_out", "    return []\n",
+    ("ruled_out -> finds no refutations", ".game_loop/bin/game_loop::ruled_out", "    return []\n",
      ["ruled", "refut"],
      # KNOWN GAP, not a decision. Its survivors all belong to the WRITE side (`--outcome refuted`
      # refusing prose evidence, the log entry) which is separately and well covered; ruled_out() is
@@ -166,11 +166,11 @@ MUTANTS = [
     # was looking at something else, which is the denylist argument stated as history rather than as
     # a principle — they are here because the enumeration named them, not because anyone suspected
     # them. Their floors were MEASURED against this HEAD, not chosen.
-    ("hooks_live_warning -> never warns", "hooks_live_warning", "    return None\n",
+    ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
-    ("config_paths_report -> reports no keyed path", "config_paths_report", "    return []\n",
+    ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",
      ["config path", "tracked", "write root", "tilde", "read_roots"], None, 12),
-    ("worktree_report -> prints no worktree block", "worktree_report", "    return []\n",
+    ("worktree_report -> prints no worktree block", ".game_loop/bin/game_loop::worktree_report", "    return []\n",
      ["worktree", "drift", "rules"],
      # KNOWN GAP. #30's coverage went almost entirely to `worktree --porcelain`, which reads
      # worktree_drift() — a DIFFERENT producer — so the STATUS block this renders is asserted twice
@@ -178,7 +178,7 @@ MUTANTS = [
      # line and the "NOT compared" reach statement can all vanish unnoticed. Fixing it means
      # asserting the matched and unreadable arms of the block, not deleting this note.
      "coverage went to `worktree --porcelain` (a different producer); the status block has two", 2),
-    ("update_notice -> never announces an update", "update_notice", "    return None\n",
+    ("update_notice -> never announces an update", ".game_loop/bin/game_loop::update_notice", "    return None\n",
      ["update", "newer", "sha", "version"],
      # Thin, and defensibly so — but say which. Its two silences ("update_check:false silences the
      # notice", "no VERSION → silent") are real restraint assertions and they DO have a companion
@@ -186,27 +186,27 @@ MUTANTS = [
      # content — both shas, the re-install command — rests on a single string match.
      "its silences are properly paired; the MESSAGE rests on one assertion, and that is the gap", 1),
     ("limits_inert_warning -> never announces that the limit gates are inert",
-     "limits_inert_warning", "    return None\n",
+     ".game_loop/bin/game_loop::limits_inert_warning", "    return None\n",
      ["limit", "inert", "snapshot", "tap"],
      # Measured at 6 against a baseline of 480. The paired negative — "a real window silences the
      # warning entirely" — correctly does NOT flip here: neutering to `return None` makes the
      # producer silent everywhere, which is the arm that assertion already permits. That is the
      # pairing behaving as designed rather than a hole, and it is why the count is 6 and not 7.
      None, 6),
-    ("fire_triggers -> a project's attachments never run", "fire_triggers", "    return []\n",
+    ("fire_triggers -> a project's attachments never run", ".game_loop/bin/game_loop::fire_triggers", "    return []\n",
      ["trigger", "attach", "harden", "stepback"], None, 9),
-    ("triggers_report -> status never mentions an attachment", "triggers_report",
+    ("triggers_report -> status never mentions an attachment", ".game_loop/bin/game_loop::triggers_report",
      "    return []\n", ["trigger", "attach", "never fired"],
      # Measured at 2 when first written, and that was the whole warning: the two assertions were the
      # never-fired pair, so the THIRD state — fires every time and fails every time — was invisible,
      # which is the one a never-fired warning is silent about. Adding it took this to 4.
      None, 4),
-    ("retro_outcome -> a retro never reports what the last one yielded", "retro_outcome",
+    ("retro_outcome -> a retro never reports what the last one yielded", ".game_loop/bin/game_loop::retro_outcome",
      "    return []\n", ["retro", "yield", "harden"],
      # Also 2 at first, both about hardens. A chapter can be all evidence and no encoding, and the
      # ledger has to show that SHAPE rather than one number, so the claims/triggers arm was added.
      None, 3),
-    ("working_tree_report -> never says you are in a different tree", "working_tree_report",
+    ("working_tree_report -> never says you are in a different tree", ".game_loop/bin/game_loop::working_tree_report",
      "    return []\n", ["worktree", "tree", "harness answers"], None, 3),
 ]
 
@@ -229,53 +229,53 @@ NOT_SWEPT = {
     # is a mechanical outcome, not a verdict about the project. Each is swept through the producer
     # that calls it — the config-paths block already asserts BOTH arms in one observation ("a
     # failing git degrades to silence" beside "the same config on a working git DOES warn").
-    "_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
+    ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
             "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
             "git-failed arm beside the git-worked one",
-    "_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
+    ".game_loop/bin/game_loop::_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
                 "mechanical outcome. Its callers are attribution_tree, merge_files and "
                 "cmd_attribute, which turn every one of those Nones into a STATED refusal that "
                 "`game_loop attribute` is asserted on; none of them can report by silence",
-    "_git_sha": "pure git helper — None is 'no HEAD here'. Its two callers are running_version and "
+    ".game_loop/bin/game_loop::_git_sha": "pure git helper — None is 'no HEAD here'. Its two callers are running_version and "
                 "pinned_report, and pinned_report's own entry below is the honest one to read: "
                 "sweeping THAT would sweep this, and it has not been done yet",
-    "_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
+    ".game_loop/bin/game_loop::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
             "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
 
     # --- EXCLUDED: the "nothing" is the LOUD direction. These resolvers refuse by returning None,
     # and the refusal is a die() in the caller that the suite asserts many times over. Neutering
     # them makes every claim refuse — noisy, not silent. The silent failure here is the INVERSE
     # (resolving a path it should not), and that mutation is outside this sweep's shape (INV6).
-    "resolve_read": "its None is the REFUSAL, and the refusal is loud — `claim --read` dies on it "
+    ".game_loop/bin/game_loop::resolve_read": "its None is the REFUSAL, and the refusal is loud — `claim --read` dies on it "
                     "and that death is asserted repeatedly. The silent direction is the inverse "
                     "(resolving what it should not), which is the mutation this sweep cannot make",
-    "resolve_env": "same as resolve_read, for a pin's anchor: None makes the command die, which is "
+    ".game_loop/bin/game_loop::resolve_env": "same as resolve_read, for a pin's anchor: None makes the command die, which is "
                    "asserted; the dangerous direction is accepting an anchor that does not exist",
 
     # --- EXCLUDED: loaders and normalizers. Their "nothing" is a state the caller branches on, not
     # a report that was withheld.
-    "sanitize_session": "a normalizer, not a detector — None means 'not a usable session id' and "
+    ".game_loop/bin/game_loop::sanitize_session": "a normalizer, not a detector — None means 'not a usable session id' and "
                         "the caller branches to repo-global state. Neutering it changes WHICH "
                         "state file is used, which fails loudly across the session-scoping tests",
-    "load_limits": "a loader — None is 'no limits file yet', the ordinary first-run state, and the "
+    ".game_loop/bin/game_loop::load_limits": "a loader — None is 'no limits file yet', the ordinary first-run state, and the "
                    "callers already treat it as empty ((load_limits() or {}))",
-    "installed_version": "a loader — None is 'no VERSION file', which is documented as the "
+    ".game_loop/bin/game_loop::installed_version": "a loader — None is 'no VERSION file', which is documented as the "
                          "game_loop source repo's own state. The producer that turns this into a "
                          "verdict is update_notice, and that IS swept",
-    "_scan_text": "None is a STATED skip ('too big to grep'), not a finding withheld; --expect "
+    ".game_loop/bin/game_loop::_scan_text": "None is a STATED skip ('too big to grep'), not a finding withheld; --expect "
                   "reports UNCHECKED rather than ✓ when it gets nothing, and that is asserted",
 
     # --- EXCLUDED: a formatter whose silence is configured, and helpers of producers now swept.
-    "flair_lines": "a formatter, and its empty list is a configured opt-out (no flair module) "
+    ".game_loop/bin/game_loop::flair_lines": "a formatter, and its empty list is a configured opt-out (no flair module) "
                    "rather than a verdict about anything. Silence here is the shipped default",
-    "_home_keyed": "helper of config_paths_report — its None is 'not under anyone's home', the "
+    ".game_loop/bin/game_loop::_home_keyed": "helper of config_paths_report — its None is 'not under anyone's home', the "
                    "ordinary case for every entry. config_paths_report is a MUTANTS entry and "
                    "sweeps both of this helper's arms",
-    "main_checkout": "helper of worktree_drift — its None is 'this IS the main checkout', the "
+    ".game_loop/bin/game_loop::main_checkout": "helper of worktree_drift — its None is 'this IS the main checkout', the "
                      "ordinary case. worktree_report is a MUTANTS entry",
-    "_same_bytes": "helper of worktree_drift — its None is UNREADABLE, which worktree_report turns "
+    ".game_loop/bin/game_loop::_same_bytes": "helper of worktree_drift — its None is UNREADABLE, which worktree_report turns "
                    "into an explicit UNKNOWN line rather than 'matching'; swept there",
-    "admit_distribution": "its verdict is delivered by die(), not by this return value — the "
+    ".game_loop/bin/game_loop::admit_distribution": "its verdict is delivered by die(), not by this return value — the "
                           "return is the record it writes afterwards. Neutering the body deletes "
                           "those refusals and would re-measure the dominance gate, which already "
                           "has its own MUTANTS entry",
@@ -283,37 +283,99 @@ NOT_SWEPT = {
     # --- KNOWN GAPS. Real producers. Should be swept. Are not, and the reason is cost, not merit:
     # each MUTANTS entry is one full suite run (~1 min), and this change spent its budget on the
     # four report producers that were actually found weak. These are the queue, in this order.
-    "retro_nudge": "KNOWN GAP, and the sharp kind. A real nudge producer, category_tell's exact "
-                   "shape. MEASURED at 0 kills against this HEAD: nothing in the suite notices if "
-                   "the retro nudge stops firing. It is not listed above only because a standing "
-                   "UNPROTECTED entry makes the sweep exit 1 with no path to green (INV5), and the "
-                   "fix is an assertion this change did not write. Write it, then move this up",
-    "legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
+    ".game_loop/bin/game_loop::retro_nudge": "KNOWN GAP still, but the REASON has changed and the "
+                   "old one would now be false. It was measured at 0 kills and the note said the "
+                   "remedy was an assertion nobody had written. That assertion now exists: the nudge "
+                   "turned out to be ARITHMETICALLY UNREACHABLE — it counted a verb that had run once "
+                   "in the entire log against a threshold of 12 — and the fix carries paired tests "
+                   "that fire it from a second counter with zero transitions. So it is no longer "
+                   "unasserted; it is owed a RE-measure, and no floor may be recorded until that runs",
+    ".game_loop/bin/game_loop::legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
                               "warning producer of unpushed_warning's shape, MEASURED at 0 kills "
                               "against this HEAD — the legacy-mandate warning can stop firing and "
                               "this suite says nothing. Owed an assertion, then a MUTANTS entry",
-    "pinned_report": "KNOWN GAP. A real report producer (the PINNED CODE block) whose empty list "
+    ".game_loop/bin/game_loop::pinned_report": "KNOWN GAP. A real report producer (the PINNED CODE block) whose empty list "
                      "is the common path, which is precisely the silence-on-pass shape. Left out "
                      "for run time; it should be swept",
-    "metric_movement": "KNOWN GAP. A real detector — 'has this metric moved, and by how much' — "
+    ".game_loop/bin/game_loop::metric_movement": "KNOWN GAP. A real detector — 'has this metric moved, and by how much' — "
                        "and its None is a non-event that several commands print around. Left out "
                        "for run time; it should be swept",
     # --- FOUND ONLY BY THE SECOND SIGNATURE. Both were invisible while the discriminator looked
     # for a literal empty return, which is why the accounting read "0 unaccounted" over a short
     # denominator. Neither is excluded on merit; both are queued.
-    "binding_windows": "KNOWN GAP, and the sharpest one here. It decides which usage windows are "
+    ".game_loop/bin/game_loop::binding_windows": "KNOWN GAP, and the sharpest one here. It decides which usage windows are "
                        "BINDING, and an always-empty return means no window ever binds — the "
                        "limitgate stops firing and a run sails into an exhausted limit with no "
                        "handoff written, silently. Exactly the shape this file distrusts, and it "
                        "was invisible to the first signature. Owed an assertion, then a MUTANTS "
                        "entry, ahead of the other gaps",
-    "parse_events": "KNOWN GAP. Parses the per-event distribution behind the dominance refusal "
+    ".game_loop/bin/game_loop::parse_events": "KNOWN GAP. Parses the per-event distribution behind the dominance refusal "
                     "(INV7). An always-empty return means no distribution is ever seen, so the "
                     "one-event-dominates check cannot fire. `dominance` IS swept and would catch "
                     "some of this, but not a parse that silently yields nothing",
-    "_asked_the_user": "KNOWN GAP. A real detector whose False is a non-event ('this turn did not "
+    ".game_loop/bin/game_loop::_asked_the_user": "KNOWN GAP. A real detector whose False is a non-event ('this turn did not "
                        "ask the user'), which is the shape this file exists to distrust. Left out "
                        "for run time; it should be swept",
+
+    # ── THE MEASURING INSTRUMENT ITSELF ─────────────────────────────────────────────────────────
+    # Now that the denominator is every source file (#44), the suite and this sweep are inside it.
+    # They are excluded on ONE shared ground, and it is not "they are only tests": neutering the
+    # instrument does not make a measurement safe, it makes the measurement MEANINGLESS. Every
+    # assertion flips because none of them ran, and the count reads as perfect coverage of
+    # something nobody exercised.
+    #
+    # DECLARED out-of-scope rather than left absent, which is the whole argument of the chain this
+    # closes: "not mine to test" and "never noticed" produce the same empty result, and only one of
+    # them is a decision.
+    "test/run.py::main":
+        "the suite's own entrypoint. Neutered, no assertion runs at all, so the entire baseline "
+        "flips and the number measures the mutation of the ruler rather than of any producer.",
+    "test/run.py::atattributed":
+        "a helper inside the suite, reached only from main() — same ground: mutating the instrument "
+        "voids the reading instead of testing anything.",
+    "test/mutation_sweep.py::all_candidates":
+        "the accountant inside its own denominator. Neutered it returns NO candidates, so the "
+        "coverage gate passes trivially over an empty set — the exact short-denominator failure "
+        "this file exists to catch, self-inflicted.",
+
+    # ── THE OTHER FOUR SCRIPTS (#44) ────────────────────────────────────────────────────────────
+    # These were never excluded; they were ABSENT. The sweep parsed one file of five and reported
+    # "0 unaccounted", and the number was true about a set that had quietly stopped containing them.
+    # They are now inside the denominator and each carries a decision.
+    #
+    # Every one is a KNOWN GAP rather than a genuine exclusion, and the run prints them as such.
+    # They are NOT measured yet: a first sweep of the ten stalled — at least one of these
+    # mutations hangs the suite rather than failing it, which is its own finding and has to be
+    # chased before a floor recorded here would mean anything. Recording an unmeasured floor would
+    # be the exact target-making this file's header warns about.
+    ".game_loop/bin/verify::owed":
+        "KNOWN GAP — the one that matters most. An always-empty return means NOTHING OWES A CHECK, "
+        "so `verify --check` reports clean and the commit gate passes everything: issue #25's "
+        "failure verbatim, in the function that decides it. Owed a sweep and an assertion.",
+    ".game_loop/bin/watchdog::exhausted_windows":
+        "KNOWN GAP — an always-empty means no usage window is ever exhausted, so the run never "
+        "parks and never rings itself awake at the reset. Same consequence as binding_windows, in "
+        "the other half of the same feature, and #45 just showed what that costs in practice.",
+    ".game_loop/bin/watchdog::superseded":
+        "KNOWN GAP — a non-event several ring decisions branch on; an always-None makes the "
+        "watchdog believe no newer run has taken over.",
+    ".game_loop/bin/notify.py::replies":
+        "KNOWN GAP — same shape: an always-empty reads as 'the human has said nothing'.",
+    ".game_loop/bin/notify.py::send":
+        "KNOWN GAP — a send that silently does nothing is indistinguishable from one nobody "
+        "answered, which is the whole failure mode of paging.",
+    ".game_loop/bin/verify::changed_files":
+        "KNOWN GAP — feeds owed(); an empty return reaches the same end by a different road.",
+    ".game_loop/bin/verify::staged_files":
+        "KNOWN GAP — an empty staged set makes every blast-radius question answer 'nothing'.",
+    ".game_loop/bin/watchdog::claim_pidfile":
+        "KNOWN GAP — its falsy return is a real branch (another watchdog holds the pidfile).",
+    ".game_loop/bin/watchdog::limits_snapshot":
+        "KNOWN GAP — an always-None is exactly the state #45 found in the wild, so the mutation "
+        "and the live defect are the same thing; worth a sweep precisely because it HAPPENED.",
+    ".game_loop/bin/watchdog::transcript_size":
+        "KNOWN GAP — an always-None makes idleness unmeasurable, so the watchdog cannot tell a "
+        "parked run from a working one.",
 }
 
 
@@ -380,12 +442,66 @@ def candidates(src):
     return sorted(found)
 
 
-def unaccounted(src, mutants=None, not_swept=None):
+# A DECLARATION, not merely "it parses": ast.parse accepts JSON and YAML, which are valid Python
+# expressions, so "parses as Python" pulled in settings.json, config.json and two templates — four
+# config files in a seven-item list, and a list that is mostly noise is one people learn to skim.
+SOURCE_DECLARES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
+
+
+def source_files(tree=None):
+    """Every TRACKED file that is Python source, asked of git rather than enumerated here.
+
+    Asking git is the point. Links 1-6 of this chain were all the same mistake — a list maintained
+    by hand, complete on the day it was written — so the set has to come from a source of truth that
+    changes when the repo does. A `*.py` glob is the other wrong answer: `game_loop`, `verify` and
+    `watchdog` have no extension, and they hold the producers that matter most. Gating on
+    extension-or-shebang instead would silently skip a Python file that has neither.
+    """
+    tree = tree or REPO
+    r = subprocess.run(["git", "-C", tree, "ls-files"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return [BIN]                      # no git: fall back to the one file, and say nothing false
+    out = []
+    for rel in (ln.strip() for ln in r.stdout.split("\n")):
+        if not rel:
+            continue
+        try:
+            with open(os.path.join(tree, rel)) as f:
+                mod = ast.parse(f.read())
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+            continue
+        if any(isinstance(n, SOURCE_DECLARES) for n in mod.body):
+            out.append(rel)
+    return sorted(out)
+
+
+def all_candidates(tree=None):
+    """{"<relpath>::<name>": (relpath, name)} across every source file.
+
+    Keys are QUALIFIED BY FILE deliberately. A bare-name namespace cannot tell two implementations
+    of one name apart — link 4 of this chain, found by a consumer whose two classes both defined the
+    same method — and it would silently merge them into one decision.
+    """
+    tree = tree or REPO
+    found = {}
+    for rel in source_files(tree):
+        try:
+            with open(os.path.join(tree, rel)) as f:
+                src = f.read()
+        except OSError:
+            continue
+        for name in candidates(src):
+            found[f"{rel}::{name}"] = (rel, name)
+    return found
+
+
+def unaccounted(found=None, mutants=None, not_swept=None):
     """Candidates that are neither swept nor explicitly excluded — the default-deny failure."""
+    found = all_candidates() if found is None else found
     mutants = MUTANTS if mutants is None else mutants
     not_swept = NOT_SWEPT if not_swept is None else not_swept
     decided = {m[1] for m in mutants} | set(not_swept)
-    return [n for n in candidates(src) if n not in decided]
+    return sorted(k for k in found if k not in decided)
 
 
 def unreasoned(not_swept=None):
@@ -403,21 +519,23 @@ def decided_twice(mutants=None, not_swept=None):
     return sorted({m[1] for m in mutants} & set(not_swept))
 
 
-def coverage_gate(src, out=print):
-    """Default-deny over the producers in `src`. Returns an exit code, and says what to do.
+def coverage_gate(found=None, out=print):
+    """Default-deny over the producers in EVERY source file. Returns an exit code, and says what.
 
     Runs BEFORE the mutation runs, deliberately. This is a list-hygiene failure fixable in one line,
     and making somebody wait out a full sweep to be told about it is how a check earns a --skip.
     """
+    found = all_candidates() if found is None else found
     contradictions, blank = decided_twice(), unreasoned()
-    orphans = unaccounted(src)
+    orphans = unaccounted(found)
     # An exclusion that outlives the function it excused is the denylist bug returning by the side
     # door: the name stays decided forever while nothing it referred to is in the script any more.
-    stale = sorted(set(NOT_SWEPT) - set(candidates(src)))
+    stale = sorted(set(NOT_SWEPT) - set(found))
     if not (orphans or contradictions or blank or stale):
         return 0
     if orphans:
-        out(f"UNACCOUNTED PRODUCERS — {len(orphans)} function(s) in {BIN} can return a finding or a")
+        out(f"UNACCOUNTED PRODUCERS — {len(orphans)} function(s) across "
+            f"{len({k.split('::')[0] for k in found})} source file(s) can return a finding or a")
         out("nothing, and this sweep has no position on any of them: "
             + " · ".join(orphans))
         out("That is the denylist failure this file's own header argues against. Decide about each:")
@@ -428,7 +546,7 @@ def coverage_gate(src, out=print):
     for n in blank:
         out(f"EXCLUDED WITHOUT A REASON — NOT_SWEPT[{n!r}] is blank. The reason is the deliverable.")
     for n in stale:
-        out(f"STALE EXCLUSION — NOT_SWEPT[{n!r}] names nothing {BIN} still produces. Renamed, or "
+        out(f"STALE EXCLUSION — NOT_SWEPT[{n!r}] names nothing this repo still produces. Renamed, or "
             "gone: either way the exclusion now excuses a function nobody can read.")
     return 1
 
@@ -458,16 +576,18 @@ def passing(out):
 def main():
     base = tempfile.mkdtemp(prefix="sweep-base-")
     subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {base}", shell=True, check=True)
-    with open(os.path.join(base, BIN)) as f:
-        original = f.read()
+    found = all_candidates(base)
 
     # Default-deny first, and before the slow part: a producer nobody decided about is the case
     # this file exists for, and it is answerable in one line rather than in ten minutes.
-    if coverage_gate(original):
+    if coverage_gate(found):
         shutil.rmtree(base, ignore_errors=True)
         return 1
-    print(f"{len(candidates(original))} candidate producers in {BIN}: "
-          f"{len(MUTANTS)} swept, {len(NOT_SWEPT)} excluded with a reason, 0 undecided.\n")
+    files = sorted({k.split("::")[0] for k in found})
+    print(f"{len(found)} candidate producers across {len(files)} source file(s): "
+          f"{len(MUTANTS)} swept, {len(NOT_SWEPT)} excluded with a reason, 0 undecided.")
+    print("  " + " · ".join(f"{f} ({sum(1 for k in found if k.startswith(f + '::'))})"
+                            for f in files) + "\n")
 
     print("producer mutation sweep — assertions that SURVIVE a neutered producer")
     print(f"(the tree under test is HEAD, not the working copy; thin under {THIN_AT} kills, "
@@ -477,25 +597,33 @@ def main():
     print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
 
     verdicts = []
-    for label, fn, body, marks, thin_note, floor in MUTANTS:
+    for label, key, body, marks, thin_note, floor in MUTANTS:
+        rel, fn = key.split("::", 1)
         t = tempfile.mkdtemp(prefix="sweep-")
         try:
-            mutated, found = neuter(original, fn, body)
-            if not found:
+            try:
+                with open(os.path.join(base, rel)) as f:
+                    original = f.read()
+            except OSError:
+                print(f"  !! {key}: {rel} is not in the tree under test. Nothing was swept.\n")
+                verdicts.append((key, None, UNPROTECTED, floor))
+                continue
+            mutated, hit = neuter(original, fn, body)
+            if not hit:
                 # Not a skip. A producer named here that no longer exists is zero evidence about
                 # zero code, and a sweep that shrugs at that is a check that cannot fail.
-                print(f"  !! {fn}: NOT FOUND in {BIN} — renamed, or gone. Nothing was swept.\n")
-                verdicts.append((fn, None, UNPROTECTED, floor))   # 4-wide: the tallies unpack it
+                print(f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. Nothing was swept.\n")
+                verdicts.append((key, None, UNPROTECTED, floor))  # 4-wide: the tallies unpack it
                 continue
             shutil.copytree(base, t, dirs_exist_ok=True)
-            with open(os.path.join(t, BIN), "w") as f:
+            with open(os.path.join(t, rel), "w") as f:
                 f.write(mutated)
-            os.chmod(os.path.join(t, BIN), 0o755)
+            os.chmod(os.path.join(t, rel), 0o755)
             out = run(t)
             still = set(passing(out))
             killed = len(baseline - still)
             v = verdict(killed)
-            verdicts.append((fn, killed, v, floor))
+            verdicts.append((key, killed, v, floor))
             tail = out.strip().split("\n")[-1]
             drift = "  ↓ BELOW FLOOR" if killed < floor else ""
             print(f"{label}\n  suite: {tail}\n  killed: {killed}   [{v}]"
@@ -517,6 +645,13 @@ def main():
     # quietly: re-record it WITH the reason, the way ruled_out's thinness carries its own.
     drifted = [f"{fn} ({k} < {fl})" for fn, k, v, fl in verdicts
                if k is not None and k < fl]
+    # KNOWN GAPS are declared, not silent. NOT_SWEPT holds two kinds of entry — a genuine exclusion
+    # and a DEBT — and printing only the first kind turns the debt into a denylist with extra steps:
+    # decided once, then never read again. The run says how much is owed, every time.
+    gaps = sorted(k for k, why in NOT_SWEPT.items() if (why or "").strip().startswith("KNOWN GAP"))
+    if gaps:
+        print(f"KNOWN GAPS — declared, NOT swept ({len(gaps)}): " + " · ".join(gaps))
+        print("Each should be swept and is not yet, with its reason recorded beside it.")
     if thin:
         print("THIN — reported, not fatal: " + " · ".join(thin))
     if drifted:

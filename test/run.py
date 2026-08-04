@@ -3457,10 +3457,20 @@ def main():
     # neuter() would not find it, the entry would report nothing, and the count would look fine.
     with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
         gl_src = f.read()
+    # Keys are "<relpath>::<name>" now (#44): the denominator is every source file, not one, and a
+    # bare-name namespace could not tell two implementations of one name apart.
+    def _mut_src(key):
+        with open(os.path.join(REPO, key.split("::")[0])) as f:
+            return f.read()
+
     missing = [m[1] for m in sweep.MUTANTS
-               if not sweep.neuter(gl_src, m[1], "    pass\n")[1]]
-    check("every producer the sweep names still exists in the real script — no silent no-op entry",
+               if not sweep.neuter(_mut_src(m[1]), m[1].split("::")[1], "    pass\n")[1]]
+    check("every producer the sweep names still exists in the file it names — no silent no-op entry",
           not missing)
+    check("...and every entry is FILE-QUALIFIED, so one name in two files cannot collapse into one "
+          "decision",
+          all("::" in m[1] for m in sweep.MUTANTS)
+          and all("::" in k for k in sweep.NOT_SWEPT))
     # Every entry must carry a recorded FLOOR, or its count is prose again: the sweep compares
     # against it and fails on a drop, which is the difference between a number that is checked and
     # one that is merely written down. Indexing rather than unpacking above, so adding a field to
@@ -3618,12 +3628,12 @@ def main():
     # run, not be quietly absent from it. Checked in BOTH directions in one observation, because "the
     # gate passed" and "the gate is dead" produce the same output.
     said = []
-    orphaned = gl_src + ("\n\ndef gl_test_undecided_producer(x):\n"
-                         "    if x:\n"
-                         "        return 'a finding'\n"
-                         "    return None\n")
+    real_found = sweep.all_candidates()
+    orphaned = dict(real_found)
+    orphaned[".game_loop/bin/game_loop::gl_test_undecided_producer"] = (
+        ".game_loop/bin/game_loop", "gl_test_undecided_producer")
     rc_bad = sweep.coverage_gate(orphaned, out=said.append)
-    rc_good = sweep.coverage_gate(gl_src, out=said.append)
+    rc_good = sweep.coverage_gate(real_found, out=said.append)
     check("a candidate in neither MUTANTS nor NOT_SWEPT fails the sweep and is NAMED in the "
           "refusal — while the real script, fully decided, passes the same gate",
           rc_bad == 1 and rc_good == 0
@@ -3649,12 +3659,37 @@ def main():
     # door: the name stays decided forever while the function it excused is gone. Driven through the
     # gate against a script those names have LEFT, so the clean answer above is a verdict.
     stale_said = []
-    rc_stale = sweep.coverage_gate("def cannot_decline(x):\n    return 1\n",
-                                   out=stale_said.append)
-    check("every excluded name is a producer the script still HAS — and the same gate refuses a "
-          "script they have left, naming the stale exclusion",
-          set(sweep.NOT_SWEPT) <= set(real_cands) and rc_good == 0
+    rc_stale = sweep.coverage_gate({}, out=stale_said.append)     # a tree those names have LEFT
+    check("every excluded name is a producer the repo still HAS — and the same gate refuses a "
+          "tree they have left, naming the stale exclusion",
+          set(sweep.NOT_SWEPT) <= set(real_found) and rc_good == 0
           and rc_stale == 1 and any("STALE EXCLUSION" in ln for ln in stale_said))
+
+    # #44 — THE DENOMINATOR. Every fix in this chain made the accounting read COMPLETE while the gap
+    # moved one level further out; this link was the FILE LIST, which was one file of five. The set
+    # now comes from git rather than from anyone's memory.
+    _srcs = sweep.source_files()
+    check("the source set is asked of git and spans the whole repo, not one file",
+          len(_srcs) > 1 and ".game_loop/bin/game_loop" in _srcs)
+    check("...including the EXTENSIONLESS scripts, which a *.py glob would have missed entirely — "
+          "and they hold the producers that matter most",
+          {".game_loop/bin/verify", ".game_loop/bin/watchdog"} <= set(_srcs))
+    check("...while config that merely PARSES as Python is excluded: ast.parse accepts JSON and "
+          "YAML, so 'it parses' over-includes and a list that is mostly noise gets skimmed",
+          not any(f.endswith((".json", ".yaml", ".yml")) for f in _srcs))
+    check("...and the producers this issue named are now IN the denominator rather than absent",
+          {".game_loop/bin/verify::owed",
+           ".game_loop/bin/watchdog::exhausted_windows"} <= set(real_found))
+    # The regression this closes: a NEW source file arriving with an undecided producer must fail
+    # the run rather than be quietly outside the count.
+    _newfile = dict(real_found)
+    _newfile["tools/newly_added.py::reports_or_declines"] = ("tools/newly_added.py",
+                                                             "reports_or_declines")
+    _nf_said = []
+    check("a producer in a file nobody has swept yet fails the gate and is NAMED, so a new script "
+          "cannot arrive silently outside the denominator",
+          sweep.coverage_gate(_newfile, out=_nf_said.append) == 1
+          and any("tools/newly_added.py::reports_or_declines" in ln for ln in _nf_said))
 
     # The owning agent runs the harness it would SHIP, not the one it is editing: every game_loop
     # hook prefers a pinned checkout when one exists and falls back to the repo's own bin/ when it

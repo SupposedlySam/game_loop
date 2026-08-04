@@ -76,6 +76,36 @@ def gl(proj, *args, stdin=None, sid=None):
                           input=stdin, capture_output=True, text=True, env=_env(sid=sid))
 
 
+# The watchdog can legitimately BLOCK FOREVER: poll_slack_replies is a `while True:` whose exits all
+# wait on a reply arriving, on the arm going away, or on a newer watchdog superseding it. That is
+# right in production — a human who has not answered still holds the ball — and wrong for a test,
+# which has no bound of its own. Neutering notify.replies made the suite HANG rather than fail: the
+# 300s cap was hit, the whole baseline reported as killed because no assertion finished, and from
+# outside it was indistinguishable from a slow machine (#50).
+#
+# So the TEST is bounded and the product loop is left alone. A timeout comes back as a result with a
+# named failure rather than as silence.
+WATCHDOG_TIMEOUT_SEC = 30
+
+
+class _TimedOut:
+    """A bounded run that did not finish. Shaped like a CompletedProcess so callers read the same,
+    and deliberately NOT returncode 2 — a hang must never satisfy an assertion about a ring."""
+    returncode = None
+
+    def __init__(self, secs):
+        self.stdout = ""
+        self.stderr = f"TIMED OUT after {secs}s — the watchdog never returned"
+
+
+def run_watchdog(wd_bin, payload, **env):
+    try:
+        return subprocess.run([wd_bin], input=json.dumps(payload), capture_output=True, text=True,
+                              timeout=WATCHDOG_TIMEOUT_SEC, env=_env(**env))
+    except subprocess.TimeoutExpired:
+        return _TimedOut(WATCHDOG_TIMEOUT_SEC)
+
+
 def guard(proj, payload, sid=None):
     return subprocess.run([os.path.join(proj, ".game_loop", "bin", "guard-writes.sh")],
                           input=json.dumps(payload), capture_output=True, text=True,
@@ -345,8 +375,8 @@ def main():
             payload = {"transcript_path": tpath}
             if sid_payload:
                 payload["session_id"] = sid_payload
-            return subprocess.run([wd_bin], input=json.dumps(payload), capture_output=True,
-                                  text=True, env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+            return run_watchdog(wd_bin, payload,
+                                WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("watchdog rings for its own session's idle mandate (A)",
               watchdog("sess-aaa").returncode == 2)
         check("watchdog stays quiet for a session with no mandate (C)",
@@ -579,10 +609,9 @@ def main():
         FakeSlack.thread_replies = [
             {"ts": "111.222", "text": "parent"},
             {"ts": "111.333", "user": "U1", "text": "staging please"}]
-        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-slk",
-                                                       "transcript_path": tpath}),
-                           capture_output=True, text=True,
-                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        r = run_watchdog(wd_bin, {"session_id": "sess-slk",
+                                                       "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         with open(os.path.join(proj, ".game_loop", "sessions", "sess-slk", "state.json")) as f:
             slk_state = json.load(f)
         check("a human thread reply rings the session with the answer (exit 2)",
@@ -603,10 +632,9 @@ def main():
         FakeSlack.thread_replies = [
             {"ts": "111.222", "text": "parent"},
             {"ts": "111.555", "user": "U1", "text": "yes deploy it"}]
-        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-slk",
-                                                       "transcript_path": tpath}),
-                           capture_output=True, text=True,
-                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        r = run_watchdog(wd_bin, {"session_id": "sess-slk",
+                                                       "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("an unmandated session still forwards the slack reply (exit 2)",
               r.returncode == 2 and "yes deploy it" in r.stderr)
 
@@ -617,10 +645,9 @@ def main():
         FakeSlack.thread_replies = [{"ts": "111.222", "text": "parent"}]   # NO in-thread human reply
         FakeSlack.channel_msgs = [{"ts": "111.777", "user": "U1", "text": "answer in the channel"}]
         gl(proj, "arm", "--question", "channel reply?", "--read", real, "--predict", "x", sid="sess-slk")
-        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-slk",
-                                                       "transcript_path": tpath}),
-                           capture_output=True, text=True,
-                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        r = run_watchdog(wd_bin, {"session_id": "sess-slk",
+                                                       "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("a top-level channel message is forwarded like a thread reply (exit 2)",
               r.returncode == 2 and "answer in the channel" in r.stderr)
         FakeSlack.channel_msgs = []
@@ -719,11 +746,10 @@ def main():
                                              "resets_at": _t.time() + 2}}},
                   open(limits_f, "w"))
         FakeSlack.posts.clear()
-        r = subprocess.run([wd_bin], input=json.dumps({"session_id": "sess-park",
-                                                       "transcript_path": tpath}),
-                           capture_output=True, text=True,
-                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0",
-                                    WATCHDOG_RESUME_BUFFER_SEC="0"))
+        r = run_watchdog(wd_bin, {"session_id": "sess-park",
+                                                       "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0",
+                                    WATCHDOG_RESUME_BUFFER_SEC="0")
         with open(os.path.join(proj, ".game_loop", "sessions", "sess-park", "state.json")) as f:
             park_state = json.load(f)
         check("exhausted window → park, then ring at reset (exit 2)",
@@ -1112,9 +1138,8 @@ def main():
         # the break must actually happen: a watchdog that rings a parked run drags the session back
         # to work the human paused.
         gl(proj, "mandate", "--park", "--reason", "stepping out", sid=pk)
-        r = subprocess.run([wd_bin], input=json.dumps({"session_id": pk, "transcript_path": tpath}),
-                           capture_output=True, text=True,
-                           env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0"))
+        r = run_watchdog(wd_bin, {"session_id": pk, "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("the watchdog does not ring a run parked by its human", r.returncode == 0)
         gl(proj, "mandate", "--clear", "--notes", "done", sid=pk)
 
@@ -3654,6 +3679,25 @@ def main():
     check("the rule itself lives in a TRACKED file now, not in gitignored scratch — a rule that "
           "does not reach a fresh clone is an oral tradition",
           _MARK in open(os.path.join(REPO, "CLAUDE.md")).read())
+
+    # #50 — THE SUITE MUST NOT BE ABLE TO HANG on the reply poll. A hang yields no verdict at all
+    # and looks, from outside, exactly like a slow machine; it also made notify.replies impossible
+    # for the sweep to measure, since the tool's method cannot terminate on it. Structural, because
+    # the failure it guards against is a NEW call site added without a bound — which no behavioural
+    # assertion would catch until the day something hangs.
+    print("the suite cannot hang on the watchdog's reply poll (#50):")
+    _own = open(os.path.join(REPO, "test", "run.py")).read()
+    _raw = [ln for ln in _own.split("\n")
+            if "subprocess.run([wd_bin]" in ln and "def run_watchdog" not in ln]
+    check("every watchdog drive goes through the bounded runner — exactly one raw call, inside it",
+          len(_raw) == 1)
+    check("...and that runner passes a timeout and turns a hang into a NAMED failure, never a "
+          "silent 2 that would satisfy an assertion about a ring",
+          "timeout=WATCHDOG_TIMEOUT_SEC" in _own and "TimeoutExpired" in _own
+          and "returncode = None" in _own)
+    check("...while the product loop keeps waiting indefinitely, which is correct there — a human "
+          "who has not answered still holds the ball",
+          "while True:" in open(os.path.join(SRC_GAME_LOOP, "bin", "watchdog")).read())
 
     print("producer mutation sweep (test/mutation_sweep.py):")
     _spec = importlib.util.spec_from_file_location(          # the real file, not a copy of it

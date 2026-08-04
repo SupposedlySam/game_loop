@@ -268,6 +268,14 @@ MUTANTS = [
      # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
      # which is exactly what #49 was about.
      None, 7),
+    ("notify.replies -> the human's answer never arrives", ".game_loop/bin/notify.py::replies",
+     "    return []\n", ["slack", "reply", "watchdog", "arm", "forward"],
+     # 4, and it took a fix to get a number at all. Neutered, this used to HANG the suite rather
+     # than fail it -- the reply poll is a `while True:` whose exits all wait on a reply arriving,
+     # so a producer that never produces spun forever and no assertion finished. Bounding the
+     # SUITE's watchdog runs (never the product loop, where waiting on the human is correct) turned
+     # an un-measurable producer into a measured one. See #50.
+     None, 4),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this
@@ -414,15 +422,6 @@ NOT_SWEPT = {
         "watchdog taken over? -- is unasserted. Not listed in MUTANTS only because a standing "
         "UNPROTECTED entry makes the sweep exit 1 with no path to green (INV5); the remedy is an "
         "assertion nobody has written yet. Same standing debt as retro_nudge, same shape.",
-    ".game_loop/bin/notify.py::replies":
-        "KNOWN GAP of a different kind: this producer cannot be measured by this tool AT ALL. "
-        "Neutered to its own nothing-literal the suite HANGS rather than fails -- 300s cap hit, "
-        "the whole baseline reported as killed because no assertion finished. watchdog's "
-        "poll_slack_replies is a `while True:` whose three exits all wait on a reply arriving, so "
-        "a producer that never produces spins forever. That is right in production and wrong for "
-        "a test, which has no bound of its own. A hang is worse than a failure: it yields no "
-        "verdict, and from outside it looks like a slow machine. Tracked as issue #50 -- and it "
-        "is why an earlier sweep of these ten stalled with no output at all.",
 }
 
 

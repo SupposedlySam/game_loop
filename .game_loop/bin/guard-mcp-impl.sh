@@ -200,9 +200,20 @@ first = words[0] if words else ""
 # prefixes. This ONLY resolves ambiguity. It can never override a mutating verb or a mutating
 # argument — an allowlist that can silence a detected mutation is a bypass with a friendly name.
 allow_names = []
+mcp_writes = "gated"        # default before the read, so an unreadable config cannot NameError
 try:
     with open(os.environ["CONFIG_F"]) as f:
-        allow_names = [str(x) for x in (json.load(f).get("mcp_read_only_tools") or [])]
+        _c = json.load(f)
+        allow_names = [str(x) for x in (_c.get("mcp_read_only_tools") or [])]
+        # THE PROJECT'S POLICY ABOUT MCP WRITES (#53). "gated" is today's behaviour and the default,
+        # so nothing changes on upgrade. "disabled" is strictly MORE restrictive than today, which
+        # is why honouring it cannot be a bypass by construction -- the cheap half of the request,
+        # and the half that was missing entirely.
+        #
+        # Anything unrecognised reads as "gated": the error runs toward today's behaviour rather
+        # than toward a stricter one nobody asked for, and `status` names the policy so a typo is
+        # visible rather than silently doing something else.
+        mcp_writes = str(_c.get("mcp_writes") or "gated").strip().lower()
 except (OSError, ValueError, KeyError):
     pass
 named_read_only = any(tool == a or (a.endswith("__") and tool.startswith(a)) for a in allow_names)
@@ -324,7 +335,10 @@ def consume_authorization(tool_name):
     return False
 
 
-if consume_authorization(tool):
+# DISABLED MEANS DISABLED. Consuming an authorization here would leave the door open while the
+# config said it was shut, which is worse than not having the setting -- the human would have
+# declared a policy the guard quietly did not hold.
+if mcp_writes != "disabled" and consume_authorization(tool):
     print("ALLOW")
     sys.exit(0)
 
@@ -345,6 +359,17 @@ else:
             "  ambiguity — it can never silence a mutating verb or a mutating argument.")
 
 print("DENY")
+if mcp_writes == "disabled":
+    # No remedy line, deliberately. Every other deny here ends by telling the agent how to get the
+    # call through, and a plausible-sounding workflow justification is exactly what an agent is good
+    # at producing. For a project that is meant to touch nothing, the door has to be absent rather
+    # than merely guarded.
+    print(body + "\n\n"
+          "This project has set  mcp_writes: \"disabled\"  in .game_loop/config.json, so mutating\n"
+          "MCP calls are refused outright and NO authorization can open this. There is no remedy to\n"
+          "reach for and asking for one is not the next step -- the human turned this off on\n"
+          "purpose, and changing it is their edit to make, not this run's.")
+    sys.exit(0)
 print(body + "\n\n"
       "If the human has explicitly authorized this one call, record their words and try again:\n"
       "  " + os.environ.get("GAMELOOP_DIR", ".game_loop") + "/bin/game_loop authorize --path "

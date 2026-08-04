@@ -4402,6 +4402,17 @@ def coverage_report(s):
                  f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
     lines.append("           written. Everything else is denied WITHOUT being named, so nothing "
                  "goes unprotected for")
+    _mw = str(cfg.get("mcp_writes") or "gated").strip().lower()
+    if _mw == "disabled":
+        lines.append("  mcp    : WRITES DISABLED — a mutating MCP call is refused outright and no "
+                     "authorization can")
+        lines.append("           open it. The escape hatch is not offered, by this project's own "
+                     "choice.")
+    else:
+        lines.append(f"  mcp    : writes are GATED (mcp_writes: {_mw!r}) — a mutating call is "
+                     "refused, and the human")
+        lines.append("           may open it once with `authorize`. Set mcp_writes: \"disabled\" "
+                     "to remove that door.")
     lines.append("           want of remembering it. 'This repo' includes its LINKED WORKTREES — "
                  "one project checked")
     lines.append("           out twice is still one project (#47) — and nothing else that shares a "

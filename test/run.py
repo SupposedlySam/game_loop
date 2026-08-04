@@ -3699,6 +3699,96 @@ def main():
     # ONE SLACK APP, N REPOS (#54). notify.json was read only from the project's own .game_loop/,
     # so anyone running game_loop across several checkouts hand-copied the same bot token into every
     # one — N copies of a credential and N places to rotate it.
+    # A PROJECT CAN SAY MCP WRITES ARE OFF (#53). Before this there was no way to state a policy:
+    # mcp_read_only_tools resolves AMBIGUITY only by its own contract, and `authorize` is per-call.
+    # So every MUTATING deny ended by telling the agent how to get the call through, and a
+    # plausible-sounding workflow justification is exactly what an agent is good at producing. For a
+    # project meant to touch nothing, the door has to be ABSENT rather than merely guarded.
+    print("a project can turn MCP writes off (#53):")
+    mp = make_sandbox()
+    try:
+        _mcfg = os.path.join(mp, ".game_loop", "config.json")
+
+        def _policy(v):
+            with open(_mcfg) as f:
+                c = json.load(f)
+            if v is None:
+                c.pop("mcp_writes", None)
+            else:
+                c["mcp_writes"] = v
+            with open(_mcfg, "w") as f:
+                json.dump(c, f)
+
+        def _mcp(tool, ti=None):
+            r = subprocess.run([os.path.join(mp, ".game_loop", "bin", "guard-mcp.sh")],
+                               input=json.dumps({"tool_name": tool, "session_id": "sess-mcp",
+                                                 "tool_input": ti or {"id": 1}}),
+                               capture_output=True, text=True, env=_env(mp, sid="sess-mcp"))
+            try:
+                d = json.loads(r.stdout)["hookSpecificOutput"]
+                return d["permissionDecision"], d["permissionDecisionReason"]
+            except Exception:  # noqa: BLE001 — no JSON at all means it allowed
+                return "allow", ""
+
+        # DEFAULT IS UNCHANGED, asserted first so "disabled works" means something.
+        _policy(None)
+        _d, _r = _mcp("mcp__x__deleteThing")
+        check("with no policy set, a mutating call is refused AND offered the hatch — today's "
+              "behaviour, unchanged on upgrade",
+              _d == "deny" and "authorize" in _r)
+        _policy("gated")
+        _d2, _r2 = _mcp("mcp__x__deleteThing")
+        check("...and an explicit 'gated' is the same thing said out loud",
+              _d2 == "deny" and "authorize" in _r2)
+
+        _policy("disabled")
+        _dd, _rr = _mcp("mcp__x__deleteThing")
+        check("with mcp_writes disabled a mutating call is refused with NO remedy offered — the "
+              "door is absent rather than guarded",
+              _dd == "deny" and "authorize" not in _rr and "disabled" in _rr)
+        check("...and it says asking is not the next step, since the human turned it off on purpose",
+              "not the next step" in _rr)
+        # READ-ONLY IS UNTOUCHED. "disabled" is about writes; blocking reads would make it a
+        # different feature that nobody asked for.
+        check("...while a read-only call still passes, because this is a policy about WRITES",
+              _mcp("mcp__x__getThing")[0] == "allow")
+
+        # An unrecognised value must not silently do something else. Checked HERE, before any
+        # authorization exists — later it would be allowed by the live grant and the assertion would
+        # fail for a reason that is not the policy.
+        _policy("disabledd")
+        _td, _tr = _mcp("mcp__x__deleteThing")
+        check("a typo'd policy reads as GATED — the error runs toward today's behaviour, and status "
+              "names the value so the typo is visible rather than silent",
+              _td == "deny" and "authorize" in _tr
+              and "disabledd" in gl(mp, "status", sid="sess-mcp").stdout)
+        _policy("disabled")
+
+        # THE ONE THAT MAKES IT REAL: an existing authorization must not open a disabled project,
+        # or the config declared a policy the guard quietly did not hold.
+        # Granted through the REAL verb rather than by writing state by hand: a fixture that
+        # invents the record's shape tests the fixture. (It did — my first attempt used a key the
+        # implementation does not have, and the paired arm failed for that reason rather than the
+        # interesting one.)
+        gl(mp, "authorize", "--path", "mcp__x__deleteThing", "--reason", "the human said so",
+           "--uses", "3", sid="sess-mcp")
+        _ad, _ar = _mcp("mcp__x__deleteThing")
+        check("...and a LIVE authorization cannot open it — disabled means disabled, or the setting "
+              "is worse than not having it",
+              _ad == "deny" and "authorize" not in _ar)
+        # PAIRED: that same authorization DOES open a gated project, so the arm above is not passing
+        # because authorizations are broken.
+        _policy("gated")
+        check("...while the same authorization opens a GATED project, so the refusal above is the "
+              "policy and not a broken hatch",
+              _mcp("mcp__x__deleteThing")[0] == "allow")
+        _policy("disabled")
+
+        check("...and status says plainly when the door has been removed",
+              "WRITES DISABLED" in gl(mp, "status", sid="sess-mcp").stdout)
+    finally:
+        shutil.rmtree(mp, ignore_errors=True)
+
     print("notify config falls back to a user-level file (#54):")
     nf = make_sandbox()
     _xdg = tempfile.mkdtemp(prefix="glxdg-")

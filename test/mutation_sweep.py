@@ -11,7 +11,20 @@ not a guess. It also prints the checks that STILL PASS whose text suggests they 
 producer's silence; that filter is a crude keyword match and pulls in unrelated assertions, so
 the KILL COUNTS are the reliable signal and the survivor list is a lead to follow by hand.
 
-BASELINE TO BEAT (#42, measured — before → after the companion assertions that issue added):
+A FLOOR WITH A REASON ATTACHED — NOT A SCORE, AND NOT A TARGET. These are what the numbers were
+after #42, recorded so a later reader can tell drift from noise without having been there. Calling
+them "a baseline to beat" was the original wording here and it was wrong in a way this file is
+otherwise about: a kill count is not coverage — ten assertions reading one line of output flip
+together and count ten — so a number can be raised without a single behaviour becoming better
+protected, and a docstring that invites you to beat it is asking for exactly that.
+
+The honest use is the ORDERING. Ranking is the one thing these numbers genuinely do: strengthen in
+ascending kill order, because "which non-events did I assert alone" is a property this sweep
+MEASURES, while "which behaviour feels under-tested" is one you would have to guess. That ordering
+rule was tested — a hypothesis that recently-argued behaviours are the weakest came back NEGATIVE,
+and the real predictor turned out to be simply whether a non-event assertion ever got a companion.
+
+(#42, measured — before → after the companion assertions that issue added):
 
     producer            before   after
     unpushed_warning       4    →   7
@@ -23,8 +36,16 @@ BASELINE TO BEAT (#42, measured — before → after the companion assertions th
 
 (suite total 431 → 446 over the same change.)
 
-A run that comes back BELOW those numbers is drift, not noise. A run above them is fine —
-provided the assertions are companions and not this sweep's own metric being farmed. See THIN_AT.
+A run that comes back BELOW those numbers is drift, not noise. A run ABOVE them proves nothing on
+its own: check that the added assertions are companions in the same observation, and not this
+sweep's own metric being farmed. See THIN_AT.
+
+THE RULE THAT WOULD HAVE PREVENTED ALL OF THIS, and it costs nothing at write time: when you assert
+that something did NOT happen, pair it in the same observation with the case where it DOES. Two
+producers survived their mutation only because someone happened to do that the day they wrote the
+test — `fix_warning` here, and a `waiting` producer in a downstream project, different repos, no
+shared author on those lines. Two accidents are a better argument for a rule than any reasoning
+about it. Retrofitting the pairing is expensive; writing it costs a single extra capture.
 
 The named restraint assertions — "up to date with upstream → checkpoint stays quiet", "a branch
 with NO upstream stays quiet", "a claim filed WITH a scope is not also nudged about one", "an

@@ -283,6 +283,13 @@ MUTANTS = [
      # exactly like a healthy one for the rest of the session -- which is the defect #43 named:
      # registered, fired, and listening now are three different claims.
      None, 3),
+    ("shared_pins -> the checkout's pins are invisible to every session",
+     ".game_loop/bin/game_loop::shared_pins", "    return []\n",
+     ["pin", "tidy", "environment", "load-bearing"],
+     # 9 against a baseline of 572. Neutered, no pin reaches any status -- which is the state #18
+     # shipped in all but name, since a pin only the registering session could see never reached
+     # the run that tidies it away.
+     None, 9),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

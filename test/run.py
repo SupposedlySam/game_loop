@@ -1065,20 +1065,48 @@ def main():
               "DRIFTED" in gl(proj, "status").stdout)
         with open(head_f, "w") as f:
             f.write("abc123def456\n")
-        # pins are per-session state like everything else — one session's pins never leak into another
+        # #31 — INVERTED, deliberately, and this assertion used to say the opposite. #18 shipped
+        # pins session-scoped, and the incident it was built from says why that was wrong: the
+        # damage happens "later, cleaning up loose ends" — a different moment, very often a
+        # different session, arriving fresh with no memory of why the state was unusual. Scoped to
+        # one session, the guard protected the only run that did not need protecting.
+        #
+        # #17 answered the same question for refuted claims the other way and wrote down why: a
+        # negative result is knowledge about the CHECKOUT. That argument is stronger for a pin,
+        # which is knowledge about the ENVIRONMENT two sessions genuinely share.
         gl(proj, "pin", "--fact", "sess-pin-A only", "--reason", "A's build needs it",
-           "--path", head_f, sid="sess-pin-a")
-        check("a pin registered in one session does not appear in another's status",
-              "sess-pin-A only" not in gl(proj, "status", sid="sess-pin-b").stdout
-              and "sess-pin-A only" in gl(proj, "status", sid="sess-pin-a").stdout)
+           "--path", head_f, sid="pinA0001")
+        _other = gl(proj, "status", sid="pinB0002").stdout
+        check("a pin registered in one session DOES reach another's status — the run that tidies "
+              "it away is the one that never knew why it was there",
+              "sess-pin-A only" in _other
+              and "sess-pin-A only" in gl(proj, "status", sid="pinA0001").stdout)
+        check("...and the other session is told WHO pinned it, so there is somebody to ask",
+              "pinned by" in _other)
+        # The effector/instrument/fix registries stay session-scoped on purpose: a proof that a verb
+        # acts, or that a metric is controlled, is a PERISHABLE fact about this run's regime, and
+        # inheriting one is the "assumed to have survived the change" failure. Asserted here so the
+        # sharing above reads as a decision about pins rather than a drift toward sharing everything.
+        gl(proj, "effector", "--prove", "scroll31", "--known-state", "k",
+           "--before", head_f, "--observed", head_f, sid="pinA0001")
+        check("...while an effector proof stays SESSION-scoped — perishable facts are not shared",
+              "scroll31" not in gl(proj, "status", sid="pinB0002").stdout)
         r = gl(proj, "pin", "--release", "p1")
         check("refuses to release a pin without --notes (the revert must stay a stated decision)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
         r = gl(proj, "pin", "--release", "p1", "--notes", "the API landed on the default branch")
         check("releases a pin by id", r.returncode == 0 and "RELEASED" in r.stdout)
         r = gl(proj, "status")   # a bare absence would pass against an unimplemented verb, so this
-        check("a released pin is gone from status",  # asserts the empty-pins line is present too
-              "dep-checkout is pinned to abc123def456" not in r.stdout and "pins: none" in r.stdout)
+        check("a released pin is gone from status, while pins nobody released stay — the list is "
+              "the CHECKOUT's now, so 'none left' is no longer the same claim as 'this one went'",
+              "dep-checkout is pinned to abc123def456" not in r.stdout
+              and "sess-pin-A only" in r.stdout)
+        r2 = gl(proj, "pin", "--release", "p2", "--notes", "A's build moved on")
+        check("...and releasing another session's pin SAYS whose it was — the run tidying up is by "
+              "construction the one that never knew why the state was unusual",
+              r2.returncode == 0 and "registered by ANOTHER session" in r2.stdout)
+        check("...and with every pin released the empty-pins line is back",
+              "pins: none" in gl(proj, "status").stdout)
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("both the pin and its release are permanent in the log",

@@ -1694,16 +1694,66 @@ def pin_state(pin):
     return "✗", f"DRIFTED — no longer contains {exp!r}; the pin has been undone"
 
 
+def shared_pins():
+    """Every live pin in this CHECKOUT, read from the shared log — not from one session's state.
+
+    #18 shipped these session-scoped, and the incident it was built from says why that was wrong.
+    The failure was "later, cleaning up loose ends, it was restored to its default branch": a
+    DIFFERENT moment, very often a different session — after a restart, after compaction, after a
+    handback. The tidying instinct that does the damage is precisely the one that arrives fresh,
+    with no memory of why the state was unusual. Session-scoped, the guard protected the only run
+    that did not need protecting.
+
+    #17 answered the identical question for refuted claims and answered it the other way, on stated
+    reasoning: a negative result is knowledge about the CHECKOUT, and the run that must not re-walk
+    it is a later session holding none of this one's state. That argument is stronger here, not
+    weaker — a refutation is knowledge about a codebase, while a pin is knowledge about the
+    ENVIRONMENT ON THIS MACHINE, which two sessions genuinely share. The fact is true for both of
+    them whether or not either one recorded it.
+
+    Each pin carries the session that registered it, so it is clear who established it and can be
+    asked. WHAT THIS STILL MISSES (INV6): a pin whose session ended and whose fact was reverted by
+    hand outside game_loop reads as live until its --expect notices, and a pin with no --expect
+    cannot notice at all.
+
+    The whole log is scanned rather than its tail: a pin scrolling out of a window is exactly the
+    silent revert this exists to prevent. Cheap because the JSON parse is gated on a substring.
+    """
+    live, released = [], set()
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                if '"pin' not in ln:
+                    continue
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                kind, pid = r.get("kind"), r.get("id")
+                if kind == "pin_release" and pid:
+                    released.add(pid)
+                elif kind == "pin" and pid:
+                    live.append(r)
+    except OSError:
+        return []
+    return [p for p in live if p.get("id") not in released]
+
+
 def pins_report(s):
     """The pins block for `status` — surviving compaction is the entire point of putting it here."""
-    pins = s.get("pins") or []
+    pins = shared_pins()          # the checkout's, not this session's (#31)
     if not pins:
         return ['pins: none registered — `game_loop pin --fact ".." --reason ".." --path <real path>` '
                 "the moment local state becomes load-bearing"]
     lines = ["", "PINS — load-bearing environment facts. Do NOT tidy these away:"]
     for p in pins:
         sym, note = pin_state(p)
-        lines.append(f"  {sym} [{p.get('id')}] {p.get('fact')}")
+        who = p.get("sid")
+        # SESSION[:8] is what logline stamps, so compare like with like: SESSION.startswith(who)
+        # called any two sessions sharing a prefix the same session, and silently dropped the
+        # attribution in exactly the case it exists for.
+        mine = "" if not who or (SESSION and SESSION[:8] == who) else f"   (pinned by {who})"
+        lines.append(f"  {sym} [{p.get('id')}] {p.get('fact')}{mine}")
         lines.append(f"      why    : {p.get('reason')}")
         lines.append(f"      anchor : {p.get('path')} — {note}")
         if p.get("restore"):
@@ -1719,7 +1769,7 @@ def cmd_pin(s, a):
     "dep is on abc123 because the merge API does not exist on the default branch" stops one. The
     anchor is the keystone, and --expect is what turns a displayed pin into a checked one.
     """
-    pins = list(s.get("pins") or [])   # copy: never mutate the module-level DEFAULT_STATE list
+    pins = shared_pins()               # the checkout's pins, whoever registered them (#31)
 
     if a.list:
         if not pins:
@@ -1731,20 +1781,24 @@ def cmd_pin(s, a):
     if a.release:
         hit = next((p for p in pins if p.get("id") == a.release), None)
         if not hit:
-            die(f"no pin with id {a.release!r} in this session. `game_loop pin --list` shows the live "
-                "ones.")
+            die(f"no live pin with id {a.release!r} in this checkout. `game_loop pin --list` shows "
+                "them.")
         if not a.notes:
             die("pin --release needs --notes: say why this fact is no longer load-bearing.\n"
                 f"  releasing: [{hit['id']}] {hit['fact']}\n"
                 f"  it was kept because: {hit['reason']}\n"
                 "Making the revert a STATED decision is the only job this verb has. An unexplained "
                 "release is the invisible revert all over again.")
-        pins.remove(hit)
-        s["pins"] = pins
-        save(s)
         logline({"kind": "pin_release", "id": hit["id"], "fact": hit["fact"],
                  "path": hit.get("path"), "notes": a.notes})
+        # Releasing somebody ELSE's pin is the moment the human's judgement is worth spending: the
+        # run tidying up is, by construction, the one that does not know why the state was unusual.
+        foreign = hit.get("sid") and not (SESSION and SESSION[:8] == hit["sid"])
         out("✓ PIN RELEASED — the revert is on the record.",
+            *([f"  ⚠ registered by ANOTHER session ({hit['sid']}) — that run established this "
+               "state and is the one that knew why.",
+               "    You are releasing it on its behalf."]
+              if foreign else []),
             f"  was  : [{hit['id']}] {hit['fact']}",
             f"  kept because: {hit['reason']}",
             f"  notes: {a.notes}",
@@ -1766,21 +1820,28 @@ def cmd_pin(s, a):
         die(f"--path does not name anything on disk: {a.path}\n"
             "Name the checkout, file, or install dir the fact actually lives at (absolute, or "
             "relative to the repo / a read_root). If it isn't there, the pin is already broken.")
-    pin = {"id": f"p{s.get('pin_seq', 0) + 1}", "fact": a.fact, "reason": a.reason, "path": real,
-           "expect": a.expect, "restore": a.restore, "at": now()}
+    # Sequence off the CHECKOUT's history, not this session's: two sessions each numbering from 1
+    # would collide the moment the list became shared, and `pin --release p1` would be ambiguous.
+    seq = 0
+    try:
+        with open(LOG_F) as f:
+            seq = sum(1 for ln in f if '"kind": "pin"' in ln)
+    except OSError:
+        pass
+    pin = {"id": f"p{max(seq, s.get('pin_seq', 0)) + 1}", "fact": a.fact, "reason": a.reason,
+           "path": real, "expect": a.expect, "restore": a.restore, "at": now()}
     if a.expect:
         sym, note = pin_state(pin)
         if sym != "✓":
             die(f"--expect does not hold right now: {note}\n"
                 "A pin records state you have ALREADY established, so its check must be green at "
                 "registration. A check born red is a check nobody will believe later.")
-    pins.append(pin)
-    s["pins"] = pins
     s["pin_seq"] = s.get("pin_seq", 0) + 1
     save(s)
     logline({"kind": "pin", **{k: pin[k] for k in ("id", "fact", "reason", "path", "expect",
                                                    "restore")}})
-    out(f"✓ PIN registered [{pin['id']}] — carried in resume state, re-shown by every `status`.",
+    out(f"✓ PIN registered [{pin['id']}] — carried in the CHECKOUT's log, re-shown by every "
+        "`status`, in every session.",
         f"  fact   : {pin['fact']}",
         f"  why    : {pin['reason']}",
         f"  anchor : {real}" + (f"  (expect {a.expect!r} — CHECKED)" if a.expect else

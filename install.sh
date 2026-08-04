@@ -51,6 +51,7 @@ if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
     | tar -xz -C "$TMP/payload" --strip-components=1
   SRC="$TMP/payload"
+  FETCHED=1        # we downloaded $REF ourselves, so asking GitHub for its sha describes THIS payload
   if [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
     echo "Fetched archive did not contain the game_loop payload (looked in $SRC/.game_loop/bin/)." >&2
     exit 1
@@ -240,11 +241,55 @@ fi
 # Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
 # clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.
 GL_SHA=""
-if git -C "$SRC" rev-parse HEAD >/dev/null 2>&1; then
+# WHOSE CHECKOUT IS THIS? git resolves by walking UP, so `git -C "$SRC" rev-parse HEAD` inside a
+# VENDORED copy -- one with no .git of its own, which is what any extraction or package manager
+# produces -- does not fail. It finds the CONSUMING repo's .git and answers with that repo's HEAD.
+# Measured: a game_loop archive at .vendor/ inside a throwaway consumer reported the consumer's sha,
+# not game_loop's, and would have stamped VERSION with a commit from an unrelated repository.
+#
+# The discriminator is the toplevel: a source that is its own checkout has one equal to itself.
+# Nothing else distinguishes them, and the failure is silent in the worst way -- a plausible sha,
+# from a real repo, that describes none of the installed files.
+SRC_TOP="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null || true)"
+SRC_OWN=0
+if [ -n "$SRC_TOP" ] && [ "$(cd "$SRC_TOP" 2>/dev/null && pwd -P)" = "$(cd "$SRC" 2>/dev/null && pwd -P)" ]; then
+  SRC_OWN=1
+fi
+if [ "$SRC_OWN" = 1 ]; then
   GL_SHA="$(git -C "$SRC" rev-parse HEAD)"
-elif command -v curl >/dev/null 2>&1; then
+elif [ -f "$SRC/.game_loop/VERSION" ]; then
+  # A vendored tree may carry the stamp its packager wrote. That is the only party that knows which
+  # commit the extraction came from, so it is the only honest source here.
+  GL_SHA="$(tr -d '[:space:]' < "$SRC/.game_loop/VERSION")"
+  echo "  note    the source is not its own git checkout; carried its recorded VERSION forward"
+elif [ "${FETCHED:-0}" = 1 ] && command -v curl >/dev/null 2>&1; then
+  # ONLY when we fetched it. Asking GitHub for $REF's sha describes the payload when the payload IS
+  # that download -- and describes nothing when $SRC is a directory somebody handed us. A vendored
+  # tree extracted from an OLD commit would otherwise be stamped with today's main, which is the
+  # same lie as stamping the consumer's HEAD, arrived at by a different road.
   GL_SHA="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null \
             | python3 -c 'import json,sys; print((json.load(sys.stdin) or {}).get("sha",""))' 2>/dev/null || true)"
+fi
+# THE STAMP MUST DESCRIBE WHAT LANDED. The payload is copied from the source WORKING TREE, while the
+# sha comes from HEAD -- the same thing only when that tree is clean. Installing from a checkout with
+# uncommitted work therefore stamped a commit whose content is not what was copied, and since
+# `status` uses the stamp to decide whether a re-install is due, the target reported itself current
+# while carrying files that exist in no commit. Reported by a downstream package manager that read
+# install.sh rather than guessing, and verified here before fixing.
+#
+# NOT REFUSED, MARKED. Installing from a work-in-progress checkout is a legitimate thing to do -- it
+# is how this repo is developed. What is not legitimate is recording it as though it were a commit.
+# Only meaningful when the source IS its own checkout -- otherwise this compares against whichever
+# repository git walked up into, which is the same defect one line down.
+if [ "$SRC_OWN" = 1 ] && [ -n "$GL_SHA" ] && ! git -C "$SRC" diff --quiet HEAD 2>/dev/null; then
+  GL_SHA="${GL_SHA}-dirty"
+  echo "  ⚠ the source checkout has uncommitted changes, so what was copied is NOT $(printf '%s' "$GL_SHA" | cut -c1-8)."
+  echo "    Stamped -dirty: the sha does not describe these files, and status will say so."
+fi
+if [ -z "$GL_SHA" ]; then
+  echo "  ⚠ no VERSION stamped: the source is not its own git checkout and carries no recorded"
+  echo "    VERSION, so nothing here knows which commit these files came from. Leaving it UNSET is"
+  echo "    the honest answer — a wrong sha would make the update check confidently wrong."
 fi
 if [ -n "$GL_SHA" ]; then
   printf '%s\n' "$GL_SHA" > "$TARGET/.game_loop/VERSION"

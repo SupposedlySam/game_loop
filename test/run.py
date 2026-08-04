@@ -3239,6 +3239,112 @@ def main():
     # only exists for an agent that goes looking. A banner saying "run status" would have been rung
     # 6 of the ladder applied to the gap that decides whether any other rung runs (INV1), so this
     # runs the verb rather than advertising it.
+    # THE STAMP MUST DESCRIBE WHAT LANDED. install.sh copies the payload from the source WORKING
+    # TREE and stamps the sha from HEAD — the same thing only when that tree is clean. Installing
+    # from a checkout with uncommitted work recorded a commit whose content is not what was copied,
+    # and `status` uses that stamp to decide whether a re-install is due, so the target reported
+    # itself current while carrying files that exist in no commit.
+    #
+    # NOT REFUSED, MARKED: installing from a work-in-progress checkout is legitimate — it is how
+    # this repo is developed. Recording it as though it were a commit is not.
+    print("an install records what it actually installed:")
+    ds = make_sandbox()
+    try:
+        _dv = os.path.join(ds, ".game_loop", "VERSION")
+
+        def _notice(stamp):
+            with open(_dv, "w") as f:
+                f.write(stamp + "\n")
+            return gl(ds, "status", sid="sess-dirty").stdout
+
+        _d = _notice("a" * 40 + "-dirty")
+        check("a -dirty stamp is reported as an install whose sha does not describe its files",
+              "INSTALLED FROM AN UNCOMMITTED TREE" in _d)
+        check("...and it says no update check can be meaningful against it, rather than computing "
+              "an answer about a commit that was never installed",
+              "no update check can be meaningful" in _d)
+        # PAIRED: a clean stamp must not trip it, or the warning is a permanent banner.
+        check("...while an ordinary clean stamp says nothing of the kind",
+              "INSTALLED FROM AN UNCOMMITTED TREE" not in _notice("b" * 40))
+
+        # The installer's half, asserted at the source: it must consult the source tree's state at
+        # all. Without this, the marking above is a reader for a mark nobody writes.
+        with open(os.path.join(REPO, "install.sh")) as f:
+            _isrc = f.read()
+        check("install.sh asks whether the SOURCE checkout is dirty before stamping",
+              'git -C "$SRC" diff --quiet HEAD' in _isrc and '-dirty' in _isrc)
+        check("...and it MARKS rather than refuses — installing from a work-in-progress checkout is "
+              "how this repo is developed",
+              "exit 1" not in _isrc.split('git -C "$SRC" diff --quiet HEAD')[1][:400])
+
+        # GIT RESOLVES BY WALKING UP. A vendored source — one with no .git of its own, which is what
+        # any extraction or package manager produces — makes `git -C "$SRC" rev-parse HEAD` succeed
+        # against the CONSUMING repo and answer with that repo's HEAD. Measured before fixing: a
+        # game_loop archive inside a throwaway consumer reported the consumer's sha. The failure is
+        # silent in the worst way — a plausible sha, from a real repository, describing none of the
+        # installed files.
+        check("install.sh asks WHOSE checkout the source is, rather than trusting that git answered "
+              "about it",
+              'rev-parse --show-toplevel' in _isrc and "SRC_OWN" in _isrc)
+        check("...and the network fallback is gated on having FETCHED the payload — asking GitHub "
+              "for a ref's sha describes a download, and describes nothing about a directory "
+              "somebody handed us",
+              'FETCHED:-0' in _isrc)
+
+        # End to end, because the structural checks above would pass against a variable nobody reads.
+        _van = tempfile.mkdtemp(prefix="gl-vendor-")
+        try:
+            def _g(cwd, *a):
+                return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *a],
+                                      cwd=cwd, capture_output=True, text=True)
+
+            _g(_van, "init", "-q", ".")
+            _g(_van, "commit", "-q", "--allow-empty", "-m", "consumer")
+            _consumer_sha = _g(_van, "rev-parse", "HEAD").stdout.strip()
+            _vend = os.path.join(_van, "vendored")
+            os.makedirs(_vend)
+            subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {_vend}",
+                           shell=True, capture_output=True)
+            # The archive is HEAD, so it carries the COMMITTED installer. Overlay the working copy:
+            # this suite must test the installer it is being run against, not the last released one.
+            # (Discovering that took a debug pass — the archived installer silently exercised the
+            # old code path and the assertion failed for the right reason.)
+            shutil.copy(os.path.join(REPO, "install.sh"), os.path.join(_vend, "install.sh"))
+            os.chmod(os.path.join(_vend, "install.sh"), 0o755)
+            # VERSION is UNTRACKED, so `git archive` never carries it — a vendored tree starts with
+            # no stamp at all, which is precisely the case that used to reach for the consumer's
+            # HEAD. Removed defensively rather than assumed absent.
+            _vv = os.path.join(_vend, ".game_loop", "VERSION")
+            if os.path.exists(_vv):
+                os.remove(_vv)
+            _tgt = os.path.join(_van, "target")
+            os.makedirs(_tgt)
+            _g(_tgt, "init", "-q", ".")
+            _r = subprocess.run([os.path.join(_vend, "install.sh"), _tgt],
+                                capture_output=True, text=True, env=_env(_tgt))
+            _stamp = os.path.join(_tgt, ".game_loop", "VERSION")
+            check("a VENDORED source stamps NOTHING rather than the consuming repo's HEAD — an "
+                  "absent stamp is honest, a wrong one makes the update check confidently wrong",
+                  not os.path.exists(_stamp) and "no VERSION stamped" in _r.stdout)
+            check("...and the consumer's own sha appears nowhere in what was written",
+                  _consumer_sha and _consumer_sha not in _r.stdout)
+            # PAIRED: a packager that DID record the commit has its record carried forward.
+            with open(os.path.join(_vend, ".game_loop", "VERSION"), "w") as f:
+                f.write("c" * 40 + "\n")
+            _tgt2 = os.path.join(_van, "target2")
+            os.makedirs(_tgt2)
+            _g(_tgt2, "init", "-q", ".")
+            subprocess.run([os.path.join(_vend, "install.sh"), _tgt2],
+                           capture_output=True, text=True, env=_env(_tgt2))
+            with open(os.path.join(_tgt2, ".game_loop", "VERSION")) as f:
+                check("...while a vendored source that DOES carry a recorded VERSION has it carried "
+                      "forward — the packager is the only party that knows which commit it extracted",
+                      f.read().strip() == "c" * 40)
+        finally:
+            shutil.rmtree(_van, ignore_errors=True)
+    finally:
+        shutil.rmtree(ds, ignore_errors=True)
+
     print("the session entry point runs itself (#48):")
     ss = make_sandbox()
     try:

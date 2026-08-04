@@ -3886,6 +3886,15 @@ def update_notice():
     inst = installed_version()
     if not inst:
         return None
+    if inst.endswith("-dirty"):
+        # A dirty install has no sha that describes it, so there is nothing to compare and no
+        # honest way to say "up to date". Say what it IS instead of computing an answer about a
+        # commit whose content was never installed.
+        return (f"⚠ INSTALLED FROM AN UNCOMMITTED TREE — .game_loop/VERSION reads {inst[:8]}-dirty.\n"
+                "  The payload was copied from a working tree with changes that are in no commit, so "
+                "that sha\n"
+                "  does NOT describe these files and no update check can be meaningful against it.\n"
+                "  → Re-install from a clean checkout to get a stamp that means something.")
     latest = _latest_version(cfg.get("update_repo", "SupposedlySam/game_loop"),
                              cfg.get("update_api_base", "https://api.github.com"))
     if not latest or inst.startswith(latest) or latest.startswith(inst):

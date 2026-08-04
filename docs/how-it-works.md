@@ -464,6 +464,74 @@ the system enforces, and the command refuses unless you name the real file that 
 are the index; the artifact is the enforcement. Take the highest rung that applies (IMPOSSIBLE > LOUD
 > CHECKED > AUTOMATED > VISIBLE > doc-of-last-resort).
 
+### triggers — this project's own attachments to the loop
+
+Some things worth doing at a moment in the loop **cannot ship as a rule**. The one that prompted this
+is broadcasting a generalised learning to a channel that other agents read — and most installs have
+no such channel, no other agents, and no wish to talk to anyone at all. A rule that cannot apply to
+everyone must not be wired in for everyone. So the harness owns the **moment**, and the project owns
+what happens there.
+
+The name is deliberate: a **trigger** is what the industry calls this everywhere else (database
+triggers, CI triggers, event triggers), and it is the dungeon's own word for a plate you step on and
+something fires. It is *not* called a hook, because game_loop already wires Claude Code **hooks** and
+two different things under one word is how documentation starts lying.
+
+Config in `.game_loop/triggers.json`, scripts in `.game_loop/triggers.d/` — both **gitignored**,
+like `notify.json` and for the same reason: they name paths, rooms, and sometimes credentials that
+belong to one machine rather than to the product. `templates/triggers.example.json` documents the
+contract. Nothing is attached by default and an install with no file behaves exactly as before.
+
+The contract, deliberately the same shape as a Claude Code hook, so anyone who has written one of
+those already knows it:
+
+* the event payload arrives as **JSON on stdin**
+* **stdout comes back to the agent** — a trigger that reads a channel is useless if what it read
+  is discarded
+* env: `GAME_LOOP_EVENT`, `GAME_LOOP_ROOT`, `GAME_LOOP_REPO`; `timeout_sec` defaults to 20
+
+Three rules, each of them a scar:
+
+1. **It never blocks.** A failing broadcast must not stop a learning being hardened. The work
+   outranks the announcement, and a report that can veto what it reports on is a guard blocking its
+   own fix.
+2. **It is never silent.** Failure, timeout and an unrunnable command all say so, and say that the
+   verb itself still stands.
+3. **It is always accounted for.** Every attachment carries its last outcome in state, so `status`
+   can name one that has **never fired**. *Configured* and *working* are different claims — a
+   distinction this repo learned the expensive way, when three usage-limit gates sat inert for weeks
+   behind a file nobody noticed was never written.
+
+**Moments published so far:** `harden` (a learning was just encoded — the moment to generalise and
+share it) and `stepback` (a retro just began, fired **before** its output, so what other agents
+learned is an input to the reflection rather than an appendix to it).
+
+`harden --general` carries the **transferable** form: what another agent could use without knowing
+anything about this codebase. It is a separate act of thought from hardening, because the incident
+form almost never transfers — *"our tap never wrote limits.json"* helps nobody, while *"a check whose
+pass is silence cannot distinguish satisfied from never-ran"* is the part that travels. Where a
+`harden` trigger is attached and `--general` is missing, the loop says so and hardens anyway.
+
+### the retro nudge — and why it never fired
+
+Worth reading as a worked example of a check that was broken in the one way nothing reports.
+
+`retro_nudge` fired when `trans_since_stepback` crossed a threshold of 12. That counter advances only
+when someone runs `game_loop trans` — an optional bookkeeping verb. In this repo's entire logged
+history `trans` ran **once**, `harden` ran **twelve** times, and `stepback` ran **zero** times. The
+nudge was not merely unreliable; it was *arithmetically unreachable*, and its silence read exactly
+like "no retro is due".
+
+A trigger fed by an optional verb is enforcement resting on the very diligence it exists to replace
+(INV1). The fix is a second counter fed by work that **logs itself whether or not anyone remembers
+this feature exists** — claims sourced, learnings hardened, fix proofs. Either counter fires it;
+`trans` stays honoured for anyone who does drive phases.
+
+The other half: a retro that produces nothing is indistinguishable, afterwards, from one that never
+happened. So each `stepback` opens by reporting what the **previous** one yielded — hardens, claims,
+fix proofs, triggers fired, counted from the shared log — and states plainly when the answer is
+nothing. The act was never the point; the encoding is.
+
 ### instruments — `game_loop instrument` / `measure` / `claim --metric`
 
 `claim --read` reaches only evidence that is a **document**. When the evidence is a **number**, "name a

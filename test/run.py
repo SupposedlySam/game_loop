@@ -2872,6 +2872,148 @@ def main():
     finally:
         shutil.rmtree(_tp, ignore_errors=True)
 
+    # TRIGGERS. Some things worth doing at a moment in the loop cannot ship as a rule, because
+    # they need infrastructure most installs do not have — the one that prompted this is a shared
+    # channel other agents read. So the harness owns the MOMENT, and the project owns what happens
+    # there.
+    #
+    # The failure mode this design is most exposed to is the one the usage-limit tap just taught:
+    # something configured, never running, and looking exactly like something working. So every
+    # assertion here is paired, and `status` is required to name an attachment that has never fired.
+    print("triggers — a project's own attachments to the loop:")
+    tpp = make_sandbox()
+    try:
+        _tpf = os.path.join(tpp, ".game_loop", "triggers.json")
+        _cfgf = os.path.join(tpp, ".game_loop", "config.json")
+
+        def _tp_write(cfg):
+            with open(_tpf, "w") as f:
+                json.dump(cfg, f)
+
+        def _tp_cfg(**kw):
+            with open(_cfgf) as f:
+                c = json.load(f)
+            c.update(kw)
+            with open(_cfgf, "w") as f:
+                json.dump(c, f)
+
+        def _run(*args, sid="sess-tp"):
+            return subprocess.run([os.path.join(tpp, ".game_loop", "bin", "game_loop"), *args],
+                                  capture_output=True, text=True, cwd=tpp, env=_env(tpp, sid=sid))
+
+        def _harden(*extra, sid="sess-tp"):
+            return _run("harden", "--learning", "L", "--artifact", ".game_loop/config.json",
+                        "--mechanism", "M", "--rung", "3", *extra, sid=sid)
+
+        # PAIRED FIRST: with nothing attached the loop must not mention triggers at all. Most
+        # installs want no part of this, and a feature that narrates its own absence is noise.
+        _none = _harden("--general", "G")
+        check("nothing attached → harden says nothing about triggers",
+              "triggers ·" not in _none.stdout and "HARDENED" in _none.stdout)
+        check("...and status stays silent about them too",
+              "TRIGGERS" not in _run("status").stdout)
+
+        _tp_write({"harden": [{"name": "tp-ok", "command": "cat; echo FIRED-OK"}]})
+        _fired = _harden("--general", "the transferable form")
+        check("an attached trigger RUNS at its moment, and its stdout comes back to the agent",
+              "FIRED-OK" in _fired.stdout and "triggers · harden" in _fired.stdout)
+        check("...and the payload arrives as JSON on stdin, carrying the GENERAL form",
+              '"general": "the transferable form"' in _fired.stdout
+              and '"event": "harden"' in _fired.stdout)
+
+        # A trigger must never be able to veto the work it is only reporting on (INV5).
+        _tp_write({"harden": [{"name": "tp-bad", "command": "echo nope >&2; exit 3"}]})
+        _bad = _harden("--general", "G")
+        check("a FAILING trigger is announced loudly, naming the failure",
+              "tp-bad FAILED" in _bad.stdout and "nope" in _bad.stdout)
+        check("...and the harden still stands — a trigger never blocks the work",
+              _bad.returncode == 0 and "HARDENED" in _bad.stdout
+              and "never blocks the work" in _bad.stdout)
+
+        _tp_write({"harden": [{"name": "tp-slow", "command": "sleep 5", "timeout_sec": 1}]})
+        _slow = _harden("--general", "G")
+        check("a trigger that hangs is bounded and SAYS it timed out",
+              "tp-slow FAILED" in _slow.stdout and "timed out" in _slow.stdout
+              and "HARDENED" in _slow.stdout)
+
+        # GENERALISING is a separate act from hardening: the incident form rarely transfers. Nudge
+        # only where somebody has actually attached a sharing step, and never block.
+        _tp_write({"harden": [{"name": "tp-ok", "command": "cat; echo FIRED-OK"}]})
+        _nogen = _harden()
+        check("a harden with no --general is nudged WHERE a sharing trigger is attached",
+              "no --general" in _nogen.stdout and "HARDENED" in _nogen.stdout)
+        check("...and giving one silences the nudge — so the nudge is about the FORM, not the flag",
+              "no --general" not in _harden("--general", "G").stdout)
+        _tp_write({})
+        check("...and with nothing attached there is no nudge at all: nobody is asked to share into "
+              "a void",
+              "no --general" not in _harden().stdout)
+
+        # THE VISIBILITY REQUIREMENT. Attached and working are different claims.
+        _tp_write({"stepback": [{"name": "tp-never", "command": "echo x"}]})
+        _st = _run("status").stdout
+        check("a trigger that has NEVER fired is named as such in status",
+              "tp-never" in _st and "CONFIGURED BUT NEVER FIRED" in _st)
+        check("...and status names the moments nothing is attached to, so an unused one is a "
+              "CHOICE rather than an oversight",
+              "nothing attached to: harden" in _st or "nothing attached: harden" in _st)
+        _run("stepback", "--notes", "n")
+        _st2 = _run("status").stdout
+        check("...and once it has fired, status shows it as fired instead — the pair that makes the "
+              "warning above mean something",
+              "tp-never" in _st2 and "CONFIGURED BUT NEVER FIRED" not in _st2)
+
+        # A trigger that fires and FAILS every time is the third state, and the one most likely to
+        # go unnoticed: it has fired, so the never-fired warning is silent about it.
+        _tp_write({"harden": [{"name": "tp-broken", "command": "exit 4"}]})
+        _harden("--general", "G")
+        _st3 = _run("status").stdout
+        check("a trigger that fires but FAILS is carried into status as failing, not as fired",
+              "tp-broken" in _st3 and "FAILING" in _st3)
+
+        # THE RETRO NUDGE, which could not fire for the whole life of this project: it counted
+        # `trans`, an optional verb that had run ONCE against twelve hardens and zero retros.
+        _tp_write({})
+        _tp_cfg(work_nudge_every=2, trans_nudge_every=99)
+        _run("stepback", "--notes", "reset the counters")
+        _harden(sid="sess-nudge")
+        check("evidence work below the threshold does NOT nudge — the control for the next one",
+              "since the last retro" not in _run("status", sid="sess-nudge").stdout)
+        _harden(sid="sess-nudge")
+        _nudged = _run("status", sid="sess-nudge").stdout
+        check("work that LOGS ITSELF reaches the threshold and the retro nudge fires — with zero "
+              "transitions, which is the arrangement that was silent forever",
+              "since the last retro" in _nudged and "stepback" in _nudged)
+
+        # A retro that produces nothing is indistinguishable afterwards from one that never happened.
+        _yield = _run("stepback", "--notes", "n", sid="sess-nudge").stdout
+        check("a retro opens by reporting what the LAST one yielded, counted from the log",
+              "WHAT THE LAST RETRO YIELDED" in _yield and "2 hardened" in _yield)
+        _empty = _run("stepback", "--notes", "n", sid="sess-nudge").stdout
+        check("...and a retro that encoded nothing is SAID to have encoded nothing",
+              "NOTHING WAS HARDENED" in _empty)
+        # The yield is the whole ledger, not just hardens — a chapter can be all evidence and no
+        # encoding, and the report has to be able to show that shape rather than one number.
+        _run("claim", "--assert", "a", "--read", ".game_loop/config.json", sid="sess-nudge")
+        _tp_write({"harden": [{"name": "tp-y", "command": "echo y"}]})
+        _harden("--general", "G", sid="sess-nudge")
+        _ledger = _run("stepback", "--notes", "n", sid="sess-nudge").stdout
+        check("the yield counts claims and triggers fired too, not hardens alone",
+              "1 claims" in _ledger and "1 triggers fired" in _ledger and "1 hardened" in _ledger)
+        check("...while the one that did encode something is not accused of it — the pair that "
+              "keeps the warning honest",
+              "NOTHING WAS HARDENED" not in _yield)
+
+        # Others' learnings must arrive BEFORE the reflection, or they are an appendix to thinking
+        # that has already happened.
+        _tp_write({"stepback": [{"name": "tp-in", "command": "echo INCOMING-LEARNING"}]})
+        _sb = _run("stepback", "--notes", "n", sid="sess-nudge").stdout
+        check("a stepback trigger's output lands BEFORE the retro's own output, not after",
+              "INCOMING-LEARNING" in _sb
+              and _sb.index("INCOMING-LEARNING") < _sb.index("STEP-BACK — invariants re-injected"))
+    finally:
+        shutil.rmtree(tpp, ignore_errors=True)
+
     # PINNED HARNESS. game_loop dogfoods itself: the hooks guarding a session run the very bin/ that
     # session is editing, so a half-finished gate is live in the same breath it is written. A merge
     # left conflict markers in bin/game_loop and every verb died with a SyntaxError; a shell parse

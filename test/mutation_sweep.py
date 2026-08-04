@@ -193,6 +193,19 @@ MUTANTS = [
      # producer silent everywhere, which is the arm that assertion already permits. That is the
      # pairing behaving as designed rather than a hole, and it is why the count is 6 and not 7.
      None, 6),
+    ("fire_triggers -> a project's attachments never run", "fire_triggers", "    return []\n",
+     ["trigger", "attach", "harden", "stepback"], None, 9),
+    ("triggers_report -> status never mentions an attachment", "triggers_report",
+     "    return []\n", ["trigger", "attach", "never fired"],
+     # Measured at 2 when first written, and that was the whole warning: the two assertions were the
+     # never-fired pair, so the THIRD state — fires every time and fails every time — was invisible,
+     # which is the one a never-fired warning is silent about. Adding it took this to 4.
+     None, 4),
+    ("retro_outcome -> a retro never reports what the last one yielded", "retro_outcome",
+     "    return []\n", ["retro", "yield", "harden"],
+     # Also 2 at first, both about hardens. A chapter can be all evidence and no encoding, and the
+     # ledger has to show that SHAPE rather than one number, so the claims/triggers arm was added.
+     None, 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

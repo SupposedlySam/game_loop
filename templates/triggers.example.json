@@ -1,0 +1,46 @@
+{
+  "//": [
+    "TRIGGERS — your project's own actions, attached to moments in the loop.",
+    "",
+    "Copy to .game_loop/triggers.json (gitignored) and edit. Scripts live in",
+    ".game_loop/triggers.d/ (also gitignored). Both are SITE wiring: they name paths, rooms and",
+    "sometimes credentials that belong to one machine, not to the product.",
+    "",
+    "WHY THIS EXISTS. Some things worth doing at a moment in the loop cannot ship as a rule, because",
+    "they depend on infrastructure most installs do not have — a chat room, a ticket tracker, a",
+    "metrics endpoint. game_loop owns the MOMENT; you own what happens there.",
+    "",
+    "THE CONTRACT",
+    "  * the event payload arrives as JSON on stdin (the same shape Claude Code hands its hooks)",
+    "  * stdout comes back to the agent and is printed — this is how a trigger TELLS you things",
+    "  * env: GAME_LOOP_EVENT, GAME_LOOP_ROOT (the .game_loop dir), GAME_LOOP_REPO (the repo root)",
+    "  * a non-zero exit is reported loudly and NEVER blocks the verb — the work outranks the",
+    "    announcement, and a broadcast that can veto what it reports on is a guard blocking its own fix",
+    "  * timeout_sec defaults to 20",
+    "",
+    "MOMENTS AVAILABLE",
+    "  harden   — a learning was just encoded. Payload: learning, general, artifact, mechanism, rung,",
+    "             project, session. `--general` is the transferable form, and is null when not given.",
+    "  stepback — a retro just began, BEFORE its output. Payload: notes, project, session,",
+    "             trans_since, work_since. The moment to pull in what others have learned.",
+    "",
+    "`game_loop status` lists what you have attached and names anything that has never fired.",
+    "Configured and working are different claims, and only one of them is visible by default."
+  ],
+
+  "harden": [
+    {
+      "name": "example-append-to-a-file",
+      "command": "python3 -c \"import json,sys; d=json.load(sys.stdin); g=d.get('general'); print('nothing to share' if not g else open('/tmp/learnings.md','a').write(g+chr(10)) and 'shared')\"",
+      "timeout_sec": 20
+    }
+  ],
+
+  "stepback": [
+    {
+      "name": "example-read-something",
+      "command": "echo 'whatever this prints is shown to the agent before it reflects'",
+      "timeout_sec": 20
+    }
+  ]
+}

@@ -177,6 +177,10 @@ DEFAULT_CONFIG = {
     "deploy_verbs": [],        # extra irreversible verbs the guard blocks anywhere
     "generated_globs": [],     # extra generated/vendored paths the commit blast-radius warning skips
     "trans_nudge_every": 12,   # phase transitions between retro nudges
+    # Evidence work (claims, hardens, fix proofs) between retro nudges. The transitions counter above
+    # cannot fire on its own: it counts an OPTIONAL verb, and in this repo's whole history `trans`
+    # ran once against twelve hardens and zero retros. This one counts work that logs itself.
+    "work_nudge_every": 8,
     "watchdog": {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3},
     # Usage-limit survival (statusline tap + limitgate + watchdog park). threshold_pct is where the
     # handoff gate closes; exhausted_pct is where the watchdog treats the session as rate-limited
@@ -400,12 +404,151 @@ def render_banner(s, frm=None):
 
 
 def retro_nudge(s):
-    n = s.get("trans_since_stepback", 0)
-    every = config().get("trans_nudge_every", 12)
-    if n >= every:
-        return (f"⚠ {n} transitions since the last retro — `game_loop stepback --notes ..` is due "
+    """Due-for-a-retro, measured on work that ACTUALLY HAPPENS.
+
+    This nudge was unreachable for the whole life of the project, and the arithmetic says why: it
+    counted `trans` only, `trans` had run ONCE in the log's entire history, and the threshold was 12.
+    Nothing was broken — the counter simply never moved, so the check could not fire, and its
+    silence read exactly like "no retro is due". Meanwhile `harden` had run twelve times and
+    `stepback` zero, which is the retro not happening at all.
+
+    A trigger fed by an OPTIONAL bookkeeping verb is enforcement resting on the thing it is meant to
+    enforce (INV1). So the second counter is fed by work that leaves a log line whether or not
+    anyone remembers this feature exists: claims sourced, learnings hardened, fixes proved.
+    Either counter can fire it — `trans` stays honoured for anyone who does drive phases.
+    """
+    cfg = config()
+    t, w = s.get("trans_since_stepback", 0), s.get("work_since_stepback", 0)
+    t_every, w_every = cfg.get("trans_nudge_every", 12), cfg.get("work_nudge_every", 8)
+    if t >= t_every:
+        return (f"⚠ {t} transitions since the last retro — `game_loop stepback --notes ..` is due "
                 "(reflect, harden the chapter's learnings, reset the count).")
+    if w >= w_every:
+        return (f"⚠ {w} pieces of evidence work (claims, hardens, fix proofs) since the last retro — "
+                "`game_loop stepback --notes ..` is due. This counter exists because the "
+                "transitions one counted a verb nobody runs, and so never fired.")
     return None
+
+
+# ── triggers ──────────────────────────────────────────────────────────────────────────────────
+#
+# A place for a project to attach ITS OWN action to a moment in the loop. game_loop cannot ship the
+# actions themselves: the one that prompted this is broadcasting a generalised learning to a channel
+# other agents read, and most installs have no such channel, no other agents, and no wish to talk to
+# anyone at all. A rule that cannot apply to everyone must not be wired in for everyone — so the
+# harness owns the MOMENT, and the project owns what happens there.
+#
+# Config lives in triggers.json, which is GITIGNORED, exactly like notify.json and for the same
+# reason: it is site wiring, not product. config.json is tracked and would ship one machine's paths
+# and room names to every cloner.
+#
+# Three rules, each a scar:
+#   * NEVER BLOCKS. A trigger that fails must not stop a learning from being hardened — the work
+#     outranks the announcement, and a broadcast that can veto the thing it reports on is a guard
+#     blocking its own fix (INV5).
+#   * NEVER SILENT. Failure, timeout and a command that cannot be found all SAY so. A missing
+#     trigger is the usage-limit tap over again: three gates fed by one file nobody noticed was
+#     never written (INV8).
+#   * ALWAYS ACCOUNTED. Every configured trigger carries its last outcome in state, so `status`
+#     can name one that has never fired. "Configured" and "working" are different claims.
+TRIGGERS_F = os.path.join(ROOT, "triggers.json")
+
+# The moments the loop publishes. Adding one is a deliberate act: a moment nobody attaches to is
+# dead weight, and a moment that fires on a hot path turns a helpful hook into a tax.
+TRIGGER_EVENTS = {
+    "harden": "a learning was just encoded into an artifact — the moment to GENERALISE and share it",
+    "stepback": "a retro just began — the moment to LEARN from what others have shared",
+}
+
+
+def load_triggers():
+    try:
+        with open(TRIGGERS_F) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def triggers_for(event):
+    e = load_triggers().get(event)
+    return [t for t in e if isinstance(t, dict) and t.get("command")] if isinstance(e, list) else []
+
+
+def fire_triggers(s, event, payload):
+    """Run this project's attachments for `event`. Returns lines to print; raises nothing, ever.
+
+    The payload goes in as JSON on stdin — the same shape Claude Code hands its own hooks, so anyone
+    who has written one of those already knows this contract. stdout comes BACK to the agent on
+    purpose: a trigger that reads a channel is useless if what it read is thrown away.
+    """
+    fired = []
+    for t in triggers_for(event):
+        name = str(t.get("name") or "(unnamed)")
+        try:
+            timeout = max(1.0, float(t.get("timeout_sec") or 20))
+        except (TypeError, ValueError):
+            timeout = 20.0
+        env = dict(os.environ, GAME_LOOP_EVENT=event, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT)
+        try:
+            r = subprocess.run(["bash", "-c", t["command"]], input=json.dumps(payload),
+                               capture_output=True, text=True, timeout=timeout, env=env)
+            ok, body, err = r.returncode == 0, (r.stdout or "").strip(), (r.stderr or "").strip()
+            if not ok and not err:
+                err = f"exited {r.returncode} with nothing on stderr"
+        except subprocess.TimeoutExpired:
+            ok, body, err = False, "", f"timed out after {timeout:.0f}s"
+        except OSError as exc:                       # command unrunnable — still an ANSWER, not a crash
+            ok, body, err = False, "", str(exc)
+        rec = s.setdefault("triggers", {}).setdefault(name, {})
+        rec.update({"event": event, "at": now(), "ok": ok, "detail": (err or body)[:200]})
+        logline({"kind": "trigger", "name": name, "event": event, "ok": ok,
+                 "detail": (err or "")[:200]})
+        fired.append((name, ok, body, err))
+    if not fired:
+        return []
+    save(s)
+    lines = [f"— triggers · {event} ——————————————————————————"]
+    for name, ok, body, err in fired:
+        if ok:
+            lines.append(f"  ✓ {name}")
+            lines.extend("     " + l for l in (body.splitlines() or ["(no output)"]))
+        else:
+            # Loud, and it says the verb still stands — otherwise the next reader assumes it didn't.
+            lines.append(f"  ✗ {name} FAILED — {err or 'no detail'}")
+            if body:
+                lines.extend("     " + l for l in body.splitlines())
+            lines.append(f"     (the {event} itself stands; a trigger never blocks the work)")
+    return lines
+
+
+def triggers_report():
+    """Silent when a project has attached nothing — most installs want no part of this.
+
+    Once something IS attached, silence becomes the failure mode worth naming: a trigger that has
+    never fired looks identical, from outside, to one that fires perfectly every time.
+    """
+    cfg = load_triggers()
+    entries = [(ev, t) for ev in cfg for t in triggers_for(ev)]
+    if not entries:
+        return []
+    s = load()
+    seen = s.get("triggers") or {}
+    lines = ["TRIGGERS — this project's own attachments to the loop:"]
+    for ev, t in entries:
+        name = str(t.get("name") or "(unnamed)")
+        rec = seen.get(name)
+        if not rec:
+            lines.append(f"  ⚠ [{ev}] {name} — CONFIGURED BUT NEVER FIRED in this tree. Either the "
+                         f"moment has not come round yet, or it is not wired to anything.")
+        else:
+            mark = "✓" if rec.get("ok") else "✗"
+            lines.append(f"  {mark} [{ev}] {name} — last {rec.get('at')}"
+                         + ("" if rec.get("ok") else f" · FAILING: {rec.get('detail') or '?'}"))
+    unused = [e for e in TRIGGER_EVENTS if not triggers_for(e)]
+    if unused:
+        lines.append("  → moments with nothing attached: " + ", ".join(sorted(unused)))
+    return lines
 
 
 # ── source resolution ───────────────────────────────────────────────────────────────────────────
@@ -1034,6 +1177,7 @@ def cmd_claim(s, a):
             inst["recheck_n"] = len(inst.get("readings") or [])
     logline(rec)
     s["claim_count"] = s.get("claim_count", 0) + 1
+    s["work_since_stepback"] = s.get("work_since_stepback", 0) + 1   # feeds the retro nudge
     save(s)
     msg = [CLAIM_OUTCOMES[outcome],
            f"  assert    : {a.assert_}",
@@ -2720,6 +2864,8 @@ def cmd_fix(s, a):
                                      ("name", "promises", "produces", "diagnosis", "before",
                                       "observed", "produces_digest", "diagnosis_digest",
                                       "before_digest", "observed_digest", "expect")}})
+    s["work_since_stepback"] = s.get("work_since_stepback", 0) + 1
+    save(s)          # this verb had no other reason to persist state; without it the count is lost
     sym, note = fix_state(proof)
     out(f"{sym} FIX PROVED — {a.prove} was exercised through what it produces.",
         f"  promises : {a.promises}",
@@ -4169,6 +4315,7 @@ def cmd_status(s, a):
             out(f"  … {len(ro) - RULED_OUT_SHOWN} older — grep '\"outcome\": \"refuted\"' "
                 ".game_loop/log.jsonl")
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
+    out(*triggers_report())  # attached ≠ working: one that never fired looks just like one that does
     snap = load_limits()
     lim = limits_summary(snap) if snap else None
     if lim:
@@ -4231,9 +4378,11 @@ def cmd_harden(s, a):
         die("these --artifact paths aren't real files: " + ", ".join(bad) + "\n"
             "Hardening means the artifact EXISTS (code / assert / check / tool), not a plan to write "
             "one. Write it first, then record it here.")
+    general = (getattr(a, "general", None) or "").strip()
     logline({"kind": "harden", "learning": a.learning, "artifact": list(resolved.values()),
-             "mechanism": a.mechanism, "rung": a.rung})
+             "mechanism": a.mechanism, "rung": a.rung, "general": general or None})
     s["hardened_count"] = s.get("hardened_count", 0) + 1
+    s["work_since_stepback"] = s.get("work_since_stepback", 0) + 1
     save(s)
     out("✓ HARDENED — learning → artifact.",
         f"  learning : {a.learning}",
@@ -4241,7 +4390,56 @@ def cmd_harden(s, a):
         f"  mechanism: {a.mechanism}",
         f"  rung     : {a.rung or '(unspecified — which ladder rung?)'}",
         f"→ enforced by the system now, not by memory. (hardened so far: {s['hardened_count']})")
+    if general:
+        out(f"  general  : {general}")
+    elif triggers_for("harden"):
+        # Only nag where somebody has actually attached a sharing step. GENERALISING is a separate
+        # act of thought from hardening, and the transferable form is rarely the incident: "our tap
+        # never wrote limits.json" helps nobody, while "a check whose PASS is silence cannot tell
+        # satisfied from never-ran" is the part that travels. Never blocks — an unshared learning is
+        # still hardened, and refusing the record to extract a sentence would be the tail wagging.
+        out("  ⚠ no --general: this project has a harden trigger attached, and it has nothing to",
+            "    share. The incident form rarely transfers — say the version another agent could use",
+            "    without knowing anything about this codebase.")
+    if (n := retro_nudge(s)):
+        out("", n)
+    out(*fire_triggers(s, "harden", {
+        "event": "harden", "learning": a.learning, "general": general or None,
+        "artifact": list(resolved.values()), "mechanism": a.mechanism, "rung": a.rung,
+        "project": config().get("project_name"), "session": SESSION}))
     flair_out(s, "harden")
+
+
+def retro_outcome():
+    """What CAME of the last retro, counted from the shared log rather than remembered.
+
+    A retro that produces nothing is indistinguishable, afterwards, from one that never happened —
+    both leave a session where no learning got encoded. The act was never the point; the encoding
+    is. So each retro opens by reporting the previous one's yield, and an empty yield is stated
+    rather than passed over. Read from the log because it is the record neither optimism nor
+    compaction can edit.
+    """
+    try:
+        with open(LOG_F) as f:
+            recs = [json.loads(l) for l in f if l.strip()]
+    except (OSError, ValueError):
+        return []
+    last = max((i for i, r in enumerate(recs) if r.get("kind") == "stepback"), default=None)
+    if last is None:
+        return ["  (no previous retro in this log — this is the first)"]
+    after = recs[last + 1:]
+    counts = collections.Counter(r.get("kind") for r in after)
+    when = recs[last].get("t") or "?"
+    hardened = counts.get("harden", 0)
+    lines = [f"  since the last retro ({when}): {hardened} hardened · "
+             f"{counts.get('claim', 0)} claims · {counts.get('fix_proof', 0)} fix proofs · "
+             f"{counts.get('trigger', 0)} triggers fired"]
+    if not hardened:
+        lines.append("  ⚠ NOTHING WAS HARDENED since the last retro. Either the chapter genuinely "
+                     "taught nothing, or the")
+        lines.append("    last retro ended at the writing-it-down step. Only one of those is worth "
+                     "repeating.")
+    return lines
 
 
 def cmd_stepback(s, a):
@@ -4249,9 +4447,20 @@ def cmd_stepback(s, a):
         die("stepback needs --notes — a REAL retro: what WORKED (repeat it)? where did I DEVIATE? "
             "did I assert before reading? AND which recurring learning gets ENCODED (harden), not "
             "written down?")
+    # Others' learnings arrive BEFORE the reflection, not after it — arriving afterwards would make
+    # them a reading exercise rather than an input to the thinking they are supposed to inform.
+    incoming = fire_triggers(s, "stepback", {
+        "event": "stepback", "notes": a.notes, "project": config().get("project_name"),
+        "session": SESSION, "trans_since": s.get("trans_since_stepback", 0),
+        "work_since": s.get("work_since_stepback", 0)})
+    prior = retro_outcome()          # BEFORE the new line lands, or it finds itself and reports zero
     logline({"kind": "stepback", "notes": a.notes})
     s["trans_since_stepback"] = 0
+    s["work_since_stepback"] = 0
     save(s)
+    if incoming:
+        out(*incoming)
+    out("=== WHAT THE LAST RETRO YIELDED ===", *prior, "")
     out("=== STEP-BACK — invariants re-injected ===")
     try:
         with open(INV_F) as f:
@@ -4302,6 +4511,8 @@ def main():
     hd.add_argument("--artifact", help="real path[,path] to the code/assert/check/tool that enforces it")
     hd.add_argument("--mechanism", help="how it now fails loudly / becomes impossible")
     hd.add_argument("--rung", help="ladder rung 1..6 (1 IMPOSSIBLE .. 6 doc-last-resort)")
+    hd.add_argument("--general", help="the TRANSFERABLE form — what another agent could use without "
+                                      "knowing this codebase (fed to any `harden` trigger)")
 
     sb = sub.add_parser("stepback")
     sb.add_argument("--notes")

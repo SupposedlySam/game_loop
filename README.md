@@ -203,12 +203,12 @@ even if you never automate the resume.
 | `game_loop arm --question .. --read .. --predict ..` | Arm one interruption of the human, backed by a file you already read. |
 | `game_loop claim --assert ".." --read <path>` | Assert something about external reality — refused unless you name a real file. |
 | `game_loop claim --assert ".." --outcome refuted --evidence <path>` | Retract it: a first-class negative result. Must name the control that killed it; `status` keeps the RULED-OUT list. |
-| `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N` | Turn a learning into an enforced artifact. |
+| `game_loop harden --learning .. --artifact <path> --mechanism .. --rung N [--general ".."] | Turn a learning into an enforced artifact. `--general` is the transferable form — what another agent could use without knowing this codebase — and is handed to any `harden` trigger. |
 | `game_loop pin --fact .. --reason .. --path <path> [--expect ..]` | Carry a load-bearing environment fact (a pinned dep commit, a toolchain, an SDK path) in resume state, so a later tidy-up can't silently revert it. `--list` / `--release <id> --notes ".."`. |
 | `game_loop authorize --path <prefix> --reason ".."` | One-time, logged permission for a single write outside the repo. |
 | `game_loop attribute --merge <ref> [--merge <ref>] --reason ".."` | Declare that the next commit lands work a named REF carries, so the blast-radius warning reports only what *nothing* accounts for. Takes refs, never filenames — the files are recomputed from the ref. One commit, consumed, logged. |
 | `game_loop trans --tier .. --milestone .. --doing ..` | Record a phase transition (drives the retro nudge). |
-| `game_loop stepback --notes ".."` | Retro; re-injects your invariants. |
+| `game_loop stepback --notes ".."` | Retro; re-injects your invariants, fires any `stepback` trigger **first**, and reports what the previous retro actually yielded. |
 | `game_loop note --text ".."` | Append a note to the log. |
 | `game_loop notify --text ".."` / `--test` | Page the configured Slack channel by hand / verify the channel works. |
 | `game_loop worktree [--porcelain]` | Does this linked worktree carry the *project's* rules? Names the files that drifted. `--porcelain` answers both questions as JSON — `rules` (differ ⇒ the trees enforce different things) and `harness` (every owned file). Exit 0 **only** when it compared and matched; 1 rules drifted, 3 notes drifted, 2 could not determine — never read a 2 as clean. |
@@ -254,6 +254,9 @@ for the guarantees as runnable checks (`python3 test/run.py`).
                              // classify them, e.g. "mcp__docs__" or "mcp__db__explainPlan". Resolves
                              // ambiguity ONLY — it can never silence a mutating verb or argument.
   "trans_nudge_every": 12,   // phase transitions between retro nudges
+  "work_nudge_every": 8,     // evidence work (claims, hardens, fix proofs) between retro nudges.
+                             // The transitions counter above cannot fire on its own — it counts an
+                             // OPTIONAL verb. This one counts work that logs itself either way.
   "watchdog": { "idle_sec": 30, "settle_sec": 5, "ring_cap": 3 },
   "limits": {                // usage-limit survival (see "Survive Claude Code usage limits")
     "threshold_pct": 98,     // handoff gate closes here

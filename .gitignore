@@ -14,6 +14,8 @@
 .game_loop/.limits.lock
 .game_loop/HANDOFF.md
 .game_loop/.update_cache.json
+.game_loop/triggers.json
+.game_loop/triggers.d/
 
 # pinned harness checkout (`game_loop self --pin <ref>`) — CODE only, at a chosen commit, so the
 # hooks guarding a session are not the same files that session is editing. Local by construction:
@@ -33,9 +35,6 @@ NEXT_SESSION.md
 
 # showrunner: per-Crawler git worktrees (local only)
 .worktrees/
-
-# llm_chat identity for this project
-.llm_chat/
 
 # machine-local hook config (absolute paths)
 .claude/settings.local.json

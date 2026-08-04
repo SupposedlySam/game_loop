@@ -412,6 +412,8 @@ limits.json
 .limits.lock
 HANDOFF.md
 .update_cache.json
+triggers.json
+triggers.d/
 EOF
   echo "  wrote   .game_loop/.gitignore"
 else
@@ -427,6 +429,12 @@ else
   if ! grep -q '^.update_cache.json$' "$GI"; then
     echo ".update_cache.json" >> "$GI"
     echo "  updated .game_loop/.gitignore (+ .update_cache.json — update-check cache)"
+  fi
+  # triggers.json is SITE wiring — local paths, room names, sometimes a credential in a command.
+  # Ignored before anyone writes one, for the same reason notify.json is.
+  if ! grep -q '^triggers.json$' "$GI"; then
+    printf 'triggers.json\ntriggers.d/\n' >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ triggers.json — this project's own triggers)"
   fi
   # the no-session fallback's edited-path record (the per-session one is under sessions/)
   if ! grep -q '^edited.txt$' "$GI"; then

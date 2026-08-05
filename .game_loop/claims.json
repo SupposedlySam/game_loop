@@ -21,7 +21,18 @@
     "Each claim carries `ledger`: the exact LEDGER.md heading it accounts for. The suite",
     "matches on THOSE, not on a count -- a count passes when one entry is added and",
     "another removed, which is the shape of check that lies to you. A new VERIFIED or",
-    "RULED-OUT entry about the host therefore fails the run until somebody decides it."
+    "RULED-OUT entry about the host therefore fails the run until somebody decides it.",
+    "",
+    "A RUNG ABOVE VERSIONING, from showrunner: version the subject when you cannot reach it,",
+    "EXERCISE the subject when you can. A stamp records that the author verified something on the",
+    "author's machine and asserts it about a stranger's. An exercise checks it on the stranger's,",
+    "every run, and cannot go stale because there is no recorded answer to rot. Where a fact can be",
+    "provoked, the stamp is the weaker instrument -- so `exercised_by` outranks `verified_against`",
+    "on any claim that carries it, and the report says which one it is speaking from.",
+    "",
+    "Only one of the six is exercisable today and the rest say so rather than implying otherwise:",
+    "the five RULED-OUT entries are absences, and an absence cannot be provoked -- observing that",
+    "no `claude usage` flag exists this run is not evidence it did not appear in the last release."
   ],
   "claude_code": {
     "subject": "Claude Code (the host this harness runs inside)",
@@ -34,7 +45,9 @@
         "says": "rate_limits.five_hour/.seven_day ride the statusline stdin JSON, each {used_percentage, resets_at}",
         "source": "https://code.claude.com/docs/en/statusline.md",
         "breaks": "game_loop statusline writes no snapshot, so limitgate and the park are inert",
-        "ledger": "Claude Code exposes subscription rate limits in the statusline stdin JSON"
+        "ledger": "Claude Code exposes subscription rate limits in the statusline stdin JSON",
+        "exercised_by": "limits.json carrying five_hour/seven_day with used_percentage",
+        "exercise_note": "the host writes this through our own tap, so a snapshot in the expected shape IS the claim holding, observed on the consumer's machine rather than on the author's"
       },
       {
         "id": "statusline-config-keys",

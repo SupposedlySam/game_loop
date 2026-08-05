@@ -547,6 +547,13 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    ".game_loop/bin/game_loop::_statusline_claim_live":
+        "the EXERCISE behind one host claim: it returns a description of live evidence, or None "
+        "when there is none. Its None is not a silence-on-pass — it is one of two reported "
+        "outcomes, and both are asserted directly in a sandbox (observed, not-observed, and a "
+        "snapshot missing the field). Neutering it to None reproduces the arm the suite already "
+        "drives on purpose, so sweeping it would re-measure through status what three paired "
+        "assertions decide at the source.",
     ".game_loop/bin/game_loop::installed_by":
         "reads the packager marker that decides WHICH upgrade command the update notice names. "
         "Neutered it returns None and the notice falls back to the curl — which is precisely the "

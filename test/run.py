@@ -920,9 +920,26 @@ def main():
         FakeGH.compare = "behind"
         check("...while an install genuinely behind still gets the notice",
               "update available" in fresh_status())
+        # DIVERGED IS NOT "BEHIND". It means the installed commit is on no branch — a rebase or a
+        # force-push orphaned it — and every other signal a consumer can see says fine: the payload
+        # is complete, VERSION is stamped, CONFIDENCE may say stable. Reporting that as an ordinary
+        # available update understates it to the one party who cannot check.
+        #
+        # I CAUSED ONE. A channel pointer went out at a commit whose branch push had been rejected,
+        # so `stable` briefly named a tree on no branch and my own rebase orphaned it. The
+        # producer-side guard only helps whoever installs AFTERWARDS; anyone inside the window
+        # depended on me noticing and writing to them. A downstream maintainer named that as the
+        # half that cannot see anything, and this is that half.
         FakeGH.compare = "diverged"
-        check("...and a diverged history is reported too, since it is not at-or-past latest either",
-              "update available" in fresh_status())
+        _div = fresh_status()
+        check("a DIVERGED install is told its commit is not on the branch at all, not merely that "
+              "an update exists — the one failure a consumer cannot otherwise detect",
+              "NOT ON" in _div.upper() and "orphaned" in _div)
+        check("...and it names the reason everything else looks fine, so the reader does not "
+              "dismiss it as the usual nag",
+              "payload" in _div and "VERSION is stamped" in _div)
+        check("...and offers a ref a branch actually contains, rather than leaving them to guess",
+              "GAME_LOOP_CHANNEL=stable" in _div)
         # COULD NOT DETERMINE is a third answer, and it must not be spoken as either of the others.
         FakeGH.compare = None
         _undet = fresh_status()
@@ -5418,6 +5435,31 @@ def main():
     # AND IT MUST NOT IMPLY IT CHECKED THE TRUTH. verified_against is null on every entry, which is
     # the finding rather than an oversight: the original verification never recorded a version, so
     # there is nothing to compare and the report has to say exactly that.
+    # AN EXERCISE OUTRANKS A STAMP (showrunner). A stamp records that the AUTHOR checked something
+    # on the AUTHOR's machine and asserts it about a stranger's; an exercise checks it on the
+    # stranger's, every run, and has no recorded answer to rot. Paired both ways in a sandbox,
+    # because the repo itself runs on a host whose tap never fires — so the un-observed arm here
+    # would otherwise be the only one anybody ever saw.
+    xw = make_sandbox()
+    try:
+        _xs = gl(xw, "status", sid="sess-x").stdout
+        check("an exercisable claim with no observation says so, and says it cannot tell a tap that "
+              "never ran from a claim that stopped holding",
+              "has NOT been observed here" in _xs and "cannot tell which" in _xs)
+        with open(os.path.join(xw, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"five_hour": {"used_percentage": 12, "resets_at": 1}}, f)
+        _xs2 = gl(xw, "status", sid="sess-x").stdout
+        check("...and a real snapshot in the expected shape reports the claim CONFIRMED LIVE on "
+              "this machine — the host's own behaviour, not a record of somebody checking",
+              "CONFIRMED LIVE here" in _xs2 and "cannot be stale" in _xs2)
+        with open(os.path.join(xw, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"five_hour": {"nope": 1}}, f)
+        check("...while a snapshot MISSING the field the claim is about does not count as "
+              "confirming it — the exercise checks the shape, not the file's existence",
+              "has NOT been observed here" in gl(xw, "status", sid="sess-x").stdout)
+    finally:
+        shutil.rmtree(xw, ignore_errors=True)
+
     _rep = "\n".join(gl(REPO, "status").stdout.split("\n"))
     check("status reports the claims, and says plainly that nothing here checks whether one is TRUE",
           "load-bearing claim(s) about" in _rep and "never checks whether a claim is TRUE" in _rep)

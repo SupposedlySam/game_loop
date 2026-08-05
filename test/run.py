@@ -3242,6 +3242,60 @@ def main():
                   "silences the watchdog on exactly the wedged run it was built to catch",
                   '"watchdog_exhausted"' in _l and '"watchdog_wait_held"' not in _l)
 
+        # "COULD NOT TELL" IS A THIRD STATE, and it used to be spent as "not waiting".
+        #
+        # Conservative-toward-not-waiting is right and it is not self-reporting: a broken probe and
+        # a working one seeing work produce the same non-zero exit, the same ring, and no way to
+        # tell them apart. Measured, not imagined -- this repo's own probe bailed on `command -v gh`
+        # because gh is absent from a hook's PATH, exited 1 with EMPTY stderr, and read as "there is
+        # work" for five rounds while I reported the loop fixed. The contract is now 0 or 1; every
+        # other code means the probe could not answer, and SAYS so.
+        for _name, _cmd in (("an unexpected exit code", "exit 3"),
+                            ("a probe that cannot run at all", "/nonexistent/probe/xyz"),
+                            ("a probe that hangs past its bound", "sleep 60")):
+            open(_wlog, "w").close()
+            _probe(_cmd)
+            _at_cap()
+            _run()
+            with open(_wlog) as f:
+                _l = f.read()
+            check(f"...{_name} is recorded as UNANSWERED, not as 'not waiting' — a check that "
+                  "cannot run must not borrow the credibility of one that ran and said no",
+                  '"answered": false' in _l)
+            check(f"...and status says the probe is FAILING for {_name}, so configured-but-inert "
+                  "is loud instead of indistinguishable from a busy queue",
+                  "THE WAITING PROBE IS FAILING" in gl(wp, "status", sid="sess-wait").stdout)
+
+        # PAIRED: a probe that genuinely answers "there is work" must NOT be smeared as broken, or
+        # the warning becomes noise and stops carrying information.
+        open(_wlog, "w").close()
+        _probe("exit 1")
+        _at_cap()
+        _run()
+        with open(_wlog) as f:
+            check("...while a probe that answers 'there is work' is recorded as ANSWERED — the "
+                  "warning marks breakage only, so it still means something when it fires",
+                  '"answered": true' in f.read())
+        _st_ans = gl(wp, "status", sid="sess-wait").stdout
+        check("...and status reports it as an ordinary 'not waiting', not as a failure",
+              "not waiting" in _st_ans and "THE WAITING PROBE IS FAILING" not in _st_ans)
+
+        # And the shipped probe honours the contract it is judged by. A hook's PATH is not a login
+        # shell's, which is the exact way this failed: resolving `gh` by name alone.
+        _shipped = os.path.join(SRC_GAME_LOOP, "triggers.d", "waiting-on-issues.sh")
+        if os.path.exists(_shipped):
+            _p = subprocess.run(["env", "-i", "PATH=/usr/bin:/bin",
+                                 "HOME=" + os.path.expanduser("~"), "bash", _shipped],
+                                capture_output=True, text=True, timeout=60)
+            # The assertion is about PATH RESOLUTION, not about the tracker being reachable. An
+            # unauthenticated or offline gh is a real "could not tell" and exits 2 honestly; failing
+            # to FIND gh under a hook's PATH is the defect that cost five rounds, and it is the one
+            # thing this environment can decide. Asserting `returncode in (0, 1)` instead would tie
+            # the suite to network and credentials, which is a different test wearing this one's name.
+            check("this repo's own waiting probe RESOLVES its tracker CLI under a minimal PATH — "
+                  "the environment a hook actually gets, not the one a hand-check is run in",
+                  "not found on PATH" not in _p.stderr)
+
         # CONFIG-AUTHORED ONLY. A wait the agent can declare for itself is the off switch.
         _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
         check("no verb can set the probe — it is config-authored only, never runtime-settable",

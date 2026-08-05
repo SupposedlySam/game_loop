@@ -3845,9 +3845,20 @@ def waiting_report():
     if not last:
         return ["waiting: a probe is configured, but the watchdog has not run it yet — its verdict "
                 "appears here once it does."]
+    detail = last.get("detail") or ""
+    # A probe that could not ANSWER is a third state, and it used to be absorbed into "not waiting"
+    # — where it is invisible for as long as there is work, then wrong the moment there is not.
+    if last.get("answered") is False:
+        return [f"⚠ THE WAITING PROBE IS FAILING, not answering — as of {last.get('t', '?')}"
+                + (f" · {detail}" if detail else ""),
+                "  It must exit 0 (waiting) or 1 (not waiting); anything else means it could not "
+                "tell, and",
+                "  the watchdog rings. Until it answers, 'no work outstanding' and 'the probe is "
+                "broken' look",
+                "  the same from here — which is the failure this probe exists to prevent, one "
+                "level out."]
     verdict = "WAITING on dispatched work" if last.get("waiting") or \
               last.get("kind") == "watchdog_wait_held" else "not waiting"
-    detail = last.get("detail") or ""
     return [f"waiting: {verdict} — as of {last.get('t', '?')}" + (f" · {detail}" if detail else ""),
             "  (the watchdog's own last verdict, not a fresh one; it is conservative toward NOT "
             "waiting)"]

@@ -453,13 +453,28 @@ def waiting_verdict():
         env = dict(os.environ, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT)
         r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15,
                            cwd=REPO_ROOT, env=env)
+        # THE EXIT CONTRACT IS 0 OR 1 AND NOTHING ELSE.
+        #
+        # "Conservative toward not waiting" is right, and on its own it made a BROKEN probe
+        # indistinguishable from a working one reporting work: both are non-zero, both ring, and
+        # the failure is invisible for exactly as long as the queue is busy. That is the
+        # statusline-tap shape (#45) reappearing inside the feature added to prevent this class.
+        #
+        # Measured here: this repo's own probe bailed on `command -v gh` because gh is not on a
+        # hook's PATH, exited 1 with EMPTY stderr, and read as "there is work" for five rounds while
+        # I reported the loop fixed. A silence that a legitimate answer also produces is not a
+        # signal, so the third state gets its own code and is reported rather than absorbed.
         waiting = r.returncode == 0
+        answered = r.returncode in (0, 1)
         reason = (r.stdout or "").strip().splitlines()
         reason = reason[0][:160] if reason else ""
         detail = reason if waiting else (r.stderr or "").strip()[:160]
-    except Exception:  # noqa: BLE001 — unrunnable, hung, anything: NOT waiting, and say why
-        waiting, detail = False, "probe did not run"
-    logline({"kind": "watchdog_waiting", "waiting": waiting, "detail": detail})
+        if not answered:
+            detail = (detail or f"exit {r.returncode} with nothing on stderr")[:160]
+    except Exception:  # noqa: BLE001 — unrunnable, hung, anything: NOT waiting, and say so
+        waiting, answered, detail = False, False, "probe did not run at all"
+    logline({"kind": "watchdog_waiting", "waiting": waiting, "answered": answered,
+             "detail": detail})
     return waiting, detail
 
 

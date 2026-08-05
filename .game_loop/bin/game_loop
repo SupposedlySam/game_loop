@@ -5461,8 +5461,25 @@ def cmd_stepback(s, a):
 # with a hole in it; a generated patch had its escapes consumed one layer early. After the first I
 # hardened "route prose through a file" as a thing to remember -- rung 6 -- and it failed twice more
 # while I was writing about checks that cannot report their own failure.
+# ENUMERATED, AND THEREFORE ALREADY ONCE INCOMPLETE. The first version of this list missed
+# `mandate --set` — the single most load-bearing sentence in the tool, the one the whole autonomy
+# loop is driven by — along with the arm's question and prediction and every descriptive field of
+# the evidence family. I found it by trying to rewrite my own mandate through a file and being told
+# the option did not exist. That is the same failure #57 removed from mcp_standing_writes, committed
+# here in the fix for it: a hand-kept list of names is complete on the day it is written.
+#
+# The entry test is CONTRACT, not length: does the field hold a sentence somebody composed? A path,
+# a name, an enum, a number and a ref all stay out — they cannot carry a backtick that means
+# anything, and bounding them would refuse legitimate values for no gain.
 PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", "--fact",
-              "--notes", "--text", "--because", "--confidence", "--promises", "--doing")
+              "--notes", "--text", "--because", "--confidence", "--promises", "--doing",
+              # the autonomy loop's own prose, and the most expensive to corrupt
+              "--set", "--question", "--predict", "--next",
+              # the evidence family's descriptive halves — what a thing MEANS, not where it lives
+              "--known-state", "--measures", "--connects", "--recheck",
+              # a pin's expectation and its restore command: a command carrying $ or a backtick is
+              # precisely what a shell rewrites on the way past
+              "--expect", "--restore")
 
 # MEASURED, not chosen for roundness. Over the 130 prose values in this repo's log: p50 157, p75
 # 285, p95 632, max 1011. Both corrupted values were over 700. 400 sits above the p95 of every field

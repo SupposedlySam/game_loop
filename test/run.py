@@ -4385,6 +4385,36 @@ def main():
         check("...and each prose option a verb takes gets its file sibling by WALKING the parsers, "
               "so a verb that later reuses --notes is covered without anyone adding a pair",
               all(o + "-file" in _helps for o in ("--learning", "--mechanism", "--general")))
+
+        # THE LIST ITSELF WENT STALE, which is what an enumeration does. The first version missed
+        # `mandate --set` — the sentence the whole autonomy loop is driven by, and the most
+        # expensive one in the tool to have three words eaten out of — plus the arm's question and
+        # prediction and every descriptive field of the evidence family. Found by trying to rewrite
+        # this repo's own mandate through a file and being told the option did not exist. Naming the
+        # load-bearing ones here is not a substitute for the walk above; it is a floor under the one
+        # thing the walk cannot notice, which is a field nobody put on the list.
+        for _verb, _opt in (("mandate", "--set"), ("arm", "--question"), ("arm", "--predict"),
+                            ("effector", "--known-state"), ("instrument", "--measures"),
+                            ("pin", "--restore")):
+            _h = gl(pw, _verb, "--help", sid="sess-prose").stdout
+            check(f"...and `{_verb} {_opt}` — a sentence somebody composed — can come from a file",
+                  _opt + "-file" in _h)
+        # PAIRED: a field that is a PATH, a NAME or an ENUM must NOT be bounded, or the rule starts
+        # refusing legitimate values to no purpose. None of these can carry a backtick that means
+        # anything, so none of them belongs in PROSE_OPTS.
+        _h = gl(pw, "claim", "--help", sid="sess-prose").stdout
+        check("...while --read (a path) and --outcome (an enum) get no file twin — the entry test "
+              "is whether the field holds a composed sentence, not whether it holds a string",
+              "--read-file" not in _h and "--outcome-file" not in _h)
+
+        # AND THE MANDATE ITSELF ROUND-TRIPS, since that is the field the miss was found on.
+        _mf = os.path.join(pw, "mandate.txt")
+        with open(_mf, "w") as f:
+            f.write("keep going until the queue is empty")
+        gl(pw, "mandate", "--set-file", _mf, sid="sess-prose")
+        check("...and a mandate SET from a file is the mandate that comes back out — the loop's own "
+              "prose no longer has to survive a shell to be recorded",
+              "keep going until the queue is empty" in gl(pw, "status", sid="sess-prose").stdout)
         check("...and the bound in the refusal is the constant, not a number retyped into prose",
               "PROSE_MAX = 400" in _src and "400 chars" in _helps)
     finally:

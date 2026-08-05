@@ -351,6 +351,13 @@ MUTANTS = [
      # the user file -- which survives a producer neutered to silence, by design. Reporting-only:
      # it decides nothing, which is why there is little to kill.
      "one status line; its companion asserts absence and survives silence by design", 1),
+    ("config_local_keys -> a local config override is never announced",
+     ".game_loop/bin/game_loop::config_local_keys", "    return []\n",
+     ["config.local", "override", "site wiring"],
+     # Measured at 0 when first written -- I shipped config.local.json with no test at all, and this
+     # sweep is what said so. THIN at 1 now: the producer feeds one status line, and its companions
+     # assert the OTHER arm (no local file, nothing announced), which survives silence by design.
+     "one status line; the no-override companion asserts absence and survives silence", 1),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

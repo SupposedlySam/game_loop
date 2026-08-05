@@ -201,6 +201,7 @@ first = words[0] if words else ""
 # argument — an allowlist that can silence a detected mutation is a bypass with a friendly name.
 allow_names = []
 mcp_writes = "gated"        # default before the read, so an unreadable config cannot NameError
+standing_writes = []
 try:
     with open(os.environ["CONFIG_F"]) as f:
         _c = json.load(f)
@@ -214,9 +215,48 @@ try:
         # than toward a stricter one nobody asked for, and `status` names the policy so a typo is
         # visible rather than silently doing something else.
         mcp_writes = str(_c.get("mcp_writes") or "gated").strip().lower()
+        standing_writes = [str(x) for x in (_c.get("mcp_standing_writes") or [])]
 except (OSError, ValueError, KeyError):
     pass
 named_read_only = any(tool == a or (a.endswith("__") and tool.startswith(a)) for a in allow_names)
+
+# ── standing writes: the MCP analogue of allow_write_roots (#56) ─────────────────────────────────
+#
+# `allow_write_roots` lets a project say "writes to these places are fine, standing, no human
+# needed", and nobody calls that a bypass — it is a narrow reviewed policy stated once instead of a
+# human restating it per write. The MCP plane had no equivalent: after #53 it was ask-every-time or
+# never. So any workflow whose WORK PRODUCT lands through an MCP write could not finish unattended,
+# which is the category this tool exists to enable. Observed: a completed PR review that could not
+# be posted, where the human's authorization bought a RETRY rather than a safety decision.
+#
+# What keeps it a policy rather than an off switch, and each of these is refused at READ time rather
+# than silently dropped, because a policy that is half-honoured is worse than one that is rejected:
+#   * EXACT tool names only. A prefix or glob would silence tools the project never evaluated,
+#     turning an allowlist back into a denylist over everything the server adds later.
+#   * NEVER an irreversible verb. HARD_VERBS stays human-only regardless of what config says.
+# And two more enforced at the point of use rather than here:
+#   * never an ARGUMENT-level finding — that is per-call and cannot be pre-approved;
+#   * inert under mcp_writes: "disabled", because disabled must stay absolute (#53).
+standing_bad = []
+standing_ok = set()
+for _e in standing_writes:
+    _w = tokens(_e.split("__")[-1]) if _e.count("__") >= 2 else []
+    if "*" in _e or "?" in _e or not _e.startswith("mcp__") or _e.count("__") < 2 or _e.endswith("__"):
+        standing_bad.append((_e, "not an exact mcp__server__tool name (no prefixes, no globs)"))
+    elif set(tokens(_e)) & HARD_VERBS:
+        standing_bad.append((_e, "names an irreversible verb, which stays human-only"))
+    else:
+        standing_ok.add(_e)
+
+if standing_bad:
+    print("DENY")
+    print("BLOCKED: this project's mcp_standing_writes is not a valid policy, so no MCP call is\n"
+          "classified until it is fixed.\n\n"
+          + "\n".join("    " + e + "\n      " + why for e, why in standing_bad)
+          + "\n\nRefused at CONFIG-READ time rather than dropped: a standing allowance that is\n"
+            "partly honoured is worse than one that is rejected, because nobody can tell which\n"
+            "half is live. Fix .game_loop/config.json -> mcp_standing_writes.")
+    sys.exit(0)
 
 # ── argument shape ───────────────────────────────────────────────────────────────────────────────
 SQL_MUTATION = re.compile(
@@ -283,6 +323,26 @@ elif hard_hit:
     kind = "MUTATING"
     why = "its NAME carries an irreversible verb: '" + hard_hit[0] + "'"
 elif first in MUTATE_VERBS:
+    # Standing allowance applies HERE and nowhere else: past the argument findings and past the
+    # irreversible-verb branch, both of which have already returned above. So a declared tool whose
+    # ARGUMENTS carry a mutation is still refused, and a declared tool naming a hard verb never got
+    # into standing_ok in the first place.
+    if mcp_writes != "disabled" and tool in standing_ok:
+        try:
+            log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
+            with open(log_f, "a") as f:
+                rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+                sid = os.environ.get("SID", "")
+                if sid:
+                    rec["sid"] = sid[:8]
+                # Logged like an authorize spend (#41): "allowed by standing policy" and "never ran"
+                # must stay distinguishable afterwards.
+                rec.update({"kind": "standing_mcp_write", "tool": tool, "verb": first})
+                f.write(json.dumps(rec) + "\n")
+        except OSError:
+            pass
+        print("ALLOW")
+        sys.exit(0)
     kind = "MUTATING"
     why = "its NAME's verb mutates: '" + first + "'"
 elif first in READ_VERBS or named_read_only:

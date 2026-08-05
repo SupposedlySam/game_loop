@@ -3704,6 +3704,121 @@ def main():
     # So every MUTATING deny ended by telling the agent how to get the call through, and a
     # plausible-sounding workflow justification is exactly what an agent is good at producing. For a
     # project meant to touch nothing, the door has to be ABSENT rather than merely guarded.
+    # THE MCP ANALOGUE OF allow_write_roots (#56). A project could gate MCP writes or remove them,
+    # never declare the narrow set it trusts — so any workflow whose WORK PRODUCT lands through an
+    # MCP write could not finish unattended, which is the category this tool exists to enable.
+    # Observed: a completed PR review that could not be posted, where the human's authorization
+    # bought a RETRY rather than a safety decision.
+    # SITE CONFIG NEEDS A GITIGNORED HOME. config.json is tracked AND is the seed a fresh install
+    # copies from, so a value true of one machine — a path, a tracked issue queue, a command that
+    # only exists here — becomes the DEFAULT for everybody who installs from it. This project has
+    # already had to remove one leak of exactly that kind from its docs. notify.json and
+    # triggers.json were gitignored for this reason; config had no such home.
+    print("site config has a gitignored home (config.local.json):")
+    cl = make_sandbox()
+    try:
+        _cj = os.path.join(cl, ".game_loop", "config.json")
+        _clj = os.path.join(cl, ".game_loop", "config.local.json")
+        with open(_cj) as f:
+            _base = json.load(f)
+        _base["mcp_writes"] = "gated"        # a key status actually reports, so the override is
+        with open(_cj, "w") as f:            # observable rather than merely asserted about
+            json.dump(_base, f)
+
+        # PAIRED FIRST: with no local file, the tracked value stands and nothing is announced.
+        _s0 = gl(cl, "status", sid="sess-cl").stdout
+        check("with no config.local.json the tracked config stands, and status says nothing about "
+              "an override",
+              "writes are GATED" in _s0 and "config.local.json" not in _s0)
+
+        with open(_clj, "w") as f:
+            json.dump({"mcp_writes": "disabled"}, f)
+        _s1 = gl(cl, "status", sid="sess-cl").stdout
+        check("config.local.json overrides the tracked file, so site wiring never has to live in "
+              "the file that seeds other installs",
+              "WRITES DISABLED" in _s1 and "writes are GATED" not in _s1)
+        check("...and status NAMES the overridden keys — a config you cannot see is a divergence "
+              "nobody can explain",
+              "config.local.json" in _s1 and "mcp_writes" in _s1)
+        # Malformed must not take the harness down, and must not silently win either.
+        with open(_clj, "w") as f:
+            f.write("{not json")
+        check("...while a malformed local file is ignored rather than fatal, leaving the tracked "
+              "value in force",
+              "writes are GATED" in gl(cl, "status", sid="sess-cl").stdout)
+        with open(os.path.join(REPO, "install.sh")) as f:
+            _icl = f.read()
+        check("...and install.sh ships it gitignored, like notify.json and triggers.json before it",
+              "config.local.json" in _icl)
+    finally:
+        shutil.rmtree(cl, ignore_errors=True)
+
+    print("a project can declare the narrow set of MCP writes it trusts (#56):")
+    sw = make_sandbox()
+    try:
+        _scfg = os.path.join(sw, ".game_loop", "config.json")
+
+        def _set(**kw):
+            with open(_scfg) as f:
+                c = json.load(f)
+            c.update(kw)
+            with open(_scfg, "w") as f:
+                json.dump(c, f)
+
+        def _call(tool, ti=None):
+            r = subprocess.run([os.path.join(sw, ".game_loop", "bin", "guard-mcp.sh")],
+                               input=json.dumps({"tool_name": tool, "session_id": "sess-sw",
+                                                 "tool_input": ti or {"id": 1}}),
+                               capture_output=True, text=True, env=_env(sw, sid="sess-sw"))
+            try:
+                d = json.loads(r.stdout)["hookSpecificOutput"]
+                return d["permissionDecision"], d["permissionDecisionReason"]
+            except Exception:  # noqa: BLE001 — no JSON means it allowed
+                return "allow", ""
+
+        _DECL = "mcp__github__createPullRequestReview"
+        # PAIRED FIRST: undeclared, it is refused — so "allowed" below is the policy, not the guard
+        # having stopped classifying.
+        _set(mcp_writes="gated", mcp_standing_writes=[])
+        check("an undeclared mutating call is still refused, so the allowance below means something",
+              _call(_DECL)[0] == "deny")
+
+        _set(mcp_standing_writes=[_DECL])
+        check("a DECLARED tool runs with no human — the standing, reviewed policy allow_write_roots "
+              "already gives the filesystem plane",
+              _call(_DECL)[0] == "allow")
+        with open(os.path.join(sw, ".game_loop", "log.jsonl")) as f:
+            check("...and the consumption is LOGGED, so 'allowed by policy' and 'never ran' stay "
+                  "distinguishable afterwards",
+                  any('"standing_mcp_write"' in ln and _DECL in ln for ln in f))
+        check("...and status lists the standing doors, so a human sees what is open without "
+              "reading config",
+              _DECL in gl(sw, "status", sid="sess-sw").stdout)
+
+        # THE FOUR REFUSALS THAT KEEP IT A POLICY. Each is a way it could have become an off switch.
+        check("an ARGUMENT-level mutation is refused even for a declared tool — that finding is "
+              "per-call and cannot be pre-approved",
+              _call(_DECL, {"sql": "DELETE FROM t"})[0] == "deny"
+              and _call(_DECL, {"force": True})[0] == "deny")
+        _set(mcp_writes="disabled")
+        check("...and the whole list is inert under mcp_writes disabled, so #53 stays absolute",
+              _call(_DECL)[0] == "deny")
+        _set(mcp_writes="gated", mcp_standing_writes=["mcp__github__deletePullRequestComment"])
+        _hd, _hr = _call("mcp__github__deletePullRequestComment")
+        check("...and an entry naming an IRREVERSIBLE verb is refused AT CONFIG-READ time, loudly, "
+              "rather than silently dropped",
+              _hd == "deny" and "irreversible verb" in _hr)
+        _set(mcp_standing_writes=["mcp__github__"])
+        _pd, _pr = _call("mcp__github__getThing")
+        check("...and a PREFIX is refused too — a prefix would silence tools the project never "
+              "evaluated, turning the allowlist back into a denylist over everything added later",
+              _pd == "deny" and "exact" in _pr)
+        check("...and an invalid policy stops classification entirely rather than honouring the "
+              "valid half, because nobody could tell which half was live",
+              "not a valid policy" in _pr)
+    finally:
+        shutil.rmtree(sw, ignore_errors=True)
+
     print("a project can turn MCP writes off (#53):")
     mp = make_sandbox()
     try:

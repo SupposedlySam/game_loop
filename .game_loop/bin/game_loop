@@ -259,14 +259,46 @@ def now():
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+CONFIG_LOCAL_F = os.path.join(ROOT, "config.local.json")
+
+
 def config():
+    """config.json, then config.local.json on top — the second one GITIGNORED.
+
+    config.json is a tracked, user-owned file AND the seed a fresh install copies from. So a value
+    that is true of one machine -- a path, a tracked issue queue, a command that only exists here --
+    does not merely clutter this repo's config: it becomes the DEFAULT for everybody who installs
+    from it. This project has already had to remove one leak of exactly that kind from its docs.
+
+    The precedent is already here and this closes the gap in it: notify.json and triggers.json are
+    gitignored because they are site wiring. Config had no such home, so anything site-specific had
+    to go in the tracked file or nowhere.
+
+    A shallow update, deliberately, matching how config.json itself layers over the defaults --
+    nested keys are replaced whole rather than merged, so "watchdog" here means THIS watchdog block
+    and not a half of one. `status` names when an override is live, because a config you cannot see
+    is a divergence nobody can explain.
+    """
     cfg = dict(DEFAULT_CONFIG)
-    try:
-        with open(CONFIG_F) as f:
-            cfg.update(json.load(f))
-    except (OSError, ValueError):
-        pass
+    for f_ in (CONFIG_F, CONFIG_LOCAL_F):
+        try:
+            with open(f_) as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                cfg.update(d)
+        except (OSError, ValueError):
+            continue
     return cfg
+
+
+def config_local_keys():
+    """The keys config.local.json is overriding, for reporting. Never a decision."""
+    try:
+        with open(CONFIG_LOCAL_F) as f:
+            d = json.load(f)
+        return sorted(d) if isinstance(d, dict) else []
+    except (OSError, ValueError):
+        return []
 
 
 def load():
@@ -4413,6 +4445,13 @@ def coverage_report(s):
                      "refused, and the human")
         lines.append("           may open it once with `authorize`. Set mcp_writes: \"disabled\" "
                      "to remove that door.")
+        # Standing doors are worth seeing without reading config, for the same reason the write
+        # roots are: a human should be able to tell what is open without going to look (#56).
+        _sw = [str(x) for x in (cfg.get("mcp_standing_writes") or [])]
+        if _sw:
+            lines.append(f"           STANDING, no human needed ({len(_sw)}): " + ", ".join(_sw))
+            lines.append("           Exact names only, never an irreversible verb, never an "
+                         "argument-level finding.")
     lines.append("           want of remembering it. 'This repo' includes its LINKED WORKTREES — "
                  "one project checked")
     lines.append("           out twice is still one project (#47) — and nothing else that shares a "
@@ -5179,6 +5218,11 @@ def cmd_status(s, a):
         out(w)
     out(*session_start_warning())
     out(*installed_confidence_report())
+    if (_lk := config_local_keys()):
+        out(f"config: {len(_lk)} key(s) overridden by .game_loop/config.local.json (gitignored) — "
+            + ", ".join(_lk),
+            "  Site wiring lives there so it never seeds into anyone else's install; a config you "
+            "cannot see is a divergence nobody can explain.")
     if (w := legacy_mandate_warning()):
         out(w)
     try:

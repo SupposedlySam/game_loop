@@ -513,6 +513,7 @@ HANDOFF.md
 .update_cache.json
 triggers.json
 triggers.d/
+config.local.json
 EOF
   echo "  wrote   .game_loop/.gitignore"
 else
@@ -532,7 +533,7 @@ else
   # triggers.json is SITE wiring — local paths, room names, sometimes a credential in a command.
   # Ignored before anyone writes one, for the same reason notify.json is.
   if ! grep -q '^triggers.json$' "$GI"; then
-    printf 'triggers.json\ntriggers.d/\n' >> "$GI"
+    printf 'triggers.json\ntriggers.d/\nconfig.local.json\n' >> "$GI"
     echo "  updated .game_loop/.gitignore (+ triggers.json — this project's own triggers)"
   fi
   # the no-session fallback's edited-path record (the per-session one is under sessions/)

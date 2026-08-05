@@ -5492,6 +5492,35 @@ def main():
           "agreement it did not establish",
           "UNRECORDED version" in _rep and "not an assurance" in _rep)
 
+    print("the behaviour record is a contract a consumer can pin to:")
+    with open(os.path.join(SRC_GAME_LOOP, "behaviour.json")) as f:
+        _bh = json.load(f)
+    # A SCHEMA INTEGER, because this file announces changes to game_loop's verbs and nothing
+    # announced changes to THIS FILE. Adding a field is safe; renaming `change` or dropping
+    # `why_it_qualifies` would break a programmatic reader silently — and there is one now.
+    check("the behaviour record declares a schema version, so a consumer pins to the contract "
+          "rather than to the shape it happens to see today",
+          isinstance(_bh.get("schema"), int) and _bh["schema"] >= 1)
+    # EVERY ENTRY CARRIES EVERY FIELD. Adding `consequence` to seq 1 alone reproduced the exact
+    # defect the field was added to fix: for the other four, reading `consequence` returned nothing
+    # and nothing distinguished "predates the field" from "the author judged there is none". Two
+    # causes, one indistinguishable result, and only the author holds the difference.
+    _req = ("seq", "sha", "verb", "change", "consequence", "why_it_qualifies")
+    _short = [f"seq {e.get('seq')}: missing " + ",".join(k for k in _req if not e.get(k))
+              for e in _bh["changes"] if not all(e.get(k) for k in _req)]
+    check("every entry carries every field, so an absent consequence cannot mean either 'predates "
+          "the field' or 'the author decided there is none'"
+          + (" · " + "; ".join(_short[:3]) if _short else ""),
+          _bh["changes"] and not _short)
+    # An entry complete but for the field this whole change is about — the precise case that was
+    # live an hour ago, when seq 1 had a consequence and seq 2-5 did not.
+    _synthetic = {"seq": 9, "sha": "abc1234", "verb": "v", "change": "c", "why_it_qualifies": "w"}
+    check("...and the check can FIRE, naming the one missing field — so the clean result above is a "
+          "verdict rather than a loop over nothing",
+          [k for k in _req if not _synthetic.get(k)] == ["consequence"])
+    check("...and seq is unique and monotonic, since it is the ordering shas cannot provide",
+          [e["seq"] for e in _bh["changes"]] == sorted({e["seq"] for e in _bh["changes"]}))
+
     print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
     # THE MECHANISM WAS BUILT AND THE DISCIPLINE LAPSED SILENTLY, which a consumer measured rather
     # than me: twelve commits touched the refusal paths after behaviour.json's first and only entry,

@@ -519,6 +519,11 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    "test/run.py::_writes_outside_tmp":
+        "the scan that proves this file never writes to the working tree, and it lives inside the "
+        "suite. Neutered it finds no writes, so its own gate passes over an empty set — which is "
+        "why the arm beside it asserts there IS a write to find, and a third arm feeds it a "
+        "deliberate offender. Both decide it in-suite rather than by mutation.",
     "test/run.py::_parses":
         "ast.parse with a boolean face, inside the suite. Neutered to a constant it either passes "
         "everything or fails everything, and the paired 'a deliberately broken program fails to "

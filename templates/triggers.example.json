@@ -23,6 +23,13 @@
     "             project, session. `--general` is the transferable form, and is null when not given.",
     "  stepback — a retro just began, BEFORE its output. Payload: notes, project, session,",
     "             trans_since, work_since. The moment to pull in what others have learned.",
+    "  confidence — a commit was just marked beta or stable. Payload: level, sha, tag, ref, notes,",
+    "             project, session. This is the instant 'ready for consumers' stops being an",
+    "             intention and becomes a fact about a sha, so anything that DISTRIBUTES this",
+    "             project belongs here: a package manager, a mirror, an announcement. It is also",
+    "             the last honest moment to ask whether consumers can FIND what they are given —",
+    "             see the documentation example below. Order matters within an event: they run top",
+    "             to bottom, so put the checks above the publish.",
     "",
     "`game_loop status` lists what you have attached and names anything that has never fired.",
     "Configured and working are different claims, and only one of them is visible by default."
@@ -41,6 +48,29 @@
       "name": "example-read-something",
       "command": "echo 'whatever this prints is shown to the agent before it reflects'",
       "timeout_sec": 20
+    }
+  ],
+
+  "confidence": [
+    {
+      "//": [
+        "DOES THE DOCUMENTATION KNOW ABOUT THIS RELEASE? Worth stealing, because the failure it",
+        "catches is quiet and universal: a feature lands, its design gets written up somewhere",
+        "deep, and the two files a human and an agent actually START from never hear about it.",
+        "This repo shipped four user-facing features that way in a single week.",
+        "",
+        "The check is the ungameable half — every option and config key the CODE defines, against",
+        "your documentation files. Prose cannot satisfy it: the name appears or it does not. What",
+        "it cannot check is the larger half, and say so where you use it: whether the docs are",
+        "correct, whether they EXPLAIN the thing or merely name it, or whether they still describe",
+        "what the code does. A mention is the floor, not the goal.",
+        "",
+        "Two tiers is what makes it useful — 'written down somewhere' and 'reachable' are",
+        "different properties, and only the second is worth anything to a consumer."
+      ],
+      "name": "example-undocumented-surface",
+      "command": "grep -ho 'add_argument(\"--[a-z-]*\"' src/*.py | sed 's/.*\"\\(--[a-z-]*\\)\"/\\1/' | sort -u | while read -r o; do grep -qF -- \"$o\" README.md || echo \"UNDOCUMENTED: $o\"; done; echo '(checks that a name APPEARS, never that the prose is right)'",
+      "timeout_sec": 30
     }
   ]
 }

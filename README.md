@@ -251,7 +251,8 @@ Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees 
 - **Write guard** — an allowlist: the repo, the OS temp dir, and roots you configure. Everything else
   is read-only, including sibling projects. The escape hatch is you — single-use, and logged.
 - **MCP guard** — a connected MCP server can delete or force-push with no shell command at all. Calls
-  are classified before they run, and anything unclassifiable is refused.
+  are classified before they run, and anything unclassifiable is refused. You can shut the plane off
+  (`mcp_writes: "disabled"`) or pre-authorise a narrow set (`mcp_standing_writes`); see Configure.
 - **Commit blast radius** — names the staged files this session never wrote, so a widened commit is
   visible before it lands.
 - **verify** — your own map from "you changed X" to "these checks must pass". Refuses a commit when the
@@ -270,17 +271,91 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `arm --question .. --read .. --predict ..` | Spend one interruption of you, backed by a file it already read. |
 | `claim --assert ".." --read <path>` | Assert something about the outside world, with the receipt. |
 | `harden --learning .. --artifact <path>` | Turn a lesson into something enforced instead of remembered. |
-| `authorize --path <prefix> --reason ".."` | Your one-time, logged permission for a single write outside the repo. |
+| `authorize --path <prefix> --reason ".." [--uses N]` | Your one-time, logged permission for a single write outside the repo. `--uses N` when you authorised a run of several, rather than being interrupted once per call. |
+| `confidence --mark beta\|stable [--ref <sha>] [--recheck]` | Record how much this project stands behind a commit. `--recheck` re-runs the gate instead of trusting the tag. |
+| `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 
 ## Configure
 
-Everything lives in `.game_loop/config.json` — read roots, extra write roots, deploy verbs to block,
-watchdog timing, usage-limit thresholds. One worth knowing about if you fan work out to subagents:
-`watchdog.waiting_probe` is a command you supply that answers *"is this run waiting on work it
-dispatched?"* — exit 0 for yes. Without it, a run that has correctly handed out all its work looks
-identical to one that fell asleep, and eventually pages you about it. It is config-only on purpose:
-a wait the agent could declare for itself would be an off switch for the watchdog. It ships with sane defaults and comments; see
+Everything lives in `.game_loop/config.json`. It ships with sane defaults and comments; see
 [docs/how-it-works.md](docs/how-it-works.md) for what each knob changes.
+
+| Key | What it does |
+|---|---|
+| `read_roots` | Extra directories a `claim --read` may cite, beyond this repo. |
+| `allow_write_roots` | Extra roots the write guard permits. **An absolute home path here ships a write permission to everyone who clones you.** |
+| `deploy_verbs` | Extra deploy/publish commands to block outright. This rail is a *denylist* — a verb nobody listed is not blocked. |
+| `mcp_writes` | `"gated"` (default: a mutating MCP call is refused, and you may open it once with `authorize`) or `"disabled"` (refused outright, no hatch offered). |
+| `mcp_standing_writes` | A narrow set of MCP writes that need no human, in either of two grains — an exact `mcp__server__tool`, or a whole-server `mcp__server__` prefix. See below. |
+| `mcp_read_only_tools` | Teaches the MCP guard which *ambiguous* tools of a server you trust are read-only. It can only resolve ambiguity — never silence a mutating verb or a mutating argument. |
+| `watchdog` | Ring timing, ring cap, and `waiting_probe`. |
+| `limits` | Usage-limit thresholds for the handoff gate and the park. |
+| `update_check`, `update_repo` | Whether to check for a newer game_loop, and where from. `update_api_base` / `update_raw_base` retarget those lookups (GitHub Enterprise, a mirror, or a test). |
+| `session_start` | `false` disables the status block injected at session start and after compaction. |
+| `work_nudge_every`, `trans_nudge_every` | How much evidence work goes by before `status` nudges for a retro / a phase transition. |
+| `hooks_probe_slack_sec` | How stale a hook probe may be before `status` calls the wiring into question. |
+| `project_name`, `flair` | Display name, and the fun lines (`flair.enabled: false` to opt out). |
+
+**Standing MCP writes.** Ask-every-time is the wrong shape when a workflow's *work product* lands
+through an MCP write — a finished review that cannot be posted buys a retry, not a safety decision.
+
+```json
+"mcp_standing_writes": ["mcp__github__", "mcp__other__createThing"]
+```
+
+A **whole-server prefix** is the right grain when the server is your own first-party code, because
+enumerating its tools goes stale every time it grows one — and it goes stale *toward a stuck agent*.
+It is safe because every floor runs on the **live call** and returns before this policy is consulted:
+a prefix widens *which servers* are trusted, never *what* may be done through them. One tier a prefix
+does **not** inherit — `merge`, `publish`, `deploy`, `release`, `push` still need the tool named
+exactly. Typing it out is the deliberate act; inheriting it from which list a verb sits in is not.
+
+**The waiting probe**, if you fan work out to subagents: `watchdog.waiting_probe` is a command you
+supply that answers *"is this run waiting on work it dispatched?"* Without it, a run that has
+correctly handed out all its work looks identical to one that fell asleep, and eventually pages you.
+It is config-only on purpose — a wait the agent could declare for itself would be an off switch for
+the watchdog. The contract is three-valued:
+
+| Exit | Meaning |
+|---|---|
+| `0` | Waiting. The watchdog stays quiet. |
+| `1` | Not waiting — there is work here. The watchdog rings. |
+| anything else, a timeout, or an unrunnable command | **Could not answer.** Still rings, *and* `status` reports the probe as FAILING. |
+
+That third state exists because a probe that crashed and a probe reporting work produced identical
+output, so a broken one stayed invisible for exactly as long as there was work to do. Write yours to
+resolve its own dependencies explicitly: a hook's `PATH` is not your shell's, and a tool found by
+bare name is the usual way one of these silently stops running.
+
+### Site wiring: `config.local.json`
+
+`.game_loop/config.local.json` is gitignored and layered on top of `config.json`, key by key. Put
+anything machine- or checkout-specific there — a `waiting_probe` naming your tracker, a local write
+root — so it never seeds into anyone else's install. `status` names how many keys are overridden and
+which, because a config you cannot see is a divergence nobody can explain.
+
+### Prose that quotes code goes through a file
+
+Every option taking free prose has a `--<name>-file PATH` twin, and an inline value over 400
+characters is refused in favour of it — `checkpoint --notes-file`, `harden --general-file`, and so
+on. A quoted shell argument is code to the shell first: backticks run, `$NAME` expands to nothing, a
+lone quote truncates, and the tool receives the result with no way to know anything went missing.
+The bound is measured against this repo's own logged prose, not chosen for roundness.
+
+### Triggers: attaching your own actions to the loop
+
+`.game_loop/triggers.json` (gitignored; see `templates/triggers.example.json`) lets a project hang
+its own command on a moment in the loop. Nothing is attached by default.
+
+| Event | Fires when | Typically used for |
+|---|---|---|
+| `harden` | a learning was just encoded into an artifact | share the transferable form with other agents |
+| `stepback` | a retro just began | pull in what others learned; re-read the work queue |
+| `confidence` | a commit was just marked | publish it wherever consumers take it |
+
+A trigger gets a JSON payload on stdin and its stdout comes back to the agent. It **never blocks**
+the verb, it is **never silent** — `status` lists each one with its last run, and a failing trigger
+is shown as FAILING with its error rather than passing quietly.
 
 Your project's own rules live in three files the installer seeds once and never overwrites:
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and

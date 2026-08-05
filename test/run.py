@@ -5319,6 +5319,70 @@ def main():
     # its own candidates out of the script and refuses to run while any of them is undecided. What
     # is checked here is the ENUMERATION and the REFUSAL, because those are what can rot; the sweep
     # itself is still far too slow to run from this suite.
+    print("the sweep cannot strand a mutation in the working tree:")
+    # OBSERVED, in a peer project rather than here, and reported by its owner: their sweep mutates
+    # the tree IN PLACE and restores in a `finally`. They SIGKILLed a run they thought was stuck,
+    # the finally never ran, and FOUR neutered functions sat in their working tree for hours —
+    # including one that made a CLI raise NameError on every call. Agents pointing at that checkout
+    # ran deliberately broken code the whole time, and the owner spent the day diagnosing around
+    # their own tree. I killed my sweep twice today for the same reason, so this is not a hazard I
+    # am merely sympathetic to.
+    #
+    # My sweep happens to be immune: it writes only inside a mkdtemp copy of a `git archive HEAD`
+    # extract, so there is no restore step for a missed finally to skip. HAPPENS TO BE is the
+    # problem — nothing checked it, so the property was one careless `open(os.path.join(REPO, ...))`
+    # away from gone, and its absence would have been silent. A `finally` is not cleanup, because
+    # SIGKILL, a sleeping laptop and a power cut all skip it; the only durable answer is for the
+    # original never to be the subject.
+    _ms_src = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+
+    def _writes_outside_tmp(src):
+        """Any `open(<path>, "w")` whose path is not rooted in a mkdtemp-derived variable.
+
+        LINE-SCOPED ON PURPOSE. The first version matched across newlines, so a READ —
+        `open(os.path.join(tree, rel)) as f:` — paired with a `"w"` several lines later and was
+        reported as a write. A scan that reaches past the end of the call it is reading invents
+        findings; a write is on one line here, so the check stays on one line too.
+        """
+        tmp_vars = set(re.findall(r"^\s*(\w+)\s*=\s*tempfile\.mkdtemp", src, re.M))
+        bad = []
+        for line in src.split("\n"):
+            m = re.search(r'open\(\s*([^)]*\)?[^,]*),\s*"w"', line)
+            if not m:
+                continue
+            root = re.match(r"os\.path\.join\(\s*(\w+)", m.group(1))
+            if not (root and root.group(1) in tmp_vars):
+                bad.append(line.strip()[:70])
+        return bad
+
+    check("the sweep writes ONLY inside a temp directory it made — the original is never the "
+          "subject, so a kill has nothing to restore and cannot leave the repo neutered",
+          not _writes_outside_tmp(_ms_src))
+    check("...and the same check CATCHES a write aimed at the repo, so the clean result above is a "
+          "verdict rather than a regex that matches nothing",
+          _writes_outside_tmp('t = tempfile.mkdtemp()\nopen(os.path.join(REPO, rel), "w")')
+          and not _writes_outside_tmp('t = tempfile.mkdtemp()\nopen(os.path.join(t, rel), "w")'))
+    check("...and a READ is not mistaken for a write just because a write appears further down — "
+          "a scan that reaches past the call it is reading invents findings",
+          not _writes_outside_tmp('t = tempfile.mkdtemp()\n'
+                                  'with open(os.path.join(tree, rel)) as f:\n'
+                                  '    pass\n'
+                                  'open(os.path.join(t, rel), "w")'))
+    check("...and there IS a write to find — a sweep that mutated nothing would pass the check "
+          "above for the wrong reason entirely",
+          'open(os.path.join(t, rel), "w")' in _ms_src)
+    check("...and its subject is a committed tree, not the working copy: a floor measured against "
+          "uncommitted work is a number about a tree nobody else can check out",
+          "archive HEAD" in _ms_src and "mkdtemp" in _ms_src)
+
+    # And the mutating function itself is PURE — it returns the new source, it does not write one.
+    _wd_path = os.path.join(SRC_GAME_LOOP, "bin", "watchdog")
+    _wd_before = open(_wd_path).read()
+    _neutered, _found = sweep.neuter(_wd_before, "superseded", "    return False\n")
+    check("neuter() hands back a mutated STRING and writes nothing — the caller chooses where it "
+          "lands, and here that is only ever a copy",
+          _found and "return False" in _neutered and open(_wd_path).read() == _wd_before)
+
     print("mutation sweep coverage (default-deny over the producers it can find):")
     synth = ("def decides(x):\n"
              "    if x:\n"

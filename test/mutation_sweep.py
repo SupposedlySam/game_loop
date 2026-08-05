@@ -496,6 +496,15 @@ NOT_SWEPT = {
     "test/run.py::atattributed":
         "a helper inside the suite, reached only from main() — same ground: mutating the instrument "
         "voids the reading instead of testing anything.",
+    "test/run.py::_embedded_python":
+        "the extractor for the embedded-python check, inside the suite and reached only from "
+        "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
+        "assertion that there ARE programs to check is the guard against exactly that, sitting "
+        "beside it where a reader will see it.",
+    "test/run.py::_parses":
+        "ast.parse with a boolean face, inside the suite. Neutered to a constant it either passes "
+        "everything or fails everything, and the paired 'a deliberately broken program fails to "
+        "parse' arm decides that in-suite rather than by mutation.",
     "test/mutation_sweep.py::all_candidates":
         "the accountant inside its own denominator. Neutered it returns NO candidates, so the "
         "coverage gate passes trivially over an empty set — the exact short-denominator failure "

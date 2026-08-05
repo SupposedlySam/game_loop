@@ -278,6 +278,30 @@ guesses "probably fine" is not a guard. A project can teach it the ambiguous too
 trusts (`config.json → mcp_read_only_tools`) — a list that can only resolve ambiguity, never silence a
 mutating verb or a mutating argument.
 
+Ask-every-time is the wrong shape when a workflow's **work product** lands through an MCP write — a
+finished review that cannot be posted buys a retry, not a safety decision. So a project may state a
+standing policy, the MCP analogue of `allow_write_roots`: `config.json → mcp_standing_writes`, in
+either of two grains and nothing between them.
+
+```json
+"mcp_standing_writes": ["mcp__github__", "mcp__other__createThing"]
+```
+
+An **exact** `mcp__server__tool` names one tool. A **whole-server** `mcp__server__` prefix trusts a
+server — the right unit when the server is the project's own first-party code, because enumerating
+its tools goes stale every time it grows one, and it goes stale toward a *dead-ended agent*. A prefix
+is safe here for a reason specific to this guard rather than a promise: every floor above runs on the
+**live call**, from the tool being invoked, and returns before the standing policy is consulted. So a
+prefix widens *which servers* are trusted; it cannot widen *what* may be done through them. An
+argument-level finding still refuses, an irreversible verb still refuses, `mcp_writes: "disabled"`
+still makes the whole list inert, and every consumption is logged — with which grain allowed it, so
+an audit can review the rule rather than just observe that something permitted the call.
+
+One tier a prefix does **not** inherit: `merge`, `publish`, `deploy`, `release`, `push`. Those still
+need the tool named exactly. Under an enumeration, granting one was the deliberate act of typing it
+out; under a prefix it would be inherited from which list a verb happens to sit in — and that is the
+difference between an agent posting its review unattended and an agent landing code unattended.
+
 What it still cannot see is stated in the file: what a server actually *does* behind a read-only name,
 effects downstream of a call it allowed, a mutation hidden in an opaque blob or a stored-procedure
 handle, and any MCP call made where this hook is not installed. Silence from it is not evidence of

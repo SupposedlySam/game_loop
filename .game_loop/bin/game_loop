@@ -4461,8 +4461,12 @@ def coverage_report(s):
         _sw = [str(x) for x in (cfg.get("mcp_standing_writes") or [])]
         if _sw:
             lines.append(f"           STANDING, no human needed ({len(_sw)}): " + ", ".join(_sw))
-            lines.append("           Exact names only, never an irreversible verb, never an "
-                         "argument-level finding.")
+            lines.append("           Exact name or whole-server prefix; never an irreversible verb, "
+                         "never an")
+            lines.append("           argument-level finding. A PREFIX also stops short of the "
+                         "landing tier (merge,")
+            lines.append("           publish, deploy, release, push) — those need the tool named "
+                         "exactly (#57).")
     lines.append("           want of remembering it. 'This repo' includes its LINKED WORKTREES — "
                  "one project checked")
     lines.append("           out twice is still one project (#47) — and nothing else that shares a "

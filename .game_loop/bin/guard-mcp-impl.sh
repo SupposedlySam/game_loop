@@ -208,6 +208,17 @@ MUTATE_VERBS = {
 # almost never a NOUN in a read-only tool name, so it does not misfire on `getLatestRelease`.
 HARD_VERBS = {"delete", "destroy", "truncate", "purge", "wipe", "force"}
 
+# Verbs that LAND things — that move work into the world where undoing it is a social act, not an
+# edit. These are ordinary members of MUTATE_VERBS and stay so: they are refused by the ordinary
+# gate and a human may authorize them, exactly as before.
+#
+# What they are NOT is inheritable. An exact standing grant carries them, because typing
+# `mcp__github__mergePullRequest` IS the deliberate act #56 exists to respect. A PREFIX grant does
+# not, because a prefix is a rule evaluated once against tools that did not exist when it was
+# written, and "an agent may post its review unattended" must not quietly become "an agent may land
+# code unattended" the day a first-party server grows a merge tool (#57).
+LANDING_VERBS = {"merge", "publish", "deploy", "release", "push"}
+
 words = tokens(leaf) or tokens(tool)
 # Some servers repeat their own name inside the tool name (`mcp__pebble__pebble_run_command`).
 # Strip that prefix so the real VERB lands in the verb slot instead of the server's name — otherwise
@@ -253,18 +264,41 @@ named_read_only = any(tool == a or (a.endswith("__") and tool.startswith(a)) for
 #
 # What keeps it a policy rather than an off switch, and each of these is refused at READ time rather
 # than silently dropped, because a policy that is half-honoured is worse than one that is rejected:
-#   * EXACT tool names only. A prefix or glob would silence tools the project never evaluated,
-#     turning an allowlist back into a denylist over everything the server adds later.
+#   * TWO GRAINS AND NOTHING BETWEEN THEM: an exact `mcp__server__tool`, or an `mcp__server__`
+#     prefix. #56 shipped exact names only, at my own ask, and that was the wrong constraint: when
+#     a project's MCP servers are its OWN first-party code the unit of trust is the server, and an
+#     enumeration goes stale toward a DEAD-ENDED agent every time that server grows a tool (#57).
+#     A prefix is safe here for a reason specific to this file — every floor below runs on the LIVE
+#     call, from the tool being invoked rather than from config, and returns before standing is
+#     consulted. So a prefix widens WHICH SERVERS are trusted; it cannot widen WHAT may be done
+#     through them. Globs stay refused, and a prefix never spans servers or reaches below one.
 #   * NEVER an irreversible verb. HARD_VERBS stays human-only regardless of what config says.
-# And two more enforced at the point of use rather than here:
+# And three more enforced at the point of use rather than here:
 #   * never an ARGUMENT-level finding — that is per-call and cannot be pre-approved;
+#   * never a LANDING verb through a PREFIX (an exact name still carries one — see LANDING_VERBS);
 #   * inert under mcp_writes: "disabled", because disabled must stay absolute (#53).
+#
+# THE ASYMMETRY IS REAL AND WORTH SAYING OUT LOUD: an exact name is checked for an irreversible verb
+# twice, once here and once on the call. A prefix has no tool token to inspect, so only the call-site
+# check remains. That is two layers down to one — accepted because the surviving layer is the one
+# that runs on EVERY call, and because this read-time check never protected against a tool that does
+# not exist yet, which is the entire population a prefix is for.
 standing_bad = []
 standing_ok = set()
+standing_prefixes = set()
 for _e in standing_writes:
-    _w = tokens(_e.split("__")[-1]) if _e.count("__") >= 2 else []
-    if "*" in _e or "?" in _e or not _e.startswith("mcp__") or _e.count("__") < 2 or _e.endswith("__"):
-        standing_bad.append((_e, "not an exact mcp__server__tool name (no prefixes, no globs)"))
+    _is_prefix = _e.endswith("__") and _e.count("__") == 2
+    if "*" in _e or "?" in _e or not _e.startswith("mcp__"):
+        standing_bad.append((_e, "not an mcp__server__tool name or an mcp__server__ prefix, and "
+                                 "globs are never accepted"))
+    elif _is_prefix and len(_e) <= len("mcp____"):
+        standing_bad.append((_e, "a prefix must NAME a server: mcp__<server>__"))
+    elif _is_prefix:
+        standing_prefixes.add(_e)
+    elif _e.count("__") < 2 or _e.endswith("__"):
+        standing_bad.append((_e, "neither grain: an exact mcp__server__tool, or a whole-server "
+                                 "mcp__server__ prefix. A prefix below the server level would be a "
+                                 "third grain nobody can audit at a glance"))
     elif set(tokens(_e)) & HARD_VERBS:
         standing_bad.append((_e, "names an irreversible verb, which stays human-only"))
     else:
@@ -349,7 +383,10 @@ elif first in MUTATE_VERBS:
     # irreversible-verb branch, both of which have already returned above. So a declared tool whose
     # ARGUMENTS carry a mutation is still refused, and a declared tool naming a hard verb never got
     # into standing_ok in the first place.
-    if mcp_writes != "disabled" and tool in standing_ok:
+    by_prefix = sorted(p for p in standing_prefixes if tool.startswith(p))
+    lands = sorted(set(words) & LANDING_VERBS)
+    grain = "exact" if tool in standing_ok else ("prefix" if by_prefix and not lands else "")
+    if mcp_writes != "disabled" and grain:
         try:
             log_f = os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl")
             with open(log_f, "a") as f:
@@ -359,14 +396,26 @@ elif first in MUTATE_VERBS:
                     rec["sid"] = sid[:8]
                 # Logged like an authorize spend (#41): "allowed by standing policy" and "never ran"
                 # must stay distinguishable afterwards.
-                rec.update({"kind": "standing_mcp_write", "tool": tool, "verb": first})
+                # WHICH grant allowed it, not merely that one did: an audit that cannot tell an
+                # enumerated tool from a whole-server rule cannot review the rule.
+                rec.update({"kind": "standing_mcp_write", "tool": tool, "verb": first,
+                            "grain": grain})
+                if grain == "prefix":
+                    rec["via"] = by_prefix[0]
                 f.write(json.dumps(rec) + "\n")
         except OSError:
             pass
         print("ALLOW")
         sys.exit(0)
     kind = "MUTATING"
-    why = "its NAME's verb mutates: '" + first + "'"
+    if by_prefix and lands:
+        why = ("its verb '" + lands[0] + "' LANDS work, and the standing grant covering it is the\n"
+               "    whole-server prefix '" + by_prefix[0] + "'. A prefix is a rule written once,\n"
+               "    against tools that did not exist yet — so it grants the server, never the tier\n"
+               "    that moves work into the world. Name this tool EXACTLY in mcp_standing_writes\n"
+               "    to grant it standing, or authorize this one call.")
+    else:
+        why = "its NAME's verb mutates: '" + first + "'"
 elif first in READ_VERBS or named_read_only:
     print("ALLOW")
     sys.exit(0)

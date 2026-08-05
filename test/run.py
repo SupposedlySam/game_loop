@@ -4,6 +4,7 @@
 Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) inside a throwaway copy
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
+import ast
 import datetime
 import importlib.util
 import inspect
@@ -3947,14 +3948,76 @@ def main():
         check("...and an entry naming an IRREVERSIBLE verb is refused AT CONFIG-READ time, loudly, "
               "rather than silently dropped",
               _hd == "deny" and "irreversible verb" in _hr)
-        _set(mcp_standing_writes=["mcp__github__"])
+        _set(mcp_standing_writes=["mcp__github__bogus", "mcp__github__*"])
         _pd, _pr = _call("mcp__github__getThing")
-        check("...and a PREFIX is refused too — a prefix would silence tools the project never "
-              "evaluated, turning the allowlist back into a denylist over everything added later",
-              _pd == "deny" and "exact" in _pr)
         check("...and an invalid policy stops classification entirely rather than honouring the "
               "valid half, because nobody could tell which half was live",
-              "not a valid policy" in _pr)
+              _pd == "deny" and "not a valid policy" in _pr)
+
+        # ── #57: THE SERVER GRAIN ─────────────────────────────────────────────────────────────────
+        #
+        # #56 shipped exact names only and this suite asserted a prefix was refused. That assertion
+        # is REVERSED here deliberately: when a project's MCP servers are its own first-party code,
+        # an enumeration goes stale every time the server grows a tool, and it goes stale toward a
+        # DEAD-ENDED agent — the failure #56 was filed to remove, on a slower clock. The reversal is
+        # safe for a reason this file can check rather than assert: every floor below runs on the
+        # LIVE call and returns before standing is consulted, so a prefix widens which SERVERS are
+        # trusted and cannot widen WHAT may be done through them. The arms below are that claim.
+        _set(mcp_standing_writes=["mcp__github__"])
+        check("a whole-server PREFIX grants a mutating tool on that server — the unit of trust for "
+              "first-party code is the server, and an enumeration of its tools rots (#57)",
+              _call("mcp__github__addIssueComment")[0] == "allow")
+        with open(os.path.join(sw, ".game_loop", "log.jsonl")) as f:
+            _lg = f.read()
+        check("...and the log records WHICH grain allowed it, so an audit can review the rule and "
+              "not merely observe that something permitted the call",
+              '"grain": "prefix"' in _lg and '"via": "mcp__github__"' in _lg)
+        check("...while a tool on a server nobody granted is still refused — the prefix is a grant "
+              "over one server, not a mood",
+              _call("mcp__other__addThing")[0] == "deny")
+
+        # THE TIER A PREFIX DOES NOT INHERIT. merge/publish/deploy/release/push sit in MUTATE_VERBS,
+        # so under exact names granting one was an act of typing it out. Under a prefix it would be
+        # inherited from which set a verb happens to occupy — and that is the difference between an
+        # agent posting its review unattended and an agent LANDING CODE unattended.
+        _md, _mr = _call("mcp__github__mergePullRequest")
+        check("...and a LANDING verb is refused through a prefix — a rule written once, against "
+              "tools that did not exist yet, does not get to move work into the world",
+              _md == "deny" and "LANDS work" in _mr)
+        check("...and the refusal names the exact grant that would allow it, so the human is left "
+              "with a next step rather than a wall",
+              "Name this tool EXACTLY" in _mr)
+        _set(mcp_standing_writes=["mcp__github__mergePullRequest"])
+        check("...while the SAME tool named EXACTLY is allowed — typing it out is the deliberate "
+              "act #56 exists to respect, and the asymmetry is the whole point",
+              _call("mcp__github__mergePullRequest")[0] == "allow")
+
+        # THE FLOORS STILL RUN UNDER A PREFIX, which is what makes the grain safe at all.
+        _set(mcp_standing_writes=["mcp__github__"])
+        check("an IRREVERSIBLE verb is refused through a prefix, though no config-read check could "
+              "have seen it — the surviving layer is the one that runs on every call",
+              _call("mcp__github__deleteIssueComment")[0] == "deny")
+        check("...and an ARGUMENT-level mutation is refused through a prefix too, since that "
+              "finding is per-call and was never pre-approvable",
+              _call("mcp__github__addIssueComment", {"sql": "DELETE FROM t"})[0] == "deny")
+        _set(mcp_writes="disabled")
+        check("...and a prefix is inert under mcp_writes disabled, so #53 stays absolute across "
+              "both grains rather than just the one it was written against",
+              _call("mcp__github__addIssueComment")[0] == "deny")
+
+        # NO THIRD GRAIN. Server or exact tool; anything between is a shape nobody can audit fast.
+        # Note `mcp__github__get` is NOT that shape -- it is a valid exact tool name and nothing in
+        # the string distinguishes it from one. Only a trailing `__` declares prefix intent, so the
+        # sub-server grain is `mcp__github__get__`, and that is what must be refused.
+        _set(mcp_writes="gated", mcp_standing_writes=["mcp__github__get__"])
+        _gd, _gr = _call("mcp__github__getThing")
+        check("a prefix BELOW the server level is refused at config-read — two grains are "
+              "reviewable at a glance and three are not",
+              _gd == "deny" and "neither grain" in _gr)
+        _set(mcp_standing_writes=["mcp____"])
+        _ed, _er = _call("mcp__github__getThing")
+        check("...and a prefix naming NO server is refused rather than read as every server",
+              _ed == "deny" and "must NAME a server" in _er)
     finally:
         shutil.rmtree(sw, ignore_errors=True)
 
@@ -4810,6 +4873,86 @@ def main():
     #
     # The needle is BUILT rather than written, so this file does not contain the thing it forbids
     # and cannot flag itself — the same trick mutation_sweep.py uses for the here-doc operator.
+    print("the python EMBEDDED in the shell guards parses:")
+    # `bash -n` is what a shell file gets checked with, and it cannot see inside a heredoc or a
+    # `python3 -c '...'` block -- to bash those are opaque strings. So a guard whose Python is
+    # syntactically broken passes the only syntax check it has, and the breakage surfaces as the
+    # guard CRASHING on a live call. Measured here: #57's refusal text was written through a
+    # generating script where `\n` escaped one layer early, producing real newlines inside a string
+    # literal. `bash -n` passed. The MCP guard then died on every call, and a crashing guard reads
+    # as ALLOW to the harness that invokes it -- fail-closed defeated by a syntax error.
+    #
+    # The existing rule was "ast.parse before you write a .py file". This is the same rule, aimed at
+    # where the code actually lives rather than at the extension it happens to have.
+
+    def _embedded_python(text):
+        """(label, source) for each Python program embedded in a shell file.
+
+        Shell single-quoting cannot contain a `'`, so the non-greedy match on `-c '...'` is exact
+        rather than approximate -- the terminator genuinely cannot appear inside the body.
+        WHAT THIS DOES NOT SEE: a program built by string concatenation, one piped in from
+        elsewhere, or a heredoc whose terminator is not quoted (which the shell would expand first,
+        making it a different program than the one on disk anyway).
+        """
+        lines = text.split("\n")
+        # A shell COMMENT is prose, not code, and this file's own comments quote `python3 -c
+        # 'os.remove(..)'` as an example of what the guard cannot see. A check that fires on prose
+        # describing code gets narrowed until it fires on nothing, so it declines here instead.
+        _comment_at = set()
+        _off = 0
+        for _ln in lines:
+            if _ln.lstrip().startswith("#"):
+                _comment_at.update(range(_off, _off + len(_ln) + 1))
+            _off += len(_ln) + 1
+        found = []
+        for m in re.finditer(r"python3 -c '(.*?)'", text, re.S):
+            if m.start() in _comment_at:
+                continue
+            found.append((f"-c at offset {m.start()}", m.group(1)))
+        i = 0
+        while i < len(lines):
+            m = re.search(r"<<'([A-Za-z_][A-Za-z0-9_]*)'", lines[i])
+            if m and "python3" in lines[i]:
+                term, body, j = m.group(1), [], i + 1
+                while j < len(lines) and lines[j] != term:
+                    body.append(lines[j])
+                    j += 1
+                found.append((f"heredoc <<{term} at line {i + 1}", "\n".join(body)))
+                i = j
+            i += 1
+        return found
+
+    def _parses(src):
+        try:
+            ast.parse(src)
+            return True
+        except SyntaxError:
+            return False
+
+    _broken = "import os\nx = ('a\nb')\n"
+    check("the extractor finds a heredoc program AND a -c program, and a deliberately broken one "
+          "fails to parse — the check can fire",
+          len(_embedded_python("foo | python3 -c 'import os'\nbar python3 <<'PY'\nimport sys\nPY\n"))
+          == 2 and not _parses(_broken))
+
+    _bindir = os.path.join(SRC_GAME_LOOP, "bin")
+    _shells = sorted(os.path.join(_bindir, n) for n in os.listdir(_bindir) if n.endswith(".sh"))
+    check("...and there ARE shell guards to check, so a green result is not an empty loop",
+          len(_shells) >= 2)
+    _bad = []
+    _seen = 0
+    for _sh in _shells:
+        with open(_sh) as f:
+            _txt = f.read()
+        for _label, _src in _embedded_python(_txt):
+            _seen += 1
+            if not _parses(_src):
+                _bad.append(os.path.basename(_sh) + " " + _label)
+    check(f"every python program embedded in a shell guard parses ({_seen} found) — the check bash "
+          "cannot perform on the code it is carrying"
+          + (" · BROKEN: " + "; ".join(_bad[:4]) if _bad else ""),
+          not _bad)
+
     print("the house voice is enforced, not remembered (#33):")
     _w = "sys" + "tem"
     _banned = re.compile(r"\b" + _w + r"s?\b", re.I)

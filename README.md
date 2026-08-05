@@ -222,6 +222,24 @@ Levels ride annotated **git tags**, so they arrive with an ordinary `git clone` 
 travels in the tag message. `install.sh` records the level it installed from, and `status` says so
 later, when nobody remembers which commit they took.
 
+### Installing the latest stable
+
+```bash
+GAME_LOOP_CHANNEL=stable curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
+```
+
+`stable` and `beta` are **moving pointers**, re-aimed at each mark by whoever marks it, so nothing on
+your side has to work out which tag is newest. That matters more than it sounds: the marks are
+*annotated* tags, so tag order is not commit order — `--sort=-creatordate` is right and
+`--sort=-committerdate` returns something much older, both look reasonable, and picking wrong pins an
+older commit that `install.sh` then correctly stamps as stable. Nothing downstream ever contradicts
+it. Sorting them yourself is the one step here with a silent wrong answer in it, so it happens once,
+at the source.
+
+Pin an exact release instead with `GAME_LOOP_REF=stable-<sha>` — immutable, where the channel moves.
+Either way the level is recorded from the ref that was fetched, so a tarball with no `.git` no longer
+falls through to `alpha`.
+
 **Vendoring game_loop into another project?** An extracted copy has no git tags, so the level cannot
 be read from it — and because `alpha` is the default, the failure would be silent and would look like
 an honest answer. Carry two files into the extraction and `install.sh` honours them:

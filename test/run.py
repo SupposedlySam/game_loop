@@ -3758,6 +3758,33 @@ def main():
               "itself what bar it ships at",
               '"level": "beta"' in _m2.stdout and '"tag":' in _m2.stdout)
 
+        # THE CHANNEL POINTER, SO NOBODY DOWNSTREAM ORDERS TAGS (#61). `beta-<sha>` records one
+        # mark; `beta` means "the newest thing marked at that level". Ordering annotated tags is a
+        # trap — creatordate is right, committerdate returns something much older, both look
+        # reasonable, and picking wrong silently pins an older commit that the installer then
+        # correctly stamps, so nothing ever contradicts it. Doing it here means it is done once by
+        # the only party that already knows the answer.
+        def _points_at(ref):
+            r = subprocess.run(["git", "rev-parse", ref + "^{commit}"], cwd=cd,
+                               capture_output=True, text=True)
+            return r.stdout.strip() if r.returncode == 0 else ""
+
+        _head = _points_at("HEAD")
+        check("marking moves a CHANNEL pointer beside the immutable tag, so a consumer asks for a "
+              "level rather than sorting tags they cannot see",
+              _points_at("beta") == _head and _head)
+        check("...and the mark tells you to push BOTH — a channel nobody pushed serves the previous "
+              "commit, which is a stale answer that looks exactly like a current one",
+              "git push origin --force beta" in _m2.stdout)
+        # PAIRED: it must MOVE on the next mark, or it is an immutable tag wearing a channel's name.
+        _cg("commit", "-q", "--allow-empty", "-m", "third")
+        _new_head = _points_at("HEAD")
+        _m3 = _conf("--mark", "beta", "--notes", "third")
+        check("...and the next mark MOVES it — a pointer that stayed put would quietly keep serving "
+              "the commit before this one",
+              _points_at("beta") == _new_head and _new_head != _head
+              and _m3.returncode == 0)
+
         # THE INSTALLED SIDE. A consumer who took a copy months ago cannot run `confidence` against
         # a clone they no longer have, so the level is recorded at install time and status says it.
         _cf = os.path.join(cd, ".game_loop", "CONFIDENCE")
@@ -5105,6 +5132,31 @@ def main():
     # target already had .game_loop/bin/game_loop, the test passed against the target's OWN old
     # copy, the fetch was skipped, SRC == TARGET, and it died claiming you had pointed it at the
     # game_loop repo. Reported from outside with a two-arm repro; the arms are pinned here.
+    print("install.sh can reach a marked release (#61):")
+    _inst = open(os.path.join(REPO, "install.sh")).read()
+    # STRUCTURAL, because the behavioural arms need github. Each of these is a fact about the file
+    # that was FALSE when the issue was filed, and each one was reported as measured against the
+    # real endpoint: refs/heads/<tag> is 404, refs/tags/<tag> is 200.
+    check("a tag is reachable — the fetch falls back to refs/tags when refs/heads misses, so the "
+          "GAME_LOOP_REF=<tag> the header has always documented finally works",
+          "refs/heads/$REF" in _inst and "refs/tags/$REF" in _inst)
+    # CODE, NOT COMMENTS. The file explains the sort trap at length precisely so nobody reinvents
+    # it, and a check that forbade the string outright would force that explanation to be deleted —
+    # a rule that fires on the documentation of a hazard gets satisfied by removing the warning.
+    _inst_code = "\n".join(l for l in _inst.split("\n") if not l.lstrip().startswith("#"))
+    check("...and GAME_LOOP_CHANNEL resolves to a ref rather than sorting tags — the installer does "
+          "no ordering, because the party that marked the commit already did it",
+          'REF="$GAME_LOOP_CHANNEL"' in _inst_code
+          and "ls-remote" not in _inst_code and "--sort=" not in _inst_code)
+    check("...and setting CHANNEL and REF together is refused, since two sources for one answer "
+          "leaves nobody able to say afterwards which was installed",
+          "not both" in _inst and "GAME_LOOP_CHANNEL:-" in _inst)
+    check("...and a level ref that was FETCHED records its level, instead of falling through to "
+          "the alpha DEFAULT — a stable commit recording alpha is silent by construction",
+          "LEVEL_REF" in _inst and 'GL_LEVEL="$LEVEL_REF"' in _inst)
+    check("...covering BOTH grains: the moving channel pointer and one mark's immutable tag",
+          "stable|stable-*)" in _inst and "beta|beta-*)" in _inst)
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")

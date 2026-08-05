@@ -7,7 +7,8 @@
 #   A sibling tree: ./install.sh --same-as /path/to/project /path/to/copy
 #
 # The one-liner needs no local clone: the installer fetches the payload tarball from GitHub itself.
-# Override the source with GAME_LOOP_REPO=owner/repo and GAME_LOOP_REF=branch|tag (default: main).
+# Override the source with GAME_LOOP_REPO=owner/repo and GAME_LOOP_REF=branch|tag (default: main),
+# or GAME_LOOP_CHANNEL=stable|beta to install the newest commit marked at that level.
 #
 # Idempotent: re-running updates the scripts and re-merges the hooks without duplicating them. Your
 # state.json, config.json, INVARIANTS.md, verify.yaml and LEDGER.md are NEVER overwritten once they
@@ -22,6 +23,43 @@ set -euo pipefail
 
 REPO="${GAME_LOOP_REPO:-SupposedlySam/game_loop}"
 REF="${GAME_LOOP_REF:-main}"
+LEVEL_REF=""     # set when REF itself names a confidence level — see the GL_LEVEL block below
+
+# GAME_LOOP_CHANNEL=stable|beta — resolve "the newest commit we marked at that level" HERE, once,
+# instead of in every consumer's script (#61).
+#
+# WHY THIS IS NOT MERELY A CONVENIENCE. The tags are ANNOTATED, so tag order is not commit order,
+# and the two plausible sorts disagree:
+#     git tag -l 'stable-*' --sort=-creatordate    -> newest      CORRECT
+#     git tag -l 'stable-*' --sort=-committerdate  -> much older   WRONG
+# Both look reasonable. A consumer who picks the wrong one silently pins an older commit, and the
+# installer then correctly stamps THAT commit's level as stable — so the mistake is invisible
+# downstream forever. A silent wrong answer is the failure this whole project is organised against,
+# and leaving the knowledge in a README for everyone to re-implement is how it keeps happening.
+#
+# `git ls-remote --sort` needs no clone and asks the remote directly, so this costs one network call
+# and cannot drift from what the repo actually carries.
+if [ -n "${GAME_LOOP_CHANNEL:-}" ]; then
+  case "$GAME_LOOP_CHANNEL" in
+    stable|beta) : ;;
+    *) echo "GAME_LOOP_CHANNEL must be 'stable' or 'beta' (got '$GAME_LOOP_CHANNEL')." >&2; exit 1 ;;
+  esac
+  if [ -n "${GAME_LOOP_REF:-}" ]; then
+    echo "Set GAME_LOOP_CHANNEL or GAME_LOOP_REF, not both — two sources for one answer is the" >&2
+    echo "shape where nobody can say afterwards which one was installed." >&2
+    exit 1
+  fi
+  # The channel IS a ref, moved by whoever marked the commit. Nothing here sorts anything, needs
+  # git, or reads a tag object: this resolves to one more codeload request on the path below.
+  REF="$GAME_LOOP_CHANNEL"
+fi
+
+# Does the ref we are about to fetch NAME a confidence level? Both grains count: the moving channel
+# pointer (`stable`) and one mark's immutable tag (`stable-<sha>`).
+case "$REF" in
+  stable|stable-*) LEVEL_REF="stable" ;;
+  beta|beta-*)     LEVEL_REF="beta" ;;
+esac
 
 # Locate the payload. Running from a clone, it sits next to this script. Piped through `curl | bash`
 # there is no checkout — fetch the repo tarball into a temp dir and use that. `--strip-components=1`
@@ -48,8 +86,16 @@ if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
   trap 'rm -rf "$TMP"' EXIT
   echo "Fetching game_loop ($REPO@$REF) from GitHub…"
   mkdir -p "$TMP/payload"
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
-    | tar -xz -C "$TMP/payload" --strip-components=1
+  # A TAG IS A REF TOO (#61). This hardcoded refs/heads/, while the header has always documented
+  # GAME_LOOP_REF as "branch|tag" — so the documented flag for the one thing a consumer most wants,
+  # a marked release, 404'd. Measured: refs/heads/<tag> is 404, refs/tags/<tag> is 200. The branch
+  # is tried first so the default path is unchanged and costs no extra request.
+  if ! curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" 2>/dev/null \
+       | tar -xz -C "$TMP/payload" --strip-components=1 2>/dev/null; then
+    rm -rf "$TMP/payload"; mkdir -p "$TMP/payload"
+    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/tags/$REF" \
+      | tar -xz -C "$TMP/payload" --strip-components=1
+  fi
   SRC="$TMP/payload"
   FETCHED=1        # we downloaded $REF ourselves, so asking GitHub for its sha describes THIS payload
   if [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
@@ -325,6 +371,19 @@ if [ "$SRC_OWN" = 1 ]; then
       beta-*)   [ "$GL_LEVEL" = "stable" ] || GL_LEVEL="beta" ;;
     esac
   done
+elif [ "${FETCHED:-0}" = 1 ] && [ -n "$LEVEL_REF" ]; then
+  # WE ASKED GITHUB FOR A LEVEL REF AND IT ANSWERED (#61). A codeload tarball carries no .git, so
+  # `git tag --points-at` cannot run and the level fell through to the alpha DEFAULT — meaning an
+  # install from a commit carrying a stable mark recorded ALPHA, and recorded it silently, because
+  # alpha is what absence looks like. Correct by the scheme's rules and wrong about the world.
+  #
+  # Requesting refs/tags/stable-<sha> (or the moving channel ref) from the configured repo and
+  # receiving a tree IS the proof: that resolution was done by the remote against its own refs, and
+  # it is the same trust root as fetching the payload at all. What it does NOT prove is anything
+  # about a repo nobody configured — GAME_LOOP_REPO points somewhere, and this records that
+  # somewhere's judgement, exactly as the rest of the install does.
+  GL_LEVEL="$LEVEL_REF"
+  echo "  note    level taken from the ref this was fetched by ($REF) — a tarball carries no tags"
 elif [ -f "$SRC/.game_loop/CONFIDENCE" ]; then
   GL_LEVEL="$(tr -d '[:space:]' < "$SRC/.game_loop/CONFIDENCE")"
   case "$GL_LEVEL" in

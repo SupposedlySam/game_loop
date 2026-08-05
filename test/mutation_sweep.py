@@ -538,6 +538,13 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    ".game_loop/bin/game_loop::installed_by":
+        "reads the packager marker that decides WHICH upgrade command the update notice names. "
+        "Neutered it returns None and the notice falls back to the curl — which is precisely the "
+        "reported defect, and the suite asserts both branches by behaviour: a marked install must "
+        "name the packager's command and must NOT offer the curl, an unmarked one must offer the "
+        "curl and say what it does. Sweeping it would re-measure through status what two paired "
+        "assertions already decide directly.",
     "test/run.py::_writes_outside_tmp":
         "the scan that proves this file never writes to the working tree, and it lives inside the "
         "suite. Neutered it finds no writes, so its own gate passes over an empty set — which is "

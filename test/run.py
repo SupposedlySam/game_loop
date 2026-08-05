@@ -864,6 +864,34 @@ def main():
         open(ver_f, "w").write("b" * 40 + "\n")
         check("status flags an available update when installed sha != latest",
               "update available" in fresh_status() and "aaaaaaaa" in fresh_status())
+
+        # A CORRECT ALERT WITH A DESTRUCTIVE FIX ATTACHED. Reported by a consumer who nearly ran it:
+        # the notice told every install to re-run the curl installer, which for a payload placed by
+        # a package manager overwrites a blessed, stamped release with whatever is on main at that
+        # instant, drops CONFIDENCE, and reverts the integration they had just finished. Detection
+        # right, remedy wrong for half the population — and the distinguishing fact is on disk.
+        _by_f = os.path.join(proj, ".game_loop", "installed-by.json")
+        _plain = fresh_status()
+        check("...and with no packager marker it still offers the curl, but SAYS what that does — "
+              "installing whatever is on main right now, which may be ahead of any blessed commit",
+              "curl -fsSL" in _plain and "AT THAT INSTANT" in _plain)
+        with open(_by_f, "w") as f:
+            json.dump({"name": "examplepkg", "upgrade": "examplepkg upgrade game_loop"}, f)
+        _vend = fresh_status()
+        check("...while a payload a packager placed is told to upgrade THROUGH it, and the curl is "
+              "not offered at all — the remedy comes from the same place as the install",
+              "examplepkg upgrade game_loop" in _vend and "curl -fsSL" not in _vend)
+        # THE COMMAND IS PRINTED, NEVER RUN — a file game_loop executed would be a code-execution
+        # vector wearing a helpful face. Garbage must degrade to the ordinary notice, not to a crash
+        # and not to a half-quoted command.
+        for _bad in ('{"name": "x", "upgrade": "a\\nb"}', "not json at all", '["upgrade"]'):
+            with open(_by_f, "w") as f:
+                f.write(_bad)
+            _b = fresh_status()
+            check(f"...and an unusable marker ({_bad[:18]}…) falls back to the ordinary notice "
+                  "rather than printing a command nobody can trust",
+                  "update available" in _b and "curl -fsSL" in _b)
+        os.remove(_by_f)
         open(ver_f, "w").write(FakeGH.sha + "\n")
         check("status is silent when installed sha == latest",
               "update available" not in fresh_status())

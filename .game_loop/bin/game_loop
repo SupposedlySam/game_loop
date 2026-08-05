@@ -4250,6 +4250,40 @@ def installed_confidence_report():
                else "the author's own agent was running on it") + "."]
 
 
+INSTALLED_BY_F = os.path.join(ROOT, "installed-by.json")
+
+
+def installed_by():
+    """{"name", "upgrade"} when a packager placed this payload — else None.
+
+    THE ALERT WAS RIGHT AND THE REMEDY WAS DESTRUCTIVE, reported by a consumer who nearly ran it.
+    `status` told every install to re-run the curl installer. For a payload placed by a package
+    manager that would overwrite a blessed, stamped release with whatever is on main at that
+    instant, drop the CONFIDENCE file, and revert the integration the consumer had just finished.
+    A correct detection wired to one remedy for two populations.
+
+    The distinguishing fact is on disk and free to read, so the notice can name the right command
+    per consumer instead of the same one for everybody. That is this repo's own rule -- the thing
+    you RECORD and the thing you ACT ON must come from the same place -- applied to a suggestion
+    rather than to a check, which is where I had not thought to apply it.
+
+    THE COMMAND IS PRINTED, NEVER RUN. A file that game_loop executed would be a code-execution
+    vector wearing a helpful face; displaying it leaves the decision and the typing with the human.
+    """
+    try:
+        with open(INSTALLED_BY_F) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    up = str(d.get("upgrade") or "").strip()
+    if not up or "\n" in up:
+        return None            # a multi-line "command" is not a command; say nothing rather than guess
+    return {"name": str(d.get("name") or "the packager that installed this").strip()[:60],
+            "upgrade": up[:200]}
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -4285,10 +4319,23 @@ def update_notice():
                 f"({latest[:8]}).\n"
                 f"  Which is newer could NOT be determined — no re-install is implied by this line "
                 f"alone.")
-    note = (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
-            f"  Re-install to update (bin/ is refreshed; no session restart):\n"
-            f"    curl -fsSL https://raw.githubusercontent.com/{repo}"
-            f"/main/install.sh | bash -s -- .")
+    _by = installed_by()
+    if _by:
+        # Placed by a packager: its own upgrade is the only remedy that keeps the vendored release,
+        # its stamp and its CONFIDENCE intact.
+        note = (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
+                f"  This payload was installed by {_by['name']}, so upgrade THROUGH it — the curl\n"
+                f"  installer would replace a vendored release with whatever is on main right now:\n"
+                f"    {_by['upgrade']}")
+    else:
+        note = (f"⬆ game_loop update available — installed {inst[:8]}, latest {latest[:8]} on main.\n"
+                f"  Re-install to update (bin/ is refreshed; no session restart):\n"
+                f"    curl -fsSL https://raw.githubusercontent.com/{repo}"
+                f"/main/install.sh | bash -s -- .\n"
+                f"  This installs whatever is on main AT THAT INSTANT, which may be ahead of any\n"
+                f"  released or blessed commit. If a package manager placed this payload, upgrade\n"
+                f"  through that instead and have it write .game_loop/installed-by.json so this\n"
+                f"  line names your command rather than this one.")
     # WHAT changed, not merely THAT something did (#37). "An update is available" is true and
     # useless for deciding whether to care. A new verb costs nothing until you reach for it; an
     # existing verb that starts costing minutes, or refusing where it used to warn, changes

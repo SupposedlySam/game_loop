@@ -291,6 +291,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `watchdog` | Ring timing, ring cap, and `waiting_probe`. |
 | `limits` | Usage-limit thresholds for the handoff gate and the park. |
 | `update_check`, `update_repo` | Whether to check for a newer game_loop, and where from. `update_api_base` / `update_raw_base` retarget those lookups (GitHub Enterprise, a mirror, or a test). |
+| *(not config)* `.game_loop/installed-by.json` | Written by a **packager**, not by you — see below. |
 | `session_start` | `false` disables the status block injected at session start and after compaction. |
 | `work_nudge_every`, `trans_nudge_every` | How much evidence work goes by before `status` nudges for a retro / a phase transition. |
 | `hooks_probe_slack_sec` | How stale a hook probe may be before `status` calls the wiring into question. |
@@ -341,6 +342,24 @@ distinguishes anything. What is live during a fan-out is the subagents' artifact
 under the **host's** per-session directory, not game_loop's. The session id is what lets a probe
 resolve its own directory there instead of globbing across every session in the checkout.
 `GAME_LOOP_TRANSCRIPT` is supplied for probes that genuinely want the parent's own activity.
+
+### If a package manager installs game_loop for you
+
+`status` tells you when a newer game_loop is on main. By default it suggests re-running the curl
+installer — which is right for a curl install and **wrong for a vendored one**, where it would
+replace a blessed, stamped release with whatever is on main at that instant and drop the
+`CONFIDENCE` file. A correct alert with a destructive fix attached.
+
+So a packager should drop `.game_loop/installed-by.json` beside the payload:
+
+```json
+{"name": "yourpkg", "upgrade": "yourpkg upgrade game_loop"}
+```
+
+The notice then names *that* command and stops offering the curl. The command is **printed, never
+run** — a file game_loop executed would be a code-execution vector wearing a helpful face, so the
+decision and the typing stay with the human. An unreadable or multi-line value falls back to the
+ordinary notice rather than printing something nobody can trust.
 
 ### Site wiring: `config.local.json`
 

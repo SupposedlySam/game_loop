@@ -443,8 +443,16 @@ def waiting_verdict():
     if not cmd:
         return False, ""
     try:
+        # SAME ENVIRONMENT CONTRACT AS A TRIGGER. Both features run a command the PROJECT supplied,
+        # and they were handing it different environments: triggers set GAME_LOOP_ROOT and
+        # GAME_LOOP_REPO, this set neither. A probe written to the documented trigger contract
+        # therefore expanded to an empty path, failed, and read as NOT WAITING -- so the watchdog
+        # rang exactly the run the probe existed to leave alone, and the conservative default hid
+        # the breakage. Two runners of project-supplied commands must not differ in what they
+        # provide, or the contract is whichever one you happened to test against.
+        env = dict(os.environ, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT)
         r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15,
-                           cwd=REPO_ROOT)
+                           cwd=REPO_ROOT, env=env)
         waiting = r.returncode == 0
         reason = (r.stdout or "").strip().splitlines()
         reason = reason[0][:160] if reason else ""

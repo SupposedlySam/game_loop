@@ -3184,6 +3184,25 @@ def main():
         with open(os.path.join(_wsd, "state.json"), "w") as f:
             json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
                        "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        # THE ENVIRONMENT CONTRACT. Triggers and the waiting probe both run a PROJECT-supplied
+        # command, and they were handing it different environments — so a probe written to the
+        # documented trigger contract expanded $GAME_LOOP_ROOT to nothing, failed, and read as NOT
+        # WAITING. The conservative default hid it: the watchdog rang exactly the run the probe
+        # existed to leave alone, and nothing looked broken.
+        _probe('test -n "$GAME_LOOP_ROOT" && test -n "$GAME_LOOP_REPO" && echo env-ok')
+        with open(os.path.join(_wsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        _env_run = _run()
+        with open(_wlog) as f:
+            check("the waiting probe gets the SAME environment a trigger gets — two runners of "
+                  "project-supplied commands must not differ in what they provide",
+                  _env_run.returncode == 0 and "env-ok" in f.read())
+        open(_wlog, "w").close()
+        _probe("echo nothing to do; exit 0")
+        with open(os.path.join(_wsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
         _r0 = _run()
         check("a verified wait stops the RING itself — a run with nothing to do is not woken to "
               "discover that again",

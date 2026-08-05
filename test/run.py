@@ -4103,6 +4103,46 @@ def main():
         check("...and an ARGUMENT-level mutation is refused through a prefix too, since that "
               "finding is per-call and was never pre-approvable",
               _call("mcp__github__addIssueComment", {"sql": "DELETE FROM t"})[0] == "deny")
+
+        # A STATE-CHANGING VERB NOBODY ENUMERATED used to fail closed, which stranded the agent
+        # rather than protecting anything: a review could post its comments (`add`, `create`,
+        # `approve`) but not resolve the threads it had just verified. These verbs are ordinary
+        # members of MUTATE_VERBS, so they reach the policy instead of dying before it.
+        for _t in ("resolveComment", "minimizePullRequestComment", "unminimizePullRequestComment",
+                   "convertToDraft"):
+            check(f"a state-changing verb reaches the standing policy rather than failing closed: "
+                  f"{_t}",
+                  _call("mcp__github__" + _t)[0] == "allow")
+        # PAIRED: being classified is not being allowed. The same verbs are refused the moment the
+        # policy stops covering them — otherwise the checks above would pass for the wrong reason.
+        _set(mcp_standing_writes=[])
+        check("...and with the prefix withdrawn every one of them is refused again, so the allow "
+              "above is the POLICY talking and not a verb that quietly became free",
+              all(_call("mcp__github__" + _t)[0] == "deny"
+                  for _t in ("resolveComment", "minimizePullRequestComment", "convertToDraft")))
+        _set(mcp_standing_writes=["mcp__github__"])
+
+        # A verb slot too generic to whitelist globally STAYS ambiguous: `user` and the leading
+        # token of `systemPrompt` are real words in read-only names, so they keep failing closed
+        # and a project names the exact tool in mcp_read_only_tools if it wants them.
+        _ud, _ur = _call("mcp__github__userInfo")
+        check("a verb slot too generic to classify still fails closed even under a prefix — the "
+              "grant widens which servers are trusted, never what counts as a known verb",
+              _ud == "deny" and "could not be classified" in _ur)
+
+        # The same gap, one layer worse, on a server whose tools repeat its name
+        # (`mcp__device__device_build`): the repeat is stripped first, so the REAL verb slot is what
+        # gets classified — and on a first-party device server that slot is a physical effector.
+        _set(mcp_standing_writes=["mcp__device__"])
+        for _t in ("device_build", "device_background", "device_foreground", "device_screenshot",
+                   "device_key", "device_pointer", "device_setup"):
+            check(f"a device effector past the server-name repeat reaches the policy: {_t}",
+                  _call("mcp__device__" + _t)[0] == "allow")
+        check("...while a LANDING verb on that same server is still refused through the prefix, so "
+              "widening the effectors did not widen what may be shipped to a device",
+              _call("mcp__device__device_deploy")[0] == "deny")
+        _set(mcp_standing_writes=["mcp__github__"])
+
         _set(mcp_writes="disabled")
         check("...and a prefix is inert under mcp_writes disabled, so #53 stays absolute across "
               "both grains rather than just the one it was written against",

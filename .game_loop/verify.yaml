@@ -72,6 +72,18 @@
 # host, which looks exactly like a harness with no external claims to make. That is the failure this
 # repo keeps paying for, so the shipped file owes the suite too. The suite also holds the
 # default-deny that ties each entry to its LEDGER heading, so editing either without the other fails.
+# A change to what game_loop REFUSES owes an entry in the behaviour record, or an explicit decision
+# that nobody would notice. The mechanism existed and the discipline lapsed silently — twelve
+# refusal-touching commits after the record's only entry, four of them qualifying — so it is a gate
+# now rather than a habit. It fires only when a refusal LINE moves, not on every edit.
+".game_loop/bin/guard-writes-impl.sh":
+  - "python3 test/behaviour_gate.py"
+".game_loop/bin/guard-mcp-impl.sh":
+  - "python3 test/behaviour_gate.py"
+"test/behaviour_gate.py":
+  - "python3 test/run.py"
+".game_loop/behaviour.json":
+  - "python3 test/run.py"
 ".game_loop/claims.json":
   - "python3 test/run.py"
 ".game_loop/LEDGER.md":

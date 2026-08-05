@@ -5492,6 +5492,70 @@ def main():
           "agreement it did not establish",
           "UNRECORDED version" in _rep and "not an assurance" in _rep)
 
+    print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
+    # THE MECHANISM WAS BUILT AND THE DISCIPLINE LAPSED SILENTLY, which a consumer measured rather
+    # than me: twelve commits touched the refusal paths after behaviour.json's first and only entry,
+    # and four qualified. The sharpest — a commit target built from a variable, which used to pass
+    # SILENTLY and now denies — went unrecorded for weeks, so that consumer described the OLD
+    # behaviour to every agent it spawns, in the voice of a measured finding, because re-deriving it
+    # from source is what you do when the record is empty.
+    bg = tempfile.mkdtemp(prefix="gameloop-bg-")
+    try:
+        _bgs = os.path.join(bg, ".game_loop", "bin")
+        os.makedirs(_bgs)
+        _guard = os.path.join(bg, ".game_loop", "bin", "guard-writes-impl.sh")
+        _rec = os.path.join(bg, ".game_loop", "behaviour.json")
+        with open(_guard, "w") as f:
+            f.write('#!/usr/bin/env bash\necho ok\n')
+        with open(_rec, "w") as f:
+            json.dump({"changes": []}, f)
+        shutil.copy(os.path.join(REPO, "test", "behaviour_gate.py"),
+                    os.path.join(bg, "behaviour_gate.py"))
+
+        def _git(*a):
+            return subprocess.run(["git"] + list(a), cwd=bg, capture_output=True, text=True)
+
+        def _gate():
+            return subprocess.run([sys.executable, "behaviour_gate.py", "HEAD"], cwd=bg,
+                                  capture_output=True, text=True)
+
+        _git("init", "-q", "-b", "main")
+        _git("config", "user.email", "t@t"); _git("config", "user.name", "t")
+        _git("add", "-A"); _git("commit", "-qm", "base")
+
+        check("with nothing changed the gate is silent — it must not fire on every commit or it "
+              "becomes noise and gets turned off",
+              _gate().returncode == 0 and "nothing owed" in _gate().stdout)
+
+        # A REFUSAL CHANGES AND THE RECORD DOES NOT: the case that actually happened.
+        with open(_guard, "a") as f:
+            f.write('deny "BLOCKED: something new"\n')
+        _bad = _gate()
+        check("a changed refusal line with no record entry FAILS, naming the lines — an omission "
+              "is otherwise indistinguishable from 'nothing changed'",
+              _bad.returncode == 1 and "BEHAVIOUR GATE" in _bad.stderr
+              and "BLOCKED: something new" in _bad.stderr)
+        check("...and the refusal offers BOTH answers, including recording that nobody would "
+              "notice — a decision on the record rather than silence",
+              '"notice": false' in _bad.stderr and "would somebody who changed NOTHING" in _bad.stderr)
+
+        # PAIRED: touching the record clears it. Otherwise the gate is a wall, not a prompt.
+        with open(_rec, "w") as f:
+            json.dump({"changes": [{"seq": 1, "change": "x"}]}, f)
+        check("...and updating the record in the same change clears it",
+              _gate().returncode == 0)
+
+        # AND IT MUST NOT FIRE ON ORDINARY EDITS to the same watched file — a gate that cannot tell
+        # a comment from a denial would be met by moving denials somewhere it does not look.
+        _git("add", "-A"); _git("commit", "-qm", "recorded")
+        with open(_guard, "a") as f:
+            f.write('# just a comment, and an echo\necho hello\n')
+        check("...while a non-refusal edit to the very same file owes nothing, so the gate stays "
+              "aimed at behaviour rather than at activity",
+              _gate().returncode == 0 and "nothing owed" in _gate().stdout)
+    finally:
+        shutil.rmtree(bg, ignore_errors=True)
+
     print("the house voice is enforced, not remembered (#33):")
     _w = "sys" + "tem"
     _banned = re.compile(r"\b" + _w + r"s?\b", re.I)

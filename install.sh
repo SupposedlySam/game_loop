@@ -93,8 +93,26 @@ if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
   if ! curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" 2>/dev/null \
        | tar -xz -C "$TMP/payload" --strip-components=1 2>/dev/null; then
     rm -rf "$TMP/payload"; mkdir -p "$TMP/payload"
-    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/tags/$REF" \
-      | tar -xz -C "$TMP/payload" --strip-components=1
+    if ! curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/tags/$REF" 2>/dev/null \
+         | tar -xz -C "$TMP/payload" --strip-components=1 2>/dev/null; then
+      # SAY WHICH REF AND WHY, not `curl: (56) 404`. A channel that nobody has marked yet is the
+      # likeliest way to land here, and it is a perfectly ordinary state — `beta` does not exist
+      # until something is marked beta. An installer that answers that with a transport error makes
+      # the reader debug their network instead of reading one sentence.
+      echo "" >&2
+      echo "No ref '$REF' in $REPO — tried refs/heads/$REF and refs/tags/$REF, both 404." >&2
+      if [ -n "$LEVEL_REF" ] && [ "$REF" = "${GAME_LOOP_CHANNEL:-}" ]; then
+        echo "" >&2
+        echo "'$REF' is a CHANNEL POINTER, and it only exists once something has been marked at" >&2
+        echo "that level. Nothing has been, or it was never pushed. Your options:" >&2
+        echo "  * pick a level that exists:   git ls-remote --tags https://github.com/$REPO" >&2
+        echo "  * install an exact release:   GAME_LOOP_REF=<tag> ..." >&2
+        echo "  * install the tip:            omit GAME_LOOP_CHANNEL (records alpha, honestly)" >&2
+      else
+        echo "Check the spelling, or list what exists: git ls-remote https://github.com/$REPO" >&2
+      fi
+      exit 1
+    fi
   fi
   SRC="$TMP/payload"
   FETCHED=1        # we downloaded $REF ourselves, so asking GitHub for its sha describes THIS payload

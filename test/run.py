@@ -5146,8 +5146,24 @@ def main():
     _inst_code = "\n".join(l for l in _inst.split("\n") if not l.lstrip().startswith("#"))
     check("...and GAME_LOOP_CHANNEL resolves to a ref rather than sorting tags — the installer does "
           "no ordering, because the party that marked the commit already did it",
-          'REF="$GAME_LOOP_CHANNEL"' in _inst_code
-          and "ls-remote" not in _inst_code and "--sort=" not in _inst_code)
+          'REF="$GAME_LOOP_CHANNEL"' in _inst_code and "--sort=" not in _inst_code)
+
+    # THE DOCUMENTED ONE-LINER MUST PUT THE VARIABLE ON `bash`, NOT ON `curl`. In
+    # `VAR=x curl … | bash`, the assignment applies to curl only — the bash that runs the installer
+    # never sees it, so you silently get an alpha install of main. Reported against the recipe this
+    # very issue added, and verified here rather than reasoned about: the broken form even stamps a
+    # correct-looking VERSION, because main and the channel point at the same commit until main
+    # moves. NOTHING IN THE TOOL CAN CATCH THIS — the installer never receives the variable, so that
+    # run is indistinguishable from an ordinary one. The document is the only place it can be fixed,
+    # which is exactly why the document is what gets checked.
+    _readme = open(os.path.join(REPO, "README.md")).read()
+    _broken = re.findall(r"^GAME_LOOP_\w+=\S+ curl[^\n]*\|\s*bash", _readme, re.M)
+    check("no documented one-liner puts a GAME_LOOP_* assignment before `curl` in a pipe to bash — "
+          "that form never reaches the installer and fails toward a silent alpha install",
+          not _broken)
+    check("...and the channel recipe is present in a form that DOES reach it, so this is a check on "
+          "a live instruction rather than on the absence of one",
+          re.search(r"^export GAME_LOOP_CHANNEL=stable$", _readme, re.M) is not None)
     check("...and setting CHANNEL and REF together is refused, since two sources for one answer "
           "leaves nobody able to say afterwards which was installed",
           "not both" in _inst and "GAME_LOOP_CHANNEL:-" in _inst)
@@ -5156,6 +5172,17 @@ def main():
           "LEVEL_REF" in _inst and 'GL_LEVEL="$LEVEL_REF"' in _inst)
     check("...covering BOTH grains: the moving channel pointer and one mark's immutable tag",
           "stable|stable-*)" in _inst and "beta|beta-*)" in _inst)
+    # A CHANNEL NOBODY HAS MARKED YET IS AN ORDINARY STATE, not a transport failure. Before this,
+    # GAME_LOOP_CHANNEL=beta with no beta pointer died as `curl: (56) 404` — which sends the reader
+    # to debug their network instead of reading one sentence. Measured against the live repo, which
+    # genuinely has a stable pointer and no beta one.
+    check("...and a ref that does not exist names ITSELF and both paths tried, rather than exiting "
+          "as a bare curl error",
+          "both 404" in _inst and "refs/heads/$REF and refs/tags/$REF" in _inst)
+    check("...and an unmarked CHANNEL says why it is missing and offers three real routes, since "
+          "'nothing has been marked beta yet' is a normal answer and not a fault",
+          "CHANNEL POINTER" in _inst and "GAME_LOOP_REF=<tag>" in _inst
+          and "records alpha, honestly" in _inst)
 
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")

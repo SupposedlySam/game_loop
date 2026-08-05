@@ -225,8 +225,15 @@ later, when nobody remembers which commit they took.
 ### Installing the latest stable
 
 ```bash
-GAME_LOOP_CHANNEL=stable curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
+export GAME_LOOP_CHANNEL=stable
+curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
 ```
+
+The `export` is on its own line on purpose. In `VAR=x curl … | bash`, the assignment applies to
+**`curl` only** — the `bash` that actually runs the installer never sees it, so you silently get an
+`alpha` install of `main`. Nothing can warn you, because the installer never received the variable
+and cannot tell that run from an ordinary one. (`curl … | GAME_LOOP_CHANNEL=stable bash -s -- .`
+works too, and survives reformatting less well.)
 
 `stable` and `beta` are **moving pointers**, re-aimed at each mark by whoever marks it, so nothing on
 your side has to work out which tag is newest. That matters more than it sounds: the marks are

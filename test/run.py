@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -4180,6 +4181,84 @@ def main():
                   _hit.returncode == 0 and "CONFIDENCE:" in _hit.stdout)
         finally:
             shutil.rmtree(_fd, ignore_errors=True)
+
+    print("a superseded watchdog stands down (the sweep's own KNOWN GAP, measured at 0 kills):")
+    # THE SWEEP NAMED THIS ONE AND SAID SO: `watchdog::superseded` neutered to `return False` killed
+    # NOTHING out of a 534-assertion baseline. Every ring decision that branches on "has a newer
+    # watchdog taken over?" was unasserted, so a broken one would leave TWO watchdogs ringing the
+    # same session and no test anywhere would notice. It sat in NOT_SWEPT as declared debt with the
+    # remedy written down — "an assertion nobody has written yet" — which is what this is.
+    sp = make_sandbox()
+    try:
+        _ssd = os.path.join(sp, ".game_loop", "sessions", "sess-sup")
+        os.makedirs(_ssd, exist_ok=True)
+        _spid = os.path.join(_ssd, ".watchdog.pid")
+        _slog = os.path.join(sp, ".game_loop", "log.jsonl")
+        _stp = os.path.join(sp, "transcript.jsonl")
+        with open(_stp, "w") as f:
+            f.write("{}\n")
+        with open(os.path.join(_ssd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+
+        # A SACRIFICIAL PID, never this process's own. claim_pidfile() SIGTERMs whatever pid it
+        # finds — that is its job — so writing os.getpid() here makes the next watchdog invocation
+        # kill the test runner. It did: the suite died at exit 143 with no output, which reads
+        # exactly like a hang. Hand the killer something it is allowed to kill.
+        _victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+
+        def _steal():
+            """Claim the pidfile out from under the running watchdog, as a newer one would.
+
+            The REAL path is claim_pidfile() killing the old process, so superseded() is the
+            backstop for when that kill does not land — a race, or a pid that has already gone. It
+            is exactly the branch a signal-based test would never reach, which is a fair guess at
+            why it went unasserted for so long.
+            """
+            for _ in range(200):
+                try:
+                    with open(_spid) as f:
+                        if f.read().strip().isdigit():
+                            break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            with open(_spid, "w") as f:
+                f.write(str(_victim.pid))          # alive, certainly not the watchdog, expendable
+
+        _t = threading.Thread(target=_steal, daemon=True)
+        _t.start()
+        _sup = run_watchdog(os.path.join(sp, ".game_loop", "bin", "watchdog"),
+                            {"session_id": "sess-sup", "transcript_path": _stp},
+                            WATCHDOG_IDLE_SEC="6", WATCHDOG_SETTLE_SEC="0")
+        _t.join(timeout=5)
+        with open(_slog) as f:
+            _sl = f.read()
+        check("a watchdog whose pidfile has been claimed by another process does NOT ring — two "
+              "watchdogs waking one session is the failure the pidfile exists to prevent",
+              _sup.returncode == 0)
+        check("...and it SAYS it was superseded, so standing down is distinguishable from a "
+              "watchdog that simply broke",
+              '"watchdog_quiet"' in _sl and "superseded" in _sl)
+
+        # PAIRED, or the quiet above proves only that the watchdog stopped working: the identical
+        # idle session, pidfile left alone, must still ring.
+        open(_slog, "w").close()
+        with open(os.path.join(_ssd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        _ring = run_watchdog(os.path.join(sp, ".game_loop", "bin", "watchdog"),
+                             {"session_id": "sess-sup", "transcript_path": _stp},
+                             WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        check("...while the SAME idle session with its pidfile untouched rings — the quiet is "
+              "supersession doing its job, not the watchdog having stopped",
+              _ring.returncode == 2)
+    finally:
+        try:
+            _victim.kill()
+        except (NameError, OSError):
+            pass
+        shutil.rmtree(sp, ignore_errors=True)
 
     print("prose arrives unmangled, or it does not arrive (#58):")
     pw = make_sandbox()

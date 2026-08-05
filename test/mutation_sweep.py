@@ -166,6 +166,24 @@ MUTANTS = [
     # was looking at something else, which is the denylist argument stated as history rather than as
     # a principle — they are here because the enumeration named them, not because anyone suspected
     # them. Their floors were MEASURED against this HEAD, not chosen.
+    # PAID OFF, not re-declared. This sat in NOT_SWEPT as a KNOWN GAP measured at 0 kills against a
+    # 534 baseline: nothing noticed if a superseded watchdog stopped standing down, so two watchdogs
+    # could wake one session and no test anywhere would say so. The note recorded the remedy as "an
+    # assertion nobody has written yet"; that assertion now exists, and this is it moving into the
+    # swept set with a MEASURED floor.
+    #
+    # THE MEASUREMENT WAS 4 AND THE FLOOR IS 2, DELIBERATELY. Two of the four kills are this file's
+    # own accounting reacting to the mutation rather than coverage of the producer: `return False`
+    # alone is not the nothing-OR-something shape, so the neutered function stops being a candidate,
+    # the NOT_SWEPT/MUTANTS bookkeeping sees a name that no longer exists, and two structural
+    # assertions die for reasons that have nothing to do with watchdogs. Recording 4 would book that
+    # artifact as protection and make a later honest run look like drift. The two real ones are the
+    # paired arms below.
+    ("superseded -> never reports supersession", ".game_loop/bin/watchdog::superseded",
+     "    return False\n", ["supersed", "pidfile", "watchdog"],
+     "measured at 4, floored at 2: the other two kills are the sweep's own bookkeeping noticing that "
+     "a neutered `superseded` no longer parses as a producer, which is an artifact of the mutation "
+     "and not evidence about the watchdog", 2),
     ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
     ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",
@@ -520,12 +538,6 @@ NOT_SWEPT = {
     # mutations hangs the suite rather than failing it, which is its own finding and has to be
     # chased before a floor recorded here would mean anything. Recording an unmeasured floor would
     # be the exact target-making this file's header warns about.
-    ".game_loop/bin/watchdog::superseded":
-        "KNOWN GAP, and now a MEASURED one: 0 kills against a baseline of 534. Nothing in the "
-        "suite notices if it stops working, so every ring decision that branches on -- has a newer "
-        "watchdog taken over? -- is unasserted. Not listed in MUTANTS only because a standing "
-        "UNPROTECTED entry makes the sweep exit 1 with no path to green (INV5); the remedy is an "
-        "assertion nobody has written yet. Same standing debt as retro_nudge, same shape.",
 }
 
 

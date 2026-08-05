@@ -53,6 +53,7 @@ def make_sandbox():
     # it is not a faithful install — it would let a pointer-names-a-real-file assertion pass here
     # and fail for every consumer, which is the direction that matters.
     shutil.copy(os.path.join(REPO, "llms.txt"), os.path.join(dst, "llms.txt"))
+    shutil.copy(os.path.join(SRC_GAME_LOOP, "claims.json"), os.path.join(dst, "claims.json"))
     return proj
 
 
@@ -5361,6 +5362,51 @@ def main():
           "cannot perform on the code it is carrying"
           + (" · BROKEN: " + "; ".join(_bad[:4]) if _bad else ""),
           not _bad)
+
+    print("a claim about the HOST cannot go stale quietly (showrunner's INV20):")
+    # A limitation written in prose ages exactly like a premise does, and nothing here noticed. The
+    # shape came from showrunner: a claim cannot be checked automatically, but its SUBJECT can be
+    # versioned. Deciding whether "rate_limits rides the statusline payload" still holds needs a
+    # person; deciding whether the release it was verified against is the release running is cheap.
+    with open(os.path.join(SRC_GAME_LOOP, "claims.json")) as f:
+        _cl = json.load(f)
+    _block = _cl.get("claude_code") or {}
+    _claims = _block.get("claims") or []
+    check("the load-bearing claims about the host are enumerated with what breaks if each moved",
+          len(_claims) >= 5 and all(c.get("id") and c.get("says") and c.get("breaks")
+                                    for c in _claims))
+    check("...and every one carries the DATE it was checked, so an unbounded duty becomes a dated "
+          "one",
+          bool(_block.get("verified_on")))
+
+    # DEFAULT-DENY BY IDENTITY, NOT BY COUNT — the part showrunner warned costs something and is
+    # also the part without which it lies to you. A count passes when one entry is added and
+    # another removed. Matching the exact LEDGER heading means a new claim about the host cannot
+    # join quietly. (OPEN is excluded on purpose: those are questions, not claims.)
+    with open(os.path.join(SRC_GAME_LOOP, "LEDGER.md")) as f:
+        _led = f.read()
+    _sec = _led.split("## VERIFIED", 1)[1].split("## OPEN", 1)[0]
+    _titles = re.findall(r"^- \*\*(.+?)\*\*", _sec, re.M)
+    _accounted = {c.get("ledger") for c in _claims}
+    _missing = [t for t in _titles if t not in _accounted]
+    check(f"every LEDGER claim about the host is accounted for ({len(_titles)} found) — a new one "
+          "fails the run until somebody decides it, rather than joining quietly"
+          + (" · UNACCOUNTED: " + "; ".join(_missing[:3]) if _missing else ""),
+          _titles and not _missing)
+    check("...and the check can FIRE — an invented heading is reported as unaccounted, so the clean "
+          "result above is a verdict and not a regex matching nothing",
+          [t for t in _titles + ["A claim nobody decided"] if t not in _accounted]
+          == ["A claim nobody decided"])
+
+    # AND IT MUST NOT IMPLY IT CHECKED THE TRUTH. verified_against is null on every entry, which is
+    # the finding rather than an oversight: the original verification never recorded a version, so
+    # there is nothing to compare and the report has to say exactly that.
+    _rep = "\n".join(gl(REPO, "status").stdout.split("\n"))
+    check("status reports the claims, and says plainly that nothing here checks whether one is TRUE",
+          "load-bearing claim(s) about" in _rep and "never checks whether a claim is TRUE" in _rep)
+    check("...and with no version recorded it says nothing can be compared, rather than reporting "
+          "agreement it did not establish",
+          "UNRECORDED version" in _rep and "not an assurance" in _rep)
 
     print("the house voice is enforced, not remembered (#33):")
     _w = "sys" + "tem"

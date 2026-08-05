@@ -1,0 +1,76 @@
+{
+  "//": [
+    "CLAIMS ABOUT THINGS THIS REPO DOES NOT CONTROL, and the version each was verified against.",
+    "",
+    "A limitation written in prose ages exactly like a premise does, and nothing in this repo",
+    "noticed. The shape that fixes it came from showrunner (its INV20): a claim CANNOT be checked",
+    "automatically, but its SUBJECT can be versioned. Deciding whether 'rate_limits rides the",
+    "statusline payload' is still true needs a person. Deciding whether the release it was verified",
+    "against is the release running is four lines. That converts an unbounded duty -- stay vigilant",
+    "forever -- into a dated one: re-read these entries on the specific day the layer moves.",
+    "",
+    "WHAT THIS DOES NOT DO, since that sentence is itself the kind of claim it governs: it does not",
+    "check that any claim is TRUE, and it cannot. It removes the option of going stale QUIETLY.",
+    "",
+    "`verified_against` is null on every entry below and that is not an oversight -- it is the",
+    "finding. These were read from the docs on 2026-07-29 and the version was never recorded, so",
+    "there is nothing to compare and the honest report says so. The first re-verification of any",
+    "entry fills it in and makes that entry checkable from then on. Do not back-fill it by guessing",
+    "which version was current that day; a stamp invented today is a number standing for nothing.",
+    "",
+    "Each claim carries `ledger`: the exact LEDGER.md heading it accounts for. The suite",
+    "matches on THOSE, not on a count -- a count passes when one entry is added and",
+    "another removed, which is the shape of check that lies to you. A new VERIFIED or",
+    "RULED-OUT entry about the host therefore fails the run until somebody decides it."
+  ],
+  "claude_code": {
+    "subject": "Claude Code (the host this harness runs inside)",
+    "verified_on": "2026-07-29",
+    "verified_against": null,
+    "why_it_matters": "the statusline tap, the limit gate and the watchdog's usage park all rest on these; if the host moved, they fail toward believing there is headroom",
+    "claims": [
+      {
+        "id": "statusline-rate-limits",
+        "says": "rate_limits.five_hour/.seven_day ride the statusline stdin JSON, each {used_percentage, resets_at}",
+        "source": "https://code.claude.com/docs/en/statusline.md",
+        "breaks": "game_loop statusline writes no snapshot, so limitgate and the park are inert",
+        "ledger": "Claude Code exposes subscription rate limits in the statusline stdin JSON"
+      },
+      {
+        "id": "statusline-config-keys",
+        "says": "statusLine takes {type: command, command, refreshInterval (min 1s), padding}",
+        "source": "https://code.claude.com/docs/en/statusline.md",
+        "breaks": "install.sh wires a statusline the host ignores",
+        "ledger": "statusLine config keys"
+      },
+      {
+        "id": "no-rate-limits-in-hooks",
+        "says": "no hook payload carries rate-limit data (RULED OUT)",
+        "source": "anthropics/claude-code#34817",
+        "breaks": "if it became true, the whole statusline detour is unnecessary",
+        "ledger": "Hook payloads carry rate-limit data"
+      },
+      {
+        "id": "no-headless-usage-flag",
+        "says": "there is no `claude usage` / --usage (RULED OUT)",
+        "source": "anthropics/claude-code#44328, #40395, #39141",
+        "breaks": "if it became true, usage could be read directly instead of inferred",
+        "ledger": "A headless `claude usage` / `--usage` flag exists"
+      },
+      {
+        "id": "no-readable-ratelimit-headers",
+        "says": "anthropic-ratelimit-unified-* headers are not persisted anywhere scripts reach (RULED OUT)",
+        "source": "anthropics/claude-code#55333",
+        "breaks": "if it became true, the client-side derivative stops being the only form",
+        "ledger": "`anthropic-ratelimit-unified-*` response headers are readable by harness code"
+      },
+      {
+        "id": "no-weekly-opus-window",
+        "says": "only five_hour and seven_day windows appear; the per-model weekly limit does not (RULED OUT)",
+        "source": "https://code.claude.com/docs/en/statusline.md",
+        "breaks": "nothing changes -- a run can still die unwarned on a limit the machinery cannot see",
+        "ledger": "The per-model weekly (Opus) limit is in the statusline payload"
+      }
+    ]
+  }
+}

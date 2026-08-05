@@ -67,6 +67,15 @@
 # by the suite — cheaply, without running the sweep, which is one full pass per producer.
 "test/mutation_sweep.py":
   - "python3 test/run.py"
+# The claims record is DATA the tool reads and ships, like behaviour.json — and a malformed one
+# degrades to silence: external_claims_report returns nothing and status simply stops mentioning the
+# host, which looks exactly like a harness with no external claims to make. That is the failure this
+# repo keeps paying for, so the shipped file owes the suite too. The suite also holds the
+# default-deny that ties each entry to its LEDGER heading, so editing either without the other fails.
+".game_loop/claims.json":
+  - "python3 test/run.py"
+".game_loop/LEDGER.md":
+  - "python3 test/run.py"
 ".game_loop/verify.yaml":
   - "python3 test/run.py"
 # install.sh was deliberately unlisted while it only copied files — nothing could fail. It now DECIDES

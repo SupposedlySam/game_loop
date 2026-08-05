@@ -49,6 +49,10 @@ def make_sandbox():
         os.chmod(os.path.join(dst, "bin", f), 0o755)
     for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
         shutil.copy(os.path.join(SRC_GAME_LOOP, f), os.path.join(dst, f))
+    # The agent brief ships with the payload (#60) and a refusal points at it, so a fixture without
+    # it is not a faithful install — it would let a pointer-names-a-real-file assertion pass here
+    # and fail for every consumer, which is the direction that matters.
+    shutil.copy(os.path.join(REPO, "llms.txt"), os.path.join(dst, "llms.txt"))
     return proj
 
 
@@ -4357,6 +4361,57 @@ def main():
               "PROSE_MAX = 400" in _src and "400 chars" in _helps)
     finally:
         shutil.rmtree(pw, ignore_errors=True)
+
+    print("a session that arrived blind is oriented ONCE (#60):")
+    ow = make_sandbox()
+    try:
+        def _refuse(sid):
+            r = subprocess.run([os.path.join(ow, ".game_loop", "bin", "guard-writes.sh")],
+                               input=json.dumps({"tool_name": "Write", "session_id": sid,
+                                                 "tool_input": {"file_path": "/etc/nope"}}),
+                               capture_output=True, text=True, env=_env(ow, sid=sid))
+            d = json.loads(r.stdout)["hookSpecificOutput"]
+            return d["permissionDecisionReason"]
+
+        # THE REFUSAL IS THE ONBOARDING SURFACE, because work here starts as user-level slash
+        # commands and a session that never loaded the project's CLAUDE.md is the NORMAL case.
+        # Reported: the agent hit a refusal, probed five global bin dirs for a `game_loop` on PATH,
+        # found none because nothing looks UP-TREE for a project-local binary, concluded "not
+        # installed" and escalated. #52's absolute path removes the dead end; it does not tell a
+        # blind agent that there is anything to read.
+        _first = _refuse("sess-blind")
+        check("a blind session's FIRST refusal carries a pointer — one line, naming the harness and "
+              "where to read about it",
+              "first refusal in this session" in _first)
+        _brief = os.path.join(ow, ".game_loop", "llms.txt")
+        check("...and every path that pointer names EXISTS — prose cannot satisfy this repo's own "
+              "keystone, and the first version of this line named a brief no consumer had",
+              _brief in _first and os.path.isfile(_brief)
+              and os.path.isfile(os.path.join(ow, ".game_loop", "bin", "game_loop")))
+        check("...so the installer ships the agent brief; an installed project used to contain "
+              "NOTHING written for the agent to read",
+              os.path.isfile(_brief) and "game_loop" in open(_brief).read())
+
+        # BOUNDED BY SESSION, NOT BY REFUSAL. Each session hits its first refusal exactly once, so
+        # the ceiling is one line per session lifetime rather than one per event — which is what
+        # keeps this from being N copies of noise in a checkout running many sessions.
+        check("...and the SECOND refusal in that session is silent — the bound is per session, not "
+              "per refusal, so a busy run is not narrated at",
+              "first refusal in this session" not in _refuse("sess-blind"))
+
+        # RUNNING status IS ORIENTATION. A session that arrived the documented way has already read
+        # everything the pointer would point at, so it never sees it.
+        gl(ow, "status", sid="sess-oriented")
+        check("...while a session that ran `status` first is never oriented at all — the pointer is "
+              "aimed at sessions that arrived blind, which is the whole population it is for",
+              "first refusal in this session" not in _refuse("sess-oriented"))
+        # PAIRED, so the silence above is `status` doing it rather than the line having stopped
+        # working: a third, untouched session in the SAME install still gets it.
+        check("...and a third session in the same install still gets the pointer, so that silence "
+              "is orientation and not a dead check",
+              "first refusal in this session" in _refuse("sess-third"))
+    finally:
+        shutil.rmtree(ow, ignore_errors=True)
 
     print("a refusal names a hatch that exists (#52):")
     hp52 = make_sandbox()

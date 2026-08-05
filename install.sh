@@ -238,6 +238,18 @@ if [ -f "$SRC/.game_loop/behaviour.json" ]; then
   echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/behaviour.json (what an existing verb now costs or refuses differently)"
 fi
 
+# THE AGENT BRIEF SHIPS (#60). It did not, and that was the hole under the whole of item 1: llms.txt
+# is the file written for the agent, and it existed only in game_loop's own repo. An installed
+# project had NOTHING for an agent to read — so a session that arrived by a global slash command,
+# never having loaded the project's CLAUDE.md, met a refusal with no document behind it. A pointer
+# is worthless without the thing it points at, and I nearly shipped one naming a path that is absent
+# from every consumer. Refreshed like the executables, because it is tool documentation rather than
+# one of the project's own files.
+if [ -f "$SRC/llms.txt" ]; then
+  cp "$SRC/llms.txt" "$TARGET/.game_loop/llms.txt"
+  echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/llms.txt (the agent brief — what a refusal points at)"
+fi
+
 # Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
 # clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.
 GL_SHA=""

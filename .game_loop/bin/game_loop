@@ -5143,6 +5143,13 @@ def _extract_game_loop(sha, dest):
 
 def cmd_status(s, a):
     _prune_stale_sessions()
+    # RUNNING status IS ORIENTATION (#60). A guard refusal carries a one-line pointer to this
+    # command and the agent brief, once per session — and a session that arrived the documented way
+    # has already read everything that line would point at. Marking it here is what keeps the
+    # pointer aimed at sessions that arrived blind, which is the whole population it is for.
+    if not s.get("oriented"):
+        s["oriented"] = True
+        save(s)
     out(render_banner(s))
     if (n := retro_nudge(s)):
         out(n)

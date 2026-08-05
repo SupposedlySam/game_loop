@@ -328,12 +328,19 @@ resolve its own dependencies explicitly: a hook's `PATH` is not your shell's, an
 bare name is the usual way one of these silently stops running.
 
 The probe is told **which session it speaks for**, which matters as soon as one checkout holds more
-than one session — `GAME_LOOP_SESSION`, `GAME_LOOP_SESSION_DIR`, and `GAME_LOOP_TRANSCRIPT` (this
-session's own transcript, the natural liveness signal). Without them a probe can only look across
-*every* session sharing the checkout, so it answers "waiting" because somebody else's work is
-live — a **false waiting**, which is the one direction that fails silent. An empty
-`GAME_LOOP_SESSION` means *unknown*, never a session named `""`; a probe that needs scoping should
-exit 2 rather than guess.
+than one session: `GAME_LOOP_SESSION`, `GAME_LOOP_SESSION_DIR`, and `GAME_LOOP_TRANSCRIPT`. Without
+them a probe can only look across *every* session sharing the checkout, so it answers "waiting"
+because somebody else's work is live — a **false waiting**, which is the one direction that fails
+silent. An empty `GAME_LOOP_SESSION` means *unknown*, never a session named `""`; a probe that needs
+scoping should exit 2 rather than guess.
+
+**`GAME_LOOP_SESSION` is usually the one you want, and the transcript usually is not.** For the
+common case — a parent waiting on subagents it dispatched — the parent's own transcript is quiet
+*precisely while it waits*, so it is the state you are trying to recognise rather than a signal that
+distinguishes anything. What is live during a fan-out is the subagents' artifacts, and those sit
+under the **host's** per-session directory, not game_loop's. The session id is what lets a probe
+resolve its own directory there instead of globbing across every session in the checkout.
+`GAME_LOOP_TRANSCRIPT` is supplied for probes that genuinely want the parent's own activity.
 
 ### Site wiring: `config.local.json`
 

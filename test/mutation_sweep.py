@@ -203,6 +203,15 @@ MUTANTS = [
      "measured at 4, floored at 2: the other two kills are the sweep's own bookkeeping noticing that "
      "a neutered `superseded` no longer parses as a producer, which is an artifact of the mutation "
      "and not evidence about the watchdog", 2),
+    # Measured on the working tree, not on HEAD: claims.json did not exist in HEAD when this was
+    # measured, so the archived fixture could not be built and the baseline came back 0 — which the
+    # measuring harness now refuses to report a number from rather than publishing an UNPROTECTED
+    # that means "the suite died".
+    ("external_claims_report -> reports nothing", ".game_loop/bin/game_loop::external_claims_report",
+     "    return []\n", ["claim", "host", "stale"],
+     "2 kills, and both are the arms written for it: that status SAYS nothing here checks whether a "
+     "claim is true, and that an unrecorded version reports 'cannot compare' rather than agreement. "
+     "Thin because the producer is one report; the pair is what the report must never imply.", 2),
     ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
     ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",

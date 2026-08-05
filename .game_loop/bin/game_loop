@@ -4320,6 +4320,77 @@ def installed_by():
             "upgrade": up[:200]}
 
 
+CLAIMS_F = os.path.join(ROOT, "claims.json")
+
+
+def running_host_version():
+    """(version, how) for the Claude Code actually running this session — or (None, why not).
+
+    BEST EFFORT, AND THE FIRST OBVIOUS ANSWER IS WRONG. `claude --version` reads whatever is on
+    PATH, which is NOT necessarily the binary running this session: measured on this machine, PATH's
+    claude said 2.1.145 while CLAUDE_CODE_EXECPATH pointed at a 2.1.222 install. A check built on
+    the PATH answer would confidently name the wrong subject, which is worse than naming none.
+
+    So the execpath is preferred -- it names the running binary -- and its version is read from the
+    path rather than by forking it, because this runs inside `status` and a fork per status is a
+    cost nobody asked for. Neither is guaranteed: absence returns None with a reason, and every
+    caller must treat that as UNKNOWN rather than as agreement.
+    """
+    p = os.environ.get("CLAUDE_CODE_EXECPATH") or ""
+    m = re.search(r"claude-code[-_]?v?(\d+\.\d+\.\d+)", p)
+    if m:
+        return m.group(1), "the running binary's path"
+    if p:
+        return None, "CLAUDE_CODE_EXECPATH is set but carries no version"
+    return None, "no CLAUDE_CODE_EXECPATH in the environment"
+
+
+def external_claims_report():
+    """What this harness believes about its HOST, when it last checked, and against what.
+
+    Rung 5 on purpose. Nothing here can decide whether a claim still holds -- that needs a person
+    reading a doc -- so this refuses to imply it did. It makes "these have never been re-checked"
+    visible instead of buried in a ledger nobody opens.
+    """
+    try:
+        with open(CLAIMS_F) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return []
+    blocks = [(k, v) for k, v in d.items() if k != "//" and isinstance(v, dict)]
+    if not blocks:
+        return []
+    lines = []
+    for _k, b in blocks:
+        n = len(b.get("claims") or [])
+        on, against = b.get("verified_on") or "?", b.get("verified_against")
+        head = f"  claims : {n} load-bearing claim(s) about {b.get('subject', _k)}"
+        lines.append(head)
+        run, how = running_host_version()
+        if against and run and against != run:
+            lines.append(f"           ⚠ VERIFIED AGAINST {against}, RUNNING {run} ({how}) — re-read "
+                         "them; the subject moved.")
+        elif against and run:
+            lines.append(f"           verified against {against}, and that is what is running.")
+        elif not against:
+            # The absence IS the report. Saying "up to date" here would be the exact silence this
+            # whole file exists to remove.
+            lines.append(f"           last verified {on}, against an UNRECORDED version — so "
+                         "nothing can be compared")
+            lines.append("           and no run since has re-checked them. The first "
+                         "re-verification records a version")
+            lines.append("           and makes them checkable; until then this is a date, not an "
+                         "assurance.")
+        else:
+            lines.append(f"           last verified {on}; the running version is UNKNOWN ({how}), "
+                         "so no comparison was made.")
+        if b.get("why_it_matters"):
+            lines.append(f"           if they moved: {b['why_it_matters']}")
+    lines.append("  → this never checks whether a claim is TRUE. It only stops one going stale "
+                 "quietly.")
+    return lines
+
+
 def update_notice():
     """A one-line 'a newer game_loop is on main — re-install' note, or None. Silent unless BOTH the
     installed sha (VERSION) and the latest sha are known and they differ."""
@@ -4569,6 +4640,9 @@ def coverage_report(s):
     lines.append("           A deploy verb nobody listed is NOT blocked — this is the one rail here "
                  "that defaults to")
     lines.append('           ALLOW. Add yours: config.json → "deploy_verbs".')
+    # The rails above are what this repo controls. The claims below are what it does not, and a
+    # coverage report that names only the first half implies the second half is settled.
+    lines += external_claims_report()
     lines.append("  → NONE of this sees: a mutation made through an MCP tool, an interpreter "
                  "one-liner, or a path")
     lines.append("    built from a shell variable; nor whether a listed check is real or a "

@@ -309,6 +309,15 @@ fi
 # is worthless without the thing it points at, and I nearly shipped one naming a path that is absent
 # from every consumer. Refreshed like the executables, because it is tool documentation rather than
 # one of the project's own files.
+# The claims record ships and is always refreshed, like behaviour.json: it is tool data describing
+# what this HARNESS believes about the host, not one of the project's own files. A consumer needs it
+# because the belief is the harness's and the risk is theirs -- if the host moved, their limit gate
+# is the thing that fails toward believing there is headroom.
+if [ -f "$SRC/.game_loop/claims.json" ]; then
+  cp "$SRC/.game_loop/claims.json" "$TARGET/.game_loop/claims.json"
+  echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/claims.json (what this harness believes about its host, and when it last checked)"
+fi
+
 if [ -f "$SRC/llms.txt" ]; then
   cp "$SRC/llms.txt" "$TARGET/.game_loop/llms.txt"
   echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/llms.txt (the agent brief — what a refusal points at)"

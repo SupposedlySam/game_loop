@@ -527,7 +527,14 @@ def fire_triggers(s, event, payload):
             timeout = max(1.0, float(t.get("timeout_sec") or 20))
         except (TypeError, ValueError):
             timeout = 20.0
-        env = dict(os.environ, GAME_LOOP_EVENT=event, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT)
+        # GAME_LOOP_SESSION rides along for the same reason the waiting probe gets it (#60): a
+        # checkout can hold many concurrent sessions, and a trigger that cannot tell which one it is
+        # speaking for cannot scope anything it reads or writes. Empty means UNKNOWN -- the legacy
+        # repo-global paths -- never a session whose name is the empty string.
+        env = dict(os.environ, GAME_LOOP_EVENT=event, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT,
+                   GAME_LOOP_SESSION=SESSION or "",
+                   GAME_LOOP_SESSION_DIR=(os.path.join(ROOT, "sessions", SESSION) if SESSION
+                                          else ""))
         try:
             r = subprocess.run(["bash", "-c", t["command"]], input=json.dumps(payload),
                                capture_output=True, text=True, timeout=timeout, env=env)

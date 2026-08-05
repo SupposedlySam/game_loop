@@ -409,7 +409,28 @@ def poll_slack_replies(state):
         armed = state.get("t3_armed") or {}
 
 
-def waiting_verdict():
+def session_env():
+    """The session facts a project-supplied command needs to scope itself to THIS run.
+
+    WHY THIS IS NOT OPTIONAL, reported from a checkout running EIGHTEEN concurrent sessions (#60):
+    the natural liveness signal for "am I waiting on work I dispatched" is the mtime of the host's
+    per-session artifacts, and that path is keyed by session. Without an id, a probe can only glob
+    across every session sharing the checkout -- so it answers WAITING because somebody else's work
+    is live. That is a FALSE WAITING, the one direction that fails silent, and it silences the
+    watchdog on exactly the wedged run it exists to catch. The reporter did the right thing and
+    declined to wire a probe at all, which means the feature was unusable for the case it was built
+    for.
+
+    EMPTY MEANS UNKNOWN, and a probe must treat it as unknown rather than as a session named "".
+    A run with no id resolved is on the repo-global legacy paths, where scoping is not possible and
+    a probe that needs it should decline (exit 2) rather than guess -- the same three-outcome
+    discipline the exit contract already uses.
+    """
+    sdir = os.path.join(ROOT, "sessions", SESSION) if SESSION else ""
+    return {"GAME_LOOP_SESSION": SESSION or "", "GAME_LOOP_SESSION_DIR": sdir}
+
+
+def waiting_verdict(tpath=None):
     """Is this run WAITING on work it dispatched, rather than asleep? (bool, reason)
 
     Idleness is measured from transcript growth, and a subagent's output does not grow the parent's
@@ -450,7 +471,10 @@ def waiting_verdict():
         # rang exactly the run the probe existed to leave alone, and the conservative default hid
         # the breakage. Two runners of project-supplied commands must not differ in what they
         # provide, or the contract is whichever one you happened to test against.
-        env = dict(os.environ, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT)
+        # ...and the session it speaks for, plus the transcript that is this session's own liveness
+        # signal, so a probe never has to glob across the sessions sharing a checkout (#60).
+        env = dict(os.environ, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT,
+                   GAME_LOOP_TRANSCRIPT=tpath or "", **session_env())
         r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15,
                            cwd=REPO_ROOT, env=env)
         # THE EXIT CONTRACT IS 0 OR 1 AND NOTHING ELSE.
@@ -590,7 +614,7 @@ def main():
 
     if rings >= RING_CAP:
         # Before spending the human: is this run waiting on work it dispatched? (#32)
-        _w, _why = waiting_verdict()
+        _w, _why = waiting_verdict(tpath)
         if _w:
             logline({"kind": "watchdog_wait_held", "rings": rings, "detail": _why,
                      "note": "cap reached but a declared wait still verifies — not paging"})
@@ -668,7 +692,7 @@ def main():
     # declaration, config-authored and never settable by the agent, and it is conservative toward
     # NOT waiting -- every failure mode returns "not waiting" and the ring happens. So the only way
     # to reach this quiet is for the project's own check to positively assert there is nothing to do.
-    _w, _why = waiting_verdict()
+    _w, _why = waiting_verdict(tpath)
     if _w:
         quiet(f"a declared wait verifies ({_why or 'probe says still waiting'}) — not ringing a run "
               "that has correctly run out of work")

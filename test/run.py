@@ -8,6 +8,7 @@ import ast
 import contextlib
 import datetime
 import io
+import importlib.machinery
 import importlib.util
 import inspect
 import json
@@ -3202,6 +3203,46 @@ def main():
             check("the waiting probe gets the SAME environment a trigger gets — two runners of "
                   "project-supplied commands must not differ in what they provide",
                   _env_run.returncode == 0 and "env-ok" in f.read())
+
+        # ...AND IT KNOWS WHICH SESSION IT SPEAKS FOR (#60). Reported from a checkout running 18
+        # concurrent sessions: the natural liveness signal is the mtime of per-session artifacts,
+        # and that path is keyed by session. With no id, a probe can only glob across every session
+        # sharing the checkout, so it answers WAITING because SOMEBODY ELSE's work is live. That is
+        # a false waiting — the one direction that fails silent — and it silences the watchdog on
+        # exactly the wedged run it exists to catch. The reporter declined to wire a probe at all
+        # rather than install that, which means the feature was unusable for its own motivating case.
+        open(_wlog, "w").close()
+        _probe('test "$GAME_LOOP_SESSION" = "sess-wait" '
+               '&& test -d "$GAME_LOOP_SESSION_DIR" && echo sid-ok')
+        with open(os.path.join(_wsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        _sid_run = _run()
+        with open(_wlog) as f:
+            check("...and it is told its own SESSION, and a session dir that exists — so a probe in "
+                  "a checkout shared by many sessions can scope itself instead of globbing across "
+                  "everyone else's live work",
+                  _sid_run.returncode == 0 and "sid-ok" in f.read())
+
+        # PAIRED, on the function that decides it, because `_run` always supplies a session and an
+        # assertion through it could never see the other case. What matters is that an UNRESOLVED
+        # session is handed over as empty rather than as a plausible wrong id: a probe told it is
+        # session "" can decline; a probe told it is session "None" will confidently scope itself
+        # to a directory that does not exist and report whatever that emptiness implies.
+        _wd_ld = importlib.machinery.SourceFileLoader(
+            "wd_sid", os.path.join(wp, ".game_loop", "bin", "watchdog"))
+        _wd = importlib.util.module_from_spec(importlib.util.spec_from_loader("wd_sid", _wd_ld))
+        _wd_ld.exec_module(_wd)
+        _wd.set_session("sess-wait")
+        _with = _wd.session_env()
+        _wd.set_session(None)
+        _without = _wd.session_env()
+        check("...while a run with NO session resolved hands the probe an EMPTY id and an empty "
+              "dir, never a plausible wrong one — 'I cannot scope myself' has to stay answerable",
+              _with["GAME_LOOP_SESSION"] == "sess-wait"
+              and _with["GAME_LOOP_SESSION_DIR"].endswith(os.path.join("sessions", "sess-wait"))
+              and _without["GAME_LOOP_SESSION"] == ""
+              and _without["GAME_LOOP_SESSION_DIR"] == "")
         open(_wlog, "w").close()
         _probe("echo nothing to do; exit 0")
         with open(os.path.join(_wsd, "state.json"), "w") as f:

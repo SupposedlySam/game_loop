@@ -327,6 +327,14 @@ output, so a broken one stayed invisible for exactly as long as there was work t
 resolve its own dependencies explicitly: a hook's `PATH` is not your shell's, and a tool found by
 bare name is the usual way one of these silently stops running.
 
+The probe is told **which session it speaks for**, which matters as soon as one checkout holds more
+than one session — `GAME_LOOP_SESSION`, `GAME_LOOP_SESSION_DIR`, and `GAME_LOOP_TRANSCRIPT` (this
+session's own transcript, the natural liveness signal). Without them a probe can only look across
+*every* session sharing the checkout, so it answers "waiting" because somebody else's work is
+live — a **false waiting**, which is the one direction that fails silent. An empty
+`GAME_LOOP_SESSION` means *unknown*, never a session named `""`; a probe that needs scoping should
+exit 2 rather than guess.
+
 ### Site wiring: `config.local.json`
 
 `.game_loop/config.local.json` is gitignored and layered on top of `config.json`, key by key. Put

@@ -5457,6 +5457,31 @@ def main():
         check("...while a snapshot MISSING the field the claim is about does not count as "
               "confirming it — the exercise checks the shape, not the file's existence",
               "has NOT been observed here" in gl(xw, "status", sid="sess-x").stdout)
+
+        # A CONDITIONAL ABSENCE IS EXERCISABLE, which corrects a bound I stated publicly and got
+        # wrong. Not presence-versus-absence: whether you CONTROL THE INPUT that would produce the
+        # effect. "No third window" is trivially true of an empty file, a missing file and a broken
+        # parser — so it means nothing until a KNOWN window is present, which is the mechanism
+        # demonstrably firing. That pairing turns an absence into a discrimination.
+        _lf = os.path.join(xw, ".game_loop", "limits.json")
+        with open(_lf, "w") as f:
+            json.dump({}, f)
+        check("an absence with no positive control is NOT reported as confirming anything — an "
+              "empty snapshot satisfies 'no third window' and proves nothing",
+              "positive control did not run" in gl(xw, "status", sid="sess-x").stdout)
+        with open(_lf, "w") as f:
+            json.dump({"five_hour": {"used_percentage": 4}, "seven_day": {"used_percentage": 9}}, f)
+        check("...and with a known window present the absence IS confirmed live, because the read "
+              "demonstrably worked and the unexpected window is still not there",
+              "'no-weekly-opus-window' CONFIRMED LIVE" in gl(xw, "status", sid="sess-x").stdout)
+        # THE ARM THAT MATTERS MOST: it must be able to say the claim STOPPED being true.
+        with open(_lf, "w") as f:
+            json.dump({"five_hour": {"used_percentage": 4},
+                       "weekly_opus": {"used_percentage": 30}}, f)
+        _falsified = gl(xw, "status", sid="sess-x").stdout
+        check("...and a window the claim says does not exist FALSIFIES it by name — an exercise "
+              "that could never report failure is a stamp with extra steps",
+              "IS NO LONGER TRUE" in _falsified and "weekly_opus" in _falsified)
     finally:
         shutil.rmtree(xw, ignore_errors=True)
 

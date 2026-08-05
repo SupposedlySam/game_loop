@@ -547,6 +547,11 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    ".game_loop/bin/game_loop::_windows_claim_live":
+        "the positive-control half of one conditional-absence exercise. Its None is one of three "
+        "reported outcomes rather than a silence, and all three are asserted directly in a sandbox: "
+        "no control fired, confirmed live, and FALSIFIED by an unexpected window. Neutering it to "
+        "None reproduces the first arm the suite already drives on purpose.",
     ".game_loop/bin/game_loop::_statusline_claim_live":
         "the EXERCISE behind one host claim: it returns a description of live evidence, or None "
         "when there is none. Its None is not a silence-on-pass — it is one of two reported "

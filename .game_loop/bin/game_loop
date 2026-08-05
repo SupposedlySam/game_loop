@@ -4393,6 +4393,37 @@ def _statusline_claim_live():
     return None
 
 
+def _windows_claim_live():
+    """Evidence about "only five_hour and seven_day windows appear" — or None if none was produced.
+
+    THE POSITIVE CONTROL IS WHAT MAKES AN ABSENCE MEAN ANYTHING (showrunner). "No third window" is
+    trivially true of an empty file, of a missing file, and of a parser that stopped working: the
+    claim would read as confirmed by every kind of nothing. So this reports only when at least one
+    KNOWN window is present — that is the mechanism demonstrably firing — and then says whether a
+    window nobody expected came with it.
+
+    Which is the sharper form of the rule I got wrong and stated publicly: the discriminator is not
+    presence versus absence, it is whether you control the input that would produce the effect. I
+    control this one, because our own tap writes the snapshot.
+    """
+    try:
+        with open(LIMITS_F) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    windows = {k for k, v in d.items() if isinstance(v, dict) and "used_percentage" in v}
+    known = windows & {"five_hour", "seven_day"}
+    if not known:
+        return None                      # no control fired; an absence here proves nothing
+    extra = sorted(windows - {"five_hour", "seven_day"})
+    if extra:
+        return (False, "a window this claim says does not exist is present: " + ", ".join(extra))
+    return (True, f"{len(known)} known window(s) present and no others — the read worked and the "
+                  "unexpected window is genuinely absent")
+
+
 def external_claims_report():
     """What this harness believes about its HOST, when it last checked, and against what.
 
@@ -4436,6 +4467,34 @@ def external_claims_report():
         # A stamp records that the AUTHOR verified something on the AUTHOR's machine and then
         # asserts it about a stranger's. An exercise checks it on the stranger's, every run, and
         # cannot go stale because there is no recorded answer to rot.
+        # A CONDITIONAL absence, exercised through the same snapshot: the control is a known window
+        # being present at all, and the claim is that no third one came with it.
+        for c in (b.get("claims") or []):
+            if c.get("id") != "no-weekly-opus-window":
+                continue
+            w = _windows_claim_live()
+            if w is None:
+                lines.append("           · 'no-weekly-opus-window' is exercisable and unobserved: "
+                             "no snapshot, so its")
+                lines.append("             positive control did not run, and its absence would "
+                             "prove nothing.")
+            elif w[0]:
+                lines.append(f"           ✓ 'no-weekly-opus-window' CONFIRMED LIVE — {w[1]}.")
+            else:
+                lines.append(f"           ⚠ 'no-weekly-opus-window' IS NO LONGER TRUE — {w[1]}.")
+        # DECLARED DEBTS, not passes: exercisable, the control identified, nobody has written it.
+        debts = [c for c in (b.get("claims") or []) if c.get("exercisable") == "yes-not-yet"]
+        for c in debts:
+            lines.append(f"           · '{c['id']}' is exercisable and NOT YET exercised — "
+                         "a declared gap, not a pass.")
+        hard = [c for c in (b.get("claims") or []) if c.get("exercisable") == "no"]
+        if hard:
+            lines.append(f"           the remaining {len(hard)} are UNCONDITIONAL: the case where "
+                         "each is false is the one")
+            lines.append("           that cannot be constructed, so there is nothing to provoke "
+                         "and a stamp is the only")
+            lines.append("           instrument there is. (Saying that of ALL of them was wrong, "
+                         "and it was wrong here.)")
         ex = [c for c in (b.get("claims") or []) if c.get("exercised_by")]
         for c in ex:
             live = _statusline_claim_live()
@@ -4449,11 +4508,6 @@ def external_claims_report():
                 lines.append(f"             expected shape. Either the tap has never run, or the "
                              "claim no longer holds —")
                 lines.append("             this cannot tell which, and does not pretend to.")
-        if len(ex) < len(b.get("claims") or []):
-            lines.append(f"           the other {len(b.get('claims') or []) - len(ex)} are "
-                         "ABSENCES, and an absence cannot be provoked: observing")
-            lines.append("           no usage flag this run is not evidence one did not appear in "
-                         "the last release.")
         if b.get("why_it_matters"):
             lines.append(f"           if they moved: {b['why_it_matters']}")
     lines.append("  → this never checks whether a claim is TRUE. It only stops one going stale "

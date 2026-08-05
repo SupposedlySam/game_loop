@@ -112,6 +112,26 @@ every consumer treats that as *absence of signal, not evidence of headroom*, and
 
 ## The guardrails
 
+### Prose in, unmangled — `--<option>-file`
+
+Every option that takes free prose has a `--<name>-file PATH` sibling, and an inline value over 400
+characters is **refused** in favour of it.
+
+This is not a style rule. A quoted shell argument is *code to the shell* before it is text to the
+tool: backticks run as command substitution, `$NAME` expands to nothing, a lone quote truncates. The
+shell substitutes and hands over the result — so by the time the tool sees the value, the evidence is
+gone. A sentence with three words eaten out of it is just a shorter sentence, and no inspection can
+tell it from one somebody wrote that way. It lands in a permanent record silently.
+
+The bound is measured, not chosen: across this repo's own logged prose, 400 sits above the 95th
+percentile of every field that is naturally a one-liner, and bites only the long-form ones — which
+are exactly the ones that carry code, newlines and quoting. The two values corrupted here were both
+over 700 characters.
+
+What it does **not** fix: a short value with a backtick in it is still mangled and still accepted —
+this bounds the exposure, it does not remove the class. And it reaches this tool only; `git commit -F`
+and `gh --body-file` are the same answer for the other CLIs in the loop.
+
 ### The claim gate — `game_loop claim`
 
 Before asserting anything about external reality (a dependency's behavior, a harness detail, another

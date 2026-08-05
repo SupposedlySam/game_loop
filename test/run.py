@@ -4181,6 +4181,61 @@ def main():
         finally:
             shutil.rmtree(_fd, ignore_errors=True)
 
+    print("prose arrives unmangled, or it does not arrive (#58):")
+    pw = make_sandbox()
+    try:
+        _long = "x" * 450
+        _f = os.path.join(pw, "prose.txt")
+        with open(_f, "w") as f:
+            f.write(_long)
+
+        _over = gl(pw, "note", "--text", _long, sid="sess-prose")
+        check("an inline prose value past the measured bound is REFUSED — a quoted shell argument "
+              "is code to the shell first, and a sentence with words eaten out of it is just a "
+              "shorter sentence by the time this tool sees it",
+              _over.returncode != 0 and "must come from a file" in _over.stderr)
+        check("...and the refusal explains the MECHANISM rather than reading as a style rule, since "
+              "a limit that looks arbitrary gets met with a shorter sentence instead of a file",
+              "backticks" in _over.stderr and "$NAME" in _over.stderr)
+        check("...and it states what it does NOT fix: a short value with a backtick is still "
+              "mangled and still accepted",
+              "does not remove it" in _over.stderr)
+
+        # PAIRED: the same text, same length, through the file — or the bound is just a wall.
+        _via = gl(pw, "note", "--text-file", _f, sid="sess-prose")
+        check("...while the SAME text through --text-file is accepted, so the bound is a redirect "
+              "and not a cap on how much you may say",
+              _via.returncode == 0)
+        with open(os.path.join(pw, ".game_loop", "log.jsonl")) as f:
+            check("...and the file's content is what got recorded, not its path",
+                  any(_long in ln for ln in f))
+
+        _both = gl(pw, "note", "--text", "short", "--text-file", _f, sid="sess-prose")
+        check("...and setting both is refused — two sources for one value is the shape where "
+              "nobody can say afterwards which one was recorded",
+              _both.returncode != 0 and "are both set" in _both.stderr)
+        _miss = gl(pw, "note", "--text-file", os.path.join(pw, "nope.txt"), sid="sess-prose")
+        check("...and an unreadable file is refused rather than recorded as an empty field, which "
+              "would read forever after as 'they left it blank'",
+              _miss.returncode != 0 and "cannot read" in _miss.stderr)
+
+        # THE FILE OPTION IS DERIVED, NOT LISTED. The defect being fixed is a rule that depended on
+        # somebody remembering, so the safe path must not depend on somebody remembering either.
+        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        _pairs = re.search(r"^PROSE_OPTS = \((.*?)\)$", _src, re.S | re.M)
+        _opts = re.findall(r'"(--[a-z-]+)"', _pairs.group(1)) if _pairs else []
+        check("every prose option is declared in one place, and there are several — a list of one "
+              "would make the sweep below prove nothing",
+              len(_opts) >= 8)
+        _helps = gl(pw, "harden", "--help", sid="sess-prose").stdout
+        check("...and each prose option a verb takes gets its file sibling by WALKING the parsers, "
+              "so a verb that later reuses --notes is covered without anyone adding a pair",
+              all(o + "-file" in _helps for o in ("--learning", "--mechanism", "--general")))
+        check("...and the bound in the refusal is the constant, not a number retyped into prose",
+              "PROSE_MAX = 400" in _src and "400 chars" in _helps)
+    finally:
+        shutil.rmtree(pw, ignore_errors=True)
+
     print("a refusal names a hatch that exists (#52):")
     hp52 = make_sandbox()
     try:

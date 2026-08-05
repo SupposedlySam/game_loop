@@ -5,7 +5,9 @@ Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) ins
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
 import ast
+import contextlib
 import datetime
+import io
 import importlib.util
 import inspect
 import json
@@ -5196,6 +5198,61 @@ def main():
     # MUTANTS cannot break this check — which is exactly how it broke when the floor was added.
     check("every producer carries a recorded floor, so a drop in coverage is caught not narrated",
           all(len(m) >= 6 and isinstance(m[5], int) and m[5] >= 0 for m in sweep.MUTANTS))
+    # CONCURRENCY MUST NOT COST THE REPORT (#59). Producers are independent by construction, so
+    # running them at once is free — but only if two things hold: no producer prints as it goes
+    # (concurrent writes interleave into an unreadable report), and the emitted order is the order
+    # of MUTANTS rather than of who happened to finish first. A sweep whose output shuffles run to
+    # run cannot be diffed against the previous one, which is most of what a floor is for.
+    # sweep_one is nested inside main(), so it cannot be reached with getattr — pull it out of the
+    # tree instead. Asserting on the whole of main() would be useless here: main() prints plenty.
+    _sweep_src = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+    _one_src = ""
+    for _n in ast.walk(ast.parse(_sweep_src)):
+        if isinstance(_n, ast.FunctionDef) and _n.name == "sweep_one":
+            _one_src = ast.get_source_segment(_sweep_src, _n) or ""
+    check("the per-producer worker RETURNS its report instead of printing it — 6 producers printing "
+          "as they go would interleave into one unreadable report",
+          bool(_one_src) and "print(" not in _one_src and "return" in _one_src)
+
+    # BEHAVIOURAL: drive the real main() with the suite stubbed, and make completion order the
+    # REVERSE of MUTANTS order. If the emit logic followed completion, this is what would catch it.
+    _fake = [("alpha -> x", ".game_loop/bin/game_loop::unpushed_warning", "    return None\n",
+              ["unpushed"], None, 0),
+             ("beta -> x", ".game_loop/bin/game_loop::aggregate_tell", "    return None\n",
+              ["aggregate"], None, 0),
+             ("gamma -> x", ".game_loop/bin/game_loop::ruled_out", "    return None\n",
+              ["ruled"], None, 0)]
+    _delays = {0: 0.45, 1: 0.25, 2: 0.05}     # first submitted finishes LAST
+    _calls = []
+
+    def _stub_run(tree):
+        # The baseline call arrives before any mutant; after that, one call per producer.
+        n = len(_calls)
+        _calls.append(tree)
+        if n:
+            time.sleep(_delays.get(n - 1, 0))
+        return "  ok   assertion one\n  ok   assertion two\n1 passed, 0 failed\n"
+
+    _real_run, _real_mut, _real_gate = sweep.run, sweep.MUTANTS, sweep.coverage_gate
+    _buf = io.StringIO()
+    try:
+        sweep.run, sweep.MUTANTS = _stub_run, _fake
+        sweep.coverage_gate = lambda found: False      # accounting is asserted above, not here
+        with contextlib.redirect_stdout(_buf):
+            sweep.main()
+    finally:
+        sweep.run, sweep.MUTANTS, sweep.coverage_gate = _real_run, _real_mut, _real_gate
+    _out = _buf.getvalue()
+    _order = [_out.find(lbl) for lbl in ("alpha -> x", "beta -> x", "gamma -> x")]
+    check("every producer is reported, and in MUTANTS order even though they finished in exactly "
+          "the reverse — the report is diffable against the last run, not a race",
+          all(p >= 0 for p in _order) and _order == sorted(_order))
+    check("...and the run reports what it COST, so the next argument about this check's runtime "
+          "starts from a number instead of an impression",
+          "producer time:" in _out and " at a time" in _out)
+    check("...and it says how many ran at once, since a wall-clock figure means nothing without it",
+          "running 3 producers," in _out)
+
     # neuter() is the whole mechanism: if it returned the source unchanged while reporting success,
     # every producer would come back perfectly protected and nothing would have been mutated.
     mutated, found = sweep.neuter(gl_src, "aggregate_tell", "    return None\n")

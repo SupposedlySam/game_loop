@@ -90,6 +90,23 @@ Sweeping everything is not the goal and would not be an improvement: each entry 
 run, and a check too slow to run is a check nobody runs. What is not allowed is an exclusion that
 is not true.
 
+THAT LAST SENTENCE CAME TRUE ABOUT THIS FILE (#59). At 41 producers against a 730-assertion suite,
+serially, the sweep was ~1.8 hours: measured at ~2.5 min each. I started it three times in one day
+and finished it none of them, and two of the abandoned runs left a COLLAPSED BASELINE behind, whose
+"killed: 0" is indistinguishable from UNPROTECTED. Slow did not make it wrong; it made it unfinished
+and then invited a partial result to be read as a verdict, which is worse.
+
+The producers are independent by construction — each gets its own temp tree, its own suite run, and
+shares no state — so they now run concurrently (`GAME_LOOP_SWEEP_JOBS`, default half the cores).
+Reports are buffered and emitted in MUTANTS order, so the output stays deterministic and a
+redirected run still shows progress. Time per producer is printed, so the next person arguing about
+this cost has a number instead of an impression.
+
+The two faster answers were both refused: sweeping fewer producers buys speed with the denominator
+this file exists to defend (#44), and running a subset of the suite per producer changes what the
+number MEANS, since a kill count is a set difference over the whole suite. Doing the same work at
+once is the only one of the three that costs nothing.
+
 WHAT THIS DOES NOT CATCH (INV6). It measures whether an assertion NOTICES a producer that has
 stopped producing. It says nothing about whether the producer is RIGHT: a wrong message and a
 correct one are killed identically, because both are non-empty. It cannot see a producer whose
@@ -104,12 +121,14 @@ missed loudly, it will simply never be enumerated. Default-deny over the shapes 
 strictly better than a hand list; it is not the same thing as complete.
 """
 import ast
+import concurrent.futures
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = ".game_loop/bin/game_loop"
@@ -773,46 +792,96 @@ def main():
     baseline = set(passing(run(base)))
     print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
 
-    verdicts = []
-    for label, key, body, marks, thin_note, floor in MUTANTS:
+    verdicts = [None] * len(MUTANTS)
+    reports = [None] * len(MUTANTS)
+    elapsed = [None] * len(MUTANTS)
+
+    def sweep_one(i):
+        """Measure ONE producer. Returns (verdict-tuple, report-text) and prints nothing.
+
+        Independent by construction -- its own temp tree, its own suite run, no shared state -- so
+        the only reason these ever ran one at a time was that the loop was written that way.
+        Printing is deferred to the caller so that concurrency cannot interleave two reports into
+        an unreadable one, and so the order stays the order of MUTANTS rather than of luck.
+        """
+        label, key, body, marks, thin_note, floor = MUTANTS[i]
         rel, fn = key.split("::", 1)
+        try:
+            with open(os.path.join(base, rel)) as f:
+                original = f.read()
+        except OSError:
+            return ((key, None, UNPROTECTED, floor),
+                    f"  !! {key}: {rel} is not in the tree under test. Nothing was swept.\n")
+        mutated, hit = neuter(original, fn, body)
+        if not hit:
+            # Not a skip. A producer named here that no longer exists is zero evidence about
+            # zero code, and a sweep that shrugs at that is a check that cannot fail.
+            return ((key, None, UNPROTECTED, floor),
+                    f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. Nothing was swept.\n")
         t = tempfile.mkdtemp(prefix="sweep-")
         try:
-            try:
-                with open(os.path.join(base, rel)) as f:
-                    original = f.read()
-            except OSError:
-                print(f"  !! {key}: {rel} is not in the tree under test. Nothing was swept.\n")
-                verdicts.append((key, None, UNPROTECTED, floor))
-                continue
-            mutated, hit = neuter(original, fn, body)
-            if not hit:
-                # Not a skip. A producer named here that no longer exists is zero evidence about
-                # zero code, and a sweep that shrugs at that is a check that cannot fail.
-                print(f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. Nothing was swept.\n")
-                verdicts.append((key, None, UNPROTECTED, floor))  # 4-wide: the tallies unpack it
-                continue
             shutil.copytree(base, t, dirs_exist_ok=True)
             with open(os.path.join(t, rel), "w") as f:
                 f.write(mutated)
             os.chmod(os.path.join(t, rel), 0o755)
             out = run(t)
-            still = set(passing(out))
-            killed = len(baseline - still)
-            v = verdict(killed)
-            verdicts.append((key, killed, v, floor))
-            tail = out.strip().split("\n")[-1]
-            drift = "  ↓ BELOW FLOOR" if killed < floor else ""
-            print(f"{label}\n  suite: {tail}\n  killed: {killed}   [{v}]"
-                  f"   floor {floor}{drift}")
-            if thin_note:
-                print(f"  why it is thin: {thin_note}")
-            for c in sorted(s for s in still if any(m in s.lower() for m in marks)):
-                print(f"    SURVIVED: {c[:96]}")
-            print(flush=True)   # one full suite per entry: show progress even when redirected
         finally:
             shutil.rmtree(t, ignore_errors=True)
+        still = set(passing(out))
+        killed = len(baseline - still)
+        v = verdict(killed)
+        tail = out.strip().split("\n")[-1]
+        drift = "  ↓ BELOW FLOOR" if killed < floor else ""
+        lines = [f"{label}", f"  suite: {tail}",
+                 f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
+        if thin_note:
+            lines.append(f"  why it is thin: {thin_note}")
+        lines += [f"    SURVIVED: {c[:96]}"
+                  for c in sorted(x for x in still if any(m in x.lower() for m in marks))]
+        return (key, killed, v, floor), "\n".join(lines) + "\n"
+
+    # ONE FULL SUITE PER PRODUCER IS THE COST, AND IT WAS BEING PAID SERIALLY (#59). Measured at
+    # ~2.5 min each against a 730-assertion suite, 41 producers came to ~1.8 hours -- and a check
+    # that long is one nobody finishes. I started it three times in a day and completed it none of
+    # them, and two of the abandoned runs left a collapsed baseline whose "killed: 0" reads exactly
+    # like UNPROTECTED. Slow did not make it unreliable on its own; it made it unfinished, which
+    # amounts to the same silence.
+    #
+    # Deliberately NOT solved by sweeping fewer producers or by running a subset of the suite per
+    # producer: the first buys speed with the denominator this file exists to defend (#44), and the
+    # second changes what the number MEANS, since a kill count is a set difference over the whole
+    # suite. Doing the same work at once is the only one of the three that costs nothing.
+    jobs = int(os.environ.get("GAME_LOOP_SWEEP_JOBS") or 0) or max(1, min(6, (os.cpu_count() or 2) // 2))
+    print(f"running {len(MUTANTS)} producers, {jobs} at a time "
+          f"(GAME_LOOP_SWEEP_JOBS to change; each is one full suite run)\n", flush=True)
+
+    started = time.monotonic()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {}
+        for i in range(len(MUTANTS)):
+            futures[pool.submit(sweep_one, i)] = (i, time.monotonic())
+        nxt = 0
+        for fut in concurrent.futures.as_completed(futures):
+            i, t0 = futures[fut]
+            elapsed[i] = time.monotonic() - t0
+            verdicts[i], reports[i] = fut.result()
+            # Emit in MUTANTS order as each prefix becomes ready: the report stays deterministic
+            # AND a redirected run still shows progress rather than 40 silent minutes.
+            while nxt < len(MUTANTS) and reports[nxt] is not None:
+                print(reports[nxt] + f"  ({elapsed[nxt]:.0f}s)\n", flush=True)
+                nxt += 1
     shutil.rmtree(base, ignore_errors=True)
+
+    # RECORDED, so this argument is never had from memory again -- #59 was filed on a figure I had
+    # to derive by hand from a part-finished run.
+    total = time.monotonic() - started
+    timed = [(elapsed[i], MUTANTS[i][1]) for i in range(len(MUTANTS)) if elapsed[i] is not None]
+    if timed:
+        worst = sorted(timed, reverse=True)[:3]
+        print(f"producer time: {total / 60:.1f} min wall for {sum(t for t, _ in timed) / 60:.1f} "
+              f"min of work at {jobs} at a time · slowest: "
+              + " · ".join(f"{k.split('::')[-1]} {t:.0f}s" for t, k in worst) + "\n")
+    verdicts = [v for v in verdicts if v is not None]
 
     thin = [f"{fn} ({k})" for fn, k, v, _ in verdicts if v == THIN]
     bad = [fn for fn, _, v, _ in verdicts if v == UNPROTECTED]

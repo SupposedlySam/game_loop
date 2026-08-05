@@ -4221,8 +4221,33 @@ def cmd_confidence(s, a):
     out(f"✓ MARKED {a.mark.upper()} — {tag}",
         *["  " + l for l in lines],
         "")
-    if moved:
-        out(f"→ push BOTH, or nobody else can see it:",
+    # IS THIS COMMIT ACTUALLY ON THE BRANCH CONSUMERS TRACK? Pushing the channel pointer at a commit
+    # that is not on main hands every consumer a tree reachable only by that tag — and if the commit
+    # is later rebased away, the pointer names something no branch contains.
+    #
+    # NOT HYPOTHETICAL. I did it today, to this repo: another agent pushed to main while I worked,
+    # my `git push origin main` was REJECTED as non-fast-forward, and I pushed the tag and the
+    # channel anyway because they were separate commands and the failure was three lines up. For
+    # several minutes `stable` named a commit missing that agent's work, which my own rebase then
+    # orphaned. A consumer installing in that window would have got it, and nothing would have said so.
+    upstream = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=REPO_ROOT,
+                              capture_output=True, text=True)
+    on_upstream = None
+    if upstream.returncode == 0 and upstream.stdout.strip():
+        anc = subprocess.run(["git", "merge-base", "--is-ancestor", sha, upstream.stdout.strip()],
+                             cwd=REPO_ROOT, capture_output=True, text=True)
+        on_upstream = anc.returncode == 0
+    if moved and on_upstream is False:
+        out("⚠ THIS COMMIT IS NOT ON YOUR UPSTREAM BRANCH YET, so pushing the channel pointer now",
+            "  would aim every consumer at a commit no branch contains — and a rebase would orphan",
+            "  it entirely. PUSH THE BRANCH FIRST and only push the pointer once that SUCCEEDS:",
+            f"    git push origin HEAD          # if this is rejected, STOP — do not push below",
+            f"    git push origin {tag}",
+            f"    git push origin --force {a.mark}",
+            "  The order is load-bearing, not tidiness.")
+    elif moved:
+        out(f"→ push these IN ORDER, and stop if one is rejected:",
+            f"    git push origin HEAD                  # the branch consumers track — FIRST",
             f"    git push origin {tag}",
             f"    git push origin --force {a.mark}      # the channel pointer consumers install from",
             f"  `{a.mark}` now names this commit, so `GAME_LOOP_CHANNEL={a.mark} ./install.sh <dir>`",

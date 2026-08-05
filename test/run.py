@@ -3777,6 +3777,23 @@ def main():
         check("...and the mark tells you to push BOTH — a channel nobody pushed serves the previous "
               "commit, which is a stale answer that looks exactly like a current one",
               "git push origin --force beta" in _m2.stdout)
+        # AND IT MUST NOT AIM CONSUMERS OFF THE BRANCH THEY TRACK. Lived, not imagined: another
+        # agent pushed to main mid-session, my `git push origin main` was rejected as
+        # non-fast-forward, and I pushed the tag and the channel anyway because they were separate
+        # commands and the failure was three lines up. For minutes `stable` named a commit missing
+        # that agent's work, which my own rebase then orphaned. The fixture has no upstream at all,
+        # which is the same "not on the branch consumers track" condition.
+        _m_off = _m2      # the same code path; re-marking one commit twice just fails on the tag
+        check("marking a commit that is not on the tracked branch WARNS before the pointer is "
+              "pushed — a channel aimed off-branch names a tree no branch contains",
+              "NOT ON YOUR UPSTREAM BRANCH" in _m_off.stdout
+              or "push these IN ORDER" in _m_off.stdout)
+        check("...and either way the branch push is listed FIRST and the order is called "
+              "load-bearing, since these are separate commands and a rejection scrolls away",
+              "git push origin HEAD" in _m_off.stdout
+              and ("order is load-bearing" in _m_off.stdout
+                   or "stop if one is rejected" in _m_off.stdout))
+
         # PAIRED: it must MOVE on the next mark, or it is an immutable tag wearing a channel's name.
         _cg("commit", "-q", "--allow-empty", "-m", "third")
         _new_head = _points_at("HEAD")

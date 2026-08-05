@@ -3175,6 +3175,33 @@ def main():
         _run()
         with open(_wlog) as f:
             _log = f.read()
+        # A VERIFIED WAIT STOPS THE RING, not just the escalation. Guarding only the cap left the
+        # run being WOKEN every idle_sec to rediscover it had nothing to do — a turn burnt each
+        # time. Measured on this repo before fixing: the queue emptied, the probe said "waiting",
+        # and the watchdog rang on a loop anyway.
+        open(_wlog, "w").close()
+        _probe("echo nothing to do; exit 0")
+        with open(os.path.join(_wsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        _r0 = _run()
+        check("a verified wait stops the RING itself — a run with nothing to do is not woken to "
+              "discover that again",
+              _r0.returncode == 0)
+        with open(_wlog) as f:
+            check("...and the quiet says WHY, so a watchdog that has stood down is distinguishable "
+                  "from one that is broken",
+                  "not ringing a run" in f.read())
+        # PAIRED: with the probe saying NOT waiting, the same idle state still rings.
+        open(_wlog, "w").close()
+        _probe("exit 1")
+        with open(os.path.join(_wsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                       "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        check("...while the same idle run DOES ring when nothing declares a wait — the quiet is the "
+              "probe's doing, not the watchdog having stopped working",
+              _run().returncode == 2)
+
         check("a verifying wait HOLDS the cap — the human is not paged about a healthy run",
               '"watchdog_wait_held"' in _log and '"watchdog_exhausted"' not in _log)
         check("...and the verdict is logged with its detail, so 'how often did this silence the "

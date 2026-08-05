@@ -632,6 +632,24 @@ def main():
     if state.get("t3_armed"):
         quiet("T3 armed while sleeping")
 
+    # A DECLARED WAIT STOPS THE RING, not merely the escalation at the cap.
+    #
+    # #32 guarded the cap, which stopped the human being paged about a healthy run. It did not stop
+    # the ringing, and ringing is a WAKE-UP: a run with nothing to do gets woken every idle_sec to
+    # discover that again, forever, burning a turn each time. Measured on this repo -- the standing
+    # mandate is "work any open issue", the queue emptied, and the watchdog rang on a loop while the
+    # probe sat there saying the run was legitimately idle.
+    #
+    # The counter-argument from #32 was that a nudge sometimes surfaces work the run had not
+    # noticed. That is true and it is weaker than the cost: the probe is the PROJECT's own
+    # declaration, config-authored and never settable by the agent, and it is conservative toward
+    # NOT waiting -- every failure mode returns "not waiting" and the ring happens. So the only way
+    # to reach this quiet is for the project's own check to positively assert there is nothing to do.
+    _w, _why = waiting_verdict()
+    if _w:
+        quiet(f"a declared wait verifies ({_why or 'probe says still waiting'}) — not ringing a run "
+              "that has correctly run out of work")
+
     after = transcript_size(tpath)
     if before is not None and after is not None and after > before:
         # Working, not parked. Reset the ring budget so a resumed session is not permanently deaf.

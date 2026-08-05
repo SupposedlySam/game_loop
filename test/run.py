@@ -3750,6 +3750,45 @@ def main():
             _icl = f.read()
         check("...and install.sh ships it gitignored, like notify.json and triggers.json before it",
               "config.local.json" in _icl)
+
+        # EVERY READER, OR IT IS A HALF-FEATURE. Shipped exactly that way once: config.local.json
+        # reached `game_loop` and nothing else, so a waiting probe configured there was invisible to
+        # the WATCHDOG — the one component that needed it. Structural, because the failure is a
+        # NEW reader added without the merge, and no behavioural assertion catches that until
+        # something silently ignores a setting somebody wrote down.
+        _readers = []
+        for _f in ("game_loop", "watchdog", "notify.py", "guard-writes-impl.sh",
+                   "guard-mcp-impl.sh"):
+            with open(os.path.join(SRC_GAME_LOOP, "bin", _f)) as fh:
+                _src = fh.read()
+            if "config.json" in _src and "config.local.json" in _src:
+                _readers.append(_f)
+        check("every component that reads config.json also reads config.local.json — a local "
+              "override only SOME of them honour works where you test it and not where it matters",
+              len(_readers) == 5)
+
+        # And behaviourally, in the two that decide things: the guard and the watchdog.
+        with open(_clj, "w") as f:
+            json.dump({"watchdog": {"idle_sec": 99, "settle_sec": 0, "ring_cap": 7}}, f)
+        _wd = subprocess.run(["python3", "-c", (
+            "import importlib.util,os\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            f"os.environ['GAME_LOOP_HOME']={os.path.join(cl, '.game_loop')!r}\n"
+            f"l=SourceFileLoader('wd',{os.path.join(cl, '.game_loop', 'bin', 'watchdog')!r})\n"
+            "s=importlib.util.spec_from_loader('wd',l); m=importlib.util.module_from_spec(s)\n"
+            "try: l.exec_module(m)\n"
+            "except SystemExit: pass\n"
+            "print(m._cfg().get('ring_cap'))")], capture_output=True, text=True, env=_env(cl))
+        check("...and the WATCHDOG honours it — the component whose blindness to it was the bug",
+              _wd.stdout.strip() == "7")
+        with open(_clj, "w") as f:
+            json.dump({"mcp_writes": "disabled"}, f)
+        _mg = subprocess.run([os.path.join(cl, ".game_loop", "bin", "guard-mcp.sh")],
+                             input=json.dumps({"tool_name": "mcp__x__updateThing",
+                                               "tool_input": {}}),
+                             capture_output=True, text=True, env=_env(cl))
+        check("...and the MCP guard honours it, so a policy set locally is actually enforced",
+              "disabled" in _mg.stdout)
     finally:
         shutil.rmtree(cl, ignore_errors=True)
 

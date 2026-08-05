@@ -120,23 +120,34 @@ def set_session(sid):
         PID_PATH = os.path.join(sdir, ".watchdog.pid")
 
 
+def _merged_config(config_f):
+    """config.json, then config.local.json on top. The local file is GITIGNORED site wiring, and it
+    has to reach every component that reads config -- a setting only some of them honour is worse
+    than one nobody has, because it works in the place you test it and not in the place it matters.
+    (Shipped that way once: the waiting probe lived here and the watchdog could not see it.)"""
+    import json as _json
+    import os as _os
+    cfg = {}
+    for _p in (config_f, _os.path.join(_os.path.dirname(config_f), "config.local.json")):
+        try:
+            with open(_p) as _f:
+                _d = _json.load(_f)
+            if isinstance(_d, dict):
+                cfg.update(_d)
+        except (OSError, ValueError):
+            continue
+    return cfg
+
+
 def _cfg():
     wd = {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3}
-    try:
-        with open(CONFIG_F) as f:
-            wd.update((json.load(f).get("watchdog") or {}))
-    except (OSError, ValueError):
-        pass
+    wd.update(_merged_config(CONFIG_F).get("watchdog") or {})
     return wd
 
 
 def _limits_cfg():
     lc = {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"}
-    try:
-        with open(CONFIG_F) as f:
-            lc.update((json.load(f).get("limits") or {}))
-    except (OSError, ValueError):
-        pass
+    lc.update(_merged_config(CONFIG_F).get("limits") or {})
     return lc
 
 

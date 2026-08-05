@@ -100,6 +100,28 @@ writing — the next re-pin destroys it. Add GAME_LOOP_HOME=\"\$CLAUDE_PROJECT_D
 hook in .claude/settings.local.json and reload the window. \`game_loop self\` prints the whole block."
 fi
 CONFIG_F="$GAMELOOP_DIR/config.json"
+# config.local.json layered over config.json, computed ONCE and handed to every embedded reader
+# below. A gitignored local override that only SOME components honour is worse than none at all: it
+# works where you test it and not where it matters. (Shipped exactly that way once -- the waiting
+# probe lived in the local file and the watchdog, which is the component that needed it, could not
+# see it.) Merging here rather than in each block keeps one place to get it wrong instead of five.
+CONFIG_MERGED='{}'   # set BEFORE the computation: the line below exports the whole env
+                     # into its own subshell, and under `set -u` that read itself.
+CONFIG_MERGED=$(CONFIG_F="$CONFIG_F" python3 -c '
+import io, json, os
+cfg = {}
+for p in (os.environ["CONFIG_F"],
+          os.path.join(os.path.dirname(os.environ["CONFIG_F"]), "config.local.json")):
+    try:
+        with open(p) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        continue
+    if isinstance(d, dict):
+        cfg.update(d)
+print(json.dumps(cfg))
+' 2>/dev/null)
+[ -n "$CONFIG_MERGED" ] || CONFIG_MERGED='{}'
 
 # State is per-session: an authorization is granted IN a session and spendable only THERE. Mirrors
 # guard-writes-impl.sh and set_session() in bin/game_loop — payload session_id, then env, then the
@@ -125,9 +147,9 @@ fi
 #
 # NB: this Python is embedded in a $(...) here-doc, so it must contain NO backtick, NO dollar-paren,
 # and NO literal here-doc operator — any of those derails bash's parse of the surrounding $(...).
-verdict=$(GAMELOOP_DIR="$GAMELOOP_DIR" CONFIG_F="$CONFIG_F" STATE_F="$STATE_F" SID="$SID" \
+verdict=$(GAMELOOP_DIR="$GAMELOOP_DIR" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" STATE_F="$STATE_F" SID="$SID" \
           python3 - "$payload" <<'PY'
-import datetime, json, os, re, sys
+import datetime, io, json, os, re, sys
 
 try:
     payload = json.loads(sys.argv[1])
@@ -203,7 +225,7 @@ allow_names = []
 mcp_writes = "gated"        # default before the read, so an unreadable config cannot NameError
 standing_writes = []
 try:
-    with open(os.environ["CONFIG_F"]) as f:
+    with io.StringIO(os.environ.get("CONFIG_MERGED", "{}")) as f:
         _c = json.load(f)
         allow_names = [str(x) for x in (_c.get("mcp_read_only_tools") or [])]
         # THE PROJECT'S POLICY ABOUT MCP WRITES (#53). "gated" is today's behaviour and the default,

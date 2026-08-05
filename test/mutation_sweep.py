@@ -358,6 +358,19 @@ MUTANTS = [
      # sweep is what said so. THIN at 1 now: the producer feeds one status line, and its companions
      # assert the OTHER arm (no local file, nothing announced), which survives silence by design.
      "one status line; the no-override companion asserts absence and survives silence", 1),
+    # The neutered body is `return {}` and not `return []`, deliberately: this is an ACCUMULATOR
+    # returning a dict, so an empty LIST makes every .get() on the result raise and the suite dies
+    # instead of the behaviour being measured. Given the wrong empty form these read 243 and 609 --
+    # crash cascades, not coverage. A mutation has to be the producer's own silence.
+    ("watchdog._merged_config -> the local config override is invisible to the watchdog",
+     ".game_loop/bin/watchdog::_merged_config", "    return {}\n",
+     ["config.local", "override", "watchdog", "waiting"], None, 6),
+    ("notify._merged_config -> paging never sees the local override",
+     ".game_loop/bin/notify.py::_merged_config", "    return {}\n",
+     ["notify", "config.local", "project"],
+     # THIN at 1: this reader feeds only the project NAME used in page text, so one assertion
+     # notices. Its siblings in the guards and the watchdog carry the load.
+     "one consumer -- the project name in page text; the deciding readers are elsewhere", 1),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

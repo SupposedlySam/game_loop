@@ -142,12 +142,28 @@ def _slack():
     return (_cfg().get("slack") or {})
 
 
+def _merged_config(config_f):
+    """config.json, then config.local.json on top. The local file is GITIGNORED site wiring, and it
+    has to reach every component that reads config -- a setting only some of them honour is worse
+    than one nobody has, because it works in the place you test it and not in the place it matters.
+    (Shipped that way once: the waiting probe lived here and the watchdog could not see it.)"""
+    import json as _json
+    import os as _os
+    cfg = {}
+    for _p in (config_f, _os.path.join(_os.path.dirname(config_f), "config.local.json")):
+        try:
+            with open(_p) as _f:
+                _d = _json.load(_f)
+            if isinstance(_d, dict):
+                cfg.update(_d)
+        except (OSError, ValueError):
+            continue
+    return cfg
+
+
 def _project():
-    try:
-        with open(CONFIG_F) as f:
-            return json.load(f).get("project_name") or os.path.basename(os.path.dirname(ROOT))
-    except (OSError, ValueError):
-        return os.path.basename(os.path.dirname(ROOT))
+    return (_merged_config(CONFIG_F).get("project_name")
+            or os.path.basename(os.path.dirname(ROOT)))
 
 
 def configured():

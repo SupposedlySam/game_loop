@@ -1029,7 +1029,15 @@ PY
 
 This is an irreversible, outward-facing action (a real publish/release/deploy). An unattended agent
 does not fire these. If it is genuinely needed, escalate to the human — that is the only escape
-hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)"
+hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)
+
+WRITING ABOUT THE VERB RATHER THAN RUNNING IT? A commit message, an issue body, a doc quoting a
+command — then your PROSE tripped this, not a deploy. Put the text in a file and pass the path:
+  git commit -F <file>   ·   gh issue comment --body-file <file>   ·   <verb> --<option>-file <file>
+The whole word in prose is matched deliberately: narrowing to command position would miss a real
+deploy nested in an interpreter argument, and missing a real publish is the expensive direction.
+That trade is worth stating here rather than only in the source, because this message is where
+somebody meets it."
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.

@@ -4092,6 +4092,52 @@ def main():
               "valid half, because nobody could tell which half was live",
               _pd == "deny" and "not a valid policy" in _pr)
 
+        # ── mcp_trusted_servers: THIS SERVER IS OURS ──────────────────────────────────────────────
+        #
+        # Reported by a user whose team WROTE the MCP server their agents call: every fresh
+        # PR-review agent stopped to ask for the same approve/comment authorizations, on a server
+        # the project owns. mcp_standing_writes covers that and deliberately stops short of the
+        # irreversible and landing tiers (#57) — right for somebody else's server, wrong for one you
+        # wrote, where the team already owns the blast radius.
+        _set(mcp_writes="gated", mcp_standing_writes=[], mcp_trusted_servers=["mcp__github__"])
+        for _t in ("mcp__github__approvePullRequest", "mcp__github__mergePullRequest",
+                   "mcp__github__deleteIssueComment", "mcp__github__forcePushBranch"):
+            check(f"a wholly trusted server allows {_t.split('__')[-1]} — including the tiers a "
+                  "standing prefix withholds, which is the whole request",
+                  _call(_t)[0] == "allow")
+        check("...including a mutating ARGUMENT, since 'everything' stated plainly beats a "
+              "half-grant that refuses what you most likely built the server to do",
+              _call("mcp__github__addIssueComment", {"sql": "DELETE FROM t"})[0] == "allow")
+        with open(os.path.join(sw, ".game_loop", "log.jsonl")) as f:
+            check("...and every consumption is logged as trusted_mcp_write naming the server, so "
+                  "'allowed because ours' and 'never ran' stay distinguishable",
+                  '"trusted_mcp_write"' in f.read())
+        # THE CONTROLS. Each is a way this could have become an off switch rather than a policy.
+        check("...while a server NOBODY declared is refused exactly as before — the grant is one "
+              "server, not a mood",
+              _call("mcp__other__deleteThing")[0] == "deny")
+        _set(mcp_writes="disabled")
+        check("...and mcp_writes disabled still wins absolutely, so #53 outranks even this",
+              _call("mcp__github__mergePullRequest")[0] == "deny")
+        _set(mcp_writes="gated", mcp_trusted_servers=[])
+        check("...and with the key absent the floors are untouched, so the allowances above are "
+              "the declaration talking and not a guard that quietly stopped classifying",
+              _call("mcp__github__deleteIssueComment")[0] == "deny")
+        # SERVER GRAIN ONLY: "trust everything" is a statement about a server, never about a tool.
+        for _bad, _why in ((["mcp__github__mergeIt"], "must name a WHOLE SERVER"),
+                           (["mcp__*__"], "globs are never accepted"),
+                           (["mcp____"], "must name a WHOLE SERVER")):
+            _set(mcp_trusted_servers=_bad)
+            _d, _r = _call("mcp__github__getThing")
+            check(f"...and {_bad[0]!r} is refused at CONFIG-READ, not silently dropped — the widest "
+                  "door half-honoured is worse than one rejected",
+                  _d == "deny" and "not a valid policy" in _r)
+        _set(mcp_trusted_servers=["mcp__github__"])
+        check("...and status reports it in capitals, because a door this wide that nobody can see "
+              "is the failure this tool argues against",
+              "WHOLLY TRUSTED SERVER" in gl(sw, "status", sid="sess-sw").stdout)
+        _set(mcp_trusted_servers=[])
+
         # ── #57: THE SERVER GRAIN ─────────────────────────────────────────────────────────────────
         #
         # #56 shipped exact names only and this suite asserted a prefix was refused. That assertion
@@ -4572,6 +4618,22 @@ def main():
               "first refusal in this session" in _refuse("sess-third"))
     finally:
         shutil.rmtree(ow, ignore_errors=True)
+
+    print("the deploy refusal names the CHEAP right path, not only the rule:")
+    # A guard staying correct depends partly on how expensive it is to work around at the moment
+    # somebody is tired — an argument for making the RIGHT path cheap rather than for trusting
+    # anyone's resolve, mine included. Measured on myself: this guard refused the commit that
+    # documented what it refuses, because the commit text contained a deploy verb as a whole word.
+    # The remedy took ten seconds and I only found it because I had used it that afternoon; the
+    # refusal did not mention it. Ten seconds bought the right answer, an afternoon might not have.
+    _dv = open(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh")).read()
+    check("the deploy refusal names the prose case and its remedy — writing ABOUT a verb is the "
+          "commonest way to meet this guard, and the file route is cheap only if you know it",
+          "WRITING ABOUT THE VERB" in _dv and "--body-file" in _dv and "-F <file>" in _dv)
+    check("...and it states the trade it is making, where somebody MEETS it rather than only in "
+          "the source: whole-word matching over command position, because missing a real publish "
+          "is the expensive direction",
+          "narrowing to command position" in _dv and "expensive direction" in _dv)
 
     print("a refusal names a hatch that exists (#52):")
     hp52 = make_sandbox()

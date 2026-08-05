@@ -311,6 +311,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `allow_write_roots` | Extra roots the write guard permits. **An absolute home path here ships a write permission to everyone who clones you.** |
 | `deploy_verbs` | Extra deploy/publish commands to block outright. This rail is a *denylist* — a verb nobody listed is not blocked. |
 | `mcp_writes` | `"gated"` (default: a mutating MCP call is refused, and you may open it once with `authorize`) or `"disabled"` (refused outright, no hatch offered). |
+| `mcp_trusted_servers` | Whole servers your project OWNS. Every call to them is allowed, destructive included — the widest door here. See below. |
 | `mcp_standing_writes` | A narrow set of MCP writes that need no human, in either of two grains — an exact `mcp__server__tool`, or a whole-server `mcp__server__` prefix. See below. |
 | `mcp_read_only_tools` | Teaches the MCP guard which *ambiguous* tools of a server you trust are read-only. It can only resolve ambiguity — never silence a mutating verb or a mutating argument. |
 | `watchdog` | Ring timing, ring cap, and `waiting_probe`. |
@@ -335,6 +336,27 @@ It is safe because every floor runs on the **live call** and returns before this
 a prefix widens *which servers* are trusted, never *what* may be done through them. One tier a prefix
 does **not** inherit — `merge`, `publish`, `deploy`, `release`, `push` still need the tool named
 exactly. Typing it out is the deliberate act; inheriting it from which list a verb sits in is not.
+
+**When the server is yours.** `mcp_standing_writes` deliberately stops short of the irreversible
+and landing tiers — right for a server somebody else ships, wrong for one your team wrote and
+maintains, where you already own the blast radius. For that, declare the server outright:
+
+```json
+"mcp_trusted_servers": ["mcp__github__", "mcp__internal__"]
+```
+
+Every call to those servers is allowed: irreversible verbs, landing verbs, and mutating arguments
+included. That is the point — a half-grant refuses exactly what you most likely built the server to
+do, and an agent that stops to ask for the same `approve` on every pull request is not being made
+safer, it is being made useless.
+
+Whole servers only (`mcp__server__`), never a single tool; a malformed entry is refused at
+config-read rather than silently dropped. `mcp_writes: "disabled"` still outranks it. Every call is
+logged as `trusted_mcp_write`, and `status` reports the list **in capitals**, because a door this
+wide that nobody can see is the failure this whole tool argues against.
+
+What it cannot know: whether the server really is yours. Nothing checks authorship — only that
+somebody with commit access to your config said so. If that config is shared, this is shared with it.
 
 **The waiting probe**, if you fan work out to subagents: `watchdog.waiting_probe` is a command you
 supply that answers *"is this run waiting on work it dispatched?"* Without it, a run that has

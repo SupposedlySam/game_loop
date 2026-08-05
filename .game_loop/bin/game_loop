@@ -4765,6 +4765,20 @@ def coverage_report(s):
                      "to remove that door.")
         # Standing doors are worth seeing without reading config, for the same reason the write
         # roots are: a human should be able to tell what is open without going to look (#56).
+        # THE WIDEST DOOR FIRST, and unmissable. mcp_trusted_servers permits EVERYTHING from the
+        # named servers -- irreversible verbs, landing verbs, argument-level findings -- because a
+        # project that wrote a server already owns its blast radius. That is a legitimate thing to
+        # declare and an illegitimate thing to hide, so it is reported above the narrow grain and in
+        # capitals: somebody inheriting this repo must meet it before they meet anything else.
+        _ts = [str(x) for x in (cfg.get("mcp_trusted_servers") or [])]
+        if _ts:
+            lines.append("           ⚠ WHOLLY TRUSTED SERVER(S) — EVERY call is allowed, including "
+                         "irreversible and")
+            lines.append("           landing verbs and mutating arguments: " + ", ".join(_ts))
+            lines.append("           This is the project declaring it OWNS these servers. Nothing "
+                         "here can check that")
+            lines.append("           it does — only that somebody with commit access to config "
+                         "said so.")
         _sw = [str(x) for x in (cfg.get("mcp_standing_writes") or [])]
         if _sw:
             lines.append(f"           STANDING, no human needed ({len(_sw)}): " + ", ".join(_sw))

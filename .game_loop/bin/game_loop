@@ -4445,7 +4445,28 @@ def external_claims_report():
         on, against = b.get("verified_on") or "?", b.get("verified_against")
         head = f"  claims : {n} load-bearing claim(s) about {b.get('subject', _k)}"
         lines.append(head)
+        # PER-CLAIM FIRST. A block stamp cannot express "one of these was re-read last Tuesday",
+        # and reporting the block value alone would speak one re-verification as six.
+        claims = b.get("claims") or []
+        redone = [c for c in claims if c.get("verified_against")]
         run, how = running_host_version()
+        for c in redone:
+            # NAMED APART from the block's `on`/`against` on purpose: a Python loop variable
+            # outlives its loop, and the first version of this leaked the per-claim date into the
+            # block line below — which then reported one re-reading as though it were all six.
+            _cv, _con = c["verified_against"], c.get("verified_on", "?")
+            if run and _cv != run:
+                lines.append(f"           ⚠ '{c['id']}' was re-read {_con} against {_cv}; RUNNING "
+                             f"{run} ({how}) — re-read it.")
+            elif run:
+                lines.append(f"           ✓ '{c['id']}' re-read {_con} against {_cv}, and that is "
+                             "what is running.")
+            else:
+                lines.append(f"           · '{c['id']}' re-read {_con} against {_cv}; running "
+                             f"version UNKNOWN ({how}).")
+        if redone and len(redone) < len(claims):
+            lines.append(f"           the other {len(claims) - len(redone)} have NOT been re-read "
+                         "since the original reading below.")
         if against and run and against != run:
             lines.append(f"           ⚠ VERIFIED AGAINST {against}, RUNNING {run} ({how}) — re-read "
                          "them; the subject moved.")

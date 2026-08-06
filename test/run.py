@@ -5547,6 +5547,24 @@ def main():
     finally:
         shutil.rmtree(xw, ignore_errors=True)
 
+    # PER-CLAIM VERIFICATION. The block stamp could not express "one of these was re-read", so
+    # filling it in would have spoken one re-reading as six — and the file had PROMISED that the
+    # first re-verification would fill in the null and make that entry checkable. Unkeepable as
+    # written, which is a small instance of exactly what the file exists to catch.
+    _cl_claims = _block.get("claims") or []
+    check("verification lives on each CLAIM, so a partial re-read cannot be reported as a whole one",
+          all("verified_on" in c for c in _cl_claims))
+    _redone = [c for c in _cl_claims if c.get("verified_against")]
+    check("...and at least one has actually been re-read against a recorded version, so the "
+          "mechanism has fired once rather than only being available",
+          _redone and all(c.get("verified_how") for c in _redone))
+    _cs = gl(REPO, "status").stdout
+    check("...and status names the re-read entry AND says how many were not — a leaked loop "
+          "variable made the block line report the per-claim date, which is one re-reading "
+          "wearing the authority of six",
+          "have NOT been re-read" in _cs
+          and _block["verified_on"] in _cs and _block["verified_on"] != _redone[0]["verified_on"])
+
     _rep = "\n".join(gl(REPO, "status").stdout.split("\n"))
     check("status reports the claims, and says plainly that nothing here checks whether one is TRUE",
           "load-bearing claim(s) about" in _rep and "never checks whether a claim is TRUE" in _rep)

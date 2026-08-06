@@ -5459,6 +5459,59 @@ def main():
           + (" · BROKEN: " + "; ".join(_bad[:4]) if _bad else ""),
           not _bad)
 
+    print("one terminal session arms the limit gate for every session in the checkout:")
+    # THE SNAPSHOT IS ACCOUNT-SCOPED AND FILE-BACKED, so the host that CANNOT produce it can still
+    # consume one somebody else produced. That makes the whole limit family reachable from an
+    # editor-embedded session — which is the default host for at least one heavy user — without any
+    # spawning, PTY driving, or probe that burns an API turn to measure API turns.
+    #
+    # Asserted because it is now a documented remedy: a user asked whether game_loop could spawn
+    # sessions to sample usage, and this is what I recommended instead. A recommendation nothing
+    # checks is a claim about my own product with the same standing as prose.
+    lw = make_sandbox()
+    try:
+        def _vs(*a):
+            # gl() takes no extra environment, and the entrypoint is the whole point here.
+            return subprocess.run([os.path.join(lw, ".game_loop", "bin", "game_loop"), *a],
+                                  capture_output=True, text=True,
+                                  env=_env(lw, sid="sess-lim",
+                                           CLAUDE_CODE_ENTRYPOINT="claude-vscode"))
+
+        check("with no snapshot an editor-hosted session says the protection is INERT — absence of "
+              "signal, never evidence of headroom",
+              "USAGE-LIMIT PROTECTION IS INERT" in _vs("status").stdout)
+        _lf = os.path.join(lw, ".game_loop", "limits.json")
+        with open(_lf, "w") as f:
+            json.dump({"t": "now", "windows": {"five_hour": {"used_percentage": 99.2,
+                                                             "resets_at": int(time.time()) + 3600}}}, f)
+        check("...and a snapshot written by a TERMINAL session in the same checkout clears it — the "
+              "host that cannot produce one can still consume one",
+              "USAGE-LIMIT PROTECTION IS INERT" not in _vs("status").stdout)
+        _r = subprocess.run([os.path.join(lw, ".game_loop", "bin", "game_loop"), "limitgate"],
+                            input=json.dumps({"tool_name": "Bash", "session_id": "sess-lim",
+                                              "tool_input": {"command": "echo hi"}}),
+                            capture_output=True, text=True,
+                            env=_env(lw, sid="sess-lim", CLAUDE_CODE_ENTRYPOINT="claude-vscode"))
+        check("...and the GATE itself arms for that editor-hosted session, which is the half that "
+              "matters — a quiet warning is not protection",
+              "\"permissionDecision\": \"deny\"" in _r.stdout.replace("'", '"')
+              or '"permissionDecision":"deny"' in _r.stdout.replace(" ", ""))
+        # PAIRED: a window that has already reset must NOT bind, or a stale snapshot from a terminal
+        # session last week would block every tool call today.
+        with open(_lf, "w") as f:
+            json.dump({"t": "old", "windows": {"five_hour": {"used_percentage": 99.2,
+                                                             "resets_at": int(time.time()) - 60}}}, f)
+        _r2 = subprocess.run([os.path.join(lw, ".game_loop", "bin", "game_loop"), "limitgate"],
+                             input=json.dumps({"tool_name": "Bash", "session_id": "sess-lim",
+                                               "tool_input": {"command": "echo hi"}}),
+                             capture_output=True, text=True,
+                             env=_env(lw, sid="sess-lim", CLAUDE_CODE_ENTRYPOINT="claude-vscode"))
+        check("...while a window that already RESET does not bind, so a stale snapshot from last "
+              "week cannot block today's work",
+              "deny" not in _r2.stdout)
+    finally:
+        shutil.rmtree(lw, ignore_errors=True)
+
     print("a claim about the HOST cannot go stale quietly (showrunner's INV20):")
     # A limitation written in prose ages exactly like a premise does, and nothing here noticed. The
     # shape came from showrunner: a claim cannot be checked automatically, but its SUBJECT can be

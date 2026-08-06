@@ -163,6 +163,20 @@ watchdog parks rather than burning retries against a wall, and wakes the session
 session that renders no status line these gates cannot arm — and `status` tells you so in plain terms
 rather than staying quiet and letting you assume you are covered.
 
+**If your sessions run in an editor**, the snapshot those gates read comes only from a terminal
+status line — so an editor-embedded session produces none, and `status` says the protection is
+INERT rather than implying cover it does not have.
+
+It can still *consume* one. The snapshot is a file in the checkout (`.game_loop/limits.json`) and
+the limits are account-wide, so **one terminal session in that repo arms the gate for every other
+session in it**, editor-hosted included. Keep an ordinary `claude` session open in a terminal on
+the same repo — doing real work, not polling — and the rest inherit its readings. Nothing to
+configure, and no probe that spends API turns to measure how many API turns you have left.
+
+The honest limit: a window whose reset time has passed no longer binds, so a snapshot from last
+week protects nothing. This helps while a terminal session is running or has run recently, and
+`status` tells you which of those is true.
+
 ## Optional: let bare `game_loop` work anywhere in the repo
 
 game_loop is a **project-local binary** (`./.game_loop/bin/game_loop`), never a global command — one

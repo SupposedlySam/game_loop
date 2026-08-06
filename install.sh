@@ -376,6 +376,11 @@ if [ -z "$GL_SHA" ]; then
   echo "  ⚠ no VERSION stamped: the source is not its own git checkout and carries no recorded"
   echo "    VERSION, so nothing here knows which commit these files came from. Leaving it UNSET is"
   echo "    the honest answer — a wrong sha would make the update check confidently wrong."
+  echo "    WHAT IT COSTS YOU: with no stamp, \`status\` cannot tell you a newer game_loop exists."
+  echo "    It goes quiet rather than wrong, and quiet is indistinguishable from up to date."
+  echo "    A COMMON CAUSE is the unauthenticated GitHub API refusing the sha lookup — 60 requests"
+  echo "    an hour, shared by everything on this machine. Measured here: the same install stamped"
+  echo "    correctly minutes later. Just re-run it."
 fi
 # WHAT LEVEL WAS THE SOURCE AT? A clone gives you whatever was on main that morning, so the sha
 # alone does not say whether the author stands behind it. Carried into the target so `status` can

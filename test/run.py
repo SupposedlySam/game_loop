@@ -5322,6 +5322,21 @@ def main():
           "CHANNEL POINTER" in _inst and "GAME_LOOP_REF=<tag>" in _inst
           and "records alpha, honestly" in _inst)
 
+    print("a missing VERSION stamp says what it COSTS, not only that it is missing:")
+    # MEASURED: an install from the stable channel produced no stamp, and the warning explained the
+    # mechanism without saying the consequence — that `status` can no longer tell you an update
+    # exists, going QUIET rather than wrong, which is indistinguishable from up to date. The cause
+    # was the unauthenticated GitHub API's 60/hour limit, shared by everything on the machine; the
+    # same install stamped correctly minutes later. A consumer who hits that window would never
+    # learn their update check was dead.
+    _ish = open(os.path.join(REPO, "install.sh")).read()
+    check("the no-stamp warning names the CONSEQUENCE — a reader needs to know their update check "
+          "just went silent, not only that a file is absent",
+          "WHAT IT COSTS YOU" in _ish and "indistinguishable from up to date" in _ish)
+    check("...and it names the likeliest cause and the remedy, since a rate-limited lookup is a "
+          "transient that a re-run fixes rather than a broken install",
+          "60 requests" in _ish and "re-run it" in _ish)
+
     print("every executable in bin/ actually ships (default-deny over the payload):")
     # MEASURED, NOT IMAGINED: limit-probe.sh was added to bin/, wired into the verb and the
     # watchdog, tested, and NEVER ADDED TO install.sh. Every consumer would have got

@@ -127,6 +127,18 @@
         "exercised_by": "a known window present in limits.json (the control) with no third window beside it (the claim)",
         "verified_on": "2026-07-29",
         "verified_against": null
+      },
+      {
+        "id": "fresh-session-token-floor",
+        "says": "a fresh session costs ~31.5k input tokens before answering, of which ~24k is irreducible base preamble; tool definitions are ~6k and MCP schemas ~1k",
+        "source": "measured: claude -p ... --output-format json at 2.1.223",
+        "breaks": "the recommendation against spawning sessions to sample usage rests on this floor; if it dropped to near zero the objection would weaken and a polling probe might be fine",
+        "ledger": "A fresh Claude Code session costs ~31.5k INPUT tokens before it answers anything, and ~24k of that is irreducible",
+        "verified_on": "2026-08-05",
+        "verified_against": "2.1.223",
+        "verified_how": "three probes at 2.1.223 reading usage from --output-format json: baseline 31,547 / --strict-mcp-config 30,323 / plus 13 tools disabled 24,377. Decomposed rather than estimated, because a single number cannot say what is trimmable.",
+        "exercisable": "yes-not-yet",
+        "exercisable_why": "CONDITIONAL and exercisable \u2014 I control the input and the probe reports its own usage, so re-running it is the exercise. NOT wired into the suite on purpose: the exercise spends the resource it measures and needs network and credentials, so it would make the suite cost tokens and fail offline. That is a real reason and it is still a debt, not a pass."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

@@ -22,6 +22,28 @@ _Things we read at the pinned version, by hand, and confirmed. Each with a sourc
 - **statusLine config keys**: `{type: "command", command, refreshInterval (min 1s), padding}`;
   event-driven runs debounced at 300ms, `refreshInterval` adds a timer for idle periods. Same source,
   2026-07-29.
+- **A fresh Claude Code session costs ~31.5k INPUT tokens before it answers anything, and ~24k of
+  that is irreducible**: measured at 2.1.223 with `claude -p "reply with the single word ok"
+  --output-format json`, in a directory with no CLAUDE.md and no game_loop, so this is the HOST's
+  floor and not ours. Three readings, each the full input (cache creation + cache read + input):
+
+      5 MCP servers loaded, all tools    31,547
+      --strict-mcp-config (no MCP)       30,323   -1,224   (MCP schemas are ~4%)
+      ...and 13 built-in tools disabled  24,377   -7,170   (tool definitions are ~19%)
+
+  So the decomposition is roughly 24k base preamble + 6k tool definitions + 1k MCP schemas. A
+  project's own CLAUDE.md adds on top of all three. Nothing amortises any of it across spawns,
+  because each spawn is a new session — the 19,051 cache READ in the baseline is a warm cache from
+  a previous run, and it still counts as input.
+
+  This is the number under the recommendation NOT to poll usage by spawning sessions: even stripped
+  to the bone a probe costs ~24k input tokens, so one probe per 15 minutes is ~490k input tokens per
+  5-hour window spent purely observing. Measured 2026-08-05.
+
+  What this does NOT establish: how a subscription's 5-hour window weights input against output, or
+  whether cache reads are discounted against it. The probe's cost is measured; the fraction of a
+  window it consumes is not. Nor does it establish that the ~24k floor is constant across models or
+  releases — it is one reading at one version.
 
 ## RULED-OUT
 

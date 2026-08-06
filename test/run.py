@@ -5322,6 +5322,23 @@ def main():
           "CHANNEL POINTER" in _inst and "GAME_LOOP_REF=<tag>" in _inst
           and "records alpha, honestly" in _inst)
 
+    print("the sha lookup does not depend on a budget a team shares:")
+    # MEASURED TWICE, the second time with the budget read at 0 of 60: the unauthenticated GitHub
+    # REST API allows 60 requests an hour PER IP, shared by everything on the machine and by
+    # everyone behind the same address. A team pulling this down on one afternoon exhausts it
+    # between them, and every install after that gets no VERSION — and therefore a permanently
+    # silent update check, which is indistinguishable from being up to date.
+    _ish0 = open(os.path.join(REPO, "install.sh")).read()
+    check("the installer resolves the sha over the GIT protocol before it touches the REST API, "
+          "because that budget is shared by everyone behind one address",
+          _ish0.index("git ls-remote") < _ish0.index("api.github.com/repos/$REPO/commits"))
+    check("...and it dereferences an ANNOTATED tag before falling back to the plain ref, so a "
+          "marked release resolves to its commit rather than to the tag object",
+          '"$REF^{}"' in _ish0)
+    check("...and the REST call survives as the last resort, so a machine with no git still "
+          "stamps rather than silently losing its update check",
+          "api.github.com/repos/$REPO/commits" in _ish0 and "command -v git" in _ish0)
+
     print("a missing VERSION stamp says what it COSTS, not only that it is missing:")
     # MEASURED: an install from the stable channel produced no stamp, and the warning explained the
     # mechanism without saying the consequence — that `status` can no longer tell you an update
@@ -5333,9 +5350,9 @@ def main():
     check("the no-stamp warning names the CONSEQUENCE — a reader needs to know their update check "
           "just went silent, not only that a file is absent",
           "WHAT IT COSTS YOU" in _ish and "indistinguishable from up to date" in _ish)
-    check("...and it names the likeliest cause and the remedy, since a rate-limited lookup is a "
-          "transient that a re-run fixes rather than a broken install",
-          "60 requests" in _ish and "re-run it" in _ish)
+    check("...and it names the likeliest causes and the durable remedy, since an exhausted budget "
+          "and a GitHub incident produce the SAME silence and one reading cannot separate them",
+          "60 requests" in _ish and "incident" in _ish and "Installing git avoids both" in _ish)
 
     print("every executable in bin/ actually ships (default-deny over the payload):")
     # MEASURED, NOT IMAGINED: limit-probe.sh was added to bin/, wired into the verb and the

@@ -353,8 +353,24 @@ elif [ "${FETCHED:-0}" = 1 ] && command -v curl >/dev/null 2>&1; then
   # that download -- and describes nothing when $SRC is a directory somebody handed us. A vendored
   # tree extracted from an OLD commit would otherwise be stamped with today's main, which is the
   # same lie as stamping the consumer's HEAD, arrived at by a different road.
-  GL_SHA="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null \
-            | python3 -c 'import json,sys; print((json.load(sys.stdin) or {}).get("sha",""))' 2>/dev/null || true)"
+  # GIT PROTOCOL FIRST, REST second. The unauthenticated REST API allows 60 requests an hour PER IP,
+  # shared by everything on the machine and by everyone behind the same address — so a team pulling
+  # this down on the same afternoon exhausts it between them, and every install after that gets no
+  # VERSION and therefore a permanently silent update check. Measured here, twice, and the second
+  # time the budget read 0 of 60.
+  #
+  # `git ls-remote` answers the same question over the git protocol, which that budget does not
+  # govern. `$REF^{}` dereferences an ANNOTATED tag to its commit; a lightweight tag or a branch has
+  # nothing to dereference and returns empty, so the plain ref is tried next. The REST call stays as
+  # the last resort for a machine with no git.
+  if command -v git >/dev/null 2>&1; then
+    GL_SHA="$(git ls-remote "https://github.com/$REPO" "$REF^{}" 2>/dev/null | awk 'NR==1{print $1}')"
+    [ -n "$GL_SHA" ] || GL_SHA="$(git ls-remote "https://github.com/$REPO" "$REF" 2>/dev/null | awk 'NR==1{print $1}')"
+  fi
+  if [ -z "${GL_SHA:-}" ]; then
+    GL_SHA="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null \
+              | python3 -c 'import json,sys; print((json.load(sys.stdin) or {}).get("sha",""))' 2>/dev/null || true)"
+  fi
 fi
 # THE STAMP MUST DESCRIBE WHAT LANDED. The payload is copied from the source WORKING TREE, while the
 # sha comes from HEAD -- the same thing only when that tree is clean. Installing from a checkout with
@@ -378,9 +394,11 @@ if [ -z "$GL_SHA" ]; then
   echo "    the honest answer — a wrong sha would make the update check confidently wrong."
   echo "    WHAT IT COSTS YOU: with no stamp, \`status\` cannot tell you a newer game_loop exists."
   echo "    It goes quiet rather than wrong, and quiet is indistinguishable from up to date."
-  echo "    A COMMON CAUSE is the unauthenticated GitHub API refusing the sha lookup — 60 requests"
-  echo "    an hour, shared by everything on this machine. Measured here: the same install stamped"
-  echo "    correctly minutes later. Just re-run it."
+  echo "    LIKELIEST CAUSE: no git on this machine AND the GitHub REST lookup unavailable. That"
+  echo "    budget is 60 requests an hour PER IP, shared by everyone behind one address, so a team"
+  echo "    installing on the same afternoon can use it up between them — and a GitHub incident"
+  echo "    produces the same silence. Installing git avoids both, since the sha is then read over"
+  echo "    the git protocol. Otherwise re-run this later; nothing else about the install is wrong."
 fi
 # WHAT LEVEL WAS THE SOURCE AT? A clone gives you whatever was on main that morning, so the sha
 # alone does not say whether the author stands behind it. Carried into the target so `status` can

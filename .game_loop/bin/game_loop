@@ -902,6 +902,9 @@ def cmd_limitgate(s, a, payload):
 # CODE_ROOT, not ROOT: the probe is executable code, so under a pin it must come from the
 # pinned copy alongside every other script rather than from the project it is guarding.
 PROBE_SCRIPT = os.path.join(CODE_ROOT, "bin", "limit-probe.sh")
+# Longer than a probe takes (~75s measured) and far shorter than any sane interval: a stale claim
+# must expire on its own, or one session dying mid-probe would silence the others indefinitely.
+PROBE_LEASE_SEC = 300
 
 
 def probe_cfg():
@@ -971,6 +974,33 @@ def cmd_limitprobe(s, a):
             "Or run this once by hand with --force.")
     if not os.path.exists(PROBE_SCRIPT):
         die(f"the probe script is missing: {PROBE_SCRIPT}")
+
+    # ONE PROBE SERVES THE CHECKOUT. The snapshot is account-scoped, so the number is the same for
+    # every session sharing it — but each session runs its own watchdog, and each would
+    # independently find the snapshot stale and spend ~24k tokens fetching an answer another session
+    # was already fetching. Reported from a checkout running EIGHTEEN concurrent sessions, where
+    # that is 430k tokens to read one number.
+    #
+    # A LEASE RATHER THAN A HELD LOCK. The probe takes ~75s and the limits lock is also what the
+    # statusline tap takes on every refresh, so holding it across the spawn would stall every
+    # statusline in the checkout for over a minute. Instead: claim under the lock, release, spawn.
+    # A claim older than the lease is ignored, so a session that dies mid-probe cannot wedge the
+    # others — it costs one duplicate probe, once, which is the cheap direction to fail.
+    now_probe = time.time()
+    if not a.force:
+        with limits_lock():
+            snap = load_limits() or {}
+            claimed = float(snap.get("probe_started_at") or 0)
+            if now_probe - claimed < PROBE_LEASE_SEC:
+                out(f"another session started a probe {int(now_probe - claimed)}s ago — skipping.",
+                    "  The snapshot is account-scoped, so its answer is this session's answer too.")
+                logline({"kind": "limit_probe", "outcome": "deferred_to_peer"})
+                return
+            snap["probe_started_at"] = now_probe
+            try:
+                save_limits(snap)
+            except OSError:
+                pass                    # unclaimable is not fatal; worst case is a duplicate probe
     r = subprocess.run(["bash", PROBE_SCRIPT], capture_output=True, text=True, timeout=180)
     if r.returncode == 2:
         # COULD NOT LOOK. Never folded into "no limits data": a caller that treats them the same

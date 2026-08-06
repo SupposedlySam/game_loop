@@ -44,7 +44,8 @@ def make_sandbox():
     dst = os.path.join(proj, ".game_loop")
     os.makedirs(os.path.join(dst, "bin"))
     for f in ("game_loop", "watchdog", "guard-writes.sh", "guard-writes-impl.sh",
-              "guard-mcp.sh", "guard-mcp-impl.sh", "verify", "flair.py", "notify.py"):
+              "guard-mcp.sh", "guard-mcp-impl.sh", "verify", "flair.py", "notify.py",
+              "limit-probe.sh"):
         shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f), os.path.join(dst, "bin", f))
         os.chmod(os.path.join(dst, "bin", f), 0o755)
     for f in ("config.json", "verify.yaml", "INVARIANTS.md"):
@@ -5321,6 +5322,33 @@ def main():
           "CHANNEL POINTER" in _inst and "GAME_LOOP_REF=<tag>" in _inst
           and "records alpha, honestly" in _inst)
 
+    print("every executable in bin/ actually ships (default-deny over the payload):")
+    # MEASURED, NOT IMAGINED: limit-probe.sh was added to bin/, wired into the verb and the
+    # watchdog, tested, and NEVER ADDED TO install.sh. Every consumer would have got
+    # "the probe script is missing" — a feature shipped broken, invisible from inside the repo
+    # because the file is right there. The list in install.sh is a denylist by omission: it
+    # defaults to NOT shipping whatever nobody remembered to type.
+    _bin = os.path.join(SRC_GAME_LOOP, "bin")
+    _shipped_from = open(os.path.join(REPO, "install.sh")).read()
+    _exes = sorted(n for n in os.listdir(_bin)
+                   if os.access(os.path.join(_bin, n), os.X_OK)
+                   and not n.startswith(".") and n != "__pycache__")
+    # Imported by the others rather than invoked, so they ride along in the same cp line; named here
+    # so "not executable" never becomes the reason something silently stops shipping.
+    _also = {"flair.py", "notify.py"}
+    _missing = [n for n in _exes + sorted(_also) if n not in _shipped_from]
+    check(f"every executable in .game_loop/bin/ is named in install.sh ({len(_exes)} found)"
+          + (" · NOT SHIPPED: " + ", ".join(_missing) if _missing else ""),
+          _exes and not _missing)
+    check("...and the check can FIRE — a name that is not in the installer is reported, so the "
+          "clean result above is a verdict rather than a loop over nothing",
+          "definitely-not-in-install" not in _shipped_from
+          and [n for n in ["definitely-not-in-install.sh"] if n not in _shipped_from])
+    check("...and the sandbox fixture ships the same set, so a test install cannot pass on a file "
+          "no real install would have",
+          all(os.path.exists(os.path.join(make_sandbox(), ".game_loop", "bin", n))
+              for n in ("limit-probe.sh", "game_loop")))
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")
@@ -5571,6 +5599,43 @@ def main():
         check("a real snapshot CONFIRMS the statusline claim live — the exercise reads windows "
               "where they are, not where the first draft guessed",
               "'statusline-rate-limits' CONFIRMED LIVE" in _st)
+        # ONE PROBE SERVES THE CHECKOUT. The snapshot is account-scoped, so the answer is the same
+        # for every session sharing it — but each runs its own watchdog and each would find it stale
+        # and buy the same number. Reported from a checkout with EIGHTEEN concurrent sessions: that
+        # is 430k input tokens to read one figure.
+        # The lease check sits AFTER the enabled check, so these arms need the probe turned on —
+        # otherwise they would pass by dying at "the probe is off" and prove nothing about leases.
+        _lpcfg = os.path.join(pw2, ".game_loop", "config.json")
+        with open(_lpcfg) as f:
+            _lpc = json.load(f)
+        _lpc["limits"] = dict(_lpc.get("limits") or {}, probe={"enabled": True})
+        with open(_lpcfg, "w") as f:
+            json.dump(_lpc, f)
+        _lpf = os.path.join(pw2, ".game_loop", "limits.json")
+        with open(_lpf, "w") as f:
+            json.dump({"captured_at": 0, "windows": {}, "probe_started_at": time.time()}, f)
+        _peer = gl(pw2, "limitprobe", sid="sess-lp2")
+        check("a session whose PEER just started a probe skips it — one probe serves the checkout, "
+              "because the number is account-scoped and so is the answer",
+              "skipping" in _peer.stdout and "account-scoped" in _peer.stdout)
+        # A LEASE, NOT A LOCK HELD ACROSS THE SPAWN: the probe takes ~75s and the limits lock is
+        # what every statusline refresh takes, so holding it would stall the whole checkout.
+        _gl_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        check("...and the claim is a LEASE that expires, so a session dying mid-probe costs one "
+              "duplicate rather than silencing every other session indefinitely",
+              "PROBE_LEASE_SEC = 300" in _gl_src)
+        with open(_lpf, "w") as f:
+            json.dump({"captured_at": 0, "windows": {},
+                       "probe_started_at": time.time() - 600}, f)
+        # NOTE: this arm must NOT spawn a real session — the suite would then cost ~24k input
+        # tokens per run and fail without credentials. Removing the probe script makes it fail at
+        # "script is missing", which is past the lease check and therefore still proves the point.
+        os.remove(os.path.join(pw2, ".game_loop", "bin", "limit-probe.sh"))
+        _stale = gl(pw2, "limitprobe", sid="sess-lp2")
+        check("...and an EXPIRED claim does not defer — the skip above is a live peer, not a "
+              "permanent wedge",
+              "skipping" not in _stale.stdout and "probe script is missing" in _stale.stderr)
+
         # THE WATCHDOG MUST ASK THE SAME FUNCTION THE VERB REPORTS FROM, or the two disagree about
         # when the next spend is due and neither is wrong from where it stands.
         _iv = gl(pw2, "limitprobe", "--interval-only", sid="sess-lp")

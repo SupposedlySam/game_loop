@@ -547,6 +547,13 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    ".game_loop/bin/game_loop::absorb_rate_limits":
+        "the one place a rate_limits reading becomes the snapshot, extracted so the statusline tap "
+        "and the spawned probe cannot drift apart. Its return is the windows dict, never a silence: "
+        "an empty result means the reading carried no usable window, which the callers report "
+        "explicitly. Neutering it to {} reproduces the no-windows path the suite already drives "
+        "through both callers, and its paging and carry-forward behaviour are asserted through the "
+        "statusline tests that predate the extraction.",
     ".game_loop/bin/game_loop::_windows_claim_live":
         "the positive-control half of one conditional-absence exercise. Its None is one of three "
         "reported outcomes rather than a silence, and all three are asserted directly in a sandbox: "

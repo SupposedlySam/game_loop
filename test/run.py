@@ -5512,6 +5512,71 @@ def main():
     finally:
         shutil.rmtree(lw, ignore_errors=True)
 
+    print("the limit probe: a reading on a host that renders no statusline:")
+    # THE COST IS REAL AND SO IS THE ALTERNATIVE. ~24k input tokens per run, measured, against an
+    # unattended run that hits its limit at 1am, dies mid-action, and is still dead at 7am because
+    # nothing could see the wall coming. The whole limit family is built and tested and was only
+    # ever missing the snapshot. I first argued against this by comparing the probe's cost to ZERO,
+    # which is not the alternative.
+    pw2 = make_sandbox()
+    try:
+        check("the probe ships as executable code beside the other scripts, so a pinned harness "
+              "runs the pinned probe",
+              os.access(os.path.join(SRC_GAME_LOOP, "bin", "limit-probe.sh"), os.X_OK))
+        _off = gl(pw2, "limitprobe", sid="sess-lp")
+        check("it is OFF unless a human turned it on — a verb that spends tokens is a decision "
+              "somebody makes, never one they inherit",
+              _off.returncode != 0 and "probe is off" in _off.stderr
+              and "24k input tokens" in _off.stderr)
+        check("...and the refusal names the exact config key and the one-off escape, so being "
+              "refused does not mean being stuck",
+              '"probe": {"enabled": true}' in _off.stderr and "--force" in _off.stderr)
+
+        # THE INTERVAL SCALES WITH WHAT IS AT STAKE. A fixed one is wrong at both ends: far from the
+        # limit it burns tokens to learn nothing, near it, it learns too late.
+        _ld = importlib.machinery.SourceFileLoader(
+            "gl_lp", os.path.join(pw2, ".game_loop", "bin", "game_loop"))
+        _glm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lp", _ld))
+        _ld.exec_module(_glm)
+        _pc = {"min_interval_sec": 300, "max_interval_sec": 3600}
+        _now = time.time()
+
+        def _snap(pct):
+            return {"windows": {"five_hour": {"used_percentage": pct, "resets_at": _now + 3600}}}
+
+        _far, _near = (_glm.next_probe_after(_snap(5), _now, _pc),
+                       _glm.next_probe_after(_snap(95), _now, _pc))
+        check("a nearly-full window is probed sooner than an empty one — the spend rises with the "
+              "risk rather than running at a fixed rate",
+              _near < _far and _near <= _pc["min_interval_sec"] + 1)
+        check("...and with NO snapshot it waits the longest, since the first probe has the least "
+              "information and should not also be the most frequent",
+              _glm.next_probe_after(None, _now, _pc) == _pc["max_interval_sec"])
+        check("...and a window that has already RESET does not shorten anything, because the thing "
+              "being timed is when work would stop and a reset window stops nothing",
+              _glm.next_probe_after({"windows": {"five_hour": {"used_percentage": 99,
+                                                              "resets_at": _now - 10}}},
+                                    _now, _pc) == _pc["max_interval_sec"])
+
+        # THE EXERCISE MUST READ THE SHAPE THE SNAPSHOT ACTUALLY HAS. The first version read the
+        # windows at the top level, so it could never report the claim confirmed on ANY host — an
+        # exercise incapable of firing positive reports "not observed" forever, which reads as the
+        # claim failing rather than as the check being wrong. Found only when a real snapshot
+        # finally existed to compare against.
+        with open(os.path.join(pw2, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"captured_at": _now, "windows": {
+                "five_hour": {"used_percentage": 10, "resets_at": _now + 3600},
+                "seven_day": {"used_percentage": 62, "resets_at": _now + 86400}}}, f)
+        _st = gl(pw2, "status", sid="sess-lp").stdout
+        check("a real snapshot CONFIRMS the statusline claim live — the exercise reads windows "
+              "where they are, not where the first draft guessed",
+              "'statusline-rate-limits' CONFIRMED LIVE" in _st)
+        check("...and each exercised claim reports its OWN evidence exactly once, rather than one "
+              "claim carrying another's reading under its name",
+              _st.count("'no-weekly-opus-window' CONFIRMED") == 1)
+    finally:
+        shutil.rmtree(pw2, ignore_errors=True)
+
     print("a claim about the HOST cannot go stale quietly (showrunner's INV20):")
     # A limitation written in prose ages exactly like a premise does, and nothing here noticed. The
     # shape came from showrunner: a claim cannot be checked automatically, but its SUBJECT can be
@@ -5561,14 +5626,18 @@ def main():
         check("an exercisable claim with no observation says so, and says it cannot tell a tap that "
               "never ran from a claim that stopped holding",
               "has NOT been observed here" in _xs and "cannot tell which" in _xs)
+        # NESTED UNDER "windows", the shape the tap and the probe actually write. The first
+        # version of these fixtures used the top level and so did the code they exercised —
+        # test and product wrong together, agreeing with each other, passing. Only a REAL
+        # snapshot from a live probe showed the exercise could never have fired on a real host.
         with open(os.path.join(xw, ".game_loop", "limits.json"), "w") as f:
-            json.dump({"five_hour": {"used_percentage": 12, "resets_at": 1}}, f)
+            json.dump({"windows": {"five_hour": {"used_percentage": 12, "resets_at": 1}}}, f)
         _xs2 = gl(xw, "status", sid="sess-x").stdout
         check("...and a real snapshot in the expected shape reports the claim CONFIRMED LIVE on "
               "this machine — the host's own behaviour, not a record of somebody checking",
               "CONFIRMED LIVE here" in _xs2 and "cannot be stale" in _xs2)
         with open(os.path.join(xw, ".game_loop", "limits.json"), "w") as f:
-            json.dump({"five_hour": {"nope": 1}}, f)
+            json.dump({"windows": {"five_hour": {"nope": 1}}}, f)
         check("...while a snapshot MISSING the field the claim is about does not count as "
               "confirming it — the exercise checks the shape, not the file's existence",
               "has NOT been observed here" in gl(xw, "status", sid="sess-x").stdout)
@@ -5585,14 +5654,15 @@ def main():
               "empty snapshot satisfies 'no third window' and proves nothing",
               "positive control did not run" in gl(xw, "status", sid="sess-x").stdout)
         with open(_lf, "w") as f:
-            json.dump({"five_hour": {"used_percentage": 4}, "seven_day": {"used_percentage": 9}}, f)
+            json.dump({"windows": {"five_hour": {"used_percentage": 4},
+                                   "seven_day": {"used_percentage": 9}}}, f)
         check("...and with a known window present the absence IS confirmed live, because the read "
               "demonstrably worked and the unexpected window is still not there",
               "'no-weekly-opus-window' CONFIRMED LIVE" in gl(xw, "status", sid="sess-x").stdout)
         # THE ARM THAT MATTERS MOST: it must be able to say the claim STOPPED being true.
         with open(_lf, "w") as f:
-            json.dump({"five_hour": {"used_percentage": 4},
-                       "weekly_opus": {"used_percentage": 30}}, f)
+            json.dump({"windows": {"five_hour": {"used_percentage": 4},
+                                   "weekly_opus": {"used_percentage": 30}}}, f)
         _falsified = gl(xw, "status", sid="sess-x").stdout
         check("...and a window the claim says does not exist FALSIFIES it by name — an exercise "
               "that could never report failure is a stamp with extra steps",

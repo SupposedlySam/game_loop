@@ -84,6 +84,10 @@
   - "python3 test/run.py"
 ".game_loop/behaviour.json":
   - "python3 test/run.py"
+# The probe is executable code that spends the human's tokens and writes the snapshot three gates
+# read. It owes the suite like every other script here.
+".game_loop/bin/limit-probe.sh":
+  - "python3 test/run.py"
 ".game_loop/claims.json":
   - "python3 test/run.py"
 ".game_loop/LEDGER.md":

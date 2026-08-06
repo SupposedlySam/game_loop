@@ -959,6 +959,11 @@ def cmd_limitprobe(s, a):
     built and tested and was only ever missing the snapshot. This supplies it.
     """
     pc = probe_cfg()
+    if getattr(a, "interval_only", False):
+        # The watchdog asks the SAME function that reports "next probe in ~N min", so the two can
+        # never disagree about when the next spend is due. Prints seconds and nothing else.
+        out(str(next_probe_after(load_limits(), time.time(), pc)))
+        return
     if not (pc["enabled"] or a.force):
         die("the limit probe is off. It spends ~24k input tokens per run, so it is a decision "
             "somebody makes rather than inherits:\n"
@@ -6112,6 +6117,8 @@ def main():
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart/PostCompact entrypoint; not for humans
     lp = sub.add_parser("limitprobe")
+    lp.add_argument("--interval-only", dest="interval_only", action="store_true",
+                    help="print the seconds until the next probe is worth spending on, and exit")
     lp.add_argument("--force", action="store_true",
                     help="run it even though limits.probe.enabled is false — it costs ~24k input "
                          "tokens, so the default is off")

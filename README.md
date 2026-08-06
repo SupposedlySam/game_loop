@@ -177,6 +177,24 @@ The honest limit: a window whose reset time has passed no longer binds, so a sna
 week protects nothing. This helps while a terminal session is running or has run recently, and
 `status` tells you which of those is true.
 
+**Or let it fetch its own reading.** If keeping a terminal open is not practical, game_loop can
+spawn a short session purely to read the windows and write the snapshot:
+
+```json
+"limits": { "probe": { "enabled": true, "min_interval_sec": 900, "max_interval_sec": 3600 } }
+```
+
+**Off by default, and it is not free**: a spawn costs about 24k input tokens (measured, and it is
+the host's floor rather than ours). The reason to pay it is that the alternative is not zero — an
+unattended run that hits its limit at 1am dies mid-action and is still dead at 7am, because nothing
+could see the wall coming. The whole limit family already works; it was only ever missing the
+snapshot.
+
+The watchdog refreshes it on an interval **the reading itself implies** — the fullest window
+decides, a window about to reset is not urgent however full it is, and with no snapshot at all it
+waits the longest, since the first probe has the least information and should not also be the most
+frequent. Run one by hand with `game_loop limitprobe --force`.
+
 ## Optional: let bare `game_loop` work anywhere in the repo
 
 game_loop is a **project-local binary** (`./.game_loop/bin/game_loop`), never a global command — one

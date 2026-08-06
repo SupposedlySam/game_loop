@@ -212,6 +212,11 @@ instruction.
 #   pinned checkout of ITSELF, so editing this repo cannot break the gate guarding the edit.
 #   No --pin: report what is pinned now and print the hook wiring.
 ./.game_loop/bin/game_loop confidence [--mark beta|stable] [--ref <sha>] [--recheck]  # see below
+./.game_loop/bin/game_loop limitprobe [--force]                                      # read the usage
+#   windows by SPAWNING a short session, on a host that renders no statusline (so limits.json never
+#   arrives on its own). Off unless the project enabled it — it costs ~24k input tokens per run —
+#   and the watchdog fires it automatically on an interval the reading implies. You do not normally
+#   run this: if `status` says usage protection is INERT, that is a config question for the human.
 ```
 
 **The evidence family.** `claim`'s keystone — name a real file — only reaches evidence that is a

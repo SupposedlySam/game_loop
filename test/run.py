@@ -5571,6 +5571,24 @@ def main():
         check("a real snapshot CONFIRMS the statusline claim live — the exercise reads windows "
               "where they are, not where the first draft guessed",
               "'statusline-rate-limits' CONFIRMED LIVE" in _st)
+        # THE WATCHDOG MUST ASK THE SAME FUNCTION THE VERB REPORTS FROM, or the two disagree about
+        # when the next spend is due and neither is wrong from where it stands.
+        _iv = gl(pw2, "limitprobe", "--interval-only", sid="sess-lp")
+        check("--interval-only prints seconds and nothing else, so the watchdog and the verb cannot "
+              "disagree about when the next probe is due",
+              _iv.returncode == 0 and _iv.stdout.strip().isdigit())
+        _wd_src = open(os.path.join(SRC_GAME_LOOP, "bin", "watchdog")).read()
+        check("...and the watchdog refreshes the snapshot BEFORE deciding whether to park — parking "
+              "on a stale reading is the same failure as not parking at all",
+              _wd_src.index("refresh_limits_if_due()") < _wd_src.index("park_until_limit_resets(state)  #"))
+        check("...and it asks for the interval rather than inventing one, and is OFF unless the "
+              "project enabled it",
+              "--interval-only" in _wd_src and 'pc.get("enabled")' in _wd_src)
+        check("...and a probe that fails cannot take the watchdog with it — a guard whose failure "
+              "stops the guard above it is worse than the gap it fills",
+              "probe raised" in _wd_src and "never blocking a ring" in _wd_src.lower()
+              or "NEVER FATAL" in _wd_src)
+
         check("...and each exercised claim reports its OWN evidence exactly once, rather than one "
               "claim carrying another's reading under its name",
               _st.count("'no-weekly-opus-window' CONFIRMED") == 1)

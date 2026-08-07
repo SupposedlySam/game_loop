@@ -233,6 +233,22 @@ It finds the **nearest** harness walking up, which is what you want — and does
 harness left in `/tmp` made every path under `/tmp` resolve to it. Harmless, but surprising if you
 have forgotten it is there.)
 
+## Optional: a Claude Code skill so a session never has to guess
+
+`templates/skills/game_loop/SKILL.md` is a **user-level** skill (not installed by `install.sh` —
+that only ever writes inside the project it targets, never to your personal `~/.claude/`). Copy it
+once to make it available in every project you work in:
+
+```bash
+mkdir -p ~/.claude/skills/game_loop
+cp templates/skills/game_loop/SKILL.md ~/.claude/skills/game_loop/SKILL.md
+```
+
+It teaches a session to detect whether the current project has game_loop installed, offer to install
+it (plain or `--central`) if not, and otherwise run and correctly interpret `game_loop status` —
+including composing a "doctor"-style health check out of real verbs (`status`, `confidence`,
+`worktree --porcelain`) rather than guessing at one that doesn't exist.
+
 A shell function cannot reach non-interactive shells that skip your profile, so this is a convenience
 for you and never something the tool relies on. Everything game_loop prints names the explicit path
 for exactly that reason.

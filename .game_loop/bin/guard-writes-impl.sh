@@ -389,7 +389,8 @@ import io, json, os, subprocess
 repo = os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
 allow = [repo, "/tmp", "/private/tmp", "/var/folders",
-         os.path.join(home, ".claude", "projects", os.environ["SLUG"])]
+         os.path.join(home, ".claude", "projects", os.environ["SLUG"]),
+         os.path.join(home, ".claude", "plans")]          # built-in Plan Mode save location
 try:
     with io.StringIO(os.environ.get("CONFIG_MERGED", "{}")) as f:
         allow += [os.path.expanduser(p) for p in (json.load(f).get("allow_write_roots") or [])]
@@ -1051,7 +1052,8 @@ home = os.path.expanduser("~")
 repo = os.path.realpath(os.environ["REPO_REAL"])
 
 allow = [os.environ["REPO_REAL"], "/tmp", "/private/tmp", "/var/folders",
-         os.path.join(home, ".claude", "projects", os.environ["SLUG"])]
+         os.path.join(home, ".claude", "projects", os.environ["SLUG"]),
+         os.path.join(home, ".claude", "plans")]          # built-in Plan Mode save location
 try:
     with io.StringIO(os.environ.get("CONFIG_MERGED", "{}")) as f:
         allow += [os.path.expanduser(p) for p in (json.load(f).get("allow_write_roots") or [])]

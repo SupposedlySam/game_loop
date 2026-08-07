@@ -805,3 +805,51 @@ checkout. It does nothing about a pinned copy that is itself broken, a bad commi
 pin, or a `verify.yaml` rule that is a tautology — the pin decides *which* code runs, never whether
 that code is correct. And it cannot make a stale pin visible to anything but a human reading `status`:
 nothing refuses because the pin is old.
+
+### Central install: one code location for many repos
+
+A different problem from the one above, using the same split. `self --pin` is for developing
+game_loop itself — isolating one repo's hooks from the edits it is making to its own gates.
+**Central install** is for ordinary consumer repos that never touch game_loop's code at all, and just
+want to stop each carrying (and drifting on) their own full copy of it.
+
+Setup, once per machine:
+
+```
+game_loop self --pin <ref> --dest ~/.claude/game_loop-central   # populate the shared copy
+install.sh --central /path/to/each/repo                          # wire a repo to it
+```
+
+`install.sh --central` writes 5 tiny dispatcher shims into `.game_loop/bin/` — `game_loop`,
+`verify`, `guard-writes.sh`, `guard-mcp.sh`, `watchdog` — instead of copying the tool. Each shim sets
+`GAME_LOOP_HOME` to *that repo's own* `.game_loop/` and execs into the shared copy at
+`${GAME_LOOP_CENTRAL:-~/.claude/game_loop-central}`. Rules and config (`config.json`, `verify.yaml`,
+`INVARIANTS.md`, `LEDGER.md`) still seed locally, exactly like any install — only the code moves out.
+The other 5 files an ordinary install carries (`guard-writes-impl.sh`, `guard-mcp-impl.sh`,
+`limit-probe.sh`, `notify.py`, `flair.py`) aren't copied at all, not even as shims: none of them are
+looked up relative to the repo — they resolve via `CODE_ROOT`, wherever the running code physically
+lives — so once the 5 shims dispatch there, these are already found right beside it, for free.
+
+`.claude/settings.json` is unchanged by this — still `"$CLAUDE_PROJECT_DIR"/.game_loop/bin/X`, the
+same as every other install. Only what sits at that local path differs. `status`'s existing **PINNED
+CODE** block (above) reports a central-wired repo exactly the way it reports a pinned one: from that
+function's point of view, a shared checkout *is* a pin, structurally, whatever the reason for it.
+
+**Keeping it current** is one command, run whenever you choose: re-run the same `self --pin --dest`
+line from an up-to-date game_loop clone. Every repo wired to that path picks up the change the next
+time any hook fires — no per-repo action, and nothing automatic or scheduled.
+
+**Three escape hatches**, because a shared dependency is a shared failure mode (INV5):
+
+1. **Open a session rooted at the central path itself.** That session's own write guard treats the
+   central checkout as *its* repo, so fixing a bad central update is an ordinary edit, not a special
+   procedure.
+2. **Each shim degrades on its own hook's existing terms**, never a hard crash: `guard-writes.sh`
+   fails **open** (same reason it always has — it's on the Write/Edit/Bash matcher that would repair
+   it) with a loud, non-silent notice; `guard-mcp.sh` fails **closed** (same reason it always has — an
+   unguarded MCP call can be irreversible); `watchdog` fails open, silently (an accepted, pre-existing
+   degradation); `verify` exits non-zero with real output, so `confidence --mark` reads "cannot
+   verify" rather than a false clean; `game_loop`'s hook subcommands fail open, its interactive ones
+   fail loud to stderr.
+3. **Any single repo reverts** to full local copies with a bare re-install: `install.sh /path/to/repo`
+   with no `--central`. The summary says so out loud either direction — this never flips silently.

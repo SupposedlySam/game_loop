@@ -114,6 +114,10 @@ Then **restart Claude Code** (hooks are read when a session starts) and confirm:
 Installing adds a `.game_loop/` directory and merges its hooks into `.claude/settings.json`. It never
 overwrites files you own.
 
+Installing several repos on one machine? `install.sh --central` wires a repo to run the tool from one
+shared, machine-wide location instead of copying it in — see "Central install" in
+[docs/how-it-works.md](docs/how-it-works.md) for setup and tradeoffs.
+
 ## Your first unattended run
 
 Three steps. This is genuinely most of what a human does.

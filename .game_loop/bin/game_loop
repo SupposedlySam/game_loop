@@ -4421,7 +4421,10 @@ def pinned_sha():
 
 def run_verify_check():
     """'' when nothing is owed, else the text of what is stale. Never raises."""
-    v = os.path.join(ROOT, "bin", "verify")
+    # CODE_ROOT, not ROOT: the binary comes from wherever this process's code came from — pinned or
+    # central dispatch both keep reading that code's verify, never a copy that may not exist locally
+    # at all. Same reasoning as coverage_report() just below; this one had drifted from it.
+    v = os.path.join(CODE_ROOT, "bin", "verify")
     if not os.path.isfile(v):
         return ""
     try:
@@ -5501,8 +5504,17 @@ def cmd_self(s, a):
     Writes nothing outside the repo: the checkout lands in <repo>/.game_loop_self, and the hooks
     block is PRINTED for .claude/settings.local.json rather than written over a file that may hold
     the human's own settings.
+
+    --dest overrides where the checkout lands, for the one caller outside this repo that needs a
+    checkout somewhere else entirely: a machine-wide central install that `install.sh --central`
+    points many *other* repos' dispatcher shims at (see docs/how-it-works.md). Everything above still
+    applies to that copy — OWNED_FILES stripped, VERSION/PINNED stamped, resolve_home still refuses a
+    bare run against it — this flag only changes WHERE, never the safety properties of what lands
+    there.
     """
-    dest = os.path.join(REPO_ROOT, PINNED_DIRNAME)
+    if a.dest and not a.pin:
+        die("self --dest: only meaningful with --pin — it names where the checkout should land.")
+    dest = os.path.abspath(os.path.expanduser(a.dest)) if a.dest else os.path.join(REPO_ROOT, PINNED_DIRNAME)
     code = os.path.join(dest, ".game_loop")
     if not a.pin:
         if CODE_ROOT != ROOT:
@@ -5547,16 +5559,23 @@ def cmd_self(s, a):
     with open(os.path.join(code, "VERSION"), "w") as f:
         f.write(sha + "\n")
     with open(os.path.join(code, PINNED_MARK), "w") as f:
+        # "home" names the ONE project this pin belongs to — meaningless for a --dest checkout meant
+        # to serve many different consumers, so it is left null rather than naming whichever repo
+        # happened to run the pin command.
         json.dump({"ref": a.pin, "sha": sha, "at": datetime.datetime.now().isoformat(
-            timespec="seconds"), "home": ROOT}, f, indent=2)
+            timespec="seconds"), "home": None if a.dest else ROOT}, f, indent=2)
         f.write("\n")
     logline({"kind": "self_pin", "ref": a.pin, "sha": sha, "dest": code})
     out(f"pinned {a.pin} ({sha[:8]}) → {code}",
         f"  dropped the project's own files from the copy: {', '.join(dropped) or '(none present)'}",
         f"  stamped VERSION and {PINNED_MARK} — running this code without {HOME_ENV} now REFUSES,",
-        "  rather than quietly checking the copy instead of the project.",
-        f"  add {PINNED_DIRNAME}/ to .gitignore if it is not there already.",
-        "", *self_hooks_block(code))
+        "  rather than quietly checking the copy instead of the project.")
+    if a.dest:
+        out("  this is a --dest checkout, not the repo's own .game_loop_self — wire consumer repos",
+            "  at it with `install.sh --central`, not with the hooks block below.")
+    else:
+        out(f"  add {PINNED_DIRNAME}/ to .gitignore if it is not there already.",
+            "", *self_hooks_block(code))
 
 
 def self_hooks_block(code):
@@ -6141,6 +6160,11 @@ def main():
                     help="check .game_loop out of REF into <repo>/.game_loop_self and stamp it, so "
                          "the hooks can run code that editing this repo cannot break. No --pin: "
                          "report what is pinned now and print the hook wiring.")
+    sf.add_argument("--dest", metavar="PATH",
+                    help="with --pin: check out to PATH instead of <repo>/.game_loop_self — for a "
+                         "machine-wide central install other repos dispatch to via "
+                         "`install.sh --central` (see docs/how-it-works.md), not for this repo's own "
+                         "hooks.")
 
     sub.add_parser("stopgate")    # Stop-hook entrypoint; not for humans
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans

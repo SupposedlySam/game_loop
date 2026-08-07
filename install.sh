@@ -5,6 +5,8 @@
 #   One-liner:      curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- .
 #   A worktree:     ./install.sh /path/to/project/.worktrees/feature      (adopts the project's rules)
 #   A sibling tree: ./install.sh --same-as /path/to/project /path/to/copy
+#   Central code:   ./install.sh --central /path/to/your/project   (dispatches to a shared, machine-
+#                    wide install instead of copying the tool in — see docs/how-it-works.md)
 #
 # The one-liner needs no local clone: the installer fetches the payload tarball from GitHub itself.
 # Override the source with GAME_LOOP_REPO=owner/repo and GAME_LOOP_REF=branch|tag (default: main),
@@ -124,7 +126,7 @@ fi
 
 usage() {
   cat <<'USAGE'
-usage: ./install.sh [--same-as <checkout>] [--fresh] /path/to/your/project
+usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] /path/to/your/project
        (or pipe via curl: ... | bash -s -- .)
 
   --same-as <checkout>  carry the SAME harness as <checkout>: copy ITS owned files rather than
@@ -133,12 +135,20 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] /path/to/your/project
                         (a sibling clone, a copied directory, a tarball someone unpacked).
   --fresh               seed the blank templates even in a linked worktree whose main checkout has
                         no harness. The refusal's escape hatch: say it, and it is yours.
+  --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
+                        shims that run it from a shared, machine-wide install instead (set up once
+                        with `game_loop self --pin <ref> --dest ~/.claude/game_loop-central`, or
+                        wherever GAME_LOOP_CENTRAL points). Rules/config (config.json, verify.yaml,
+                        INVARIANTS.md, LEDGER.md) still seed locally, same as always. See
+                        docs/how-it-works.md for the full story. Omit on a later re-install to
+                        revert this repo back to full local copies.
 USAGE
 }
 
 TARGET=""
 SAME_AS=""
 FORCE_FRESH=0
+CENTRAL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --same-as)
@@ -149,6 +159,7 @@ while [ $# -gt 0 ]; do
       SAME_AS="$2"; shift 2 ;;
     --same-as=*) SAME_AS="${1#--same-as=}"; shift ;;
     --fresh)     FORCE_FRESH=1; shift ;;
+    --central)   CENTRAL=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     --)          shift ;;
     -*)          echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -280,19 +291,58 @@ if [ -f "$TARGET/.game_loop/bin/game_loop" ]; then FRESH=0; else FRESH=1; fi
 echo "Installing game_loop into: $TARGET"
 mkdir -p "$TARGET/.game_loop/bin"
 
-# Always refresh the executables — they are the tool. (flair.py is decoration and notify.py is
-# paging; both are imported by the others and both degrade to no-ops.)
-cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
-   "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
-   "$SRC/.game_loop/bin/guard-mcp.sh" "$SRC/.game_loop/bin/guard-mcp-impl.sh" \
-   "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$SRC/.game_loop/bin/notify.py" \
-   "$SRC/.game_loop/bin/limit-probe.sh" \
-   "$TARGET/.game_loop/bin/"
-chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
-         "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-writes-impl.sh" \
-         "$TARGET/.game_loop/bin/guard-mcp.sh" "$TARGET/.game_loop/bin/guard-mcp-impl.sh" \
-         "$TARGET/.game_loop/bin/verify" "$TARGET/.game_loop/bin/limit-probe.sh"
-echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, guard-mcp.sh + -impl, verify, flair.py, notify.py, limit-probe.sh)"
+# Was this repo centrally wired BEFORE this run? Checked here, before anything below touches
+# .game_loop/bin/ — a repo written by `--central` carries the 5 shims but never guard-writes-impl.sh
+# (see the --central branch below), so its absence on an existing, non-fresh install is the signal.
+WAS_CENTRAL=0
+if [ "$CENTRAL" != 1 ] && [ "$FRESH" != 1 ] && [ ! -f "$TARGET/.game_loop/bin/guard-writes-impl.sh" ]; then
+  WAS_CENTRAL=1
+fi
+
+if [ "$CENTRAL" = 1 ]; then
+  # --central: don't copy the tool at all. Write 5 tiny shims that dispatch to a shared, machine-wide
+  # install instead (docs/how-it-works.md has the full story). The other 5 files a normal install
+  # carries — guard-writes-impl.sh, guard-mcp-impl.sh, limit-probe.sh, notify.py, flair.py — are never
+  # looked up relative to the LOCAL repo (they resolve via CODE_ROOT, wherever the running code
+  # actually lives), so this repo needs none of them, not even as shims.
+  cp "$SRC/templates/central-shims/game_loop" "$SRC/templates/central-shims/watchdog" \
+     "$SRC/templates/central-shims/guard-writes.sh" "$SRC/templates/central-shims/guard-mcp.sh" \
+     "$SRC/templates/central-shims/verify" \
+     "$TARGET/.game_loop/bin/"
+  chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
+           "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-mcp.sh" \
+           "$TARGET/.game_loop/bin/verify"
+  # Remove anything a PRIOR non-central install left behind — switching modes must not leave dead,
+  # unreferenced copies sitting in the tree looking like they still matter.
+  rm -f "$TARGET/.game_loop/bin/guard-writes-impl.sh" "$TARGET/.game_loop/bin/guard-mcp-impl.sh" \
+        "$TARGET/.game_loop/bin/limit-probe.sh" "$TARGET/.game_loop/bin/notify.py" \
+        "$TARGET/.game_loop/bin/flair.py"
+  echo "  $([ "$FRESH" = 1 ] && echo wrote || echo refreshed)  .game_loop/bin/ — 5 dispatcher shims (game_loop, watchdog, guard-writes.sh, guard-mcp.sh, verify), no local copy of the tool"
+  GLC="${GAME_LOOP_CENTRAL:-$HOME/.claude/game_loop-central}"
+  if [ -x "$GLC/.game_loop/bin/game_loop" ]; then
+    echo "  central install found at $GLC — reachable right now"
+  else
+    echo "  ⚠ no central install at $GLC yet — hooks will degrade (open for writes, closed for MCP) until one exists"
+    echo "    populate it with: game_loop self --pin <ref> --dest $GLC"
+  fi
+else
+  # Always refresh the executables — they are the tool. (flair.py is decoration and notify.py is
+  # paging; both are imported by the others and both degrade to no-ops.)
+  cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
+     "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
+     "$SRC/.game_loop/bin/guard-mcp.sh" "$SRC/.game_loop/bin/guard-mcp-impl.sh" \
+     "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$SRC/.game_loop/bin/notify.py" \
+     "$SRC/.game_loop/bin/limit-probe.sh" \
+     "$TARGET/.game_loop/bin/"
+  chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
+           "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-writes-impl.sh" \
+           "$TARGET/.game_loop/bin/guard-mcp.sh" "$TARGET/.game_loop/bin/guard-mcp-impl.sh" \
+           "$TARGET/.game_loop/bin/verify" "$TARGET/.game_loop/bin/limit-probe.sh"
+  echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/bin/ (game_loop, watchdog, guard-writes.sh + -impl, guard-mcp.sh + -impl, verify, flair.py, notify.py, limit-probe.sh)"
+  if [ "$WAS_CENTRAL" = 1 ]; then
+    echo "  reverted from central dispatch to full local copies — this repo no longer depends on a central install"
+  fi
+fi
 
 # The behaviour record ships and is ALWAYS refreshed — it is tool data, not one of the project's own
 # files. Refreshing it is what makes the installed copy mean "the record as of your install", which

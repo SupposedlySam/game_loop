@@ -4032,6 +4032,123 @@ def main():
     finally:
         shutil.rmtree(cl, ignore_errors=True)
 
+    # A MACHINE-WIDE THIRD LAYER (~/.game_loop/config.json), on top of config.json + config.local.json.
+    # Unlike config.local.json (a site override for ONE project), this is read by EVERY project's own
+    # guard scripts — full install or --central — so a trust grant made once applies everywhere,
+    # without hand-editing each project. The one property that makes this safe rather than a landmine:
+    # trust-LIST keys UNION across all three sources instead of replacing, so a global grant can never
+    # be silently erased by a project's own (possibly absent) same-key list, and vice versa.
+    print("a machine-wide config layer (~/.game_loop/config.json) unions with a project's own:")
+    gh = make_sandbox()          # doubles as the fake $HOME for these cases
+    gw = make_sandbox()          # the project actually being guarded
+    try:
+        ghome_cfg = os.path.join(gh, ".game_loop", "config.json")
+        gproj_cfg = os.path.join(gw, ".game_loop", "config.json")
+
+        def _global(**kw):
+            with open(ghome_cfg) as f:
+                c = json.load(f)
+            c.update(kw)
+            with open(ghome_cfg, "w") as f:
+                json.dump(c, f)
+
+        def _proj(**kw):
+            with open(gproj_cfg) as f:
+                c = json.load(f)
+            c.update(kw)
+            with open(gproj_cfg, "w") as f:
+                json.dump(c, f)
+
+        def _mcp_call(tool, home=None):
+            r = subprocess.run([os.path.join(gw, ".game_loop", "bin", "guard-mcp.sh")],
+                               input=json.dumps({"tool_name": tool, "session_id": "sess-gh",
+                                                 "tool_input": {}}),
+                               capture_output=True, text=True,
+                               env=_env(gw, sid="sess-gh", HOME=home or gh))
+            try:
+                d = json.loads(r.stdout)["hookSpecificOutput"]
+                return d["permissionDecision"], d.get("permissionDecisionReason", "")
+            except Exception:  # noqa: BLE001 — no JSON means it allowed
+                return "allow", ""
+
+        _global(mcp_trusted_servers=["mcp__llm_chat__"], mcp_writes="gated")
+        _proj(mcp_writes="gated")
+        check("a server trusted only in the GLOBAL config is trusted for a project with no opinion "
+              "on it at all",
+              _mcp_call("mcp__llm_chat__say")[0] == "allow")
+
+        # mcp_standing_writes only ever applies to a verb ALREADY classified MUTATING (checked as an
+        # `elif first in MUTATE_VERBS` — see guard-mcp-impl.sh's verdict section) — unlike
+        # mcp_trusted_servers just above, which is unconditional. "update" is a real MUTATE_VERBS
+        # entry; a made-up verb here would silently test the unclassifiable path instead.
+        _global(mcp_standing_writes=["mcp__global_own__update"])
+        _proj(mcp_standing_writes=["mcp__project_own__update"])
+        check("global mcp_standing_writes and a project's own DIFFERENT list both take effect — "
+              "union, not replace, in the direction that would otherwise erase the global grant",
+              _mcp_call("mcp__global_own__update")[0] == "allow")
+        check("...and the same call proves it in the OTHER direction — the project's own entry "
+              "survives a global file that never mentioned it",
+              _mcp_call("mcp__project_own__update")[0] == "allow")
+        check("...while an undeclared tool with the same mutating verb is still refused — union "
+              "widens trust, it does not turn off classification",
+              _mcp_call("mcp__nobody_trusts__update")[0] == "deny")
+
+        _global(mcp_writes="disabled")
+        _proj(mcp_writes="gated", mcp_standing_writes=[])
+        _d1, _r1 = _mcp_call("mcp__unclassifiable__thing")
+        check("a SCALAR key still uses normal override, not union: the project's own mcp_writes "
+              "wins over the global default",
+              _d1 == "deny" and "disabled" not in _r1)
+
+        _global(mcp_writes="gated")
+        _proj(mcp_writes="disabled")
+        _d2, _r2 = _mcp_call("mcp__unclassifiable__thing")
+        check("...checked in both directions — the project's stricter setting also wins when it is "
+              "the one that differs",
+              _d2 == "deny" and 'mcp_writes: "disabled"' in _r2)
+
+        os.remove(ghome_cfg)
+        _proj(mcp_writes="gated", mcp_standing_writes=["mcp__project_own__update"])
+        check("with no ~/.game_loop/config.json at all, behavior is unchanged from a plain "
+              "config.json + config.local.json merge",
+              _mcp_call("mcp__project_own__update")[0] == "allow"
+              and _mcp_call("mcp__nobody_trusts__update")[0] == "deny")
+
+        with open(ghome_cfg, "w") as f:
+            f.write("{not valid json")
+        check("...and a MALFORMED global config degrades to 'as if absent' rather than taking the "
+              "guard down",
+              _mcp_call("mcp__project_own__update")[0] == "allow")
+
+        # The write guard's OWN CONFIG_MERGED reader is a separate, identical block in a different
+        # file (guard-writes-impl.sh) — prove it independently rather than assuming the guard-mcp
+        # result generalizes.
+        with open(ghome_cfg, "w") as f:
+            json.dump({"allow_write_roots": [os.path.join(gh, "global-scratch")]}, f)
+        with open(gproj_cfg) as f:
+            _pc = json.load(f)
+        _pc["allow_write_roots"] = [os.path.join(gw, "project-scratch")]
+        with open(gproj_cfg, "w") as f:
+            json.dump(_pc, f)
+        os.makedirs(os.path.join(gh, "global-scratch"), exist_ok=True)
+        os.makedirs(os.path.join(gw, "project-scratch"), exist_ok=True)
+
+        def _write_call(path):
+            return subprocess.run([os.path.join(gw, ".game_loop", "bin", "guard-writes.sh")],
+                                  input=json.dumps({"tool_name": "Write",
+                                                    "tool_input": {"file_path": path}}),
+                                  capture_output=True, text=True,
+                                  env=_env(gw, sid="sess-gh", HOME=gh))
+
+        check("the write guard's own config merge unions allow_write_roots the same way — a "
+              "globally-allowed root ...",
+              not denied(_write_call(os.path.join(gh, "global-scratch", "f.txt"))))
+        check("...and the project's OWN allowed root, together, neither shadowing the other",
+              not denied(_write_call(os.path.join(gw, "project-scratch", "f.txt"))))
+    finally:
+        shutil.rmtree(gh, ignore_errors=True)
+        shutil.rmtree(gw, ignore_errors=True)
+
     print("a project can declare the narrow set of MCP writes it trusts (#56):")
     sw = make_sandbox()
     try:

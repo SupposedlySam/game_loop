@@ -5263,6 +5263,135 @@ def main():
         shutil.rmtree(sp, ignore_errors=True)
         shutil.rmtree(pin, ignore_errors=True)
 
+    # CENTRAL INSTALL (`self --pin --dest`; `install.sh --central`). Every repo installing game_loop
+    # today carries its OWN full copy of the tool. This lets many repos share ONE code location,
+    # updated in one place, while each repo keeps only its own config/state — reusing the exact
+    # CODE_ROOT/GAME_LOOP_HOME split the pinned-harness tests above already prove, just with the code
+    # living at an arbitrary shared path instead of <repo>/.game_loop_self.
+    print("central install (self --pin --dest; install.sh --central):")
+    cc_glc = tempfile.mkdtemp(prefix="gameloop-central-glc-")
+    shutil.rmtree(cc_glc)  # self --pin --dest must create it fresh, not merely use an empty dir
+    cc_target = tempfile.mkdtemp(prefix="gameloop-central-target-")
+    cc_plain = tempfile.mkdtemp(prefix="gameloop-central-plain-")
+    try:
+        gl_bin = os.path.join(SRC_GAME_LOOP, "bin", "game_loop")
+
+        # Populate the shared central copy from THIS repo's own HEAD — the real, already-tested
+        # self --pin machinery, just pointed at an arbitrary path instead of the repo-relative
+        # default. Read-only against the repo (git archive of a committed ref); nothing here can
+        # leave the real game_loop checkout dirty.
+        pin_r = subprocess.run([gl_bin, "self", "--pin", "HEAD", "--dest", cc_glc],
+                               cwd=REPO, capture_output=True, text=True, env=_env())
+        check("self --pin --dest lands the checkout at the given path, not under the repo",
+              pin_r.returncode == 0
+              and os.path.isfile(os.path.join(cc_glc, ".game_loop", "bin", "game_loop"))
+              and not os.path.join(cc_glc, ".game_loop").startswith(REPO + os.sep))
+        check("...still strips the project's own identity files",
+              not any(os.path.exists(os.path.join(cc_glc, ".game_loop", o))
+                      for o in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md")))
+        with open(os.path.join(cc_glc, ".game_loop", "PINNED")) as f:
+            pinned_marker = json.load(f)
+        check("...still stamps VERSION and PINNED, with home left null — many consumers, not one",
+              os.path.isfile(os.path.join(cc_glc, ".game_loop", "VERSION"))
+              and pinned_marker.get("home") is None)
+        check("...still chmods the binaries executable, or the hooks would silently never run",
+              os.access(os.path.join(cc_glc, ".game_loop", "bin", "guard-writes.sh"), os.X_OK))
+        check("...points at install.sh --central instead of printing the in-repo hooks block",
+              "install.sh --central" in pin_r.stdout
+              and "TRACKED .claude/settings.json" not in pin_r.stdout)
+
+        bad = subprocess.run([gl_bin, "self", "--dest", cc_glc], cwd=REPO, capture_output=True,
+                             text=True, env=_env())
+        check("--dest without --pin dies rather than doing nothing quietly",
+              bad.returncode != 0 and "only meaningful with --pin" in bad.stderr)
+
+        # install.sh --central against this real, populated central copy.
+        subprocess.run(["git", "init", "-q"], cwd=cc_target)
+        inst = subprocess.run([os.path.join(REPO, "install.sh"), "--central", cc_target],
+                              capture_output=True, text=True, env=_env(GAME_LOOP_CENTRAL=cc_glc))
+        check("install.sh --central succeeds and says it wrote dispatcher shims",
+              inst.returncode == 0 and "dispatcher shims" in inst.stdout)
+        bin_dir = os.path.join(cc_target, ".game_loop", "bin")
+        check("...writes only the 5 shims — nothing needing a local copy under central dispatch",
+              sorted(os.listdir(bin_dir)) == sorted(["game_loop", "guard-mcp.sh", "guard-writes.sh",
+                                                      "verify", "watchdog"]))
+        check("...and every one of them is a real dispatcher, not a copy of the full payload",
+              all("GAME_LOOP_CENTRAL" in open(os.path.join(bin_dir, f)).read()
+                  for f in os.listdir(bin_dir)))
+        check("...owned files still seed exactly like a normal install",
+              all(os.path.isfile(os.path.join(cc_target, ".game_loop", f))
+                  for f in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md")))
+
+        # settings.json must be BYTE-IDENTICAL to a plain install — that is the entire point of
+        # dispatching through local shims instead of rewriting hook command strings.
+        subprocess.run(["git", "init", "-q"], cwd=cc_plain)
+        subprocess.run([os.path.join(REPO, "install.sh"), cc_plain], capture_output=True, text=True,
+                       env=_env())
+        with open(os.path.join(cc_target, ".claude", "settings.json")) as f:
+            central_settings = f.read()
+        with open(os.path.join(cc_plain, ".claude", "settings.json")) as f:
+            plain_settings = f.read()
+        check("--central's settings.json is byte-identical to a plain install's — no command "
+              "string changed, only what sits at the paths they already named",
+              central_settings == plain_settings)
+
+        # The real shims, doing real dispatching, through a REAL populated central copy.
+        live_env = _env(cc_target, GAME_LOOP_CENTRAL=cc_glc)
+        wr = subprocess.run([os.path.join(bin_dir, "guard-writes.sh")],
+                            input=json.dumps({"tool_name": "Write",
+                                              "tool_input": {"file_path": "/etc/passwd"}}),
+                            capture_output=True, text=True, env=live_env)
+        check("through the shim, the central write guard denies an out-of-repo write exactly like "
+              "a normal install would",
+              denied(wr) and "write outside this repo" in wr.stdout)
+        st = subprocess.run([os.path.join(bin_dir, "game_loop"), "status"], cwd=cc_target,
+                            capture_output=True, text=True, env=live_env)
+        check("`status`, dispatched through the shim, prints the EXISTING pinned-code report "
+              "unmodified — proving no new status code was needed for the happy path",
+              "PINNED CODE" in st.stdout and cc_glc in st.stdout and cc_target in st.stdout)
+
+        # Central MISSING: each shim degrades exactly per its own hook's existing, already-justified
+        # posture — never a hard crash, and never silent either way.
+        missing_env = _env(cc_target, GAME_LOOP_CENTRAL=os.path.join(cc_glc, "does-not-exist"))
+        wr_missing = subprocess.run([os.path.join(bin_dir, "guard-writes.sh")],
+                                    input=json.dumps({"tool_name": "Write",
+                                                      "tool_input": {"file_path": "/etc/passwd"}}),
+                                    capture_output=True, text=True, env=missing_env)
+        check("write-guard shim fails OPEN when central is unreachable, and says so out loud",
+              not denied(wr_missing) and "THE WRITE GUARD IS NOT RUNNING" in wr_missing.stdout)
+        mc_missing = subprocess.run([os.path.join(bin_dir, "guard-mcp.sh")],
+                                    input=json.dumps({"tool_name": "mcp__x__write", "tool_input": {}}),
+                                    capture_output=True, text=True, env=missing_env)
+        check("...while the MCP-guard shim fails CLOSED, for the opposite already-justified reason",
+              denied(mc_missing) and "guard cannot run" in mc_missing.stdout)
+        gl_missing = subprocess.run([os.path.join(bin_dir, "game_loop"), "limitgate"],
+                                    capture_output=True, text=True, env=missing_env)
+        check("...and the game_loop shim's HOOK subcommands fail open too — never block a live "
+              "tool call over a missing central install",
+              gl_missing.returncode == 0)
+        gl_status_missing = subprocess.run([os.path.join(bin_dir, "game_loop"), "status"],
+                                           capture_output=True, text=True, env=missing_env)
+        check("...but its INTERACTIVE subcommands fail LOUD instead — nobody there is waiting on "
+              "an exit code, they are waiting on an answer",
+              gl_status_missing.returncode == 1 and "no central install at" in gl_status_missing.stderr)
+        vr_missing = subprocess.run([os.path.join(bin_dir, "verify"), "--check"],
+                                    capture_output=True, text=True, env=missing_env)
+        check("...and the verify shim exits non-zero WITH output, so confidence --mark reads "
+              "'cannot verify' rather than silently treating an absent binary as a clean tree",
+              vr_missing.returncode != 0 and vr_missing.stdout.strip() != "")
+
+        # Reverting: a bare re-install (no --central) must restore full local copies, loudly.
+        revert = subprocess.run([os.path.join(REPO, "install.sh"), cc_target], capture_output=True,
+                                text=True, env=_env())
+        check("a bare re-install without --central restores full local copies",
+              os.path.isfile(os.path.join(bin_dir, "guard-writes-impl.sh"))
+              and os.path.isfile(os.path.join(bin_dir, "notify.py")))
+        check("...and says so out loud rather than reverting silently",
+              "reverted from central dispatch" in revert.stdout)
+    finally:
+        for d in (cc_glc, cc_target, cc_plain):
+            shutil.rmtree(d, ignore_errors=True)
+
     # The documented `curl | bash` one-liner could install into a FRESH directory and could never
     # UPGRADE one. Piped, BASH_SOURCE[0] is empty; the old fallback to $0 made `dirname bash` = "."
     # so SRC became the cwd. On a fresh target the file test below it failed and the fetch happened

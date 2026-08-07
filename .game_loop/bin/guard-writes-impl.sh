@@ -184,25 +184,45 @@ then reload the window. \`game_loop self\` prints the whole block."
 fi
 REPO="${CLAUDE_PROJECT_DIR:-$(dirname "$GAMELOOP_DIR")}"
 CONFIG_F="$GAMELOOP_DIR/config.json"
-# config.local.json layered over config.json, computed ONCE and handed to every embedded reader
-# below. A gitignored local override that only SOME components honour is worse than none at all: it
-# works where you test it and not where it matters. (Shipped exactly that way once -- the waiting
-# probe lived in the local file and the watchdog, which is the component that needed it, could not
-# see it.) Merging here rather than in each block keeps one place to get it wrong instead of five.
+# ~/.game_loop/config.json (machine-wide) + config.json + config.local.json, computed ONCE and handed
+# to every embedded reader below. A gitignored local override that only SOME components honour is
+# worse than none at all: it works where you test it and not where it matters. (Shipped exactly that
+# way once -- the waiting probe lived in the local file and the watchdog, which is the component that
+# needed it, could not see it.) Merging here rather than in each block keeps one place to get it wrong
+# instead of five.
+#
+# TRUST-LIST keys UNION across all three sources instead of replacing: a machine-wide grant
+# (~/.game_loop/config.json -> mcp_trusted_servers, say) must never be silently erased by a project
+# that happens to set its OWN, different list for the same key, and a project's own grant must never
+# be shadowed by the machine-wide file either. Everything else keeps normal later-wins replace, so a
+# project can still override a machine-wide scalar default (e.g. mcp_writes).
 CONFIG_MERGED='{}'   # set BEFORE the computation: the line below exports the whole env
                      # into its own subshell, and under `set -u` that read itself.
 CONFIG_MERGED=$(CONFIG_F="$CONFIG_F" python3 -c '
 import io, json, os
-cfg = {}
-for p in (os.environ["CONFIG_F"],
-          os.path.join(os.path.dirname(os.environ["CONFIG_F"]), "config.local.json")):
+UNION_KEYS = {"read_roots", "allow_write_roots", "deploy_verbs", "generated_globs",
+              "mcp_read_only_tools", "mcp_standing_writes", "mcp_trusted_servers"}
+cfg, union = {}, {}
+paths = [os.path.join(os.path.expanduser("~"), ".game_loop", "config.json"),
+         os.environ["CONFIG_F"],
+         os.path.join(os.path.dirname(os.environ["CONFIG_F"]), "config.local.json")]
+for p in paths:
     try:
         with open(p) as f:
             d = json.load(f)
     except (OSError, ValueError):
         continue
-    if isinstance(d, dict):
-        cfg.update(d)
+    if not isinstance(d, dict):
+        continue
+    for k, v in d.items():
+        if k in UNION_KEYS and isinstance(v, list):
+            bucket = union.setdefault(k, [])
+            for item in v:
+                if item not in bucket:
+                    bucket.append(item)
+        else:
+            cfg[k] = v
+cfg.update(union)
 print(json.dumps(cfg))
 ' 2>/dev/null)
 [ -n "$CONFIG_MERGED" ] || CONFIG_MERGED='{}'

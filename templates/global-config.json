@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Reference example for ~/.game_loop/config.json — a MACHINE-WIDE config layer every game_loop",
+    "install (full or --central) reads in addition to its own project config.json/config.local.json.",
+    "Not installed by anything: copy what you need to ~/.game_loop/config.json by hand, once.",
+    "",
+    "Only covers projects that already run game_loop (full install or --central dispatch) — a project",
+    "with no game_loop install at all never invokes any guard script, so nothing here reaches it.",
+    "",
+    "List-valued trust keys (read_roots, allow_write_roots, deploy_verbs, generated_globs,",
+    "mcp_read_only_tools, mcp_standing_writes, mcp_trusted_servers) UNION with each project's own —",
+    "an entry here is never silently replaced by a project's own list for the same key, and vice",
+    "versa. Everything else (e.g. mcp_writes) is a normal override: a project's own value wins.",
+    "",
+    "See docs/how-it-works.md for the full semantics; see README.md's Configure section for what",
+    "each key means."
+  ],
+  "mcp_trusted_servers": [
+    "mcp__llm_chat__"
+  ],
+  "mcp_standing_writes": [
+    "mcp__plugin_dart-flutter_dart-mcp-server__hot_reload",
+    "mcp__plugin_dart-flutter_dart-mcp-server__hot_restart"
+  ]
+}

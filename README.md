@@ -467,6 +467,25 @@ anything machine- or checkout-specific there — a `waiting_probe` naming your t
 root — so it never seeds into anyone else's install. `status` names how many keys are overridden and
 which, because a config you cannot see is a divergence nobody can explain.
 
+### Machine-wide trust: `~/.game_loop/config.json`
+
+A third layer, read by every project's write guard and MCP guard (full install or `--central`) in
+addition to its own `config.json` + `config.local.json` — for a grant you want to make *once*, for
+this machine, rather than re-declare in every project. `templates/global-config.json` in this repo is
+a starting point; nothing installs it automatically — copy what you need to `~/.game_loop/config.json`
+by hand.
+
+The trust-list keys (`read_roots`, `allow_write_roots`, `deploy_verbs`, `generated_globs`,
+`mcp_read_only_tools`, `mcp_standing_writes`, `mcp_trusted_servers`) **union** across all three files
+instead of replacing — a global grant can't be silently erased by a project's own (possibly absent)
+same-key list, and a project's own grant survives a global file that never mentions it. Everything
+else uses normal later-wins override, so a project can still narrow a global default (e.g. `mcp_writes`).
+
+**One real limit, not silently swept under**: this only reaches projects that already run some form of
+game_loop. A project with no `.game_loop/` at all never invokes any guard script in the first place, so
+nothing in `~/.game_loop/config.json` reaches it — there is currently no global, no-install-required
+layer.
+
 ### Prose that quotes code goes through a file
 
 Every option taking free prose has a `--<name>-file PATH` twin, and an inline value over 400

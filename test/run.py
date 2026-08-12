@@ -5056,6 +5056,33 @@ def main():
               _trigger_target('bash "/definitely/not/here/nope.sh"') == "/definitely/not/here/nope.sh"
               and not os.path.isfile("/definitely/not/here/nope.sh"))
 
+    print("a trigger wired to a moment that does not exist can never fire, and says so:")
+    # THE HALF ONLY THIS REPO CAN FALSIFY. A neighbouring project hosts a trigger and asserts that
+    # its own docstring, wiring example and instruction all AGREE about which moment to recommend.
+    # Agreement is all it can check: if it recommended a fourth moment that does not exist, all
+    # three would say so in unison and its suite would pass. Whether the moment EXISTS is a fact
+    # about game_loop, falsifiable only here — its own words, handed over as the residue.
+    gw = make_sandbox()
+    try:
+        _gtj = os.path.join(gw, ".game_loop", "triggers.json")
+        with open(_gtj, "w") as f:
+            json.dump({"blessing": [{"name": "ghost", "command": "echo hi"}],
+                       "harden": [{"name": "real", "command": "echo hi"}]}, f)
+        _gs = gl(gw, "status", sid="sess-ghost").stdout
+        check("a trigger wired to a moment game_loop does not have is told it will NEVER fire — "
+              "not that it might be waiting, which is what 'never fired' reads as",
+              "THERE IS NO SUCH MOMENT" in _gs and "never fire" in _gs)
+        check("...and the refusal LISTS the real moments, so the reader can fix it from the "
+              "message rather than going to look for them",
+              "confidence" in _gs and "harden" in _gs and "stepback" in _gs)
+        # PAIRED, or the check is just a louder version of the ambiguity it replaced: a REAL moment
+        # that simply has not come round yet must still be reported as patient, not as broken.
+        check("...while a real moment that has merely not come round yet is still reported as "
+              "possibly waiting — two causes that used to share one message now have two",
+              "CONFIGURED BUT NEVER FIRED" in _gs)
+    finally:
+        shutil.rmtree(gw, ignore_errors=True)
+
     print("triggers — a project's own attachments to the loop:")
     tpp = make_sandbox()
     try:

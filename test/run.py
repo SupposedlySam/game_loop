@@ -14,6 +14,7 @@ import inspect
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -5009,6 +5010,52 @@ def main():
     # The failure mode this design is most exposed to is the one the usage-limit tap just taught:
     # something configured, never running, and looking exactly like something working. So every
     # assertion here is paired, and `status` is required to name an attachment that has never fired.
+    print("every configured trigger command actually exists and can run:")
+    # NAMES NO TOOL, deliberately. It reads whatever is configured, so it cannot walk back into the
+    # thing it is guarding against — a check that hardcoded a neighbour's path would put that
+    # neighbour's name in a public tree, which is how this started.
+    _tj = os.path.join(SRC_GAME_LOOP, "triggers.json")
+    if not os.path.exists(_tj):
+        # SKIPPED, NOT FAILED, and said out loud. triggers.json is gitignored and a fresh clone
+        # legitimately has none; failing here would make every consumer's suite red for a file they
+        # were never meant to have.
+        check("no triggers.json in this checkout — nothing configured to check (skipped, not "
+              "passed: a clone legitimately has none)", True)
+    else:
+        with open(_tj) as f:
+            _tcfg = json.load(f)
+        _cmds = [(ev, t.get("name"), t.get("command") or "")
+                 for ev, ts in _tcfg.items() if isinstance(ts, list) for t in ts]
+
+        def _trigger_target(cmd):
+            """The file a trigger command runs, with $GAME_LOOP_ROOT expanded — or None."""
+            c = cmd.replace("$GAME_LOOP_ROOT", SRC_GAME_LOOP).replace(
+                "${GAME_LOOP_ROOT}", SRC_GAME_LOOP)
+            for tok in shlex.split(c):
+                if os.path.sep in tok and not tok.startswith("-"):
+                    return tok
+            return None
+
+        _broken = []
+        for _ev, _name, _cmd in _cmds:
+            _t = _trigger_target(_cmd)
+            if _t is None:
+                continue                      # an inline command with no file is its own business
+            if not (os.path.isfile(_t) and os.access(_t, os.R_OK)):
+                _broken.append(f"{_name}: {_t}")
+        check(f"every configured trigger names a file that exists and is readable "
+              f"({len(_cmds)} configured)"
+              + (" · BROKEN: " + "; ".join(_broken[:3]) if _broken else ""),
+              not _broken)
+        # PAIRED, because "it passed" must not be reachable by having looked at nothing — the exact
+        # silence this check exists to prevent, reproduced inside the check itself.
+        check("...and it EXAMINED something, so a green result is a verdict rather than an empty "
+              "loop over a config with no commands in it",
+              len(_cmds) > 0)
+        check("...and the check can FIRE — a command naming a path that does not exist is reported",
+              _trigger_target('bash "/definitely/not/here/nope.sh"') == "/definitely/not/here/nope.sh"
+              and not os.path.isfile("/definitely/not/here/nope.sh"))
+
     print("triggers — a project's own attachments to the loop:")
     tpp = make_sandbox()
     try:

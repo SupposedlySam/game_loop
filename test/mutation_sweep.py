@@ -596,6 +596,11 @@ NOT_SWEPT = {
         "guards the very files whose fix would be blocked). Its empty-list and non-empty paths are "
         "both asserted directly in a sandbox git repo, four ways including a non-refusal edit to "
         "the same watched file.",
+    "test/run.py::_trigger_target":
+        "extracts the file a configured trigger runs, inside the suite. Its None means an inline "
+        "command with no file, which is legitimate and skipped rather than reported — and the "
+        "can-it-fire arm beside it feeds a path that does not exist and asserts the extractor "
+        "returns it, so a neutered version returning None would take that arm red.",
     "test/run.py::_writes_outside_tmp":
         "the scan that proves this file never writes to the working tree, and it lives inside the "
         "suite. Neutered it finds no writes, so its own gate passes over an empty set — which is "

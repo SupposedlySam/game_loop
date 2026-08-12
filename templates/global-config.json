@@ -1,22 +1,33 @@
 {
   "_comment": [
-    "Reference example for ~/.game_loop/config.json — a MACHINE-WIDE config layer every game_loop",
+    "Reference example for ~/.game_loop/config.json \u2014 a MACHINE-WIDE config layer every game_loop",
     "install (full or --central) reads in addition to its own project config.json/config.local.json.",
     "Not installed by anything: copy what you need to ~/.game_loop/config.json by hand, once.",
     "",
-    "Only covers projects that already run game_loop (full install or --central dispatch) — a project",
+    "Only covers projects that already run game_loop (full install or --central dispatch) \u2014 a project",
     "with no game_loop install at all never invokes any guard script, so nothing here reaches it.",
     "",
     "List-valued trust keys (read_roots, allow_write_roots, deploy_verbs, generated_globs,",
-    "mcp_read_only_tools, mcp_standing_writes, mcp_trusted_servers) UNION with each project's own —",
+    "mcp_read_only_tools, mcp_standing_writes, mcp_trusted_servers) UNION with each project's own \u2014",
     "an entry here is never silently replaced by a project's own list for the same key, and vice",
     "versa. Everything else (e.g. mcp_writes) is a normal override: a project's own value wins.",
     "",
     "See docs/how-it-works.md for the full semantics; see README.md's Configure section for what",
-    "each key means."
+    "each key means.",
+    "",
+    "mcp_trusted_servers IS THE WIDEST DOOR HERE, and the example above is a PLACEHOLDER rather",
+    "than a recommendation. Every call to a named server is allowed \u2014 irreversible verbs, landing",
+    "verbs and mutating arguments included \u2014 so name only servers your team wrote and maintains,",
+    "and delete the example rather than leaving it in. `status` reports the list in capitals for",
+    "the same reason.",
+    "",
+    "It deliberately does not name a real server. A template is copied whole more often than it is",
+    "read line by line, so a real name here would hand every copier a live grant to a server they",
+    "may not run \u2014 and it would make this public tree's contents depend on whether a neighbouring",
+    "repo happens to be public, which is not a fact this file can check or should assume."
   ],
   "mcp_trusted_servers": [
-    "mcp__llm_chat__"
+    "mcp__yourserver__"
   ],
   "mcp_standing_writes": [
     "mcp__plugin_dart-flutter_dart-mcp-server__hot_reload",

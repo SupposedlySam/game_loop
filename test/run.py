@@ -4072,11 +4072,11 @@ def main():
             except Exception:  # noqa: BLE001 — no JSON means it allowed
                 return "allow", ""
 
-        _global(mcp_trusted_servers=["mcp__llm_chat__"], mcp_writes="gated")
+        _global(mcp_trusted_servers=["mcp__examplesrv__"], mcp_writes="gated")
         _proj(mcp_writes="gated")
         check("a server trusted only in the GLOBAL config is trusted for a project with no opinion "
               "on it at all",
-              _mcp_call("mcp__llm_chat__say")[0] == "allow")
+              _mcp_call("mcp__examplesrv__say")[0] == "allow")
 
         # mcp_standing_writes only ever applies to a verb ALREADY classified MUTATING (checked as an
         # `elif first in MUTATE_VERBS` — see guard-mcp-impl.sh's verdict section) — unlike

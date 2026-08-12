@@ -467,6 +467,30 @@ anything machine- or checkout-specific there — a `waiting_probe` naming your t
 root — so it never seeds into anyone else's install. `status` names how many keys are overridden and
 which, because a config you cannot see is a divergence nobody can explain.
 
+### One shared copy instead of one per repo — `install.sh --central`
+
+Every project can dispatch to a single machine-wide install rather than carrying its own copy of the
+tool. Populate or refresh that copy with:
+
+```bash
+game_loop self --pin <ref> --dest ~/.claude/game_loop-central
+```
+
+`--dest` is only for the shared copy — without it, `self --pin` pins *this* repo's own harness in
+`.game_loop_self/`. Full semantics in [docs/how-it-works.md](docs/how-it-works.md).
+
+### What this harness believes about its host — `.game_loop/claims.json`
+
+Load-bearing facts about Claude Code that the limit machinery rests on, each recorded with what
+**breaks** if it moved. A claim cannot be checked automatically; its *subject* can be, so each entry
+carries `verified_on` and `verified_against` — the host version it was last re-read against. `null`
+means nobody has re-read it, and `status` says exactly that rather than implying agreement.
+
+Where a fact can be **provoked** rather than stamped, it is: `exercisable` is `yes` / `yes-not-yet` /
+`no`, and `exercised_by` names the live evidence. An exercise checks the claim on *your* machine
+every run and cannot go stale; a stamp records that the author checked it on theirs. Some facts are
+unconditional absences with nothing to provoke, and those say so instead of pretending otherwise.
+
 ### Machine-wide trust: `~/.game_loop/config.json`
 
 A third layer, read by every project's write guard and MCP guard (full install or `--central`) in

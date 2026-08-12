@@ -5978,6 +5978,54 @@ def main():
     finally:
         shutil.rmtree(mw, ignore_errors=True)
 
+    print("the account-scoped snapshot is shared across a project's worktrees:")
+    # THE RESOURCE IS ACCOUNT-WIDE AND THE FILE WAS PER-CHECKOUT. #47 settled that a linked worktree
+    # IS this project — for the write guard — and that rule never reached the limits snapshot. Every
+    # worktree resolved it under its own ROOT, and it is gitignored so it does not cross, so N
+    # worktrees meant N snapshots of one account's windows, N probes fetching the same number, and
+    # N leases each believing it was alone. Found by an orchestrator reading this source against its
+    # own dispatch topology, after I told it the lease covered its fan-out.
+    lw2 = make_sandbox()
+    try:
+        _ld2 = importlib.machinery.SourceFileLoader(
+            "gl_lim", os.path.join(lw2, ".game_loop", "bin", "game_loop"))
+        _gl2 = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lim", _ld2))
+        _ld2.exec_module(_gl2)
+
+        _main = os.path.join(lw2, "mainco")
+        os.makedirs(os.path.join(_main, ".game_loop"), exist_ok=True)
+        _gl2.main_checkout = lambda: _main
+        _gl2._LIMITS_PATH = None
+        check("from a linked worktree the snapshot resolves to the MAIN checkout — one account, one "
+              "file, so the lease and the reading are shared rather than duplicated per tree",
+              _gl2.limits_file() == os.path.join(_main, ".game_loop", "limits.json"))
+        # PAIRED: the ordinary case must be unchanged, or this would relocate every solo install.
+        _gl2.main_checkout = lambda: None
+        _gl2._LIMITS_PATH = None
+        check("...while a repo that is NOT a worktree keeps its own, so the fix relocates nothing "
+              "for the ordinary single-checkout install",
+              _gl2.limits_file() == _gl2.LIMITS_F)
+        # DEGRADES, NEVER RAISES: this runs inside a statusline refresh and a Stop hook.
+        def _boom():
+            raise RuntimeError("git said no")
+        _gl2.main_checkout = _boom
+        _gl2._LIMITS_PATH = None
+        check("...and a git that cannot answer degrades to this tree rather than raising — a "
+              "snapshot in the wrong place is a degraded reading, a raise takes the hook down",
+              _gl2.limits_file() == _gl2.LIMITS_F)
+
+        # ONLY THE SNAPSHOT MOVES. Sharing session state, the edited set, claims or authorizations
+        # would collapse the isolation the worktree exists for.
+        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        check("...and ONLY the snapshot moved: state, claims and authorizations still resolve under "
+              "this tree's own ROOT, which is the isolation a worktree is for",
+              'STATE_F = ' in _src and "os.path.join(ROOT" in _src)
+        check("...and the lock moved WITH the data file, since a shared file with per-tree locks "
+              "races worse than the private files it replaced",
+              'os.path.dirname(limits_file()), ".limits.lock"' in _src)
+    finally:
+        shutil.rmtree(lw2, ignore_errors=True)
+
     print("the limit probe: a reading on a host that renders no statusline:")
     # THE COST IS REAL AND SO IS THE ALTERNATIVE. ~24k input tokens per run, measured, against an
     # unattended run that hits its limit at 1am, dies mid-action, and is still dead at 7am because

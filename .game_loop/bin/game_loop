@@ -5655,6 +5655,120 @@ def _extract_game_loop(sha, dest):
         raise RuntimeError(f"that commit carries no .game_loop/bin/game_loop")
 
 
+def session_models(path=None):
+    """Every model this session has answered on, in order — or None if it cannot be read.
+
+    Returns {"models": [...], "first": str, "last": str, "changed": bool}.
+
+    NOT A SCALAR, and that correction came from showrunner rather than from me. I first returned
+    the last model named, which is wrong for the failure this exists to catch: `--fallback-model`
+    does not fail at spawn, it degrades MID-RUN under load, silently. A single value reports
+    whichever message happened to be read and cannot represent "started as Sonnet, fell back to
+    Haiku at message 400" — and that is the shape most likely to happen on a real fan-out, when
+    every Crawler hits the same limit at the same moment. A scalar there is a reading of the wrong
+    subject.
+
+    NO HOOK PAYLOAD CARRIES THE MODEL. Verified against a real captured Stop payload: cwd, effort,
+    permission_mode, session_id, transcript_path, and no model anywhere. The statusline payload has
+    `model.display_name` and is TUI-only, so an editor-hosted session never sees it. The transcript
+    records it per assistant message and every hook payload points at the transcript, so this works
+    on every host with nothing to configure.
+
+    `<synthetic>` records are the harness talking rather than a model answering, and are skipped —
+    counting them would report the harness to itself.
+    """
+    path = path or (load() or {}).get("transcript_path")
+    if not path or not os.path.isfile(path):
+        return None
+    tail, _stats, why_not = _scan_transcript(path)
+    if why_not:
+        return None
+    seen = []
+    for rec in tail:
+        m = ((rec.get("message") or {}) if isinstance(rec, dict) else {}).get("model")
+        if isinstance(m, str) and m and not m.startswith("<") and (not seen or seen[-1] != m):
+            seen.append(m)
+    if not seen:
+        return None
+    # Ordered-unique-by-adjacency above, so an A→B→A flip keeps all three and `changed` stays true.
+    return {"models": seen, "first": seen[0], "last": seen[-1],
+            "changed": len(set(seen)) > 1}
+
+
+MODEL_F = "model.json"
+
+
+def write_model_verdict():
+    """Publish what this session is running, where the PARENT can read it. Returns the verdict.
+
+    THE READER IS NOT THIS SESSION. A status line about a model mismatch is read by the Crawler,
+    which is the one party that can do nothing about it: it cannot switch its own model, and by the
+    time it reads the line the run is already priced. The party that can act is the orchestrator
+    that dispatched it — a different process, outside, reconciling from the parent.
+    (showrunner's INV22: a caveat filed where the reader does not stand.)
+
+    So the verdict is a FILE under this session's own directory, keyed by session id, which is what
+    a parent already holds in its dispatch record. Written on every hook run, so it stays current
+    without the Crawler cooperating or even knowing.
+    """
+    v = session_models()
+    if not v or not SESSION:
+        return None
+    v = dict(v, session=SESSION, observed_at=now())
+    try:
+        d = os.path.join(SESSIONS_DIR, SESSION)
+        os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".model.", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(v, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, os.path.join(d, MODEL_F))
+    except OSError:
+        pass                      # a verdict nobody can write is not worth taking a hook down for
+    return v
+
+
+def model_report(s):
+    """What model is running, and whether it CHANGED under the run's feet.
+
+    ADVISORY, NEVER A GATE, and for a reason worth stating: a model mismatch is not a correctness
+    failure, it is a COST failure. An Opus-priced Crawler doing Sonnet work produces perfectly good
+    output, which is exactly why nothing notices and why it can run for a week. Bricking a
+    deliberately-dispatched Crawler would be the guard doing more damage than the thing it guards.
+
+    NOTHING HAS TO BE DECLARED for this to be useful, which is what makes the feature optional by
+    construction rather than by a config default. The check that matters — did the model change
+    mid-run — is answerable from the transcript alone, with no knob for anyone to forget to set.
+    """
+    # Take the path from the state handed in rather than re-reading the global: a report that
+    # ignores its own argument cannot be exercised except through the whole binary.
+    v = session_models((s or {}).get("transcript_path"))
+    if not v:
+        return []
+    if not v["changed"]:
+        return [f"model: {v['last']}"]
+    return [f"⚠ MODEL CHANGED MID-RUN — {' → '.join(v['models'])}.",
+            "  A fallback degrades under load rather than failing at spawn, so work you dispatched",
+            "  for one model has been finishing on another. Not blocked: nothing can switch a live",
+            "  session back, and the output is fine — this is a COST failure, not a correctness one.",
+            f"  The parent can read this at sessions/{SESSION or '<id>'}/{MODEL_F}."]
+
+
+def cmd_model(s, a):
+    """Report the models this session has run on — the verb a parent or a human can call."""
+    v = write_model_verdict() or session_models()
+    if not v:
+        die("cannot read this session's model: no transcript recorded yet.\n"
+            "  A hook has to run once first — the transcript path arrives on a hook payload and\n"
+            "  nowhere else. This is absence of the reading, never evidence of a model.")
+    if a.json:
+        out(json.dumps(v, indent=2))
+        return
+    out(f"models this session has answered on: {' → '.join(v['models'])}",
+        f"  first {v['first']} · last {v['last']} · changed: {'YES' if v['changed'] else 'no'}",
+        f"  machine-readable: {os.path.join(SESSIONS_DIR, SESSION or '<id>', MODEL_F)}")
+
+
 def cmd_status(s, a):
     _prune_stale_sessions()
     # RUNNING status IS ORIENTATION (#60). A guard refusal carries a one-line pointer to this
@@ -5665,6 +5779,8 @@ def cmd_status(s, a):
         s["oriented"] = True
         save(s)
     out(render_banner(s))
+    if (_m := model_report(s)):
+        out(*_m)
     if (n := retro_nudge(s)):
         out(n)
     m = s.get("mandate") or {}
@@ -6170,6 +6286,10 @@ def main():
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart/PostCompact entrypoint; not for humans
+    md = sub.add_parser("model")
+    md.add_argument("--json", action="store_true",
+                    help="emit the verdict as JSON — the form a PARENT reads, since the session "
+                         "itself is the one party that cannot act on a model mismatch")
     lp = sub.add_parser("limitprobe")
     lp.add_argument("--interval-only", dest="interval_only", action="store_true",
                     help="print the seconds until the next probe is worth spending on, and exit")
@@ -6194,6 +6314,17 @@ def main():
         except (json.JSONDecodeError, ValueError):
             payload = {}
         set_session(payload.get("session_id") or env_session())
+        # REMEMBER WHERE THE TRANSCRIPT IS. Hooks receive it; `status` is not a hook and never
+        # does, so without this the model reading would work inside a Stop gate and nowhere a
+        # human ever looks.
+        if (_tp := payload.get("transcript_path")):
+            _st = load()
+            if _st.get("transcript_path") != _tp:
+                _st["transcript_path"] = _tp
+                save(_st)
+            # Publish where the PARENT reads, on every hook run, so the verdict stays current
+            # without the Crawler knowing or cooperating.
+            write_model_verdict()
         {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate,
          "statusline": cmd_statusline,
          "sessionstart": cmd_sessionstart}[a.cmd](load(), a, payload)
@@ -6209,7 +6340,7 @@ def main():
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix, "owned": cmd_owned,
      "worktree": cmd_worktree, "self": cmd_self, "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
-     "limitprobe": cmd_limitprobe}[a.cmd](s, a)
+     "limitprobe": cmd_limitprobe, "model": cmd_model}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

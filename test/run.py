@@ -5818,6 +5818,92 @@ def main():
     finally:
         shutil.rmtree(lw, ignore_errors=True)
 
+    print("a session's MODEL is a sequence, readable on any host, published for the parent:")
+    # NO HOOK PAYLOAD CARRIES THE MODEL — verified against a real captured Stop payload: cwd,
+    # effort, permission_mode, session_id, transcript_path, and no model anywhere. The statusline
+    # payload has it and is TUI-only, so an editor-hosted session never sees it. The transcript
+    # records it per assistant message and every hook payload points at the transcript.
+    mw = make_sandbox()
+    try:
+        _mt = os.path.join(mw, "transcript.jsonl")
+
+        def _tr(*models):
+            with open(_mt, "w") as f:
+                for m in models:
+                    f.write(json.dumps({"type": "assistant",
+                                        "message": {"model": m, "content": []}}) + "\n")
+
+        _mld = importlib.machinery.SourceFileLoader(
+            "gl_m", os.path.join(mw, ".game_loop", "bin", "game_loop"))
+        _g = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_m", _mld))
+        _mld.exec_module(_g)
+
+        _tr("claude-opus-5")
+        check("the model is read from the transcript, so no statusline is required and an "
+              "editor-hosted session is not blind",
+              (_g.session_models(_mt) or {}).get("last") == "claude-opus-5")
+
+        # A SEQUENCE, NOT A SCALAR, and this is the correction that matters. `--fallback-model`
+        # does not fail at spawn — it degrades MID-RUN under load, silently. A single value reports
+        # whichever message happened to be read and cannot represent "started as Sonnet, fell back
+        # to Haiku at message 400", which is the shape most likely on a real fan-out when every
+        # Crawler hits the same limit at once. Raised by showrunner against my first design.
+        _tr("claude-sonnet-5", "claude-sonnet-5", "claude-haiku-4-5")
+        _v = _g.session_models(_mt)
+        check("a model that CHANGED mid-run is reported as the whole sequence — a scalar would "
+              "report whichever message was read and hide the fallback entirely",
+              _v["models"] == ["claude-sonnet-5", "claude-haiku-4-5"]
+              and _v["first"] == "claude-sonnet-5" and _v["last"] == "claude-haiku-4-5"
+              and _v["changed"] is True)
+        # PAIRED: an unchanged run must NOT report a change, or the flag is noise.
+        _tr("claude-sonnet-5", "claude-sonnet-5")
+        check("...while a run that never changed model reports changed:false, so the flag still "
+              "means something when it fires",
+              _g.session_models(_mt)["changed"] is False)
+        _tr("claude-opus-5", "claude-sonnet-5", "claude-opus-5")
+        check("...and a model that flips BACK still counts as changed, since the run was priced on "
+              "both and the question is what happened, not where it ended",
+              _g.session_models(_mt)["changed"] is True)
+        _tr("claude-sonnet-5", "<synthetic>")
+        check("...and a <synthetic> record is skipped — that is the harness talking, not a model "
+              "answering, and counting it would report the harness to itself",
+              _g.session_models(_mt)["models"] == ["claude-sonnet-5"])
+        check("...and an absent transcript reports NOTHING rather than guessing, because absence "
+              "of the reading is not evidence of a model",
+              _g.session_models(os.path.join(mw, "nope.jsonl")) is None)
+
+        # THE READER IS NOT THIS SESSION. A status line about a model mismatch is read by the
+        # Crawler — the one party that cannot act on it, since it cannot switch its own model and
+        # the run is already priced by the time it reads. The party that CAN act is the
+        # orchestrator, a different process, outside. So the verdict is a file keyed by session id.
+        _tr("claude-sonnet-5", "claude-haiku-4-5")
+        # The verb reads the path from SESSION STATE, because that is where a hook records it —
+        # `model` is not a hook and never receives a payload of its own.
+        _msd = os.path.join(mw, ".game_loop", "sessions", "sess-model")
+        os.makedirs(_msd, exist_ok=True)
+        with open(os.path.join(_msd, "state.json"), "w") as f:
+            json.dump({"transcript_path": _mt}, f)
+        _mj = gl(mw, "model", "--json", sid="sess-model")
+        check("the verdict is machine-readable and keyed by SESSION, because the party that can "
+              "act on a mismatch is the parent that dispatched it, not the session reading a line",
+              _mj.returncode == 0 and json.loads(_mj.stdout)["session"] == "sess-model")
+        _vf = os.path.join(mw, ".game_loop", "sessions", "sess-model", "model.json")
+        check("...and it is written to disk where a parent can read it WITHOUT the session "
+              "cooperating or even knowing",
+              os.path.isfile(_vf) and json.load(open(_vf))["changed"] is True)
+
+        # ADVISORY, NEVER A GATE: a model mismatch is a COST failure, not a correctness one. The
+        # output is fine, which is exactly why nothing notices and why it can run for a week.
+        _rep = "\n".join(_g.model_report({"transcript_path": _mt}))
+        check("a mid-run model change is reported LOUDLY and explicitly not blocked — bricking a "
+              "deliberately-dispatched Crawler would do more damage than the thing it guards",
+              "MODEL CHANGED MID-RUN" in _rep and "Not blocked" in _rep and "COST failure" in _rep)
+        check("...and NOTHING has to be declared for that to work, which is what makes the feature "
+              "optional by construction rather than by a config default",
+              "--model" not in _rep and "config" not in _rep)
+    finally:
+        shutil.rmtree(mw, ignore_errors=True)
+
     print("the limit probe: a reading on a host that renders no statusline:")
     # THE COST IS REAL AND SO IS THE ALTERNATIVE. ~24k input tokens per run, measured, against an
     # unattended run that hits its limit at 1am, dies mid-action, and is still dead at 7am because

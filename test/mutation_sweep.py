@@ -547,6 +547,22 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
+    ".game_loop/bin/game_loop::session_models":
+        "reads the running model off the transcript. Its None is one of two REPORTED outcomes — "
+        "model_report says 'could not be read' rather than staying quiet — and all four arms "
+        "(found, last-wins, synthetic-skipped, absent) are asserted directly against a fixture "
+        "transcript. Neutering it to None reproduces the arm the suite already drives.",
+    ".game_loop/bin/game_loop::write_model_verdict":
+        "publishes the model verdict where a PARENT reads it. Its None means there was nothing to "
+        "publish (no transcript, or no session), which the caller reports rather than swallows — "
+        "`model` dies naming the reason. The file's existence and content are asserted directly in "
+        "a sandbox, including the changed:true case, so sweeping it would re-measure through the "
+        "verb what two paired assertions decide at the source.",
+    ".game_loop/bin/game_loop::model_report":
+        "the status lines for the model. Its empty return means 'nothing declared and nothing "
+        "readable', which is the OPTIONAL case and is asserted as its own arm alongside the match "
+        "and the mismatch. Sweeping it would re-measure through status what three paired "
+        "assertions decide at the source.",
     ".game_loop/bin/game_loop::absorb_rate_limits":
         "the one place a rate_limits reading becomes the snapshot, extracted so the statusline tap "
         "and the spawned probe cannot drift apart. Its return is the windows dict, never a silence: "

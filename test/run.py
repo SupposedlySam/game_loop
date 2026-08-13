@@ -3802,7 +3802,7 @@ def main():
         # commands and the failure was three lines up. For minutes `stable` named a commit missing
         # that agent's work, which my own rebase then orphaned. The fixture has no upstream at all,
         # which is the same "not on the branch consumers track" condition.
-        _m_off = _m2      # the same code path; re-marking one commit twice just fails on the tag
+        _m_off = _m2      # the same code path, reused rather than re-marked
         check("marking a commit that is not on the tracked branch WARNS before the pointer is "
               "pushed — a channel aimed off-branch names a tree no branch contains",
               "NOT ON YOUR UPSTREAM BRANCH" in _m_off.stdout
@@ -3821,6 +3821,35 @@ def main():
               "the commit before this one",
               _points_at("beta") == _new_head and _new_head != _head
               and _m3.returncode == 0)
+
+        # A MARK IS ONE-SHOT AND ITS TRIGGERS ARE NOT ITS RECORD. Observed on this repo: the mark
+        # landed, its publish trigger declined because HEAD was not pushed YET — correct at that
+        # instant — I pushed a minute later, and the re-run died on `tag already exists`. The record
+        # existed; the publication it exists to CAUSE did not; and the only recovery was running the
+        # trigger script by hand from an absolute path nobody but its author knows. Consumers stayed
+        # on the previous stable throughout, which was the build whose fix reads as unfixed.
+        check("a first mark says MARKED and not RE-MARKED, so the retry wording is a distinction "
+              "the tool draws rather than a phrase it always prints",
+              "✓ MARKED BETA" in _m3.stdout and "RE-MARKED" not in _m3.stdout)
+        _r1 = _conf("--mark", "beta", "--notes", "third again")
+        check("...and marking the SAME commit again is a RETRY, not an error: the immutable record "
+              "already exists and is left untouched, and the command no longer dies on its own tag",
+              _r1.returncode == 0 and "RE-MARKED BETA" in _r1.stdout)
+        check("...and the retry FIRES THE TRIGGERS AGAIN, which is the entire point — a trigger "
+              "that declined for a TRANSIENT reason had no way back before this",
+              "PUBLISHED" in _r1.stdout)
+        check("...and the retry does not move the channel off the commit it already served",
+              _points_at("beta") == _new_head)
+        # THE ARM THAT MUST STILL DIE. A retry is safe only because the record is unchanged; a tag
+        # of that name over a DIFFERENT commit is the immutable record being rewritten, which is the
+        # one thing immutability is for.
+        _cg("commit", "-q", "--allow-empty", "-m", "fourth")
+        _f_sha = _cg("rev-parse", "HEAD").stdout.strip()
+        _cg("tag", "-a", "beta-" + _f_sha[:8], "-m", "planted", _new_head)
+        _r2 = _conf("--mark", "beta", "--notes", "fourth")
+        check("...while that name over a DIFFERENT commit still REFUSES, and names the commit it "
+              "already records rather than reporting a bare git error",
+              _r2.returncode != 0 and _new_head[:8] in (_r2.stdout + _r2.stderr))
 
         # THE INSTALLED SIDE. A consumer who took a copy months ago cannot run `confidence` against
         # a clone they no longer have, so the level is recorded at install time and status says it.

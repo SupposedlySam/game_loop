@@ -4453,8 +4453,24 @@ def cmd_confidence(s, a):
     msg = "\n".join(lines)
     r = subprocess.run(["git", "tag", "-a", tag, "-m", msg], cwd=REPO_ROOT,
                        capture_output=True, text=True)
+    remark = False
     if r.returncode != 0:
-        die("could not create the tag: " + (r.stderr or "").strip())
+        # A MARK IS ONE-SHOT, AND ITS TRIGGERS ARE NOT THE SAME THING AS ITS RECORD. Observed here:
+        # the mark landed, its publish trigger declined because HEAD was not pushed YET, I pushed,
+        # and the re-run died on `tag already exists`. The record existed; the publication it exists
+        # to cause did not; and the only recovery was running the trigger script by hand from a path
+        # nobody but its author knows. Meanwhile consumers stayed on the previous stable.
+        #
+        # So an existing tag AT THE SAME COMMIT is not an error — it is a retry, and the thing worth
+        # retrying is the triggers. At a DIFFERENT commit it still dies: the immutable record of what
+        # was checked must never be silently rewritten, which is the whole reason it is immutable.
+        _at = _rev(tag)
+        if _at and _at == sha:
+            remark = True
+        else:
+            die("could not create the tag: " + (r.stderr or "").strip()
+                + ("\n  it names " + _at[:8] + ", not this commit — that record stands."
+                   if _at else ""))
     # AND MOVE THE CHANNEL POINTER (#61). `stable-<sha>` is the immutable record of one mark;
     # `stable` is "the newest thing marked at that level", and it exists so that NOBODY DOWNSTREAM
     # HAS TO ORDER TAGS.
@@ -4478,7 +4494,9 @@ def cmd_confidence(s, a):
     moved = ch.returncode == 0
     logline({"kind": "confidence", "level": a.mark, "sha": sha, "tag": tag,
              "channel_moved": moved, "notes": a.notes})
-    out(f"✓ MARKED {a.mark.upper()} — {tag}",
+    out(f"✓ MARKED {a.mark.upper()} — {tag}" if not remark else
+        f"✓ RE-MARKED {a.mark.upper()} — {tag} already records this commit, unchanged. The record "
+        f"was already made;\n  what is being retried is everything the mark CAUSES, below.",
         *["  " + l for l in lines],
         "")
     # IS THIS COMMIT ACTUALLY ON THE BRANCH CONSUMERS TRACK? Pushing the channel pointer at a commit

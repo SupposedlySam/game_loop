@@ -92,6 +92,15 @@
       "change": "a new OPT-IN key, mcp_trusted_servers, permits every call to a named server \u2014 irreversible verbs, landing verbs and mutating arguments included. Refusal lines moved in the guard, which is why this entry exists.",
       "consequence": "none for anyone who does not set the key. A project with no mcp_trusted_servers is refused exactly what it was refused before, asserted in the suite as its own arm. If you DO set it, read the Configure section: this is the widest door in the tool and status reports it in capitals.",
       "why_it_qualifies": "IT DOES NOT \u2014 recorded with notice:false because the behaviour gate fired and an omission would be indistinguishable from nobody having decided. The test is whether somebody who changed NOTHING would notice; an opt-in key they have not opted into changes nothing for them."
+    },
+    {
+      "seq": 7,
+      "sha": "PENDING",
+      "verb": "confidence --mark",
+      "notice": true,
+      "change": "marking a commit that is ALREADY marked at that level no longer dies on `tag already exists`. It reports RE-MARKED, leaves the immutable tag untouched, and re-fires the confidence triggers. The same name over a DIFFERENT commit still refuses, and now names the commit it already records instead of passing through a bare git error.",
+      "consequence": "a mark whose trigger declined for a TRANSIENT reason can be retried. Observed here: the mark landed, its publish trigger correctly declined because HEAD was not pushed yet, and after pushing there was no way back \u2014 the record existed and the publication it exists to cause did not. Recovery meant running the trigger script by hand from a path only its author knows, so consumers stayed on the previous stable in the meantime. If you script `--mark` and relied on a non-zero exit to mean 'already marked', that exit is now 0.",
+      "why_it_qualifies": "a consumer who changed nothing gets a different exit code and a different action from the same command on the same commit. The triggers firing again is the deliberate part, not a side effect."
     }
   ],
   "schema": 1

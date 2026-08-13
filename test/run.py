@@ -3851,11 +3851,11 @@ def main():
         _sscfg = os.path.join(ss, ".game_loop", "config.json")
         _ssprobe = os.path.join(ss, ".game_loop", "probe", "session-start.json")
 
-        def _start(event="SessionStart", sid="sess-ss"):
+        def _start(event="SessionStart", sid="sess-ss", source="startup"):
             return subprocess.run([os.path.join(ss, ".game_loop", "bin", "game_loop"),
                                    "sessionstart"],
                                   input=json.dumps({"session_id": sid, "hook_event_name": event,
-                                                    "source": "startup"}),
+                                                    "source": source}),
                                   capture_output=True, text=True, env=_env(ss, sid=sid))
 
         r = _start()
@@ -3910,6 +3910,110 @@ def main():
         os.remove(_ssprobe)
         check("...and a project that opted OUT is never nagged about the thing it turned off",
               "NO SESSION START RECORDED" not in gl(ss, "status", sid="sess-ss").stdout)
+
+        # ── THE MOMENT BECAME ATTACHABLE (#63) ────────────────────────────────────────────────
+        # Everything above is the moment TELLING a session things. What it could not do is ACT once
+        # on the session's behalf, and the only way to get that was a SECOND SessionStart hook
+        # registered beside this one: two registrants in one settings file, which makes "registered
+        # vs has-fired vs firing-now" harder to diagnose in exchange for no new capability. The
+        # instant already existed; it simply was not attachable.
+        _mark = os.path.join(ss, "acted.txt")
+        _sstj = os.path.join(ss, ".game_loop", "triggers.json")
+
+        def _attach(cfg):
+            with open(_sstj, "w") as f:
+                json.dump(cfg, f)
+
+        def _ssctx(r):
+            """The additionalContext a session start injected, or '' if it said nothing at all."""
+            try:
+                return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+            except (ValueError, KeyError):
+                return ""
+
+        def _ss_enabled(on):
+            _c["session_start"] = on
+            with open(_sscfg, "w") as f:
+                json.dump(_c, f)
+
+        # THE CONTROL FIRST, and it is proved by a FILE rather than by an empty stdout. "No output"
+        # is precisely the evidence that cannot tell 'did not run' from 'ran and said nothing', and
+        # an opt-out that suppressed the REPORT while still running the command would be the worse
+        # half of both. (config is still session_start:false, left that way by the check above.)
+        _attach({"session_start": [{"name": "ss-act",
+                                    "command": f"tee -a {shlex.quote(_mark)}; echo ACTED-ONCE"}]})
+        _offr = _start()
+        check("session_start:false stops the ATTACHMENT too, and the marker file it would have "
+              "written never appears — the opt-out reaches the acting half, not just the reporting "
+              "half",
+              _offr.returncode == 0 and not _offr.stdout.strip() and not os.path.exists(_mark))
+        _ss_enabled(True)
+        _on = _start()
+        check("...and with the moment ON, the same attachment ACTS — without this pair the line "
+              "above is equally satisfied by a trigger mechanism that never runs anything at all",
+              os.path.exists(_mark))
+        check("...and what it printed is APPENDED to the status the session was already being "
+              "given, so one text both acts and reports what it did",
+              "ACTED-ONCE" in _ssctx(_on) and "COST LADDER" in _ssctx(_on))
+        check("...and the payload names the SOURCE, which is the whole of how an attachment tells a "
+              "fresh start from a compaction: it fires on both, so 'once per project' is the "
+              "attachment's own job and it needs the fact to do it",
+              '"source": "startup"' in _ssctx(_on) and '"event": "session_start"' in _ssctx(_on))
+        check("...and a COMPACTION says compact rather than startup — the arm that makes the field "
+              "worth branching on instead of a constant dressed as a discriminator",
+              '"source": "compact"' in _ssctx(_start(event="PostCompact", source="compact")))
+
+        # THREE OUTCOMES, THREE READINGS. Failed, timed out, and ran-but-printed-nothing are three
+        # different states, and an attachment whose silence cannot be told from never having run is
+        # the exact defect this harness exists to prevent — one level in, at the moment that decides
+        # whether any of the rest runs.
+        _attach({"session_start": [{"name": "ss-quiet", "command": "true"}]})
+        _q = _ssctx(_start())
+        check("an attachment that RAN and printed nothing SAYS so — '(no output)' beneath a ✓, never "
+              "an absence the reader is left to interpret",
+              "✓ ss-quiet" in _q and "(no output)" in _q)
+        _attach({"session_start": [{"name": "ss-bad", "command": "echo why-it-broke >&2; exit 3"}]})
+        _b = _ssctx(_start())
+        check("...one that FAILED is loud, names the error, and reads nothing like the quiet one",
+              "✗ ss-bad FAILED" in _b and "why-it-broke" in _b and "(no output)" not in _b)
+        _attach({"session_start": [{"name": "ss-hang", "command": "sleep 30", "timeout_sec": 1}]})
+        _t0 = time.time()
+        _hr = _start()
+        _h = _ssctx(_hr)
+        check("...and one that HANGS is BOUNDED and says TIMED OUT — a third reading, not the "
+              "failure one. Unbounded, a single bad attachment would hang every session in the tree",
+              "✗ ss-hang FAILED" in _h and "timed out" in _h and time.time() - _t0 < 20)
+        check("...and through all three the session still gets its status and still exits 0: an "
+              "attachment is an ADDITION to this moment, never a precondition for it (INV5)",
+              _hr.returncode == 0
+              and all("COST LADDER" in t for t in (_q, _b, _h)))
+
+        # OBSERVABLE THAT IT FIRED, which is the same requirement the probe above carries and the
+        # reason this is a trigger rather than a second hook: one registrant, one place to look.
+        _attach({"session_start": [{"name": "ss-seen", "command": "echo hi"}]})
+        _stn = gl(ss, "status", sid="sess-ss").stdout
+        check("an attachment to this moment that has never fired is named as such in status, the "
+              "same way the other three moments' are",
+              "[session_start] ss-seen" in _stn and "CONFIGURED BUT NEVER FIRED" in _stn)
+        _start()
+        _stf = gl(ss, "status", sid="sess-ss").stdout
+        check("...and once the moment has come round it reads as FIRED instead — the pair that "
+              "makes the warning above mean something rather than being permanent furniture",
+              "[session_start] ss-seen" in _stf and "CONFIGURED BUT NEVER FIRED" not in _stf)
+
+        # THE FOURTH STATE, and only this moment can be in it: wired correctly, to a real moment,
+        # which has been switched off. Left as "never fired" it reads as patience, and the reader
+        # waits for something that cannot happen. Nobody typing session_start:false is thinking
+        # about an attachment they added months earlier — remembering that is the harness's job.
+        _ss_enabled(False)
+        _stoff = gl(ss, "status", sid="sess-ss").stdout
+        check("an attachment wired to session_start while the moment is SWITCHED OFF is told so, "
+              "instead of being left reading as one that has merely not come round yet",
+              "SWITCHED OFF" in _stoff and "[session_start] ss-seen" in _stoff)
+        _ss_enabled(True)
+        check("...and turning the moment back on stops the accusation — the pair proving that line "
+              "tracks the config rather than being printed here always",
+              "SWITCHED OFF" not in gl(ss, "status", sid="sess-ss").stdout)
     finally:
         shutil.rmtree(ss, ignore_errors=True)
 
@@ -5010,6 +5114,34 @@ def main():
     # The failure mode this design is most exposed to is the one the usage-limit tap just taught:
     # something configured, never running, and looking exactly like something working. So every
     # assertion here is paired, and `status` is required to name an attachment that has never fired.
+    print("a moment nobody can find is a moment nobody attaches to:")
+    # The CODE is the list of moments. The example config is where an integrator actually looks and
+    # the README table is where a reader first learns they exist, so both are checked AGAINST the
+    # code rather than against a hand-copied list — publishing a fifth moment and forgetting the
+    # docs then fails here, instead of being discovered by whoever needed it. #63 is the case: the
+    # moment already existed inside `sessionstart` and was reachable from nothing anybody reads.
+    # WHAT THIS DOES NOT CHECK (INV6): that the prose is right, or explains anything. A name
+    # appearing is the floor, not the goal, and no grep can hold the rest.
+    _gl_ast = ast.parse(open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read())
+    _moments = []
+    for _n in ast.walk(_gl_ast):
+        if isinstance(_n, ast.Assign) and any(getattr(t, "id", "") == "TRIGGER_EVENTS"
+                                              for t in _n.targets):
+            _moments = [k.value for k in _n.value.keys]
+    _ex_src = open(os.path.join(REPO, "templates", "triggers.example.json")).read()
+    _rm_src = open(os.path.join(REPO, "README.md")).read()
+
+    def _undocumented(names):
+        return [m for m in names if m not in _ex_src or f"`{m}`" not in _rm_src]
+
+    check(f"every moment the code publishes is named in the example config AND the README table "
+          f"({len(_moments)} published)"
+          + (" · MISSING: " + ", ".join(_undocumented(_moments)) if _undocumented(_moments) else ""),
+          len(_moments) >= 4 and not _undocumented(_moments))
+    check("...and the check FIRES on a name neither file carries, so a green result above is a "
+          "comparison rather than an empty loop agreeing with itself",
+          _undocumented(["a-moment-nobody-wrote-down"]) == ["a-moment-nobody-wrote-down"])
+
     print("every configured trigger command actually exists and can run:")
     # NAMES NO TOOL, deliberately. It reads whatever is configured, so it cannot walk back into the
     # thing it is guarding against — a check that hardcoded a neighbour's path would put that
@@ -5075,6 +5207,10 @@ def main():
         check("...and the refusal LISTS the real moments, so the reader can fix it from the "
               "message rather than going to look for them",
               "confidence" in _gs and "harden" in _gs and "stepback" in _gs)
+        check("...and the list is the CODE's list, so a moment added later is discoverable from the "
+              "refusal itself rather than only from whichever doc the reader happened to open",
+              any("game_loop's moments are" in ln and "session_start" in ln
+                  for ln in _gs.splitlines()))
         # PAIRED, or the check is just a louder version of the ambiguity it replaced: a REAL moment
         # that simply has not come round yet must still be reported as patient, not as broken.
         check("...while a real moment that has merely not come round yet is still reported as "

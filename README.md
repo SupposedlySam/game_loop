@@ -528,10 +528,21 @@ its own command on a moment in the loop. Nothing is attached by default.
 | `harden` | a learning was just encoded into an artifact | share the transferable form with other agents |
 | `stepback` | a retro just began | pull in what others learned; re-read the work queue |
 | `confidence` | a commit was just marked | publish it wherever consumers take it |
+| `session_start` | a session started, or was compacted | act **once** on the session's behalf — register with a local tool, join a room, claim a name |
 
 A trigger gets a JSON payload on stdin and its stdout comes back to the agent. It **never blocks**
 the verb, it is **never silent** — `status` lists each one with its last run, and a failing trigger
 is shown as FAILING with its error rather than passing quietly.
+
+`session_start` is the odd one out and worth reading twice before attaching to it. It is the only
+moment that is not a verb somebody typed, so it runs on the path **every** session crosses: the
+timeout budget is per attachment and nothing caps the sum. It fires at every start *and* every
+compaction, so "once per project" is the attachment's job — the payload carries `source`
+(`startup` / `resume` / `clear` / `compact`) to tell those apart. Its stdout is appended to the
+status block already injected at session start, so an attachment can both act and report what it
+did. And because `session_start: false` switches the whole moment off, `status` reports an
+attachment wired to a disabled moment as **SWITCHED OFF** rather than letting it read as one that
+is merely patient.
 
 Your project's own rules live in three files the installer seeds once and never overwrites:
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and

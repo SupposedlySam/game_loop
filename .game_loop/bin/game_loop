@@ -540,6 +540,19 @@ TRIGGER_EVENTS = {
     # does not happen: the first stable mark was published by a downstream maintainer who happened
     # to be watching, not by the person who marked it.
     "confidence": "a commit was just marked — the moment to publish it wherever consumers take it",
+    # THE ONE MOMENT THAT IS NOT A VERB SOMEBODY TYPED (#63). `sessionstart` already runs at the
+    # right instant and can TELL a session things; what it could not do is ACT once on the session's
+    # behalf, and the only way to get that was a SECOND SessionStart hook beside game_loop's — a
+    # second registrant in one settings file, which makes "registered vs has-fired vs firing-now"
+    # harder to diagnose in exchange for no new capability.
+    #
+    # TWO THINGS DIFFER FROM THE OTHER THREE, and both are the reader's problem if left unsaid
+    # (INV6). It runs on the session's CRITICAL PATH, so the budget is per attachment: N of them
+    # cost up to N timeouts before the session sees a word, and nothing here caps the sum. And it
+    # fires at EVERY start and EVERY compaction, so "once per project" is the attachment's own job
+    # — the payload carries `source` (startup / resume / compact) so it can tell those apart.
+    "session_start": "a session just started or was compacted — the moment to ACT once on its "
+                     "behalf, before it reads anything",
 }
 
 
@@ -636,6 +649,16 @@ def triggers_report():
             lines.append(f"  ✗ [{ev}] {name} — THERE IS NO SUCH MOMENT. This will never fire, no "
                          "matter how long you wait.")
             lines.append("      game_loop's moments are: " + " · ".join(sorted(TRIGGER_EVENTS)))
+            continue
+        if ev == "session_start" and not config().get("session_start", True):
+            # A FOURTH state, and only this moment can be in it. The moment exists, the wiring is
+            # right, and `session_start: false` has switched the whole entry point off — so the
+            # attachment waits forever while "CONFIGURED BUT NEVER FIRED" reads as patience. The
+            # opt-out is written by somebody who wants no injected status block; nobody typing it
+            # is thinking about an attachment added months earlier, which is exactly why the harness
+            # has to be the one that remembers.
+            lines.append(f"  ✗ [{ev}] {name} — SWITCHED OFF by config.json session_start:false, so "
+                         "this moment never comes round. Not waiting — disabled.")
             continue
         if not rec:
             lines.append(f"  ⚠ [{ev}] {name} — CONFIGURED BUT NEVER FIRED in this tree. Either the "
@@ -4106,6 +4129,11 @@ def cmd_sessionstart(s, a, payload):
         (#43) again -- a check whose silence is indistinguishable from never having run.
       * IT DEGRADES DURING INSTALL AND UPGRADE. Mid-install, or on a branch with no .game_loop/, it
         says nothing rather than erroring: a guard must never block its own fix (INV5).
+
+    THE `session_start` TRIGGER MOMENT INHERITS ALL THREE (#63), and inherits them the hard way: an
+    attachment is a project's ARBITRARY command running on the one path every session crosses. So it
+    is bounded by the trigger timeout, wrapped so nothing it does can raise out of here, and its
+    outcome is written to state where `triggers_report` prints it in the very block this returns.
     """
     if not config().get("session_start", True):
         return                       # a project that wants silence gets silence, opt-out not opt-in
@@ -4116,20 +4144,44 @@ def cmd_sessionstart(s, a, payload):
                        "source": payload.get("source") or payload.get("hook_event_name") or ""}, f)
     except OSError:
         pass                         # the probe is evidence, never a precondition
+    # FIRED BEFORE STATUS IS RENDERED, on the `stepback` precedent — there the attachment runs first
+    # so what it read is an INPUT to the reflection rather than an appendix to it, and here the same
+    # ordering buys the observability: the attachment acts, its outcome lands in state, and the
+    # TRIGGERS block `status` is about to print therefore reports THIS run rather than the previous
+    # session's. One moment, one text, no second place to look.
+    #
+    # Its OWN try/except, not the status one, and the split is the whole of INV5 here: this is the
+    # only code in the entry point that runs a command nobody in this repo wrote. If it explodes the
+    # session still gets its status, because an attachment is an addition to the moment and never a
+    # precondition for it. fire_triggers already promises not to raise; the wrapper is for the
+    # promise being wrong, which is the case that would gate EVERY session in the tree.
+    fired = []
+    try:
+        fired = fire_triggers(s, "session_start", {
+            "event": "session_start",
+            "source": payload.get("source") or payload.get("hook_event_name") or "",
+            "project": config().get("project_name"), "session": SESSION})
+    except Exception:  # noqa: BLE001 — no attachment gets to cost a session its start
+        fired = []
+    parts = []
     try:
         import io
         import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             cmd_status(s, a)
-        text = buf.getvalue().strip()
+        if (text := buf.getvalue().strip()):
+            parts.append(text)
     except Exception:  # noqa: BLE001 — mid-install, half-written state, anything: say nothing
-        return
-    if not text:
+        pass           # ...about STATUS. A trigger that has already ACTED still gets to report it:
+        #                dropping its output would leave a session that was acted upon and not told.
+    if fired:
+        parts.append("\n".join(fired))
+    if not parts:
         return
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": payload.get("hook_event_name") or "SessionStart",
-        "additionalContext": text}}))
+        "additionalContext": "\n".join(parts)}}))
 
 
 def session_start_warning():

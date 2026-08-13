@@ -547,8 +547,33 @@ Three rules, each of them a scar:
    behind a file nobody noticed was never written.
 
 **Moments published so far:** `harden` (a learning was just encoded — the moment to generalise and
-share it) and `stepback` (a retro just began, fired **before** its output, so what other agents
-learned is an input to the reflection rather than an appendix to it).
+share it), `stepback` (a retro just began, fired **before** its output, so what other agents
+learned is an input to the reflection rather than an appendix to it), `confidence` (a commit was
+just marked — the moment anything that *distributes* this project belongs on) and `session_start`.
+
+`session_start` is the only moment that is **not a verb somebody typed**. The entry point below
+already runs at the right instant and injects `status` as additional context, so a new session can
+be *told* things; what it could not do was **act once on the session's behalf**. Getting that meant
+registering a second `SessionStart` hook beside game_loop's — a second registrant in one settings
+file, which makes *registered* vs *has-fired* vs *firing-now* harder to diagnose in exchange for no
+new capability. The moment already existed; it simply was not attachable.
+
+It follows `stepback`'s shape: attachments fire **first**, and their stdout is appended to the
+status block, so one text both acts and reports. Three properties are load-bearing and each is
+stated where somebody attaching will read it:
+
+* it is on the path **every** session crosses, so the timeout budget is per attachment and nothing
+  caps the sum — a hanging attachment is bounded, N slow ones still cost N timeouts;
+* it fires at every start **and** every compaction, so *once per project* is the attachment's own
+  job. The payload carries `source` (`startup`/`resume`/`clear`/`compact`) to branch on;
+* nothing an attachment does can cost a session its start. It is wrapped separately from the status
+  render, so a trigger that explodes mid-upgrade still leaves the session its `status` — a guard
+  must never block its own fix (INV5).
+
+Because `session_start: false` turns the whole moment off, an attachment wired to it while disabled
+is reported as **SWITCHED OFF**, not as one that has merely never fired. That is the same
+distinction the *no such moment* refusal draws: never-fired reads as patience, and patience is the
+wrong thing to read when the moment can never come round.
 
 `harden --general` carries the **transferable** form: what another agent could use without knowing
 anything about this codebase. It is a separate act of thought from hardening, because the incident

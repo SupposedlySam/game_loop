@@ -35,6 +35,21 @@
     "             the last honest moment to ask whether consumers can FIND what they are given —",
     "             see the documentation example below. Order matters within an event: they run top",
     "             to bottom, so put the checks above the publish.",
+    "  session_start — a session just started, or was compacted. Payload: source (startup / resume /",
+    "             clear / compact), project, session. THE ONE MOMENT THAT IS NOT A VERB SOMEBODY",
+    "             TYPED, and the only one where the session ACTS on its own behalf instead of being",
+    "             told things: registering with a local tool, joining a room, claiming a name. Its",
+    "             stdout is APPENDED to the status block the harness already injects, so an",
+    "             attachment can both act and report what it did in one text.",
+    "             Three things to know before you attach here, because this moment is on the path",
+    "             every session crosses:",
+    "               * it fires at EVERY start and EVERY compaction — make the command idempotent, or",
+    "                 branch on `source`. 'Once per project' is yours to enforce, not the harness's.",
+    "               * the timeout budget is PER attachment and nothing caps the sum, so N slow",
+    "                 attachments cost N timeouts before the session sees a word. Keep them short.",
+    "               * `\"session_start\": false` in config.json switches the whole moment off. Then",
+    "                 nothing attached here can ever fire — `status` says SWITCHED OFF rather than",
+    "                 letting it read as an attachment that is merely patient.",
     "",
     "`game_loop status` lists what you have attached and names anything that has never fired.",
     "Configured and working are different claims, and only one of them is visible by default."
@@ -44,6 +59,24 @@
     {
       "name": "example-append-to-a-file",
       "command": "python3 -c \"import json,sys; d=json.load(sys.stdin); g=d.get('general'); print('nothing to share' if not g else open('/tmp/learnings.md','a').write(g+chr(10)) and 'shared')\"",
+      "timeout_sec": 20
+    }
+  ],
+
+  "session_start": [
+    {
+      "//": [
+        "ACT ONCE, THEN SAY YOU DID. The marker file is the whole example: this moment fires on",
+        "every start and every compaction, so an attachment that is not idempotent does its",
+        "one-time act several times a day. Writing the marker under $GAME_LOOP_ROOT keeps it with",
+        "the checkout it is true of; put it under $GAME_LOOP_SESSION_DIR instead if the act is",
+        "once per SESSION rather than once per project.",
+        "",
+        "It prints, and that is not decoration: an act nobody can see happened is the failure this",
+        "harness exists to prevent. The line lands in the same context the session reads first."
+      ],
+      "name": "example-act-once-per-project",
+      "command": "m=\"$GAME_LOOP_ROOT/probe/session-start-acted\"; [ -f \"$m\" ] && exit 0; date > \"$m\"; echo \"acted once for this project (delete $m to do it again)\"",
       "timeout_sec": 20
     }
   ],

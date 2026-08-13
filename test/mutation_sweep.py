@@ -163,6 +163,19 @@ def verdict(killed):
 #  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
+    # THE CLAIMS EXERCISE. Both floors were MEASURED, and the first measurement of both was 0 —
+    # against a tree copied without .git, which cost 166 baseline assertions including the ones
+    # being measured, so nothing could FLIP. The control reproduced its floor anyway, because its
+    # assertions were not among the missing: a positive control certifies the instrument for THAT
+    # case, not globally. Re-measured honestly they were 1 and 2 — thin, and the thinness was the
+    # finding: every assertion wrote the observation file by hand, so the RECORDER that runs in
+    # production was covered by nothing. Driving it end to end took them to 3 and 5.
+    ("_rate_limit_keys -> finds no rate-limit key anywhere",
+     ".game_loop/bin/game_loop::_rate_limit_keys", "    return []\n",
+     ["rate-limit", "nested", "payload"], None, 3),
+    ("_hooks_claim_live -> never reports an observation",
+     ".game_loop/bin/game_loop::_hooks_claim_live", "    return None\n",
+     ["no-rate-limits-in-hooks", "control", "payload"], None, 5),
     ("unpushed_warning -> never warns", ".game_loop/bin/game_loop::unpushed_warning", "    return None\n",
      ["unpushed", "upstream", "quiet"], None, 7),
     ("fix_warning -> never warns", ".game_loop/bin/game_loop::fix_warning", "    return None\n",

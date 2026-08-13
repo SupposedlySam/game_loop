@@ -6224,6 +6224,75 @@ def main():
               "confirming it — the exercise checks the shape, not the file's existence",
               "has NOT been observed here" in gl(xw, "status", sid="sess-x").stdout)
 
+        # A DECLARED DEBT PAID. This claim carried its own positive control in prose for two weeks
+        # while nothing checked it — the shape of every stale claim here: everything needed was
+        # written down, only the code was missing. All three arms, because an exercise that cannot
+        # report failure is a stamp with extra steps, and one that confirms on nothing is worse.
+        _pd = os.path.join(xw, ".game_loop", "probe")
+        os.makedirs(_pd, exist_ok=True)
+        _cf = os.path.join(_pd, "claims-observed.json")
+        with open(_cf, "w") as f:
+            json.dump({"control": False, "rate_limit_keys": [], "top_level_keys": []}, f)
+        check("a hook payload whose CONTROL did not fire confirms nothing — no session_id means "
+              "the read cannot be distinguished from a hook that never ran",
+              "'no-rate-limits-in-hooks' is exercisable and unobserved" in
+              gl(xw, "status", sid="sess-x").stdout)
+        with open(_cf, "w") as f:
+            json.dump({"control": True, "rate_limit_keys": [],
+                       "top_level_keys": ["cwd", "hook_event_name", "session_id"]}, f)
+        check("...and a real payload carrying session_id and NO rate-limit key confirms it live on "
+              "this host, which is the claim checked where it is consumed rather than stamped",
+              "'no-rate-limits-in-hooks' CONFIRMED LIVE" in gl(xw, "status", sid="sess-x").stdout)
+        with open(_cf, "w") as f:
+            json.dump({"control": True, "rate_limit_keys": ["rate_limits.five_hour"],
+                       "top_level_keys": ["session_id", "rate_limits"]}, f)
+        check("...and a payload that DOES carry rate-limit data falsifies it by name — the arm "
+              "that would make the whole statusline detour unnecessary",
+              "'no-rate-limits-in-hooks' IS NO LONGER TRUE" in gl(xw, "status", sid="sess-x").stdout)
+        # NESTED, not just top level: the key that would falsify this claim is the one whose real
+        # shape put the windows under "windows", which already fooled one exercise in this file.
+        _ldx = importlib.machinery.SourceFileLoader(
+            "gl_hook", os.path.join(xw, ".game_loop", "bin", "game_loop"))
+        _glx = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_hook", _ldx))
+        _ldx.exec_module(_glx)
+        check("the scan finds a rate-limit key NESTED in a payload, not only at the top level — a "
+              "shallow scan would report the claim confirmed by a payload that falsifies it",
+              _glx._rate_limit_keys({"a": {"b": {"rate_limits": {"five_hour": 1}}}}) ==
+              ["a.b.rate_limits"])
+        check("...and a payload with no such key anywhere returns nothing, so the scan is not "
+              "matching everything it is handed",
+              _glx._rate_limit_keys({"session_id": "x", "cwd": "/tmp", "n": [1, 2]}) == [])
+        os.remove(_cf)
+        # END TO END, because every assertion above this line writes the observation file BY HAND.
+        # The recorder could have been broken in production — wrong path, wrong key, never called —
+        # and all of them would still pass. Test and product agreeing because the same hand wrote
+        # both is the exact failure the top-level-vs-nested snapshot already cost this file once.
+        _glx.HOOK_CLAIM_F = _cf   # its ROOT resolved at import, not this sandbox; aim it explicitly
+        _glx.record_hook_claim_observation(
+            {"session_id": "s1", "hook_event_name": "Stop",
+             "deep": {"nested": {"rate_limits": {"five_hour": {"used_percentage": 3}}}}})
+        with open(_cf) as f:
+            _rec = json.load(f)
+        check("the RECORDER writes what the reporter reads, driven with a real payload — the half "
+              "that runs in production, which every assertion above tested only through a fixture",
+              _rec.get("control") is True and
+              _rec.get("rate_limit_keys") == ["deep.nested.rate_limits"])
+        check("...and status then falsifies the claim from that RECORDED observation, so both "
+              "halves are exercised through the path between them rather than each on its own",
+              "'no-rate-limits-in-hooks' IS NO LONGER TRUE" in
+              gl(xw, "status", sid="sess-x").stdout)
+        _glx.record_hook_claim_observation({"session_id": "s1", "hook_event_name": "Stop"})
+        check("...and the ordinary payload — one with no rate-limit key anywhere — records the "
+              "control as fired and confirms the claim, which is the arm a real host produces",
+              "'no-rate-limits-in-hooks' CONFIRMED LIVE" in
+              gl(xw, "status", sid="sess-x").stdout)
+        _glx.record_hook_claim_observation("not a payload at all")
+        check("...and a payload that is not a dict leaves the last real observation standing "
+              "rather than overwriting it with a verdict about nothing",
+              "'no-rate-limits-in-hooks' CONFIRMED LIVE" in
+              gl(xw, "status", sid="sess-x").stdout)
+
+
         # A CONDITIONAL ABSENCE IS EXERCISABLE, which corrects a bound I stated publicly and got
         # wrong. Not presence-versus-absence: whether you CONTROL THE INPUT that would produce the
         # effect. "No third window" is trivially true of an empty file, a missing file and a broken

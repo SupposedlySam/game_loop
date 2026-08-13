@@ -88,10 +88,11 @@
         "source": "anthropics/claude-code#34817",
         "breaks": "if it became true, the whole statusline detour is unnecessary",
         "ledger": "Hook payloads carry rate-limit data",
-        "exercisable": "yes-not-yet",
+        "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence and exercisable, not yet exercised: every hook invocation supplies a payload I control, and the payload carrying session_id is the positive control that the read worked while rate_limits was still absent",
         "verified_on": "2026-07-29",
-        "verified_against": null
+        "verified_against": null,
+        "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked"
       },
       {
         "id": "no-headless-usage-flag",

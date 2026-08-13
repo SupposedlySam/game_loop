@@ -3593,6 +3593,10 @@ def cmd_stopgate(s, a, payload):
             f.write("\n")
     except OSError:
         pass  # a probe that fails must never take the gate down with it
+    # EXERCISE, not a stamp: check the claim against the payload this host actually delivered.
+    # Unconditional, unlike the stop-payload probe above it — a claim checked only when a debug
+    # flag is set is a claim nobody checks.
+    record_hook_claim_observation(payload)
     # #45: the handoff is maintained HERE, at every turn-end, rather than demanded at the cliff.
     # A limit death then costs at most one turn, in any host, with no number to invent.
     refresh_handoff(s)
@@ -4638,6 +4642,76 @@ def _windows_claim_live():
                   "unexpected window is genuinely absent")
 
 
+HOOK_CLAIM_F = os.path.join(ROOT, "probe", "claims-observed.json")
+
+
+def _rate_limit_keys(obj, path="", depth=0, out=None):
+    """Every key anywhere in a payload whose name mentions a rate limit. Bounded, because this runs
+    inside the Stop gate and a pathological payload must not become a hang."""
+    if out is None:
+        out = []
+    if depth > 6 or len(out) > 8:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{path}.{k}" if path else str(k)
+            if "rate_limit" in str(k).lower():
+                out.append(p)
+            _rate_limit_keys(v, p, depth + 1, out)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj[:20]):
+            _rate_limit_keys(v, f"{path}[{i}]", depth + 1, out)
+    return out
+
+
+def record_hook_claim_observation(payload):
+    """Exercise 'no hook payload carries rate-limit data' against the payload actually delivered.
+
+    THE CLAIM DECLARED ITS OWN CONTROL AND THEN SAT AS A DEBT. Its `exercisable_why` already named
+    session_id as the positive control — a payload carrying it was genuinely read, so rate_limits
+    being absent from THAT is an absence that discriminates, rather than the absence of a payload,
+    of a parse, or of a hook that never fired. Everything needed was written down; only the code
+    was missing, which is the shape of every stale claim in this file.
+
+    Never raises. This runs inside the Stop gate, and an exercise that can take the gate down is a
+    worse defect than the staleness it fixes.
+    """
+    if not isinstance(payload, dict):
+        return
+    try:
+        rec = {"claim": "no-rate-limits-in-hooks",
+               "control": bool(payload.get("session_id")),
+               "rate_limit_keys": _rate_limit_keys(payload),
+               "top_level_keys": sorted(str(k) for k in payload),
+               "hook": str(payload.get("hook_event_name") or ""),
+               "observed_at": int(time.time())}
+        os.makedirs(os.path.dirname(HOOK_CLAIM_F), exist_ok=True)
+        tmp = HOOK_CLAIM_F + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(rec, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, HOOK_CLAIM_F)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def _hooks_claim_live():
+    """Evidence about "no hook payload carries rate-limit data" — or None if none was produced."""
+    try:
+        with open(HOOK_CLAIM_F) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not d.get("control"):
+        return None                      # no control fired; an absence here proves nothing
+    hits = [h for h in (d.get("rate_limit_keys") or []) if isinstance(h, str)]
+    if hits:
+        return (False, "a hook payload carried rate-limit data at " + ", ".join(hits[:4]))
+    n = len(d.get("top_level_keys") or [])
+    return (True, f"a real payload was read ({n} keys, session_id among them) and carried no "
+                  "rate-limit key anywhere in it")
+
+
 def external_claims_report():
     """What this harness believes about its HOST, when it last checked, and against what.
 
@@ -4717,6 +4791,18 @@ def external_claims_report():
                 lines.append(f"           ✓ 'no-weekly-opus-window' CONFIRMED LIVE — {w[1]}.")
             else:
                 lines.append(f"           ⚠ 'no-weekly-opus-window' IS NO LONGER TRUE — {w[1]}.")
+        for c in (b.get("claims") or []):
+            if c.get("id") != "no-rate-limits-in-hooks":
+                continue
+            h = _hooks_claim_live()
+            if h is None:
+                lines.append("           · 'no-rate-limits-in-hooks' is exercisable and unobserved: "
+                             "no hook payload has been")
+                lines.append("             read here yet, so its positive control did not run.")
+            elif h[0]:
+                lines.append(f"           ✓ 'no-rate-limits-in-hooks' CONFIRMED LIVE — {h[1]}.")
+            else:
+                lines.append(f"           ⚠ 'no-rate-limits-in-hooks' IS NO LONGER TRUE — {h[1]}.")
         # DECLARED DEBTS, not passes: exercisable, the control identified, nobody has written it.
         debts = [c for c in (b.get("claims") or []) if c.get("exercisable") == "yes-not-yet"]
         for c in debts:
@@ -4734,7 +4820,7 @@ def external_claims_report():
         # every exercised claim, so the weekly-window claim was reported twice — once correctly by
         # its own block above, and once carrying the statusline claim's evidence under its name.
         # A reading about the wrong subject, which is the defect this file exists to name.
-        _dedicated = {"no-weekly-opus-window"}
+        _dedicated = {"no-weekly-opus-window", "no-rate-limits-in-hooks"}
         ex = [c for c in (b.get("claims") or [])
               if c.get("exercised_by") and c["id"] not in _dedicated]
         for c in ex:

@@ -6144,6 +6144,42 @@ def main():
           all(os.path.exists(os.path.join(make_sandbox(), ".game_loop", "bin", n))
               for n in ("limit-probe.sh", "game_loop")))
 
+    print("install.sh refuses to overwrite a VENDORED payload (found by a consumer, about my advice):")
+    # I surveyed every repo's .game_loop/VERSION and told three agents to run `./install.sh <repo>`
+    # from my checkout. For a VENDORED consumer that installs whatever is in the source working tree
+    # at that instant, replaces a blessed stamped release with an unblessed one, and undoes the
+    # vendoring -- the exact remedy installed-by.json exists to redirect. update_notice() and
+    # `status` both already read the marker and name the packager's command; install.sh, the one path
+    # that DOES the damage, never looked. Same question, three code paths, consulted in two.
+    #
+    # I then ran it over two repos carrying the marker. Harmless only by timing: my tree happened to
+    # be exactly stable, so they landed on the sha the packager would have given them.
+    vend = tempfile.mkdtemp(prefix="gameloop-vendored-")
+    try:
+        _inst = os.path.join(REPO, "install.sh")
+        subprocess.run(["git", "init", "-q", "."], cwd=vend, capture_output=True)
+        _ok = subprocess.run(["bash", _inst, vend], capture_output=True, text=True, env=_env())
+        check("a target with NO vendor marker installs — the paired arm, or a refusal that always "
+              "fires would read as protection while breaking every install",
+              _ok.returncode == 0
+              and os.path.isfile(os.path.join(vend, ".game_loop", "bin", "game_loop")))
+        with open(os.path.join(vend, ".game_loop", "installed-by.json"), "w") as f:
+            json.dump({"name": "somepkg", "upgrade": "somepkg upgrade game_loop"}, f)
+        _no = subprocess.run(["bash", _inst, vend], capture_output=True, text=True, env=_env())
+        check("...and the SAME target, once marked as vendored, is REFUSED — the installer is what "
+              "undoes the vendoring, so the check belongs where the copy happens",
+              _no.returncode != 0 and "VENDORED" in _no.stderr)
+        check("...and the refusal names the PACKAGER'S OWN command, so the reader is redirected "
+              "rather than merely stopped — a refusal with no remedy is how people reach for --force",
+              "somepkg upgrade game_loop" in _no.stderr)
+        _esc = subprocess.run(["bash", _inst, "--over-vendored", vend],
+                              capture_output=True, text=True, env=_env())
+        check("...and the named escape proceeds, because INV5 says a guard must never block its own "
+              "fix: a vendored install that is BROKEN still has to be repairable by the installer",
+              _esc.returncode == 0)
+    finally:
+        shutil.rmtree(vend, ignore_errors=True)
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")

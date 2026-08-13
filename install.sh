@@ -133,6 +133,10 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] /path/to/your/p
                         seeding blank templates. A LINKED WORKTREE is detected and adopted with no
                         flag at all — reach for this only where git cannot connect the two trees
                         (a sibling clone, a copied directory, a tarball someone unpacked).
+  --over-vendored       install over a payload a package manager placed (installed-by.json). Refused
+                        by default: it replaces a blessed, stamped release with the source checkout's
+                        current state and undoes the vendoring. The packager's own upgrade command is
+                        named in the refusal.
   --fresh               seed the blank templates even in a linked worktree whose main checkout has
                         no harness. The refusal's escape hatch: say it, and it is yours.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
@@ -146,6 +150,7 @@ USAGE
 }
 
 TARGET=""
+OVER_VENDORED=0
 SAME_AS=""
 FORCE_FRESH=0
 CENTRAL=0
@@ -160,6 +165,7 @@ while [ $# -gt 0 ]; do
     --same-as=*) SAME_AS="${1#--same-as=}"; shift ;;
     --fresh)     FORCE_FRESH=1; shift ;;
     --central)   CENTRAL=1; shift ;;
+    --over-vendored) OVER_VENDORED=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     --)          shift ;;
     -*)          echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -181,6 +187,31 @@ if [ ! -d "$TARGET" ]; then
   exit 1
 fi
 TARGET="$(cd "$TARGET" && pwd)"
+
+# A VENDORED PAYLOAD IS NOT OURS TO REPLACE. installed-by.json is written by a package manager that
+# placed a blessed, stamped release here; running this installer over it swaps that for whatever is
+# in the SOURCE checkout at this instant — which may be dirty, ahead of any blessed commit, or on a
+# branch — and drops the vendoring on the floor. `game_loop status` and the update notice already
+# redirect to the packager's own command; this is the path that does the damage and it was the one
+# not looking.
+#
+# Refused rather than warned, because the warning arrives after the copy in every design where the
+# copy is the point. Escape named in the message, per INV5: a vendored install that is BROKEN must
+# still be repairable by the installer that broke it.
+VENDOR_MARK="$TARGET/.game_loop/installed-by.json"
+if [ "$OVER_VENDORED" -eq 0 ] && [ -f "$VENDOR_MARK" ]; then
+  VENDOR_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name","?"))' "$VENDOR_MARK" 2>/dev/null || echo "?")"
+  VENDOR_CMD="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("upgrade",""))' "$VENDOR_MARK" 2>/dev/null || echo "")"
+  echo "REFUSED — $TARGET carries a VENDORED game_loop payload." >&2
+  echo "  .game_loop/installed-by.json says it was placed by: $VENDOR_NAME" >&2
+  [ -n "$VENDOR_CMD" ] && echo "  Upgrade THROUGH it, which keeps the blessed release, its VERSION stamp and its CONFIDENCE:" >&2
+  [ -n "$VENDOR_CMD" ] && echo "      $VENDOR_CMD" >&2
+  echo "  This installer would copy whatever is in the source checkout RIGHT NOW — possibly dirty," >&2
+  echo "  possibly ahead of any blessed commit — and undo the vendoring." >&2
+  echo "  If that is genuinely what you want (a broken vendored install is the case that needs it):" >&2
+  echo "      ./install.sh --over-vendored $TARGET" >&2
+  exit 1
+fi
 
 if [ "$TARGET" = "$SRC" ]; then
   # Name the EVIDENCE, not an inference about which repo you are in. The old wording asserted

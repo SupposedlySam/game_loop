@@ -6144,6 +6144,50 @@ def main():
           all(os.path.exists(os.path.join(make_sandbox(), ".game_loop", "bin", n))
               for n in ("limit-probe.sh", "game_loop")))
 
+    print("install.sh refuses to DOWNGRADE a blessed install (I did this to a consumer):")
+    # I committed the vendored refusal above, whose message says "a warning printed after the copy is
+    # a report, not a guard" -- and then installed my working tree over a consumer an hour later,
+    # turning its CONFIDENCE from stable to alpha. The installer DID warn. It warns ~160 lines after
+    # the copy, beside "Done", so it described something already done, and I skimmed it while
+    # grepping the output for "Done". The vendored check does not cover this: that repo carries no
+    # packager marker. The condition that matters is the DOWNGRADE, and it is knowable before copying.
+    dg = tempfile.mkdtemp(prefix="gameloop-downgrade-")
+    try:
+        src = os.path.join(dg, "src")
+        shutil.copytree(REPO, src, ignore=shutil.ignore_patterns(
+            ".git", ".worktrees", ".game_loop_self", "__pycache__"))
+        # A HEAD that exists and carries no beta-*/stable-* tag, built rather than assumed: this
+        # repo's own HEAD may or may not be tagged on the machine running the suite.
+        for a in (["init", "-q", "."], ["add", "-A"],
+                  ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "untagged"]):
+            subprocess.run(["git", *a], cwd=src, capture_output=True)
+        tgt = os.path.join(dg, "tgt")
+        os.makedirs(os.path.join(tgt, ".game_loop"))
+        subprocess.run(["git", "init", "-q", "."], cwd=tgt, capture_output=True)
+        _inst2 = os.path.join(src, "install.sh")
+
+        def _at(level, *flags):
+            with open(os.path.join(tgt, ".game_loop", "CONFIDENCE"), "w") as f:
+                f.write(level + "\n")
+            return subprocess.run(["bash", _inst2, *flags, tgt],
+                                  capture_output=True, text=True, env=_env())
+
+        _down = _at("stable")
+        check("an unblessed source over a STABLE install is REFUSED before the copy — the existing "
+              "notice prints beside 'Done', which describes a downgrade already made",
+              _down.returncode != 0 and "DOWNGRADE" in _down.stderr)
+        check("...and the refusal names marking the commit as the remedy, not the escape, because a "
+              "refusal whose only exit is a force flag teaches the force flag",
+              "confidence --mark stable" in _down.stderr)
+        check("...while the same install over an ALPHA target proceeds — a fresh install from an "
+              "unmarked commit is ordinary, and a check that fired there would break every install",
+              _at("alpha").returncode == 0)
+        check("...and the named escape proceeds, since a BROKEN blessed install is exactly the case "
+              "that needs the installer (INV5)",
+              _at("stable", "--over-blessed").returncode == 0)
+    finally:
+        shutil.rmtree(dg, ignore_errors=True)
+
     print("install.sh refuses to overwrite a VENDORED payload (found by a consumer, about my advice):")
     # I surveyed every repo's .game_loop/VERSION and told three agents to run `./install.sh <repo>`
     # from my checkout. For a VENDORED consumer that installs whatever is in the source working tree

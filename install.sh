@@ -137,6 +137,9 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] /path/to/your/p
                         by default: it replaces a blessed, stamped release with the source checkout's
                         current state and undoes the vendoring. The packager's own upgrade command is
                         named in the refusal.
+  --over-blessed        install over a beta/stable install from a source commit carrying no mark.
+                        Refused by default: it downgrades CONFIDENCE to alpha, silently removing the
+                        only signal a consumer has. Mark the source commit instead.
   --fresh               seed the blank templates even in a linked worktree whose main checkout has
                         no harness. The refusal's escape hatch: say it, and it is yours.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
@@ -151,6 +154,7 @@ USAGE
 
 TARGET=""
 OVER_VENDORED=0
+OVER_BLESSED=0
 SAME_AS=""
 FORCE_FRESH=0
 CENTRAL=0
@@ -166,6 +170,7 @@ while [ $# -gt 0 ]; do
     --fresh)     FORCE_FRESH=1; shift ;;
     --central)   CENTRAL=1; shift ;;
     --over-vendored) OVER_VENDORED=1; shift ;;
+    --over-blessed)  OVER_BLESSED=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     --)          shift ;;
     -*)          echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -198,6 +203,48 @@ TARGET="$(cd "$TARGET" && pwd)"
 # Refused rather than warned, because the warning arrives after the copy in every design where the
 # copy is the point. Escape named in the message, per INV5: a vendored install that is BROKEN must
 # still be repairable by the installer that broke it.
+# WOULD THIS REPLACE A BLESSED INSTALL WITH AN UNBLESSED ONE? Checked HERE, before the copy, because
+# the existing ALPHA notice prints ~160 lines later — beside "Done", describing something already
+# done. I wrote "a warning after the copy is a report, not a guard" in a commit message and then did
+# exactly this to a consumer an hour afterwards, skimming my own warning while grepping for "Done".
+#
+# A FRESH install from an alpha commit is ordinary and stays a warning. The harm is the DOWNGRADE: an
+# install carrying beta or stable becoming alpha, which silently removes the only signal a consumer
+# has about whether anyone stands behind the code. Distinct from the vendored case above and not
+# covered by it — the repo this happened to carries no packager marker at all.
+#
+# Only fires where the incoming level can be KNOWN before copying: a source that is its own git
+# checkout, whose HEAD tags are readable. Anywhere else it says nothing rather than guessing, which
+# is the rule the level machinery below already follows.
+if [ "$OVER_BLESSED" -eq 0 ] && [ -f "$TARGET/.game_loop/CONFIDENCE" ]; then
+  HAVE_LEVEL="$(tr -d '[:space:]' < "$TARGET/.game_loop/CONFIDENCE" 2>/dev/null)"
+  if [ "$HAVE_LEVEL" = "stable" ] || [ "$HAVE_LEVEL" = "beta" ]; then
+    INCOMING="alpha"
+    if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
+      for _pt in $(git -C "$SRC" tag --points-at HEAD 2>/dev/null); do
+        case "$_pt" in
+          stable-*) INCOMING="stable" ;;
+          beta-*)   [ "$INCOMING" = "stable" ] || INCOMING="beta" ;;
+        esac
+      done
+    else
+      INCOMING=""        # cannot read tags here: say nothing rather than claim a downgrade
+    fi
+    if [ "$INCOMING" = "alpha" ]; then
+      echo "REFUSED — this would DOWNGRADE a blessed install." >&2
+      echo "  $TARGET currently carries: CONFIDENCE = $HAVE_LEVEL" >&2
+      echo "  The source checkout's HEAD carries no beta-* or stable-* tag, so this install would" >&2
+      echo "  be stamped ALPHA — replacing the only signal a consumer has that somebody stands" >&2
+      echo "  behind this code, with the value that means nobody has said." >&2
+      echo "  Mark the commit first, then install:" >&2
+      echo "      game_loop confidence --mark stable   # in the source checkout" >&2
+      echo "  Or say you mean it (a broken blessed install is the case that needs this):" >&2
+      echo "      ./install.sh --over-blessed $TARGET" >&2
+      exit 1
+    fi
+  fi
+fi
+
 VENDOR_MARK="$TARGET/.game_loop/installed-by.json"
 if [ "$OVER_VENDORED" -eq 0 ] && [ -f "$VENDOR_MARK" ]; then
   VENDOR_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name","?"))' "$VENDOR_MARK" 2>/dev/null || echo "?")"

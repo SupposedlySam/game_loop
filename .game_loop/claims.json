@@ -79,8 +79,9 @@
         "ledger": "statusLine config keys",
         "exercisable": "no",
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
-        "verified_on": "2026-07-29",
-        "verified_against": null
+        "verified_on": "2026-08-13",
+        "verified_against": "2.1.223",
+        "verified_how": "re-read in the running binary: type:literal(\"command\"), command:string(), padding:number().optional(), refreshInterval:number().min(1).optional() \u2014 all four keys and the 1s floor, from the client's own schema rather than from the docs page the claim cites"
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -115,7 +116,8 @@
         "exercisable": "no",
         "exercisable_why": "unconditional: nothing local produces the headers, so no run can discriminate",
         "verified_on": "2026-07-29",
-        "verified_against": null
+        "verified_against": null,
+        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists \u2014 but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
       },
       {
         "id": "no-weekly-opus-window",

@@ -27,8 +27,11 @@ set -uo pipefail
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/gl-limitprobe-XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
-# The running binary, not whatever is on PATH: measured on this machine, PATH's claude was 2.1.145
-# while the running one was 2.1.223. A probe that asks the wrong binary reports the wrong account.
+# The running binary, not whatever is on PATH. These genuinely differ: on this machine PATH held
+# 2.1.145 against a running 2.1.223 when this shipped, and 2.1.231 against the same running 2.1.223
+# three days later — so WHICH IS NEWER FLIPS, and the reason to prefer EXECPATH is not newness. It is
+# that the running binary is the one whose account and session this probe is asking about. A probe
+# that asks the wrong binary reports the wrong account, whichever version that binary happens to be.
 CB="${CLAUDE_CODE_EXECPATH:-}"
 [ -n "$CB" ] && [ -x "$CB" ] || CB="$(command -v claude 2>/dev/null || true)"
 if [ -z "$CB" ]; then

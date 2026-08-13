@@ -95,7 +95,7 @@
     },
     {
       "seq": 7,
-      "sha": "PENDING",
+      "sha": "7209686",
       "verb": "confidence --mark",
       "notice": true,
       "change": "marking a commit that is ALREADY marked at that level no longer dies on `tag already exists`. It reports RE-MARKED, leaves the immutable tag untouched, and re-fires the confidence triggers. The same name over a DIFFERENT commit still refuses, and now names the commit it already records instead of passing through a bare git error.",

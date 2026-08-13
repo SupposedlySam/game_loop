@@ -139,7 +139,12 @@ STATE_F = LEGACY_STATE_F                            # re-pointed by set_session(
 LOG_F = os.path.join(ROOT, "log.jsonl")
 CONFIG_F = os.path.join(ROOT, "config.json")
 INV_F = os.path.join(ROOT, "INVARIANTS.md")
-LIMITS_F = os.path.join(ROOT, "limits.json")  # account-scoped, deliberately NOT per-session
+# THE FALLBACK, NOT THE ANSWER — read limits_file() below, which is account-scoped. This one is
+# per-CHECKOUT and is used only when git cannot tell us where the main checkout is. It carried the
+# comment "account-scoped" until an orchestrator grepped it, read the property it asserts, and
+# nearly filed a false report that the worktree fix had never landed. A name that reads as the
+# authority is a defect even when the code beneath it is correct.
+_LIMITS_LOCAL = os.path.join(ROOT, "limits.json")   # degraded: this tree only, never the shared one
 _LIMITS_PATH = None
 
 
@@ -177,7 +182,7 @@ def limits_file():
             if os.path.isdir(os.path.dirname(shared)):
                 _LIMITS_PATH = shared
         if _LIMITS_PATH is None:
-            _LIMITS_PATH = LIMITS_F
+            _LIMITS_PATH = _LIMITS_LOCAL
     return _LIMITS_PATH
 VERSION_F = os.path.join(ROOT, "VERSION")     # the game_loop commit sha install.sh copied in
 UPDATE_CACHE_F = os.path.join(ROOT, ".update_cache.json")  # cached latest-sha lookup (gitignored)

@@ -6004,7 +6004,7 @@ def main():
         _gl2._LIMITS_PATH = None
         check("...while a repo that is NOT a worktree keeps its own, so the fix relocates nothing "
               "for the ordinary single-checkout install",
-              _gl2.limits_file() == _gl2.LIMITS_F)
+              _gl2.limits_file() == _gl2._LIMITS_LOCAL)
         # DEGRADES, NEVER RAISES: this runs inside a statusline refresh and a Stop hook.
         def _boom():
             raise RuntimeError("git said no")
@@ -6012,7 +6012,7 @@ def main():
         _gl2._LIMITS_PATH = None
         check("...and a git that cannot answer degrades to this tree rather than raising — a "
               "snapshot in the wrong place is a degraded reading, a raise takes the hook down",
-              _gl2.limits_file() == _gl2.LIMITS_F)
+              _gl2.limits_file() == _gl2._LIMITS_LOCAL)
 
         # ONLY THE SNAPSHOT MOVES. Sharing session state, the edited set, claims or authorizations
         # would collapse the isolation the worktree exists for.
@@ -6023,6 +6023,19 @@ def main():
         check("...and the lock moved WITH the data file, since a shared file with per-tree locks "
               "races worse than the private files it replaced",
               'os.path.dirname(limits_file()), ".limits.lock"' in _src)
+        # A FIX THAT READS AS UNFIXED IS A DEFECT — the consumer greps, and the grep must not lie.
+        # showrunner nearly filed a false report off the old constant, which sat three lines above
+        # the resolver still carrying the word "account-scoped" on a per-checkout expression.
+        check("...and the per-checkout path is named as the FALLBACK it is, so grepping the snapshot "
+              "cannot land on an expression that reads like the unfixed version",
+              "LIMITS_F" not in _src and "_LIMITS_LOCAL = os.path.join(ROOT" in _src)
+        check("...and nothing reads that fallback directly — it is referenced ONCE, inside the "
+              "resolver, so a new direct reader reintroduces the per-checkout snapshot loudly",
+              _src.count("_LIMITS_LOCAL") == 2)
+        _wd = open(os.path.join(SRC_GAME_LOOP, "bin", "watchdog")).read()
+        check("...and the watchdog's resolved path no longer shares a NAME with that fallback, "
+              "since one identifier meaning both things across two files is what misread once",
+              "LIMITS_F" not in _wd and "LIMITS_PATH = _limits_file()" in _wd)
     finally:
         shutil.rmtree(lw2, ignore_errors=True)
 

@@ -104,7 +104,7 @@
     },
     {
       "seq": 8,
-      "sha": "PENDING",
+      "sha": "4f203f5",
       "verb": "stopgate (turn-end)",
       "notice": true,
       "change": "turn-end can now be REFUSED by something other than the mandate gate. A `stop` key in .game_loop/triggers.json attaches a command to turn-end: a NON-ZERO exit blocks the turn and its stderr goes back to the model. Previously `stop` was not a moment at all, so such a key ran nothing and status called it THERE IS NO SUCH MOMENT. It is bounded in three ways that are part of the contract, not implementation detail: a timeout, an unrunnable command or a crash FAILS OPEN loudly (the turn ends UNCHECKED, which is not a pass); after 3 CONSECUTIVE blocks the attachment STANDS DOWN with a notice and the turn ends, resetting the moment it passes once; and it runs only where turn-end would otherwise be allowed, before any checkpoint/arm/park is consumed. Its default timeout is 10s, not the usual 20, because it runs on every turn-end.",

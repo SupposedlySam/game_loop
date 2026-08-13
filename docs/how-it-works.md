@@ -532,13 +532,14 @@ those already knows it:
 * the event payload arrives as **JSON on stdin**
 * **stdout comes back to the agent** — a trigger that reads a channel is useless if what it read
   is discarded
-* env: `GAME_LOOP_EVENT`, `GAME_LOOP_ROOT`, `GAME_LOOP_REPO`; `timeout_sec` defaults to 20
+* env: `GAME_LOOP_EVENT`, `GAME_LOOP_ROOT`, `GAME_LOOP_REPO`; `timeout_sec` defaults to 20 — and to
+  **10** at `stop`, which runs on every single turn-end and is therefore a tax on all of them
 
 Three rules, each of them a scar:
 
 1. **It never blocks.** A failing broadcast must not stop a learning being hardened. The work
    outranks the announcement, and a report that can veto what it reports on is a guard blocking its
-   own fix.
+   own fix. (One moment is deliberately exempt — `stop`, below, where blocking is the point.)
 2. **It is never silent.** Failure, timeout and an unrunnable command all say so, and say that the
    verb itself still stands.
 3. **It is always accounted for.** Every attachment carries its last outcome in state, so `status`
@@ -549,7 +550,8 @@ Three rules, each of them a scar:
 **Moments published so far:** `harden` (a learning was just encoded — the moment to generalise and
 share it), `stepback` (a retro just began, fired **before** its output, so what other agents
 learned is an input to the reflection rather than an appendix to it), `confidence` (a commit was
-just marked — the moment anything that *distributes* this project belongs on) and `session_start`.
+just marked — the moment anything that *distributes* this project belongs on), `session_start` and
+`stop`.
 
 `session_start` is the only moment that is **not a verb somebody typed**. The entry point below
 already runs at the right instant and injects `status` as additional context, so a new session can
@@ -574,6 +576,63 @@ Because `session_start: false` turns the whole moment off, an attachment wired t
 is reported as **SWITCHED OFF**, not as one that has merely never fired. That is the same
 distinction the *no such moment* refusal draws: never-fired reads as patience, and patience is the
 wrong thing to read when the moment can never come round.
+
+#### `stop` — the moment that decides instead of announcing
+
+Every other moment is an announcement: the verb has happened, the attachment reports on it, and
+rule 1 above says its exit code cannot change anything. At `stop` the exit code **is** the verdict.
+Non-zero **blocks turn-end** and stderr goes back to the model as feedback — the Stop gate's own
+contract (`exit 0 = may stop · exit 2 = blocked`), handed to a command game_loop did not write.
+
+It exists because a rule the agent must *remember* is followed only sometimes, and a rule a hook
+*consumes* holds every time (INV1). The case: an agent was asked a direct question by a human
+through a chat bridge, did the work, and ended its turn without answering, because "reply when
+addressed" lived in prose. The alternative available before this was a **second** `Stop` hook
+registered beside game_loop's — two registrants deciding one turn-end, either able to end it,
+neither able to see that the other said no.
+
+Blocking is a far sharper capability than announcing, so four things bound it:
+
+* **it runs only where turn-end would otherwise be allowed.** The mandate gate decides first; a turn
+  it has already refused never reaches the attachment. And it runs **before** anything is consumed —
+  a checkpoint, an arm and a park are each single-use, and spending one on a turn that then gets
+  blocked would burn the human's interruption on a turn that never ended;
+* **an error fails open, loudly.** A timeout, an unrunnable command or a crash ends the turn
+  *unchecked* — not passed — and says so on stderr, in the log, and in `status` until it answers
+  again. A guard must never block its own fix (INV5), and that includes the fix for itself;
+* **a block is bounded by consecutive count.** After **3** consecutive blocks the attachment
+  **stands down**: the turn ends, with a notice naming it and how many times it blocked. One pass
+  resets the count and puts it back in charge;
+* **a block is counted** in the same tally as every other block this gate issues, so `status` and
+  the log answer *why did this not stop* without anyone reconstructing it. `stop_blocks` is
+  deliberately left alone — that counter is the mandate gate's own circuit breaker, and letting an
+  attachment spend it would let one gate stand down another for an unrelated reason.
+
+**The bound is the part worth arguing about**, and it is not the same hazard as the fail-open. Every
+other way this gate blocks is satisfiable from *inside* the session in one command — `checkpoint`,
+`arm`, `mandate --clear`. A `stop` attachment's condition is **external**, and the dangerous case is
+not a crash: it is a command that runs perfectly and returns a perfectly correct *still owed* which
+nobody present can clear, because the room it asks about is down. Failing open on error does not
+touch that case. Unbounded, it is a gate no session in the tree could ever pass — the harness itself
+preventing every agent from finishing, which is the worst thing this project could ship.
+
+Three, counted as turns rather than rounded: one to **tell** the agent, one for the attempt it makes
+in response, and one for the attempt it makes after reading why the first did not clear it. A fourth
+consecutive block is no longer evidence that the condition is agent-satisfiable. (The mandate gate's
+own breaker stands down at **2**, deliberately tighter: what it asks for is a command in this
+session, where an attachment asks for an effect somewhere else, and that legitimately needs a retry.)
+
+If several attachments are configured, **all of them run even after one has said no**. Short-
+circuiting saves nothing on the passing path — every attachment must pass for the turn to end, so
+they all run anyway — and costs two things on the blocking one: the agent gets *one* turn-end and
+should be told everything it owes rather than discovering the second obligation after clearing the
+first, and a skipped attachment can neither increment nor reset its own count, so its bound would
+stop being measured in turn-ends.
+
+Blocked, failed-open-after-an-error, stood-down-after-the-bound and passed are **four different
+states and read as four different states**, in the model's feedback and in `status`. That is not
+tidiness: *could not tell* being indistinguishable from *nothing to report* is the defect this whole
+harness exists to prevent, and a gate is the last place to reintroduce it.
 
 `harden --general` carries the **transferable** form: what another agent could use without knowing
 anything about this codebase. It is a separate act of thought from hardening, because the incident

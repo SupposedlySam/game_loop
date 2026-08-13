@@ -529,10 +529,12 @@ its own command on a moment in the loop. Nothing is attached by default.
 | `stepback` | a retro just began | pull in what others learned; re-read the work queue |
 | `confidence` | a commit was just marked | publish it wherever consumers take it |
 | `session_start` | a session started, or was compacted | act **once** on the session's behalf — register with a local tool, join a room, claim a name |
+| `stop` | the turn is about to end | **refuse** it — a question left unanswered, a branch left unpushed |
 
 A trigger gets a JSON payload on stdin and its stdout comes back to the agent. It **never blocks**
 the verb, it is **never silent** — `status` lists each one with its last run, and a failing trigger
-is shown as FAILING with its error rather than passing quietly.
+is shown as FAILING with its error rather than passing quietly. `stop` is the exception to the first
+half of that and is described below.
 
 `session_start` is the odd one out and worth reading twice before attaching to it. It is the only
 moment that is not a verb somebody typed, so it runs on the path **every** session crosses: the
@@ -543,6 +545,25 @@ status block already injected at session start, so an attachment can both act an
 did. And because `session_start: false` switches the whole moment off, `status` reports an
 attachment wired to a disabled moment as **SWITCHED OFF** rather than letting it read as one that
 is merely patient.
+
+`stop` is the other one to read twice, and for the opposite reason: it is the only moment whose
+**exit code is a verdict**. Non-zero **blocks turn-end** and its stderr goes back to the model as
+the reason — the Stop gate's own contract, handed to a command your project wrote. It exists
+because rules like "reply when a human addresses you" live in prose, and prose is followed
+sometimes; an agent asked a direct question through a chat bridge did the work and ended its turn
+without answering. Four things hold it in place:
+
+* **it runs on every turn-end**, so its timeout is a tax on every turn — the default is 10s, not 20;
+* **it is bounded by consecutive count.** After **3** consecutive blocks from the same attachment it
+  **stands down** with a loud notice and the turn ends; one pass resets the count. Every other block
+  this gate issues is satisfiable from inside the session — a `stop` attachment's condition may be
+  satisfiable by nobody present (the room it asks about is down), and a gate no session can pass
+  would be the harness preventing every agent from finishing;
+* **an error fails open, loudly, and is not a pass.** A timeout, an unrunnable command or a crash
+  ends the turn *unchecked* and says so — in the log and in `status` — rather than blocking, because
+  a guard must never block its own fix;
+* **a block is counted** like any other, so `status`'s gate tally and the log answer "why did this
+  not stop" without anyone reconstructing it.
 
 Your project's own rules live in three files the installer seeds once and never overwrites:
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and

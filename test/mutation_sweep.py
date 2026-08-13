@@ -254,6 +254,24 @@ MUTANTS = [
      None, 6),
     ("fire_triggers -> a project's attachments never run", ".game_loop/bin/game_loop::fire_triggers", "    return []\n",
      ["trigger", "attach", "harden", "stepback"], None, 9),
+    # THE MOMENT THAT DECIDES (#64), and the most expensive silence in this file: neutered, no
+    # attachment can ever refuse a turn-end, every `stop` trigger in every tree becomes advisory,
+    # and nothing about a run looks different — a gate that has stopped gating is exactly what this
+    # sweep exists to notice. 22 against a baseline of 788, MEASURED on the working tree rather than
+    # on HEAD (the producer did not exist in HEAD when this was measured, which is the same reason
+    # external_claims_report's floor above was taken that way), by the same neuter/diff this file
+    # performs. Every one of the 22 is an assertion written for this moment and none is bookkeeping
+    # noticing a changed candidate set.
+    #
+    # THE FIRST MEASUREMENT READ 59 AND WAS THROWN AWAY. A test read the payload file the attachment
+    # writes with a bare `open`, so the neutered producer took the whole suite down at that line and
+    # 37 assertions about pinned harnesses "died" for having never run. That is the collapsed
+    # baseline this file's header warns about, arriving from the other end, and it inflates rather
+    # than zeroes — which is worse, because it looks like coverage. The test now degrades instead of
+    # raising, and the number below is from the re-run.
+    ("stop_trigger_block -> no attachment can ever refuse a turn-end",
+     ".game_loop/bin/game_loop::stop_trigger_block", "    return None\n",
+     ["stop", "turn-end", "attachment", "stood down"], None, 22),
     ("triggers_report -> status never mentions an attachment", ".game_loop/bin/game_loop::triggers_report",
      "    return []\n", ["trigger", "attach", "never fired"],
      # Measured at 2 when first written, and that was the whole warning: the two assertions were the

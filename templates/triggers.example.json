@@ -21,7 +21,9 @@
     "    decline rather than guess. The waiting probe gets the same two, plus GAME_LOOP_TRANSCRIPT.",
     "  * a non-zero exit is reported loudly and NEVER blocks the verb — the work outranks the",
     "    announcement, and a broadcast that can veto what it reports on is a guard blocking its own fix",
-    "  * timeout_sec defaults to 20",
+    "    ...EXCEPT at `stop`, the one moment whose exit code is a VERDICT. Read its entry below",
+    "    before attaching there: non-zero BLOCKS turn-end and stderr goes back to the model.",
+    "  * timeout_sec defaults to 20 (10 at `stop`, which runs on every single turn-end)",
     "",
     "MOMENTS AVAILABLE",
     "  harden   — a learning was just encoded. Payload: learning, general, artifact, mechanism, rung,",
@@ -50,6 +52,26 @@
     "               * `\"session_start\": false` in config.json switches the whole moment off. Then",
     "                 nothing attached here can ever fire — `status` says SWITCHED OFF rather than",
     "                 letting it read as an attachment that is merely patient.",
+    "  stop     — the turn is about to end. Payload: last_assistant_message, transcript_path,",
+    "             stop_hook_active, session_id, project, session. THE ONE MOMENT THAT PARTICIPATES",
+    "             IN A DECISION instead of announcing one: exit NON-ZERO to BLOCK turn-end, and your",
+    "             stderr goes back to the model as the reason. Exit 0 and the turn ends. Attach here",
+    "             when something checkable says the turn is not finished — an unanswered question in",
+    "             a chat bridge, an unpushed branch, a dirty tree — rather than writing it in prose",
+    "             and hoping. Prose is followed sometimes; a hook is consumed every time.",
+    "             Four things to know before you attach here, and they are not optional reading:",
+    "               * it runs on EVERY turn-end, so its timeout is a tax on EVERY turn. Default 10s.",
+    "                 Make the check cheap, and make it decline fast when it cannot answer.",
+    "               * it is BOUNDED. After 3 consecutive blocks the attachment STANDS DOWN with a",
+    "                 loud notice and the turn ends, because a block nobody present can clear would",
+    "                 gate every turn in this tree forever. One pass resets the count. Do not design",
+    "                 around the bound: it exists for the case where your check is right and the",
+    "                 thing it wants is impossible (the room is down, so the reply cannot be sent).",
+    "               * a timeout, an unrunnable command or a crash FAILS OPEN, loudly, and is NOT a",
+    "                 pass — the turn ends unchecked and says so. A guard must never block its own",
+    "                 fix, and that includes the fix for the guard itself.",
+    "               * it runs only where turn-end would otherwise be ALLOWED. The mandate gate",
+    "                 decides first; a turn it has already refused never reaches your check.",
     "",
     "`game_loop status` lists what you have attached and names anything that has never fired.",
     "Configured and working are different claims, and only one of them is visible by default."
@@ -78,6 +100,28 @@
       "name": "example-act-once-per-project",
       "command": "m=\"$GAME_LOOP_ROOT/probe/session-start-acted\"; [ -f \"$m\" ] && exit 0; date > \"$m\"; echo \"acted once for this project (delete $m to do it again)\"",
       "timeout_sec": 20
+    }
+  ],
+
+  "stop": [
+    {
+      "//": [
+        "THE RULE THAT WAS PROSE. 'Reply when a human addresses you' lived in an instruction file,",
+        "and an agent asked a direct question through a chat bridge did the work and ended its turn",
+        "without answering — because a rule you must remember is followed only sometimes.",
+        "",
+        "The shape to copy is the THREE EXITS, not the tool. Exit 0 when the check passes and say",
+        "nothing. Exit non-zero ONLY when you are sure, and put the reason on stderr in the second",
+        "person, because that text is what the model reads. And when you cannot tell — the room is",
+        "unreachable, the API is down — exit 0 rather than blocking on an unanswered question: a",
+        "check that blocks when it cannot see is a check that blocks forever the day it breaks.",
+        "",
+        "Replace the command with whatever answers 'does this turn still owe somebody something'.",
+        "Keep it under the timeout; this runs on every turn-end you take."
+      ],
+      "name": "example-answer-owed",
+      "command": "owed=$(your-chat-tool owed --as \"$GAME_LOOP_SESSION\" 2>/dev/null) || exit 0; [ -z \"$owed\" ] && exit 0; echo \"you were asked a direct question and have not answered it: $owed\" >&2; exit 1",
+      "timeout_sec": 10
     }
   ],
 

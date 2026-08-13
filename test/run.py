@@ -5159,9 +5159,14 @@ def main():
             _moments = [k.value for k in _n.value.keys]
     _ex_src = open(os.path.join(REPO, "templates", "triggers.example.json")).read()
     _rm_src = open(os.path.join(REPO, "README.md")).read()
+    # A KEY IN THE EXAMPLE, not a substring of it. `stop` (#64) is the case that made the substring
+    # test worthless: it occurs inside "stopped", "stop gate" and a dozen sentences, so a moment
+    # published and documented nowhere would have passed on the strength of prose about something
+    # else. A parsed key cannot be satisfied by an accident of wording.
+    _ex_keys = set(json.loads(_ex_src))
 
     def _undocumented(names):
-        return [m for m in names if m not in _ex_src or f"`{m}`" not in _rm_src]
+        return [m for m in names if m not in _ex_keys or f"`{m}`" not in _rm_src]
 
     check(f"every moment the code publishes is named in the example config AND the README table "
           f"({len(_moments)} published)"
@@ -5383,6 +5388,268 @@ def main():
               and _sb.index("INCOMING-LEARNING") < _sb.index("STEP-BACK — invariants re-injected"))
     finally:
         shutil.rmtree(tpp, ignore_errors=True)
+
+    # ── THE MOMENT THAT DECIDES INSTEAD OF ANNOUNCING (#64) ─────────────────────────────────────
+    # Every trigger above is an announcement whose exit code changes nothing — "a trigger never
+    # blocks the work" is printed under each failure. This one blocks: non-zero refuses turn-end and
+    # its stderr goes back to the model. It exists because "reply when a human addresses you" lived
+    # in prose, and an agent asked a direct question through a chat bridge did the work and ended
+    # its turn without answering it.
+    #
+    # Blocking is a far sharper capability than announcing, and it is what the assertions here are
+    # mostly about: every arm that says "it does NOT block" is paired with one showing it DOES, or
+    # the arm is equally satisfied by a mechanism that never runs anything at all.
+    print("the stop moment — a project's own check can REFUSE turn-end:")
+    stp = make_sandbox()
+    try:
+        _stf = os.path.join(stp, ".game_loop", "triggers.json")
+        _seen = os.path.join(stp, "stop-trigger-ran")
+        _pay = os.path.join(stp, "stop-payload-seen.json")
+
+        def _attach_stop(*trigs):
+            with open(_stf, "w") as f:
+                json.dump({"stop": list(trigs)}, f)
+
+        def _end(sid="sess-stop", msg="Done. Remaining: nothing.", **extra):
+            """One turn-end, driven through the real Stop hook entry point."""
+            return gl(stp, "stopgate", sid=sid,
+                      stdin=json.dumps({"session_id": sid, "last_assistant_message": msg, **extra}))
+
+        # THE CONTROL FIRST. An install with nothing attached must be untouched — a moment that
+        # narrates its own absence on every turn-end is a tax on everybody who never asked for it.
+        check("nothing attached to `stop` → turn-end is exactly as it was, and silent about it",
+              _end().returncode == 0 and not _end().stderr.strip())
+
+        _attach_stop({"name": "answer-owed",
+                      "command": "echo 'you owe @jonah a reply in #dev' >&2; exit 1"})
+        _blocked = _end()
+        check("an attachment that exits NON-ZERO BLOCKS turn-end (exit 2) — the contract the "
+              "mandate gate already uses, handed to a command this repo did not write",
+              _blocked.returncode == 2 and "STOP GATE CLOSED" in _blocked.stderr)
+        check("...and ITS OWN stderr is what goes back to the model, so the reason belongs to the "
+              "project rather than being a generic refusal the agent has to go and interpret",
+              "you owe @jonah a reply in #dev" in _blocked.stderr
+              and "answer-owed" in _blocked.stderr)
+        check("...and the message names the bound out loud, so the agent is not left believing it "
+              "has hit a wall that never comes down",
+              "consecutive block 1 of 3" in _blocked.stderr
+              and "stands down after 3" in _blocked.stderr)
+
+        # THE PAIR THAT MAKES ALL OF IT MEAN SOMETHING: the same attachment, saying yes.
+        _attach_stop({"name": "answer-owed", "command": "exit 0"})
+        _ok = _end()
+        check("...while the same attachment exiting ZERO lets the turn end, silently — the block "
+              "above was a VERDICT, not the mere presence of a `stop` key",
+              _ok.returncode == 0 and not _ok.stderr.strip())
+
+        # The payload, checked by what the command RECEIVED rather than by what the harness says it
+        # sends. An attachment deciding whether a turn may end needs the closing message above all:
+        # "did it answer the question" is a question about that text.
+        _attach_stop({"name": "reads-payload",
+                      "command": f"cat > {shlex.quote(_pay)}; exit 0"})
+        _end(msg="I have finished the migration.")
+        try:
+            # DEFENSIVELY, because the file is the assertion. An attachment that never ran writes
+            # nothing, and letting that raise here would take the whole suite down with it — every
+            # assertion after this point would die for a reason having nothing to do with them,
+            # which is how a mutation run reports coverage it does not have.
+            with open(_pay) as f:
+                _seen_payload = json.load(f)
+        except (OSError, ValueError):
+            _seen_payload = {}
+        check("the payload carries the agent's CLOSING MESSAGE and names the moment, so an "
+              "attachment can decide about this turn rather than about the world in general",
+              _seen_payload.get("last_assistant_message") == "I have finished the migration."
+              and _seen_payload.get("event") == "stop"
+              and _seen_payload.get("session") == "sess-stop")
+
+        # ── FAIL OPEN, AND SAY SO ───────────────────────────────────────────────────────────────
+        # A trigger that ERRORS must not wedge the session: a guard must never block its own fix
+        # (INV5), and an attachment that hangs while somebody is repairing it would otherwise hold
+        # the session shut with the repair inside it. Both arms are driven by a command that
+        # genuinely errors, never by one asserted to have errored.
+        _attach_stop({"name": "hangs", "command": "sleep 30", "timeout_sec": 1})
+        _t0 = time.time()
+        _to = _end()
+        check("an attachment that HANGS is bounded, fails OPEN, and the turn ends",
+              _to.returncode == 0 and time.time() - _t0 < 20)
+        check("...and it is LOUD about it, and refuses to be read as a pass — 'nothing was decided' "
+              "and 'it said yes' are the two states this harness exists to keep apart",
+              "FAILED OPEN" in _to.stderr and "UNCHECKED" in _to.stderr
+              and "timed out" in _to.stderr and "not a pass" in _to.stderr)
+        # A DIFFERENT genuine error, and the sharper one: a `command` that is not a string raises
+        # from inside subprocess rather than returning an exit code. That used to propagate out of
+        # the trigger runner, whose docstring promised it raises nothing — one badly typed line of
+        # site config, and the Stop hook itself would crash on every turn-end.
+        _attach_stop({"name": "typed-wrong", "command": 1234})
+        _crash = _end()
+        check("an attachment the harness cannot even RUN is an answer, not a crash: the turn ends "
+              "and the notice names it",
+              _crash.returncode == 0 and "FAILED OPEN" in _crash.stderr
+              and "typed-wrong" in _crash.stderr and "could not run" in _crash.stderr)
+
+        # ── THE BOUND, WHICH IS NOT THE SAME HAZARD AS THE FAIL-OPEN ────────────────────────────
+        # An attachment can run perfectly and return a perfectly correct "still owed" that nobody
+        # present can clear — the room it asks about is down. That is neither a crash nor a timeout,
+        # so failing open on those does not touch it, and unbounded it is a gate no session in the
+        # tree could ever pass: the harness itself preventing every agent from finishing.
+        _attach_stop({"name": "impossible", "command": "echo 'the room is unreachable' >&2; exit 1"})
+        _runs = [_end(sid="sess-bound") for _ in range(4)]
+        check("three consecutive blocks all hold — the bound is not a way of blocking once and "
+              "giving up, which would make the whole moment advisory",
+              [r.returncode for r in _runs[:3]] == [2, 2, 2]
+              and "consecutive block 3 of 3" in _runs[2].stderr)
+        check("...and the FOURTH stands down: the turn ends even though the attachment is still "
+              "saying no, because a block nobody present can clear would gate every turn forever",
+              _runs[3].returncode == 0 and "STOOD DOWN" in _runs[3].stderr)
+        check("...and the notice NAMES the attachment, the count, and what it last said — a gate "
+              "that quietly stops holding is worse than one that never held",
+              "impossible" in _runs[3].stderr and "4 consecutive turn-ends" in _runs[3].stderr
+              and "the room is unreachable" in _runs[3].stderr)
+        # THE RESET, and it is the half that keeps the bound from being a one-way door: an
+        # attachment that stood down must be able to come back, or the first bad afternoon disarms
+        # it permanently and nothing says so.
+        _attach_stop({"name": "impossible", "command": "exit 0"})
+        _end(sid="sess-bound")
+        _attach_stop({"name": "impossible", "command": "echo 'owed again' >&2; exit 1"})
+        _again = _end(sid="sess-bound")
+        check("one PASS resets the count and puts the attachment back in charge — a stand-down is "
+              "the harness declining to honour a block, never a permanent disarm",
+              _again.returncode == 2 and "consecutive block 1 of 3" in _again.stderr)
+        # And the streak is reset ONLY by a pass. Letting "could not tell" clear it hands back the
+        # unbounded case through the side door: an attachment that fails every other turn would
+        # block half of them forever and never reach its bound.
+        _attach_stop({"name": "impossible", "command": "sleep 30", "timeout_sec": 1})
+        _mid = _end(sid="sess-bound")
+        _attach_stop({"name": "impossible", "command": "echo 'still owed' >&2; exit 1"})
+        _after = _end(sid="sess-bound")
+        check("an ERROR mid-streak neither counts as a block nor clears the run of them — the "
+              "streak resumes where it was, so a trigger that errors every other turn still "
+              "reaches its bound",
+              _mid.returncode == 0 and "FAILED OPEN" in _mid.stderr
+              and _after.returncode == 2 and "consecutive block 2 of 3" in _after.stderr)
+
+        # ── WHAT A BLOCK MUST NOT COST ──────────────────────────────────────────────────────────
+        # A checkpoint, an arm and a park are each single-use. Spending one on a turn-end that then
+        # gets blocked would burn the human's interruption on a turn that never ended.
+        _attach_stop({"name": "owed", "command": "echo nope >&2; exit 1"})
+        gl(stp, "mandate", "--set", "do the work", sid="sess-keep")
+        gl(stp, "checkpoint", "--notes", "reporting", sid="sess-keep")
+        _kb = _end(sid="sess-keep")
+        _attach_stop({"name": "owed", "command": "exit 0"})
+        _kept = _end(sid="sess-keep")
+        check("a trigger block does not CONSUME the checkpoint that turn-end had declared — the "
+              "same checkpoint still carries the next one, so clearing the trigger costs one turn "
+              "and nothing else",
+              _kb.returncode == 2 and _kept.returncode == 0)
+        check("...and the pair that proves it: with the checkpoint now spent, the next bare "
+              "turn-end is refused by the mandate gate again",
+              _end(sid="sess-keep").returncode == 2)
+
+        # It runs only where turn-end would otherwise be ALLOWED. A turn the mandate gate has
+        # already refused is not a turn-end, so the attachment's question is moot — and asking it
+        # anyway would spend its timeout on every refused turn and count a block against a bound
+        # that is measured in turn-ends.
+        _attach_stop({"name": "marks", "command": f"date >> {shlex.quote(_seen)}; exit 0"})
+        gl(stp, "mandate", "--set", "do the work", sid="sess-order")
+        _asked = _end(sid="sess-order", msg="Which colour do you want?")
+        check("a turn-end the mandate gate REFUSES never reaches the attachment — proved by a file "
+              "that does not appear, not by an absence of output",
+              _asked.returncode == 2 and not os.path.exists(_seen))
+        gl(stp, "checkpoint", "--notes", "reporting", sid="sess-order")
+        _allowed = _end(sid="sess-order")
+        check("...and on a turn-end it ALLOWS, the same attachment runs — without this the line "
+              "above is equally satisfied by an attachment that never runs at all",
+              _allowed.returncode == 0 and os.path.exists(_seen))
+
+        # THE MANDATE GATE'S CIRCUIT BREAKER IS ITS OWN. Two blocks stand THAT gate down; a trigger
+        # block must not spend that budget, or one gate disarms another for a reason that has
+        # nothing to do with it.
+        _attach_stop({"name": "owed", "command": "echo nope >&2; exit 1"})
+        gl(stp, "mandate", "--set", "do the work", sid="sess-breaker")
+        gl(stp, "checkpoint", "--notes", "r1", sid="sess-breaker")
+        _tb1, _tb2 = _end(sid="sess-breaker"), _end(sid="sess-breaker")
+        _attach_stop({"name": "owed", "command": "exit 0"})
+        _spend = _end(sid="sess-breaker")   # only NOW is that checkpoint consumed
+        _bare = _end(sid="sess-breaker")
+        check("two trigger blocks do NOT stand the mandate gate down — its breaker counts ITS own "
+              "blocks, and a bare turn-end after them is still refused",
+              [_tb1.returncode, _tb2.returncode, _spend.returncode] == [2, 2, 0]
+              and _bare.returncode == 2 and "no checkpoint declared" in _bare.stderr)
+        _end(sid="sess-breaker")           # the mandate gate's second block, on its own account
+        check("...while two of the mandate gate's OWN blocks do trip it, which is the pair showing "
+              "the breaker still works rather than having been disabled by the line above",
+              _end(sid="sess-breaker").returncode == 0)
+
+        # SEVERAL ATTACHMENTS: all of them run even after one has said no. The agent gets ONE
+        # turn-end and should be told everything it owes, rather than discovering the second
+        # obligation only after clearing the first — N attachments would otherwise cost N turns.
+        _attach_stop({"name": "first", "command": "echo FIRST-SAYS-NO >&2; exit 1"},
+                     {"name": "second", "command": "echo SECOND-SAYS-NO >&2; exit 1"})
+        _both = _end(sid="sess-many")
+        check("a second attachment still runs after the first has blocked, and both reasons arrive "
+              "in one refusal",
+              _both.returncode == 2 and "FIRST-SAYS-NO" in _both.stderr
+              and "SECOND-SAYS-NO" in _both.stderr)
+        check("...and each carries its OWN count, since the bound is a statement about one "
+              "attachment: two blocking once is not one blocking twice",
+              _both.stderr.count("consecutive block 1 of 3") == 2)
+
+        # COUNTABLE. "Why did this not stop" has to stay answerable, and a trigger-sourced block is
+        # a block: it lands in the same tally as the mandate gate's.
+        def _gate_count(sid):
+            m = re.search(r"gate (\d+)\)", gl(stp, "status", sid=sid).stdout)
+            return int(m.group(1)) if m else 0
+
+        _before = _gate_count("sess-count")
+        _attach_stop({"name": "owed", "command": "exit 1"})
+        _end(sid="sess-count")
+        _mid_count = _gate_count("sess-count")
+        _attach_stop({"name": "owed", "command": "exit 0"})
+        _end(sid="sess-count")
+        check("a trigger-sourced block is COUNTED like every other block this gate issues, so the "
+              "tally still answers how often turn-end was held",
+              _mid_count == _before + 1)
+        check("...and a turn the attachment PASSED is not counted as one — the pair that keeps the "
+              "number a count of refusals rather than of turn-ends",
+              _gate_count("sess-count") == _mid_count)
+
+        # THREE OUTCOMES, THREE READINGS, in `status` as well as in the refusal. The next session
+        # reads status and nothing else; a stood-down attachment that reads like a working one is
+        # the silence this whole project is about.
+        _attach_stop({"name": "reported", "command": "echo owed >&2; exit 1"})
+        _end(sid="sess-report")
+        _st_block = gl(stp, "status", sid="sess-report").stdout
+        check("status says an attachment is BLOCKING turn-end, and how close it is to standing "
+              "down — 'FAILING' alone would read as harmless",
+              "BLOCKING turn-end — 1 consecutive of 3" in _st_block)
+        for _ in range(3):
+            _end(sid="sess-report")
+        _st_down = gl(stp, "status", sid="sess-report").stdout
+        check("...and once it has stood down, status says THAT instead — a gate that has quietly "
+              "stopped holding is exactly what a status block exists to prevent",
+              "STOOD DOWN" in _st_down and "OVERRIDDEN" in _st_down
+              and "BLOCKING turn-end" not in _st_down)
+        _attach_stop({"name": "reported", "command": "sleep 30", "timeout_sec": 1})
+        _end(sid="sess-report")
+        _st_open = gl(stp, "status", sid="sess-report").stdout
+        check("...and an attachment that could not ANSWER reads as a third thing again: the last "
+              "turn-end went unchecked, which is neither a block nor a pass",
+              "FAILED OPEN" in _st_open and "UNCHECKED" in _st_open
+              and "STOOD DOWN" not in _st_open)
+
+        # It runs under stop_hook_active, where the mandate gate declines to stack a second block.
+        # That gate can afford to defer because what it asks for is satisfiable in this session;
+        # deferring here would make the check vacuous — the attachment would fire once per
+        # continuation and never verify that what it asked for actually happened.
+        _attach_stop({"name": "owed", "command": "echo still-owed >&2; exit 1"})
+        gl(stp, "mandate", "--set", "do the work", sid="sess-reentry")
+        _re = _end(sid="sess-reentry", stop_hook_active=True)
+        check("a re-entered turn-end still consults the attachment — deferring there would make "
+              "the check advisory, and the consecutive bound is what makes it safe not to",
+              _re.returncode == 2 and "still-owed" in _re.stderr)
+    finally:
+        shutil.rmtree(stp, ignore_errors=True)
 
     # PINNED HARNESS. game_loop dogfoods itself: the hooks guarding a session run the very bin/ that
     # session is editing, so a half-finished gate is live in the same breath it is written. A merge

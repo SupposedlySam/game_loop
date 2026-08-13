@@ -826,6 +826,50 @@ def limits_summary(snap):
     return " · ".join(parts) or None
 
 
+def probe_reading(doc):
+    """Split a probe's stdout into (rate_limits, context_window). Never raises on shape.
+
+    TWO SHAPES ON PURPOSE. The probe used to print the rate_limits object bare; it now prints an
+    envelope carrying context_window beside it. Both are accepted because a PIN can pair an older
+    shipped probe script with newer game_loop code — the pinned copy and the repo copy are separate
+    trees, and assuming they move together is the kind of assumption this file exists to refuse.
+
+    The discriminator is the envelope's own key. A real rate_limits object carries window names
+    (five_hour, seven_day) and can never contain a key called "rate_limits", so the test cannot
+    misread a legacy reading as an envelope.
+    """
+    if not isinstance(doc, dict):
+        return {}, None
+    if "rate_limits" in doc:
+        rl = doc.get("rate_limits")
+        cw = doc.get("context_window")
+        return (rl if isinstance(rl, dict) else {},
+                cw if isinstance(cw, dict) else None)
+    return doc, None                 # legacy: the bare rate_limits object, from an older probe
+
+
+def record_context_window(cw):
+    """Write the raw context_window a probe render carried, or record that it carried none.
+
+    NOT INTERPRETED. This does not compute a token floor, compare against the claim, or decide
+    anything — it records what the host said so a later exercise reads a real reading instead of my
+    expectation of one. Absent is written as an explicit null rather than an empty file, because a
+    missing file cannot say whether the probe ran.
+    """
+    try:
+        p = os.path.join(ROOT, "probe", "context-window.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"context_window": cw, "observed_at": int(time.time()),
+                       "note": "raw, uninterpreted: what the probe's fresh-session render carried"},
+                      f, indent=2)
+            f.write("\n")
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        pass                         # a recording that fails must never cost the reading
+
+
 def absorb_rate_limits(rate_limits, lc, now_epoch):
     """Fold a rate_limits reading into the account-scoped snapshot; return the windows.
 
@@ -1102,10 +1146,15 @@ def cmd_limitprobe(s, a):
     except ValueError:
         logline({"kind": "limit_probe", "outcome": "unparseable"})
         die("the probe answered with something that is not JSON — treating as could-not-tell.")
+    rl, cw = probe_reading(rl)
+    record_context_window(cw)
     now_epoch = time.time()
     windows = absorb_rate_limits(rl, limits_cfg(), now_epoch)
     logline({"kind": "limit_probe", "outcome": "ok",
-             "windows": {k: v.get("used_percentage") for k, v in (windows or {}).items()}})
+             "windows": {k: v.get("used_percentage") for k, v in (windows or {}).items()},
+             # RECORDED, NOT JUDGED: whether a fresh render carries a usable count is a question the
+             # first real reading answers, not one this line should pretend to have settled.
+             "context_window_keys": sorted(cw) if isinstance(cw, dict) else None})
     nxt = next_probe_after({"windows": windows}, now_epoch, pc)
     out("✓ usage read by spawning a session — the snapshot is live on this host now.",
         "  " + (limits_summary({"windows": windows}) or "no windows in the reading"),

@@ -6215,6 +6215,53 @@ def main():
         check("the probe ships as executable code beside the other scripts, so a pinned harness "
               "runs the pinned probe",
               os.access(os.path.join(SRC_GAME_LOOP, "bin", "limit-probe.sh"), os.X_OK))
+
+        # A SECOND READING RIDING THE SAME SPAWN. The probe's session is FRESH, and 2.1.223's payload
+        # schema carries total_input_tokens — so the token-floor claim can be exercised on a spawn
+        # already being paid for instead of buying one. What is NOT known is whether a fresh render
+        # carries a usable count or a null current_usage, and the only way to find out is to run a
+        # probe. So this CAPTURES and asserts nothing about meaning.
+        _ldp = importlib.machinery.SourceFileLoader(
+            "gl_probe", os.path.join(pw2, ".game_loop", "bin", "game_loop"))
+        _glp = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_probe", _ldp))
+        _ldp.exec_module(_glp)
+        # NOT named _env: this suite already has an _env() helper that closures capture, and
+        # shadowing it broke them from inside a block that never mentions it.
+        _envelope = {"rate_limits": {"five_hour": {"used_percentage": 7}},
+                     "context_window": {"total_input_tokens": 31547, "context_window_size": 200000}}
+        check("the envelope yields BOTH readings, so the usage windows are unchanged and the token "
+              "count rides beside them rather than replacing them",
+              _glp.probe_reading(_envelope) ==
+              ({"five_hour": {"used_percentage": 7}},
+               {"total_input_tokens": 31547, "context_window_size": 200000}))
+        # THE PINNED-OLDER-PROBE ARM. The pinned copy and the repo copy are separate trees; assuming
+        # they move together is the assumption this suite exists to refuse.
+        check("...and the OLDER bare shape still reads as the windows it always was, because a pin "
+              "can pair a shipped older probe script with newer code",
+              _glp.probe_reading({"five_hour": {"used_percentage": 7}}) ==
+              ({"five_hour": {"used_percentage": 7}}, None))
+        check("...and an envelope whose context_window is null yields the windows and an explicit "
+              "None, so a missing second reading cannot be mistaken for a zero one",
+              _glp.probe_reading({"rate_limits": {"seven_day": {}}, "context_window": None}) ==
+              ({"seven_day": {}}, None))
+        check("...and a probe that answered with something that is not an object at all yields "
+              "nothing rather than raising inside the verb that spent the tokens",
+              _glp.probe_reading("nonsense") == ({}, None) and
+              _glp.probe_reading(None) == ({}, None))
+        # ABSENCE IS RECORDED, not left as a missing file — a file that is not there cannot say
+        # whether the probe ran, which is the three-outcome rule applied to its own artifact.
+        _glp.record_context_window(None)
+        _cwf = os.path.join(pw2, ".game_loop", "probe", "context-window.json")
+        with open(_cwf) as f:
+            _cwd = json.load(f)
+        check("a render carrying NO context_window is recorded as an explicit null, so 'the probe "
+              "ran and saw none' is distinguishable from 'the probe never ran'",
+              os.path.exists(_cwf) and _cwd["context_window"] is None and "observed_at" in _cwd)
+        _glp.record_context_window({"total_input_tokens": 24377})
+        with open(_cwf) as f:
+            check("...and a real one is stored RAW and uninterpreted, so the first exercise reads a "
+                  "reading rather than somebody's expectation of one",
+                  json.load(f)["context_window"] == {"total_input_tokens": 24377})
         _off = gl(pw2, "limitprobe", sid="sess-lp")
         check("it is OFF unless a human turned it on — a verb that spends tokens is a decision "
               "somebody makes, never one they inherit",

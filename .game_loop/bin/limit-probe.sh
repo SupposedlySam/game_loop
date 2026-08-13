@@ -71,6 +71,7 @@ RENDERS="$WORK/renders.jsonl" python3 <<'PY'
 import json, os, sys
 
 found = None
+ctx = None
 for line in open(os.environ["RENDERS"]):
     line = line.strip()
     if not line:
@@ -81,6 +82,12 @@ for line in open(os.environ["RENDERS"]):
         continue                      # a partial write is not a verdict
     if d.get("rate_limits"):
         found = d["rate_limits"]      # keep the LAST, which is the freshest
+    if isinstance(d.get("context_window"), dict):
+        # RIDES ALONG, and is never a reason to succeed or fail. This session is FRESH, so its
+        # render is the cheapest place a fresh-session token count can be observed — but the probe's
+        # job is the usage windows, and a context_window that is missing, null or unexpected must
+        # not change any exit code below.
+        ctx = d["context_window"]
 
 if found is None:
     # Ran, rendered, and the host carried no rate_limits. A real answer, not a failure: the field is
@@ -88,5 +95,7 @@ if found is None:
     # would treat an unsubscribed account as a broken probe forever.
     print("rendered, but the host carried no rate_limits (subscriber-only field)", file=sys.stderr)
     sys.exit(1)
-print(json.dumps(found))
+# AN ENVELOPE, so a second reading can ride the same spawn. The consumer accepts the older bare
+# shape too, because a pin can pair an old probe script with new code.
+print(json.dumps({"rate_limits": found, "context_window": ctx}))
 PY

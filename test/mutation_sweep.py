@@ -883,7 +883,38 @@ def main():
     print(f"(the tree under test is HEAD, not the working copy; thin under {THIN_AT} kills, "
           "only ZERO fails)\n")
     # The unmutated run, so a kill is a named assertion that FLIPPED rather than a count that moved.
-    baseline = set(passing(run(base)))
+    baseline_out = run(base)
+    baseline = set(passing(baseline_out))
+    # A FLOOR MEASURED AGAINST AN UNFINISHED SUITE IS NOT A FLOOR. Every kill count this file has
+    # ever printed was measured against a baseline of 788 instead of 966, because the suite CRASHED
+    # in the archived tree — no .git, so `self --pin HEAD` could not resolve and a bare open() raised
+    # ~180 assertions early. Assertions that never ran cannot flip, so a producer covered only by
+    # them reported UNPROTECTED: the one verdict here that fails a run, reached by not looking.
+    #
+    # The denominator is the part nothing reports on, which is this file's own oldest lesson arriving
+    # in its own measurement. So the baseline now has to SAY it finished, and the next crash — which
+    # will be somewhere else — stops the run instead of shortening it silently.
+    if not re.search(r"^\d+ passed, \d+ failed", baseline_out, re.M):
+        print("BASELINE DID NOT FINISH — the suite crashed or was killed in the archived tree, so "
+              "every assertion after that point")
+        print("is outside this sweep's denominator and any floor measured now would be a floor "
+              "against a shorter suite. Refusing")
+        print("to report. Reproduce with: git archive HEAD | tar -x -C <dir> && cd <dir> && "
+              "python3 test/run.py")
+        print(baseline_out[-1200:])
+        shutil.rmtree(base, ignore_errors=True)
+        return 1
+    # AND SAY WHAT THE DENOMINATOR EXCLUDES. Restoring the crash was not the whole fix: assertions
+    # that FAIL in the archived tree are outside it too, for the same reason — they cannot flip. They
+    # fail honestly (no .git, so the git-dependent arms cannot pass), but a count nobody prints is a
+    # silent cap, which is the shape this file exists to refuse.
+    _trailer = re.search(r"^(\d+) passed, (\d+) failed", baseline_out, re.M)
+    _failed = int(_trailer.group(2)) if _trailer else 0
+    if _failed:
+        print(f"note: {_failed} assertion(s) FAIL in the archived tree and are therefore outside "
+              "this denominator —")
+        print("      they cannot flip, so no producer can be credited or blamed for them. Not a "
+              "silent cap: printed every run.")
     print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
 
     verdicts = [None] * len(MUTANTS)

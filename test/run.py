@@ -5912,10 +5912,21 @@ def main():
         check("...still strips the project's own identity files",
               not any(os.path.exists(os.path.join(cc_glc, ".game_loop", o))
                       for o in ("config.json", "verify.yaml", "INVARIANTS.md", "LEDGER.md")))
-        with open(os.path.join(cc_glc, ".game_loop", "PINNED")) as f:
-            pinned_marker = json.load(f)
+        # A BARE open() HERE TRUNCATED THE MUTATION SWEEP'S DENOMINATOR FOR ITS ENTIRE HISTORY.
+        # The sweep runs against `git archive HEAD | tar -x`, which carries no .git, so `self --pin
+        # HEAD` cannot resolve a ref, PINNED is never written, and this line raised — killing the
+        # suite ~180 assertions early on EVERY sweep run. Those assertions could never flip, so any
+        # producer they alone covered reported UNPROTECTED, which is the sweep's one failing verdict.
+        # The check that fails is the one above; this line was never a check at all, only a way to
+        # stop being one.
+        try:
+            with open(os.path.join(cc_glc, ".game_loop", "PINNED")) as f:
+                pinned_marker = json.load(f)
+        except (OSError, ValueError):
+            pinned_marker = None
         check("...still stamps VERSION and PINNED, with home left null — many consumers, not one",
-              os.path.isfile(os.path.join(cc_glc, ".game_loop", "VERSION"))
+              pinned_marker is not None
+              and os.path.isfile(os.path.join(cc_glc, ".game_loop", "VERSION"))
               and pinned_marker.get("home") is None)
         check("...still chmods the binaries executable, or the hooks would silently never run",
               os.access(os.path.join(cc_glc, ".game_loop", "bin", "guard-writes.sh"), os.X_OK))

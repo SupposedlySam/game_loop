@@ -491,6 +491,20 @@ Where a fact can be **provoked** rather than stamped, it is: `exercisable` is `y
 every run and cannot go stale; a stamp records that the author checked it on theirs. Some facts are
 unconditional absences with nothing to provoke, and those say so instead of pretending otherwise.
 
+### Is the waiting seam armed? — `game_loop watchdog`
+
+An empty queue and a wedged run are indistinguishable from outside: the transcript stops growing
+either way. `watchdog.waiting_probe` is a command the PROJECT supplies that answers "is this run
+waiting on work it dispatched", and `game_loop watchdog --porcelain` reports whether one is
+configured, which file arms it, its last verdict, and whether it is failing — so a layer above can
+check the seam before it fans out instead of parsing config.
+
+**There is no verb that sets it, deliberately.** A wait a session can declare for itself is an off
+switch for the watchdog that watches it, and this verb cannot tell a session from the orchestrator
+above it. Arm it in `.game_loop/config.local.json`, which is gitignored site wiring — not
+`config.json`, which is a rule file byte-compared between a parent checkout and each worktree, so
+writing it there reports as drift.
+
 ### Machine-wide trust: `~/.game_loop/config.json`
 
 A third layer, read by every project's write guard and MCP guard (full install or `--central`) in

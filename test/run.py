@@ -6185,6 +6185,43 @@ def main():
         check("...and the named escape proceeds, since a BROKEN blessed install is exactly the case "
               "that needs the installer (INV5)",
               _at("stable", "--over-blessed").returncode == 0)
+        # THE REGRESSION THIS GUARD SHIPPED WITH, reported by one consumer and reproduced by a
+        # second within the hour: it blocked EVERY packager-vendored install. A packager vendors the
+        # payload WITHOUT .git, so there are no tags, the level fell through to ALPHA, and the guard
+        # refused correctly on an input that was never about the payload in front of it.
+        #
+        # install.sh already solved this BELOW the copy — its level logic prefers the source
+        # payload's own CONFIDENCE when the source is not its own checkout. The pre-copy guard asked
+        # git and stopped. Same question, two code paths, consulted in one: the defect a consumer
+        # reported to me that morning about installed-by.json, reintroduced by the fix for it.
+        vend_src = os.path.join(dg, "vendored")
+        shutil.copytree(src, vend_src, ignore=shutil.ignore_patterns(".git"))   # as a packager ships
+        _vinst = os.path.join(vend_src, "install.sh")
+
+        def _vend(level, tgt_level):
+            with open(os.path.join(vend_src, ".game_loop", "CONFIDENCE"), "w") as f:
+                f.write(level + "\n")
+            with open(os.path.join(tgt, ".game_loop", "CONFIDENCE"), "w") as f:
+                f.write(tgt_level + "\n")
+            return subprocess.run(["bash", _vinst, tgt], capture_output=True, text=True, env=_env())
+
+        check("a VENDORED source (no .git) stamped stable installs over a stable target — the "
+              "payload carries the answer in game_loop's own format, and asking git about a tree "
+              "with no tags is a question about the wrong thing",
+              _vend("stable", "stable").returncode == 0)
+        check("...and the same vendored source stamped ALPHA is still refused, so reading the "
+              "payload's stamp did not disarm the guard, it corrected its input",
+              _vend("alpha", "stable").returncode != 0)
+        # ORDERING, not mere presence: a source checkout that has ACQUIRED a stamp (installing
+        # game_loop into itself writes one) must still be judged by its live tags, or a stale file
+        # would outrank the repo it sits in.
+        with open(os.path.join(src, ".game_loop", "CONFIDENCE"), "w") as f:
+            f.write("alpha\n")
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "tag", "-a",
+                        "stable-deadbeef", "-m", "blessed"], cwd=src, capture_output=True)
+        check("...while a source that IS its own checkout is judged by its TAGS even when a stale "
+              "CONFIDENCE file sits beside them — the payload stamp is the fallback, not the winner",
+              _at("stable").returncode == 0)
     finally:
         shutil.rmtree(dg, ignore_errors=True)
 

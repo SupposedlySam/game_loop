@@ -219,16 +219,33 @@ TARGET="$(cd "$TARGET" && pwd)"
 if [ "$OVER_BLESSED" -eq 0 ] && [ -f "$TARGET/.game_loop/CONFIDENCE" ]; then
   HAVE_LEVEL="$(tr -d '[:space:]' < "$TARGET/.game_loop/CONFIDENCE" 2>/dev/null)"
   if [ "$HAVE_LEVEL" = "stable" ] || [ "$HAVE_LEVEL" = "beta" ]; then
-    INCOMING="alpha"
-    if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
+    # SAME PRECEDENCE AS THE LEVEL LOGIC BELOW THE COPY, which already had this right: tags only
+    # when the source IS its own checkout, otherwise the payload's own recorded level, otherwise
+    # nothing. Asking git and stopping is what broke every packager-vendored install.
+    #
+    # `rev-parse --git-dir` was the wrong test and is not merely narrower: it SUCCEEDS for a vendored
+    # directory inside somebody else's repo, so .lamp/game_loop/ would have been judged by the
+    # consuming project's tags. Right command, wrong namespace, confident answer.
+    SRC_TOP_PRE="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null || true)"
+    INCOMING=""
+    if [ -n "$SRC_TOP_PRE" ] && [ "$(cd "$SRC_TOP_PRE" 2>/dev/null && pwd -P)" = "$(cd "$SRC" 2>/dev/null && pwd -P)" ]; then
+      INCOMING="alpha"
       for _pt in $(git -C "$SRC" tag --points-at HEAD 2>/dev/null); do
         case "$_pt" in
           stable-*) INCOMING="stable" ;;
           beta-*)   [ "$INCOMING" = "stable" ] || INCOMING="beta" ;;
         esac
       done
-    else
-      INCOMING=""        # cannot read tags here: say nothing rather than claim a downgrade
+    elif [ -f "$SRC/.game_loop/CONFIDENCE" ]; then
+      # THE PAYLOAD ALREADY CARRIES THE ANSWER, in game_loop's own format, written by game_loop's own
+      # installer. Reading it needs no knowledge of any packager — which is the objection that turned
+      # up this fix rather than a lamp-specific one.
+      case "$(tr -d '[:space:]' < "$SRC/.game_loop/CONFIDENCE")" in
+        stable) INCOMING="stable" ;;
+        beta)   INCOMING="beta" ;;
+        alpha)  INCOMING="alpha" ;;
+        *)      INCOMING="" ;;
+      esac
     fi
     if [ "$INCOMING" = "alpha" ]; then
       echo "REFUSED — this would DOWNGRADE a blessed install." >&2
@@ -238,7 +255,9 @@ if [ "$OVER_BLESSED" -eq 0 ] && [ -f "$TARGET/.game_loop/CONFIDENCE" ]; then
       echo "  behind this code, with the value that means nobody has said." >&2
       echo "  Mark the commit first, then install:" >&2
       echo "      game_loop confidence --mark stable   # in the source checkout" >&2
-      echo "  Or say you mean it (a broken blessed install is the case that needs this):" >&2
+      echo "  ONLY if this install is BROKEN and reinstalling is the repair — never to get past this" >&2
+      echo "  message. Taking it stamps ALPHA over a $HAVE_LEVEL install, destroying the one signal a" >&2
+      echo "  consumer has about whether anybody stands behind the code:" >&2
       echo "      ./install.sh --over-blessed $TARGET" >&2
       exit 1
     fi

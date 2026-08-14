@@ -122,7 +122,7 @@
     },
     {
       "seq": 10,
-      "sha": "PENDING",
+      "sha": "cd2fd70",
       "verb": "Write/Edit on the project's rule files",
       "notice": true,
       "change": "the write guard now REFUSES Write/Edit to .game_loop/config.json, INVARIANTS.md and verify.yaml when the file already exists. LEDGER.md is unaffected \u2014 it is notes, not policy. Seeding a rule file that does NOT exist is still allowed, which is what keeps installers and worktree provisioning working.",

@@ -4465,12 +4465,64 @@ def waiting_state():
     return out
 
 
+def stop_seam(s):
+    """Is this session blocked at a turn-end gate — since when, by which attachment, how many?
+
+    THE STATE WAS ALWAYS HERE AND NOTHING READ IT OUT. A consumer that wanted to tell a blocked
+    session from a working one had to parse session state, which is the coupling every --porcelain
+    in this tool exists to end. Reported for the SESSION this state belongs to; a caller asking about
+    a Crawler reads that Crawler's own tree.
+
+    NOT A FRESH EVALUATION. It reports what the gate last decided, exactly as waiting_state does —
+    re-running attachments to answer a question about the past would spend their budget and could
+    return a different answer than the one that actually blocked the turn.
+    """
+    trig = s.get("stop_triggers") or {}
+    blocking = {n: r for n, r in trig.items()
+                if isinstance(r, dict) and r.get("verdict") == "blocked"}
+    stood = {n: r for n, r in trig.items()
+             if isinstance(r, dict) and (r.get("consecutive") or 0) >= STOP_TRIGGER_BLOCK_LIMIT}
+    return {
+        "blocked": bool(blocking),
+        "blocks_total": int(s.get("stop_gate_blocks_total", 0) or 0),
+        "limit": STOP_TRIGGER_BLOCK_LIMIT,
+        "attachments": {n: {"verdict": r.get("verdict"),
+                            "consecutive": r.get("consecutive", 0),
+                            "at": r.get("at"),
+                            "stood_down": (r.get("consecutive") or 0) >= STOP_TRIGGER_BLOCK_LIMIT,
+                            "detail": (r.get("detail") or "")[:200]}
+                        for n, r in trig.items() if isinstance(r, dict)},
+        "stood_down": sorted(stood),
+        # THE BOUND COUNTS CONSECUTIVE BLOCKS, so it catches a gate that keeps refusing and CANNOT
+        # catch one refusal that leaves the session inert — a session that never attempts another
+        # turn-end never produces a second block. Said here because a consumer reading `limit` would
+        # otherwise reasonably assume it bounds the time a session can be stuck, and it does not.
+        "bound_covers": ("repeated blocking by the same attachment. It does NOT bound a single "
+                         "block: one refusal with nothing able to deliver 'go back to work' never "
+                         "increments again, so the stand-down is never reached."),
+    }
+
+
 def cmd_watchdog(s, a):
     """Report the waiting seam. READ ONLY — see waiting_state for why there is no setter."""
     st = waiting_state()
+    st["stop_gate"] = stop_seam(s)
     if getattr(a, "porcelain", False):
         out(json.dumps(st, indent=2))
         return
+    _sg = st["stop_gate"]
+    if _sg["blocked"]:
+        for _n, _r in sorted(_sg["attachments"].items()):
+            if _r.get("verdict") != "blocked":
+                continue
+            out(f"stop gate: BLOCKED at turn-end by `{_n}` since {_r.get('at') or 'an unknown time'}"
+                f" ({_r.get('consecutive')} consecutive of {_sg['limit']})",
+                "  A blocked session looks exactly like a working one from outside — live pid, exit "
+                "0, artifacts on disk.",
+                "  In a HEADLESS run nothing in this harness can deliver 'go back to work' by "
+                "itself; the wake has to",
+                "  come from outside. The stand-down bounds REPEATED blocking, not one block that "
+                "leaves a session inert.")
     if not st["configured"]:
         out("waiting probe: NOT CONFIGURED — the watchdog rings on idle with no way to know whether "
             "this run is",
@@ -4480,7 +4532,11 @@ def cmd_watchdog(s, a):
             "  parent checkout and its worktrees, so writing it there reports as drift.",
             "  There is no verb that sets it: a wait a session can declare for itself is an off "
             "switch for",
-            "  the watchdog, and this verb cannot tell a session from the orchestrator above it.")
+            "  the watchdog, and this verb cannot tell a session from the orchestrator above it.",
+            "",
+            "  PASTE THIS, adjusting the command — one file, once per install:",
+            '    {"watchdog": {"waiting_probe": "<your command>"}}',
+            f"    -> {os.path.join(ROOT, 'config.local.json')}")
         return
     out(f"waiting probe: configured in {st['armed_in'] or 'an unknown file'}",
         f"  {st['command']}")

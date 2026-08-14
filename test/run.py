@@ -6384,6 +6384,49 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("watchdog: the STOP seam is readable too — blocked looks like working from outside:")
+    # A launched Crawler's stop-gate refused a turn-end, correctly, and then sat inert for 44
+    # minutes: 29s of CPU over 48, hook polling and nothing else. Live pid, open leaf, exit 0,
+    # watchdog quiet, every artifact on disk looking like success. It took a chat message to wake it.
+    #
+    # THE HARNESS KNEW THE WHOLE TIME. stop_gate_blocks_total and stop_triggers.<name> were in
+    # session state; nothing read them out, so a consumer had to parse my internals -- the coupling
+    # every --porcelain here exists to end. Same shape as #67, one moment over.
+    sw = make_sandbox()
+    _clean = json.loads(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout)
+    check("a session that has never been blocked reports blocked:false — the paired arm, or a seam "
+          "that always says blocked would be as useless as one that never does",
+          _clean["stop_gate"]["blocked"] is False)
+    # The session dir is created by a verb that WRITES state; the read-only ones above do not make
+    # one, so build the fixture rather than assume a previous call left it.
+    _sd = os.path.join(sw, ".game_loop", "sessions", "sess-sg")
+    os.makedirs(_sd, exist_ok=True)
+    _st = os.path.join(_sd, "state.json")
+    try:
+        with open(_st) as f:
+            _d = json.load(f)
+    except (OSError, ValueError):
+        _d = {}
+    _d["stop_gate_blocks_total"] = 1
+    _d["stop_triggers"] = {"showrunner-stop-gate": {"verdict": "blocked", "consecutive": 1,
+                                                    "at": "2026-08-14T11:35:36"}}
+    with open(_st, "w") as f:
+        json.dump(_d, f)
+    _blocked = json.loads(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout)["stop_gate"]
+    check("...and the state a real blocked Crawler carried reports BLOCKED, naming the attachment "
+          "and when — which is what a consumer needs to stop calling it legitimately waiting",
+          _blocked["blocked"] is True
+          and _blocked["attachments"]["showrunner-stop-gate"]["at"] == "2026-08-14T11:35:36"
+          and _blocked["attachments"]["showrunner-stop-gate"]["consecutive"] == 1)
+    check("...and it says what the stand-down bound actually covers: REPEATED blocking, never a "
+          "single block that leaves a session inert — a reader would otherwise assume it bounds "
+          "how long a session can be stuck, and it does not",
+          "does NOT bound a single block" in _blocked["bound_covers"])
+    _human = gl(sw, "watchdog", sid="sess-sg").stdout
+    check("...and the human rendering says a blocked session looks identical to a working one from "
+          "outside, since that is the property that cost 44 minutes",
+          "BLOCKED at turn-end" in _human and "looks exactly like a working one" in _human)
+
     print("watchdog: the waiting seam is READABLE without parsing a rule file (#67):")
     # An orchestrator is the only party that can answer "is this run waiting on work it dispatched",
     # and it had no way to check whether the seam was armed except parsing config.json -- the exact

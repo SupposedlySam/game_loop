@@ -106,13 +106,28 @@
 ".game_loop/behaviour.json":
   - "python3 test/run.py"
 
-# Deliberately unchecked, and it stays visible here. Prose, licence text, editor config and the
-# payload copied verbatim into other projects: no command exists that fails when they are "broken".
+# THE TWO DOCUMENTS A CONSUMER OPERATES FROM. Added after editing both and being told "nothing
+# changed that owes a check" -- while test/run.py asserts, over every tracked file, that the house
+# word appears nowhere. A doc edit really can fail the suite, so it owes the suite. Only these two:
+# gating a LICENSE edit on a three-minute run is the kind of tax that gets a rule deleted rather
+# than obeyed, and these are the ones that actually change.
+"README.md":
+  - "python3 test/run.py"
+"llms.txt":
+  - "python3 test/run.py"
+
+# Deliberately unchecked for their CONTENT, and it stays visible here. Prose, licence text, editor
+# config and the payload copied verbatim into other projects: no command exists that fails when what
+# they SAY is wrong.
+#
+# NOT "no command exists" full stop, which is what this said until it was read carefully. Every
+# tracked file here is covered for exactly one property -- the house word -- because that scan runs
+# over the whole repo (#33). The sentence was true when written and stopped being when the scan was
+# widened, which is why it now names the property rather than claiming an absence.
 "unchecked-ok":
   - "*.md"
   - "docs/**"
   - "templates/**"
-  - "llms.txt"
   - "LICENSE"
   - ".gitignore"
   - ".claude/**"

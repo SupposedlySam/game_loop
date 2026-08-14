@@ -311,6 +311,9 @@ def now():
 CONFIG_LOCAL_F = os.path.join(ROOT, "config.local.json")
 
 
+_CONFIG_UNREADABLE = set()
+
+
 def config():
     """config.json, then config.local.json on top — the second one GITIGNORED.
 
@@ -335,9 +338,24 @@ def config():
                 d = json.load(f)
             if isinstance(d, dict):
                 cfg.update(d)
-        except (OSError, ValueError):
+        except OSError:
+            continue            # absent is a FACT: this project set no config here
+        except ValueError:
+            # PRESENT AND UNPARSEABLE IS NOT THAT FACT, and storing it as one is permissive. A git
+            # conflict in this tracked file (two branches that both edited it — ordinary) made every
+            # configured key read as unset, which for a DENYLIST rail means allow: `deploy_verbs`
+            # stopped blocking and nothing said so. Found by running a consumer's own test against
+            # this repo — break the file the way git would, then ask your query and your destructive
+            # verb. A failed read is not a fact.
+            _CONFIG_UNREADABLE.add(f_)
             continue
     return cfg
+
+
+def config_unreadable():
+    """Config files that EXIST and do not parse — never the ones that are simply absent."""
+    config()                    # populate; cheap and already cached by callers' usage patterns
+    return sorted(_CONFIG_UNREADABLE)
 
 
 def config_local_keys():
@@ -6610,6 +6628,20 @@ def cmd_status(s, a):
     out(*fixes_report(s))   # which fixes were exercised through their OWN output — not their repro
     out(*coverage_report(s))   # what the rails are NOT looking at — silence from a rail is not safety
     out(*worktree_report(s))   # …and whether the rails in THIS tree are the project's at all (#30)
+    # A CONFIG THAT DID NOT PARSE IS NOT A CONFIG WITH NOTHING IN IT. Reported before anything that
+    # reads config, because every line below is computed from defaults when this fires — and for a
+    # DENYLIST rail (deploy_verbs) defaults mean ALLOW. A tracked file two branches both edited
+    # conflicts as a matter of course, so this is an ordinary merge away, not an exotic state.
+    _unread = config_unreadable()
+    if _unread:
+        out("⚠ CONFIG DID NOT PARSE — every setting below is a DEFAULT, not this project's policy:",
+            *[f"    {p}" for p in _unread],
+            "  This is what a git conflict in a tracked config looks like. While it lasts,",
+            "  `deploy_verbs` blocks NOTHING (a denylist read as empty allows everything), and any",
+            "  mcp_* or allow_write_roots grant this project set is not in force either.",
+            "  Fix the file; nothing here can tell an unparseable config from an absent one on your",
+            "  behalf, which is exactly why it says so rather than carrying on quietly.",
+            "")
     out(*config_paths_report())   # a TRACKED config handing every cloner a write root on ONE machine
     if (ro := ruled_out()):
         # The single most useful question at the start of a resumed investigation is "what has

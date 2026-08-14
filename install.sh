@@ -665,6 +665,34 @@ seed() {
 if [ -n "$ADOPT_FROM" ]; then
   echo "  adopting the harness of $ADOPT_FROM ($ADOPT_WHY) — its rules, not the blank templates"
 fi
+
+# THE PARENT'S OWN SCRIPTS, not just its rules (#69). verify.yaml can invoke a script the PROJECT
+# wrote, which lives in .game_loop/bin/ because that is where the rule points at it. Adopting the
+# rules without them produces a tree whose gate names a command that is not there — and since #66
+# that is correctly reported as "could not tell", so an orchestrator correctly refuses to dispatch
+# and no tree can satisfy both. Every gate right, no forward path.
+#
+# EXTRAS ONLY. Anything the payload ships is copied from the payload further down, so adopting a
+# parent can never install its older game_loop over this newer one. Carried rather than seeded:
+# these have no template to fall back on.
+if [ -n "$ADOPT_FROM" ] && [ -d "$ADOPT_FROM/.game_loop/bin" ]; then
+  mkdir -p "$TARGET/.game_loop/bin"
+  ADOPTED_EXTRAS=""
+  for _f in "$ADOPT_FROM"/.game_loop/bin/*; do
+    [ -f "$_f" ] || continue
+    _n="$(basename "$_f")"
+    # Shipped by this payload? then it is game_loop's, and the payload copy wins.
+    [ -e "$SRC/.game_loop/bin/$_n" ] && continue
+    [ -e "$TARGET/.game_loop/bin/$_n" ] && continue
+    cp "$_f" "$TARGET/.game_loop/bin/$_n"
+    [ -x "$_f" ] && chmod +x "$TARGET/.game_loop/bin/$_n"
+    ADOPTED_EXTRAS="$ADOPTED_EXTRAS $_n"
+  done
+  if [ -n "$ADOPTED_EXTRAS" ]; then
+    echo "  adopted .game_loop/bin/ project script(s):$ADOPTED_EXTRAS (from $ADOPT_FROM)"
+    echo "          a rule that names a command absent from this tree is a gate that cannot run"
+  fi
+fi
 # Driven by the payload's own owned-file set (read into $OWNED above), so this loop never has to be
 # edited when game_loop adds a file.
 while IFS=$'\t' read -r OWNED_NAME OWNED_SRC OWNED_KIND; do

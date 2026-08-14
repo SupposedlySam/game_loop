@@ -2789,6 +2789,33 @@ def main():
                   "blank template",
                   r.returncode == 0 and "adopted .game_loop/verify.yaml" in r.stdout
                   and "make the-projects-own-check" in read(wt, ".game_loop", "verify.yaml"))
+            # #69: THE RULES CAME AND THE SCRIPT THEY INVOKE DID NOT, which blocked three Crawlers.
+            # verify.yaml can name a command the PROJECT wrote, living in .game_loop/bin/ because
+            # that is where the rule points at it. Adopting the rules without it leaves a gate that
+            # cannot run -- and since #66 that is correctly reported as "could not tell", so an
+            # orchestrator correctly refuses to dispatch and NO tree can satisfy both. Every gate
+            # right, no forward path, which is the worst shape a correct fix can have.
+            #
+            # I shipped #66's verdict half and closed the issue whose own title named this half too.
+            _proj = os.path.join(mainco, ".game_loop", "bin", "check-project-thing")
+            with open(_proj, "w") as f:
+                f.write("#!/usr/bin/env bash\nexit 0\n")
+            os.chmod(_proj, 0o755)
+            _wt2 = worktree_of(mainco, "wt2")
+            install(_wt2)
+            _carried = os.path.join(_wt2, ".game_loop", "bin", "check-project-thing")
+            check("adopting a harness carries the project's OWN bin/ scripts, not only its rules — a "
+                  "rule naming a command absent from this tree is a gate that cannot run",
+                  os.path.isfile(_carried) and os.access(_carried, os.X_OK))
+            check("...and the adopted tree therefore reports CLEAN rather than undetermined, which "
+                  "is the difference between an orchestrator dispatching and refusing forever",
+                  json.loads(gl(_wt2, "worktree", "--porcelain").stdout)["status"] == "clean")
+            check("...while game_loop's OWN shipped binary is still the payload's, so adopting a "
+                  "parent can never install its older harness over this newer one",
+                  read(_wt2, ".game_loop", "bin", "game_loop")
+                  == read(mainco, ".game_loop", "bin", "game_loop"))
+            os.remove(_proj)
+
             check("...and its INVARIANTS.md, so the tree's north star is the project's",
                   "## INV9 — the project's own north star" in read(wt, ".game_loop",
                                                                   "INVARIANTS.md"))

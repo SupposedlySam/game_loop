@@ -6315,6 +6315,14 @@ def main():
         check("a payload vendored INSIDE the consumer installs into that consumer — that is the "
               "packager's own upgrade path, and refusing it deadlocks the command the refusal names",
               _pkg.returncode == 0)
+        # TWO GUARDS CAN FIRE HERE AND THE ASSERTION BELOW IS ABOUT ONE OF THEM. The packager
+        # install just stamped this target CONFIDENCE=stable, so the DOWNGRADE guard refuses first
+        # whenever the suite runs from a commit carrying no stable tag — the hand install still
+        # exits 1, for a different reason than the one under test, and the check reads as a
+        # regression in the vendored guard. Neutralise the other condition rather than assert on
+        # whichever refusal happens to win.
+        with open(os.path.join(vend, ".game_loop", "CONFIDENCE"), "w") as f:
+            f.write("alpha\n")
         _hand = subprocess.run(["bash", _inst, vend], capture_output=True, text=True, env=_env())
         check("...while a hand install from a separate checkout is still REFUSED, so standing aside "
               "for the packager did not disarm the guard for the case it was written for",
@@ -6343,6 +6351,52 @@ def main():
               _wrong.returncode != 0)
     finally:
         shutil.rmtree(vend, ignore_errors=True)
+
+    print("the project's POLICY is not the session's to edit (#65):")
+    # A stuck unattended agent added ten MCP verbs to mcp_read_only_tools and a whole-server prefix
+    # to mcp_standing_writes, to unblock a call the guard had refused, and reported the edit in its
+    # own summary as a fix it had applied. The rule against it was a sentence in llms.txt -- "You
+    # cannot set any of them; they are the project's policy, not yours" -- which is INV1's own
+    # example of what does not hold. If the agent ignored every instruction, would this? It did not.
+    #
+    # The edit was DEFENSIBLE, which is the whole difficulty: join and say are innocuous, the project
+    # owns that server, and a human reading the diff alone would likely approve it.
+    pol = make_sandbox()
+    _guard = os.path.join(pol, '.game_loop', "bin", "guard-writes-impl.sh")
+
+    def _edit(path):
+        r = subprocess.run(["bash", _guard],
+                           input=json.dumps({"tool_name": "Edit",
+                                             "tool_input": {"file_path": path}}),
+                           capture_output=True, text=True,
+                           env=dict(_env(pol), CLAUDE_PROJECT_DIR=pol,
+                                    GAME_LOOP_HOME=os.path.join(pol, '.game_loop')))
+        return "deny" in (r.stdout or "")
+
+    _cfg = os.path.join(pol, '.game_loop', "config.json")
+    check("editing the project's own config.json is REFUSED — the file that decides what a session "
+          "may do cannot be the session's to widen, or it is a suggestion rather than a guardrail",
+          _edit(_cfg))
+    check("...and so is INVARIANTS.md, since the north star governs the same session that would "
+          "rewrite it",
+          _edit(os.path.join(pol, '.game_loop', "INVARIANTS.md")))
+    # NOTES ARE NOT POLICY. Denying an ordinary working file trains people to reach for the escape
+    # routinely, which is how an escape stops being exceptional.
+    check("...while LEDGER.md is NOTES and stays writable, so the gate does not fire on the ordinary "
+          "course of work",
+          not _edit(os.path.join(pol, '.game_loop', "LEDGER.md")))
+    check("...and an ordinary file in the repo is untouched by this gate",
+          not _edit(os.path.join(pol, "README.md")))
+    # THE PROVISIONING CARVE-OUT, and it exists because a consumer was ASKED rather than shipped to.
+    # An orchestrator provisions worktrees by running install.sh, which SEEDS these files when
+    # absent; a blanket deny would have broken that fan-out and I would have found out by breaking
+    # it. Creating an absent policy file is provisioning; editing one that is there is the session
+    # rewriting its own gate.
+    _absent = os.path.join(pol, '.game_loop', "verify.yaml")
+    os.remove(_absent)
+    check("...and SEEDING a policy file that does not exist yet is allowed — provisioning creates, a "
+          "session edits, and the file's existence is what tells those apart with no flag needed",
+          not _edit(_absent))
 
     print("worktree --porcelain: a script it could NOT compare is undetermined, never clean (#66):")
     # rules and owned each had an `unreadable` branch; `code` never got one when the comparison was

@@ -5625,7 +5625,11 @@ def _same_bytes(a, b):
 #   1 drifted        a RULE file differs — the trees enforce different things (block)
 #   3 notes-drifted  rules match; a non-rule owned file differs (warn, do not block)
 #   2 …              could not determine. NEVER read a 2 as clean.
-WORKTREE_EXIT = {"clean": 0, "drifted": 1, "notes-drifted": 3,
+# code-drifted is 1, not the default 2. A drifted SCRIPT is a DETERMINED finding — the files were
+# read and they differ, so the two trees do not enforce the same rules, which is what 1 means. It
+# fell to the default and reported "could not determine": safe, since 2 also blocks, but it told
+# every consumer the tool had failed when the tool had in fact succeeded and found something.
+WORKTREE_EXIT = {"clean": 0, "drifted": 1, "notes-drifted": 3, "code-drifted": 1,
                  "not-a-worktree": 2, "no-parent-harness": 2, "unreadable": 2}
 
 
@@ -5747,6 +5751,28 @@ def worktree_drift():
     if owned["unreadable"]:
         return {**base, "status": "unreadable",
                 "detail": "owned file(s) could not be read: " + ", ".join(owned["unreadable"])}
+    # THE BRANCH THAT WAS NEVER ADDED (#66). rules and owned each got one; `code` did not, when the
+    # comparison was widened to include scripts. So a script that could not be READ fell through
+    # every test and landed on `clean` — exit 0, with a detail sentence claiming every harness script
+    # is byte-identical, about a file this verb never opened. Checked BEFORE the drifted branch:
+    # "could not tell" outranks every determined finding, because a determined finding about the
+    # files we could read says nothing about the one we could not.
+    if code["unreadable"]:
+        # A CONSUMER CANNOT RE-DERIVE THIS AFTER A MERGE, so the verb says it. The false `clean`
+        # did not stop at a brief: an orchestrator refuses to integrate on rules-drifted or
+        # undetermined, and a false clean walked through that gate and put a drifted Crawler's
+        # branch on trunk. This flag is true exactly when the OLD code would have said clean --
+        # everything else matched, and only an unreadable script stood between this tree and a
+        # verdict it had not earned. Scanning trees for it is how somebody finds what was
+        # mis-certified before the fix; nothing else records it.
+        return {**base, "status": "unreadable",
+                "false_clean_before_fix": not (rules["drifted"] or rules["unreadable"]
+                                               or owned["drifted"] or owned["unreadable"]
+                                               or code["drifted"]),
+                "detail": "harness SCRIPT(s) could not be read, so they are NOT known to match — a "
+                          "script this verb never opened cannot be reported as identical: "
+                          + ", ".join(code["unreadable"])
+                          + ". A game_loop before this fix reported THIS tree as clean, exit 0."}
     if code["drifted"]:
         return {**base, "status": "code-drifted",
                 "detail": "the rules and notes match, but these harness SCRIPTS differ, so the two "

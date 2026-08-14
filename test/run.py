@@ -6344,6 +6344,47 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("worktree --porcelain: a script it could NOT compare is undetermined, never clean (#66):")
+    # rules and owned each had an `unreadable` branch; `code` never got one when the comparison was
+    # widened to include scripts. So a script that could not be READ fell through every test onto
+    # `clean` -- exit 0, with a detail sentence claiming every harness script is byte-identical,
+    # about a file the verb never opened.
+    #
+    # NOT A BRIEF-ONLY BLAST RADIUS. The orchestrator that reported this refuses to integrate on
+    # drifted-or-undetermined, so a false clean walked through the one gate standing between a
+    # drifted Crawler's branch and trunk.
+    #
+    # ITS OWN FIXTURE, deliberately. The shared worktree fixture above accumulates a LEDGER.md drift
+    # and a rule drift by the time this question can be asked, so the verdict returns `notes-drifted`
+    # and never reaches the branch under test -- and resetting it clobbers a later assertion. A test
+    # that must undo three earlier mutations to ask its question is in the wrong place.
+    u_main = mkproject("u_main")
+    u_wt = worktree_of(u_main, "u_wt")
+    try:
+        install(u_wt)                 # a worktree inherits no harness; provisioning is the fixture
+        _clean = gl(u_wt, "worktree", "--porcelain")
+        check("the paired arm FIRST: an untouched worktree is clean at exit 0, so the refusal below "
+              "is a discrimination rather than a verb that always refuses",
+              json.loads(_clean.stdout)["status"] == "clean" and _clean.returncode == 0)
+        _ps = os.path.join(u_main, '.game_loop/bin', "check-project-thing")
+        with open(_ps, "w") as f:
+            f.write("#!/usr/bin/env bash\nexit 0\n")
+        r = gl(u_wt, "worktree", "--porcelain")
+        d = json.loads(r.stdout)
+        check("...and a harness script present in the main checkout and ABSENT here is UNDETERMINED "
+              "— a script this verb never opened cannot be reported as identical",
+              d["status"] == "unreadable"
+              and "check-project-thing" in d["code"]["unreadable"])
+        check("...and it exits 2, so 'could not tell' stops sharing an exit code with 'nothing to "
+              "report' — the property that makes asking better than guessing",
+              r.returncode == 2)
+        check("...and it flags that an older game_loop called THIS tree clean, because a consumer "
+              "cannot re-derive that after the merge it already allowed",
+              d.get("false_clean_before_fix") is True
+              and "reported THIS tree as clean" in d["detail"])
+    finally:
+        shutil.rmtree(u_main, ignore_errors=True)
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")

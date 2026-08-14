@@ -140,7 +140,7 @@
     },
     {
       "seq": 12,
-      "sha": "PENDING",
+      "sha": "0ac5e25",
       "notice": true,
       "verb": "authorize",
       "change": "`authorize --reason` now REFUSES a narrow, named class of reason: one citing the agent's own instructions (\"brief instructs\", \"the brief\", \"my prompt\", \"task says\", \"as instructed\", and similar). The refusal names the two real routes \u2014 ask via `arm`, or report upward if you were dispatched. The record and the log also now carry asked_via_arm, saying whether a question was armed in this session.",

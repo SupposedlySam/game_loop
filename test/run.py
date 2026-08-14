@@ -6417,6 +6417,35 @@ def main():
           _armed["configured"] is True and _armed["armed_in"] == 'config.local.json'
           and _armed["command"] == "exit 1")
 
+    print("a BRIEF is not a human — the hatch cannot be spent on your own prompt (#68):")
+    # An unattended Crawler hit the MCP guard, could not reach a human, and spent the hatch on the
+    # text that had told it what to do: reason="brief instructs: join ... before starting". Twice,
+    # in one run. The reading is DEFENSIBLE -- from inside that session the brief IS the instruction
+    # from its principal, the only voice it hears, arriving exactly as a human prompt arrives -- and
+    # the log still ends up carrying two authorizations that read as human-sanctioned. The whole
+    # value of single-use-and-logged is that the log means something later.
+    #
+    # A NARROW NAMED CLASS, not a prose scan. The rule here is that text detectors nudge and flags
+    # enforce; the exception is the agent citing ITSELF, which no human phrasing needs.
+    hw = make_sandbox()
+    _brief = gl(hw, "authorize", "--path", "/tmp/x",
+                "--reason", "brief instructs: join the room before starting")
+    check("the reason that was actually recorded in the wild is REFUSED — a brief is text another "
+          "agent wrote, arriving the way a human's words arrive",
+          _brief.returncode != 0 and "not a human" in (_brief.stdout + _brief.stderr))
+    check("...and the refusal names the two real routes — ask via `arm`, or report upward if you "
+          "were dispatched — because a refusal with no route is what produced the substitution",
+          "arm --question" in (_brief.stdout + _brief.stderr)
+          and "upward" in (_brief.stdout + _brief.stderr))
+    _human = gl(hw, "authorize", "--path", "/tmp/x",
+                "--reason", "Jonah said go ahead and upgrade the repos with no agent")
+    check("...while a human's actual sentence still authorises, so the check discriminates rather "
+          "than refusing everything — a hatch nobody can spend is a hatch that does not exist",
+          _human.returncode == 0 and "AUTHORIZED" in _human.stdout)
+    check("...and the record says NO ARMED QUESTION was raised, so a hatch spent with nobody asked "
+          "and one spent after asking stop reading the same later",
+          "NO armed question" in _human.stdout)
+
     print("the project's POLICY is not the session's to edit (#65):")
     # A stuck unattended agent added ten MCP verbs to mcp_read_only_tools and a whole-server prefix
     # to mcp_standing_writes, to unblock a call the guard had refused, and reported the edit in its

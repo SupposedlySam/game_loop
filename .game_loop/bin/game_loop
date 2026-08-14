@@ -1910,15 +1910,55 @@ def cmd_authorize(s, a):
     if not a.path or not a.reason:
         die("authorize needs --path <prefix> and --reason \"<the human's own words>\".\n"
             "This is a HUMAN escape hatch, not a convenience. Quote them, don't paraphrase.")
+    # A BRIEF IS NOT A HUMAN (#68). An unattended Crawler spent this hatch twice on its own prompt,
+    # recording "brief instructs: ..." as the human's words. From inside that session the brief IS
+    # the instruction from its principal — the only voice it hears, arriving exactly as a human
+    # prompt arrives — so the substitution is reasonable and the log still ends up carrying two
+    # authorizations that read as human-sanctioned and were not. The whole value of single-use and
+    # logged is that the log means something later.
+    #
+    # A NARROW NAMED CLASS, not a prose scan. This repo's rule is that a text detector NUDGES and the
+    # flag enforces; the exception here is that the thing being detected is the agent citing ITSELF,
+    # which no human phrasing needs. A human who really said "the brief says to" loses a rephrase.
+    _low = " " + " ".join(str(a.reason).lower().split()) + " "
+    _self_cited = [p for p in ("brief instruct", "brief says", "the brief", "my brief",
+                               "my prompt", "the prompt says", "my instructions", "task says",
+                               "instructions say", "per the brief", "as instructed")
+                   if p in _low]
+    if _self_cited:
+        die("REFUSED — that reason cites the agent's own instructions, not a human.\n"
+            f"  matched: {_self_cited[0]!r}\n\n"
+            "A brief is text another agent wrote and handed you as a prompt. It arrives exactly the\n"
+            "way a human's words arrive, which is why this is worth refusing rather than trusting —\n"
+            "an unattended Crawler spent this hatch twice on its own brief, and the log then read as\n"
+            "human-sanctioned when nobody had been asked.\n\n"
+            "TWO REAL ROUTES:\n"
+            "  * ask, and quote the answer — `game_loop arm --question .. --read .. --predict ..`\n"
+            "    surfaces it to whoever is watching, and their reply is words you did not write.\n"
+            "  * if you are dispatched and no human is reachable, the orchestrator that briefed you\n"
+            "    is the one that must ask. Report the refusal upward; do not spend the hatch for it.\n\n"
+            "The guard you hit will still be there. That is the point of it.")
     real = os.path.realpath(os.path.expanduser(a.path))
-    auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1)}
+    # PROVENANCE THE AGENT DID NOT TYPE. `arm` is the T3 mechanism and it writes state; an
+    # authorization raised while one was armed can be read later against the answer that came back.
+    # Not a gate — an interactive human speaks directly and arms nothing — but the difference between
+    # "a human was asked here" and "nobody was" stops being invisible in the record.
+    _armed = s.get("t3_armed") or {}
+    auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1),
+            "asked_via_arm": bool(_armed.get("question")),
+            "arm_question": (_armed.get("question") or None)}
     s.setdefault("authorized", []).append(auth)
     save(s)
-    logline({"kind": "authorize", "path": real, "reason": a.reason, "uses": auth["uses_left"]})
+    logline({"kind": "authorize", "path": real, "reason": a.reason, "uses": auth["uses_left"],
+             "asked_via_arm": auth["asked_via_arm"]})
     out("✓ AUTHORIZED — one mutation outside this repo.",
         f"  path  : {real}",
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
+        ("  asked : via an armed question — the reply is words you did not write"
+         if auth["asked_via_arm"] else
+         "  asked : NO armed question in this session — the record says so, because a hatch spent "
+         "with\n          nobody asked and one spent after asking must not read the same later"),
         "→ the guard will consume this and log the use. It is permanent in log.jsonl.")
 
 

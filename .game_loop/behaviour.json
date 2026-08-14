@@ -113,7 +113,7 @@
     },
     {
       "seq": 9,
-      "sha": "PENDING",
+      "sha": "54a78bf",
       "verb": "worktree --porcelain",
       "notice": true,
       "change": "two exit codes moved. A harness SCRIPT that could not be compared now reports status 'unreadable' at exit 2 \u2014 it previously fell through every branch to 'clean' at exit 0, with a detail sentence claiming every script was byte-identical. And 'code-drifted' now exits 1 rather than falling to the default 2: the scripts were read and they differ, which is a determined finding, not an inability to tell.",

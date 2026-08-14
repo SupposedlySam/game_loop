@@ -3774,6 +3774,39 @@ def main():
         check("marking fires a confidence trigger, so distribution happens AT the moment rather "
               "than whenever somebody remembers",
               "PUBLISHED" in _m2.stdout and "triggers · confidence" in _m2.stdout)
+
+        # A BUDGET IS A CAP THAT STARTS OUT TRUE. The publish trigger's 180s met a suite that had
+        # reached 183s -- nobody edited the number, the work grew past it, and NOTHING SPOKE at the
+        # moment it became impossible. The first signal was a timeout hours later that read as "the
+        # publish broke". Same shape as the mutation sweep's denominator, silently short for its
+        # entire life. So the margin is reported while it still exists, which is the only moment
+        # anybody has the number.
+        with open(os.path.join(cd, ".game_loop", "triggers.json"), "w") as f:
+            json.dump({"confidence": [{"name": "slow", "command": "cat >/dev/null; sleep 1; echo RAN",
+                                       "timeout_sec": 1.2}]}, f)
+        _cg("commit", "-q", "--allow-empty", "-m", "near-cap")
+        _near = _conf("--mark", "beta", "--notes", "near")
+        check("a trigger that SUCCEEDS but eats most of its budget reports the margin — a cap that "
+              "says nothing as you approach it is indistinguishable from one you are nowhere near",
+              "headroom left" in _near.stdout and "RAN" in _near.stdout)
+        check("...and it is reported as a READING, not a failure: the trigger still counts as having "
+              "succeeded, or the lesson taught would be to raise the budget to silence the warning",
+              "✓ slow" in _near.stdout)
+        # PAIRED, or the check is one that always fires: a trigger with room to spare says nothing.
+        with open(os.path.join(cd, ".game_loop", "triggers.json"), "w") as f:
+            json.dump({"confidence": [{"name": "quick", "command": "cat >/dev/null; echo RAN",
+                                       "timeout_sec": 30}]}, f)
+        _cg("commit", "-q", "--allow-empty", "-m", "roomy")
+        _roomy = _conf("--mark", "beta", "--notes", "roomy")
+        check("...while a trigger with real headroom stays silent about it, so the warning means "
+              "something when it appears",
+              "RAN" in _roomy.stdout and "headroom left" not in _roomy.stdout)
+        # RESTORE THE FIXTURE. This sandbox is shared with the retry assertions further down, which
+        # look for PUBLISHED — the third time today a mutation of a shared fixture has bled into a
+        # later check in this file. Leaving it swapped makes a later assertion fail for a reason that
+        # has nothing to do with what it tests.
+        with open(os.path.join(cd, ".game_loop", "triggers.json"), "w") as f:
+            json.dump({"confidence": [{"name": "pub", "command": "cat; echo PUBLISHED"}]}, f)
         check("...and the payload carries the LEVEL and the sha, so a publisher can decide for "
               "itself what bar it ships at",
               '"level": "beta"' in _m2.stdout and '"tag":' in _m2.stdout)

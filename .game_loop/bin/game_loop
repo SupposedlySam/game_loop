@@ -611,6 +611,15 @@ def _run_trigger(s, t, event, payload, default_timeout=20.0):
         timeout = max(1.0, float(t.get("timeout_sec") or default_timeout))
     except (TypeError, ValueError):
         timeout = default_timeout
+    # AN EXPLICIT VALUE WINS SILENTLY, and on the one moment where the budget is a tax somebody pays
+    # every turn that is worth saying out loud. A consumer wired stop with timeout_sec: 30 against a
+    # default of 10 — overriding a number chosen because this moment runs at EVERY turn-end — and
+    # nothing told them they had. NOT CAPPED: a project that means 30 gets 30, and overruling a
+    # consumer about their own tree is not mine to do. The defect was the silence, not the number.
+    # Same family as the budget-margin reading: a value that wins without announcing it.
+    over_default = None
+    if event == "stop" and timeout > default_timeout:
+        over_default = (timeout, default_timeout)
     # GAME_LOOP_SESSION rides along for the same reason the waiting probe gets it (#60): a
     # checkout can hold many concurrent sessions, and a trigger that cannot tell which one it is
     # speaking for cannot scope anything it reads or writes. Empty means UNKNOWN -- the legacy
@@ -646,6 +655,12 @@ def _run_trigger(s, t, event, payload, default_timeout=20.0):
         # can do to us is an ANSWER — unrunnable — never a crash.
         ran, body, err = False, "", f"could not run: {exc}"
     ok = ran and code == 0
+    if over_default:
+        _t, _d = over_default
+        _note = (f"⚠ timeout_sec {_t:.0f}s overrides the {_d:.0f}s default for `stop`, which runs at "
+                 f"EVERY turn-end — so this budget is paid on every turn, not once. Explicit values "
+                 f"are honoured uncapped; omitting the key follows the default if it is ever retuned.")
+        body = (body + "\n" + _note) if body else _note
     if near_cap:
         # Appended to the trigger's OWN reported text, so it travels with the thing it is about
         # rather than into a log nobody re-reads.

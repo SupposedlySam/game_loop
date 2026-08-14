@@ -236,6 +236,13 @@ instruction.
 #   arrives on its own). Off unless the project enabled it — it costs ~24k input tokens per run —
 #   and the watchdog fires it automatically on an interval the reading implies. You do not normally
 #   run this: if `status` says usage protection is INERT, that is a config question for the human.
+#   A probe run also records what its FRESH session's render carried under `context_window` —
+#   total_input_tokens, context_window_size and a current_usage breakdown — into
+#   .game_loop/probe/context-window.json. CAPTURED, NOT INTERPRETED: nothing computes a token floor
+#   from it or decides anything with it. The probe already buys a fresh session for the usage
+#   windows, so the cheapest place to observe what a fresh session costs is the spawn you already
+#   paid for. Absent is written as an explicit null, because a missing file cannot say whether the
+#   probe ran.
 ```
 
 **The evidence family.** `claim`'s keystone — name a real file — only reaches evidence that is a

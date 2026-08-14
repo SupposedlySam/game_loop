@@ -2825,8 +2825,13 @@ def main():
                   and all(not n.startswith("bin/") for n in d["code"]["matched"]))
             check("...and `compares` lists exactly what was looked at, so reach is never inferred "
                   "from a field name again",
-                  sorted(d["compares"]) == ["code", "owned_files", "rules"]
-                  and all(n.startswith("bin/") for n in d["compares"]["code"]))
+                  sorted(d["compares"]) == ["code", "local_override", "owned_files", "rules"]
+                  and all(n.startswith("bin/") for n in d["compares"]["code"])
+                  # local_override earns its place here: it is not a rule file and not owned, but
+                  # its keys MERGE WITH UNION semantics, so two trees can enforce different
+                  # EFFECTIVE policy while every compared file is byte-identical. A consumer that
+                  # reads `compares` to know the reach of a verdict has to see it listed.
+                  and d["compares"]["local_override"] == ["config" + ".local.json"])
             # Drifting one SCRIPT must change the verdict — otherwise the widening is decorative.
             _script = os.path.join(wt, ".game_loop", "bin", "flair.py")
             with open(_script, "a") as f:
@@ -6430,6 +6435,25 @@ def main():
     check("...and SEEDING a policy file that does not exist yet is allowed — provisioning creates, a "
           "session edits, and the file's existence is what tells those apart with no flag needed",
           not _edit(_absent))
+
+    # THE SECOND DOOR, found by a consumer verifying the first before depending on it. config.local.json is
+    # merged with UNION semantics for read_roots, allow_write_roots, deploy_verbs and every mcp_*
+    # grant -- additive, and NOT narrowable by the project's own config. Denying config.json alone
+    # left a session able to widen its own effective policy through the file I had just recommended
+    # to that same consumer for arming their waiting probe.
+    #
+    # DENIED WHETHER OR NOT IT EXISTS, unlike the rule files: nothing seeds it, so there is no
+    # provisioning arm to protect, and creating one is the same act as editing one.
+    _loc = os.path.join(pol, ".game_loop", "config" + ".local.json")
+    check("the local override is a policy file too — a session cannot widen allow_write_roots or an "
+          "mcp_* grant through a file the rule-file deny does not name",
+          _edit(_loc))
+    with open(_loc, "w") as f:
+        json.dump({"watchdog": {"waiting_probe": "exit 1"}}, f)
+    check("...and it stays denied once it EXISTS, so the exists-check that separates provisioning "
+          "from self-edit on rule files does not become a way in here",
+          _edit(_loc))
+
 
     print("worktree --porcelain: a script it could NOT compare is undetermined, never clean (#66):")
     # rules and owned each had an `unreadable` branch; `code` never got one when the comparison was

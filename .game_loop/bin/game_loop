@@ -5847,7 +5847,18 @@ def worktree_drift():
     # These two ask about the OWNED files specifically. Testing `harness` here once `harness`
     # included code meant a drifted SCRIPT returned "notes-drifted" and never reached its own
     # branch -- the widening silently swallowing the finding it was added to surface.
+    _local = _compare(["config.local.json"], pdir)
+    base["local_override"] = _local
+    base["compares"]["local_override"] = ["config.local.json"]
     if owned["drifted"]:
+        return {**base, "status": "notes-drifted",
+                    "detail": "config.local.json differs between these trees. It is not a rule file, "
+                              "but its keys MERGE WITH UNION semantics — allow_write_roots, "
+                              "deploy_verbs, read_roots and every mcp_* grant — so the two trees can "
+                              "enforce different EFFECTIVE policy while every rule file is "
+                              "byte-identical."
+                              + (" Owned files also differ: " + ", ".join(owned["drifted"])
+                                 if owned["drifted"] else "")}
         return {**base, "status": "notes-drifted",
                 "detail": "the rules match; these owned-but-not-rule file(s) differ, which is "
                           "ordinary for per-tree notes: " + ", ".join(owned["drifted"])}
@@ -5880,6 +5891,28 @@ def worktree_drift():
         return {**base, "status": "code-drifted",
                 "detail": "the rules and notes match, but these harness SCRIPTS differ, so the two "
                           "trees do not enforce them the same way: " + ", ".join(code["drifted"])}
+    # LAST, BELOW EVERY DETERMINED FINDING ABOUT THE HARNESS ITSELF. config.local.json changes
+    # EFFECTIVE policy — its keys merge with UNION semantics, so allow_write_roots and every mcp_*
+    # grant written there is additive and cannot be narrowed by the project's own config — but a
+    # drifted RULE or SCRIPT is the stronger finding and must not be swallowed by this one. I put
+    # this check above them first, which is the same widening-swallows-the-finding bug I fixed in
+    # this function hours earlier.
+    #
+    # NOTES WEIGHT: the file is legitimately per-tree and gitignored. Exit 3 warns without blocking,
+    # which is what a consumer asked for — the point is that the override stops being SILENT to the
+    # layer above, not that it becomes an error.
+    # BOTH SIDES MUST EXIST. A worktree that simply has no local wiring while the parent does is
+    # the ORDINARY case — the file is gitignored and per-tree by design — and reporting that as
+    # drift would make every adopted worktree notes-drifted on day one, which is a check nobody
+    # would keep. The attack path (a session authoring one) is closed at the WRITE by #65; this
+    # comparison exists so that two trees which BOTH carry local wiring and disagree stop looking
+    # byte-identical to the layer above.
+    if _local["drifted"]:
+        return {**base, "status": "notes-drifted",
+                "detail": "config.local.json differs between these trees. Not a rule file, but its "
+                          "keys MERGE WITH UNION semantics — allow_write_roots, deploy_verbs, "
+                          "read_roots and every mcp_* grant — so these trees can enforce different "
+                          "EFFECTIVE policy while every rule file is byte-identical."}
     pin_note = ""
     if there_pinned and not here_pinned:
         # STATED, NOT AUTO-FIXED (#38). A pin is deliberately not carried into a worktree: a

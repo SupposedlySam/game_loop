@@ -330,6 +330,11 @@ Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees 
 - **MCP guard** — a connected MCP server can delete or force-push with no shell command at all. Calls
   are classified before they run, and anything unclassifiable is refused. You can shut the plane off
   (`mcp_writes: "disabled"`) or pre-authorise a narrow set (`mcp_standing_writes`); see Configure.
+- **Policy files are not the agent's to edit** — your `config.json`, `INVARIANTS.md` and
+  `verify.yaml` are refused at the write once they exist, and `config.local.json` whether or not it
+  does. The rule against this used to be a sentence in the docs; a blocked agent widened its own MCP
+  permissions to unblock itself and reported it as a fix. **Seeding is untouched** — creating a file
+  that is not there is provisioning, so installers and worktree provisioning still work.
 - **Commit blast radius** — names the staged files this session never wrote, so a widened commit is
   visible before it lands.
 - **verify** — your own map from "you changed X" to "these checks must pass". Refuses a commit when the
@@ -348,7 +353,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `arm --question .. --read .. --predict ..` | Spend one interruption of you, backed by a file it already read. |
 | `claim --assert ".." --read <path>` | Assert something about the outside world, with the receipt. |
 | `harden --learning .. --artifact <path>` | Turn a lesson into something enforced instead of remembered. |
-| `authorize --path <prefix> --reason ".." [--uses N]` | Your one-time, logged permission for a single write outside the repo. `--uses N` when you authorised a run of several, rather than being interrupted once per call. |
+| `authorize --path <prefix> --reason ".." [--uses N]` | Your one-time, logged permission for a single write outside the repo. `--uses N` when you authorised a run of several, rather than being interrupted once per call. A reason citing the agent's *own* brief rather than you is refused — see below. |
 | `confidence --mark beta\|stable [--ref <sha>] [--recheck]` | Record how much this project stands behind a commit. `--recheck` re-runs the gate instead of trusting the tag. |
 | `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 
@@ -455,6 +460,12 @@ So a packager should drop `.game_loop/installed-by.json` beside the payload:
 {"name": "yourpkg", "upgrade": "yourpkg upgrade game_loop"}
 ```
 
+`install.sh` also **refuses** rather than quietly doing the destructive thing: running it over a
+vendored payload is blocked and names the packager's own upgrade command, and installing an unmarked
+commit over a `beta`/`stable` install is blocked because it would downgrade `CONFIDENCE` to `alpha`
+and destroy the only signal saying anybody stands behind the code. Both name an escape flag, and
+both stand aside when the packager itself is the caller — so `yourpkg upgrade` keeps working.
+
 The notice then names *that* command and stops offering the curl. The command is **printed, never
 run** — a file game_loop executed would be a code-execution vector wearing a helpful face, so the
 decision and the typing stay with the human. An unreadable or multi-line value falls back to the
@@ -464,7 +475,10 @@ ordinary notice rather than printing something nobody can trust.
 
 `.game_loop/config.local.json` is gitignored and layered on top of `config.json`, key by key. Put
 anything machine- or checkout-specific there — a `waiting_probe` naming your tracker, a local write
-root — so it never seeds into anyone else's install. `status` names how many keys are overridden and
+root — so it never seeds into anyone else's install. **You write it; the agent cannot** — its keys
+union with the tracked config, so a session able to write here could widen its own permissions, and
+the write guard refuses it. A human editing the file, or a layer above writing it from its own
+process, never passes through that hook and is unaffected. `status` names how many keys are overridden and
 which, because a config you cannot see is a divergence nobody can explain.
 
 ### One shared copy instead of one per repo — `install.sh --central`
@@ -498,6 +512,11 @@ either way. `watchdog.waiting_probe` is a command the PROJECT supplies that answ
 waiting on work it dispatched", and `game_loop watchdog --porcelain` reports whether one is
 configured, which file arms it, its last verdict, and whether it is failing — so a layer above can
 check the seam before it fans out instead of parsing config.
+
+It reports a **second seam** alongside that one: whether this session is blocked at a turn-end gate,
+since when, and by which attachment. A blocked session is indistinguishable from a working one from
+outside — live process, exit 0, files on disk — so an orchestrator had no way to tell "refused and
+waiting for a nudge" from "getting on with it".
 
 **There is no verb that sets it, deliberately.** A wait a session can declare for itself is an off
 switch for the watchdog that watches it, and this verb cannot tell a session from the orchestrator
@@ -572,7 +591,10 @@ without answering. Four things hold it in place:
   **stands down** with a loud notice and the turn ends; one pass resets the count. Every other block
   this gate issues is satisfiable from inside the session — a `stop` attachment's condition may be
   satisfiable by nobody present (the room it asks about is down), and a gate no session can pass
-  would be the harness preventing every agent from finishing;
+  would be the harness preventing every agent from finishing. **What it does not bound: a single
+  block.** A session that is refused once and never retries never increments the count again, so the
+  stand-down is never reached — observed as a Crawler sitting inert for 44 minutes after one correct
+  refusal. `game_loop watchdog --porcelain` is what makes that visible from outside;
 * **an error fails open, loudly, and is not a pass.** A timeout, an unrunnable command or a crash
   ends the turn *unchecked* and says so — in the log and in `status` — rather than blocking, because
   a guard must never block its own fix;

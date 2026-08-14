@@ -265,11 +265,47 @@ if [ "$OVER_BLESSED" -eq 0 ] && [ -f "$TARGET/.game_loop/CONFIDENCE" ]; then
 fi
 
 VENDOR_MARK="$TARGET/.game_loop/installed-by.json"
-if [ "$OVER_VENDORED" -eq 0 ] && [ -f "$VENDOR_MARK" ]; then
+# IS THE PACKAGER ITSELF THE CALLER? A payload vendored INSIDE the consumer, installing into that
+# same consumer, is the packager's own upgrade running its own install command — the path the marker
+# tells people to use. Refusing there deadlocks it: `lamp upgrade` invokes this, and the refusal
+# names `lamp upgrade` as the remedy. Reported by a consumer who had adopted the marker by hand, and
+# who could not move forward without deleting a file that states a true fact about their tree.
+#
+# Derived from the paths rather than from a flag the packager passes, so it needs no new contract and
+# no coordinated change: nothing but a vendored payload can be inside the tree it is installing into.
+SRC_REAL_PRE="$(cd "$SRC" 2>/dev/null && pwd -P || true)"
+TGT_REAL_PRE="$(cd "$TARGET" 2>/dev/null && pwd -P || true)"
+FROM_INSIDE=0
+case "$SRC_REAL_PRE" in
+  "$TGT_REAL_PRE"/*) [ -n "$TGT_REAL_PRE" ] && FROM_INSIDE=1 ;;
+esac
+
+# A DECLARED PACKAGER CALLER, for the packagers the path test cannot see: one that vendors into a
+# shared store rather than into the consumer. DERIVED from the marker rather than hardcoded, so this
+# file still names no package manager — a packager calling itself `lamp` sets LAMP_INSTALL, one
+# calling itself `brew` sets BREW_INSTALL. lamp shipped exactly this variable independently, which is
+# the agreement worth having: the same contract reached from both sides without either naming the
+# other.
+PKG_DECLARED=0
+if [ -f "$VENDOR_MARK" ]; then
+  _pkg_name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name",""))' "$VENDOR_MARK" 2>/dev/null || echo "")"
+  if [ -n "$_pkg_name" ]; then
+    _pkg_var="$(printf '%s' "$_pkg_name" | tr '[:lower:]-' '[:upper:]_' | tr -cd '[:alnum:]_')_INSTALL"
+    eval "_pkg_val=\${$_pkg_var:-}"
+    [ -n "$_pkg_val" ] && PKG_DECLARED=1
+  fi
+fi
+
+if [ "$OVER_VENDORED" -eq 0 ] && [ "$FROM_INSIDE" -eq 0 ] && [ "$PKG_DECLARED" -eq 0 ] && [ -f "$VENDOR_MARK" ]; then
   VENDOR_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name","?"))' "$VENDOR_MARK" 2>/dev/null || echo "?")"
   VENDOR_CMD="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("upgrade",""))' "$VENDOR_MARK" 2>/dev/null || echo "")"
   echo "REFUSED — $TARGET carries a VENDORED game_loop payload." >&2
-  echo "  .game_loop/installed-by.json says it was placed by: $VENDOR_NAME" >&2
+  echo "  WHAT WAS TESTED, all three true at once:" >&2
+  echo "    1. $TARGET/.game_loop/installed-by.json exists — placed by: $VENDOR_NAME" >&2
+  echo "    2. the source payload is NOT inside this project (it is at $SRC)," >&2
+  echo "       so this is not $VENDOR_NAME running its own upgrade from a tree it vendored here" >&2
+  echo "    3. \$$_pkg_var is not set in the environment, which is how $VENDOR_NAME declares" >&2
+  echo "       itself the caller. Any of those three false and this would have proceeded." >&2
   [ -n "$VENDOR_CMD" ] && echo "  Upgrade THROUGH it, which keeps the blessed release, its VERSION stamp and its CONFIDENCE:" >&2
   [ -n "$VENDOR_CMD" ] && echo "      $VENDOR_CMD" >&2
   echo "  This installer would copy whatever is in the source checkout RIGHT NOW — possibly dirty," >&2

@@ -6258,6 +6258,56 @@ def main():
         check("...and the named escape proceeds, because INV5 says a guard must never block its own "
               "fix: a vendored install that is BROKEN still has to be repairable by the installer",
               _esc.returncode == 0)
+        # ...AND THE DEADLOCK THAT GUARD SHIPPED WITH. A packager upgrade runs the payload vendored
+        # INSIDE the consumer, so the guard fired on the packager's OWN upgrade and named that same
+        # command as the remedy. No forward move: the only other option offered undoes the vendoring
+        # the guard exists to protect.
+        #
+        # It hit exactly the consumers the marker was built for -- the ones who declared themselves.
+        # Consumers who ignored the feature were unaffected. A guard that punishes adoption teaches
+        # people to delete the declaration, and the consumer who found this refused to, on the
+        # grounds that removing it would make their repo lie about its own provenance.
+        #
+        # The discriminator needs no flag and no contract: nothing but a vendored payload can be
+        # INSIDE the tree it is installing into.
+        inner = os.path.join(vend, '.lamp/game_loop')
+        shutil.copytree(REPO, inner, ignore=shutil.ignore_patterns(
+            ".git", ".worktrees", ".game_loop_self", "__pycache__"))
+        with open(os.path.join(inner, ".game_loop", "CONFIDENCE"), "w") as f:
+            f.write("stable\n")
+        with open(os.path.join(vend, ".game_loop", "installed-by.json"), "w") as f:
+            json.dump({"name": "somepkg", "upgrade": "somepkg upgrade game_loop"}, f)
+        _pkg = subprocess.run(["bash", os.path.join(inner, "install.sh"), vend],
+                              capture_output=True, text=True, env=_env())
+        check("a payload vendored INSIDE the consumer installs into that consumer — that is the "
+              "packager's own upgrade path, and refusing it deadlocks the command the refusal names",
+              _pkg.returncode == 0)
+        _hand = subprocess.run(["bash", _inst, vend], capture_output=True, text=True, env=_env())
+        check("...while a hand install from a separate checkout is still REFUSED, so standing aside "
+              "for the packager did not disarm the guard for the case it was written for",
+              _hand.returncode != 0 and "VENDORED" in _hand.stderr)
+        check("...and the refusal NAMES the file that triggered it — the consumer who found the "
+              "deadlock had to bisect by moving the marker aside, because the text never said",
+              "installed-by.json" in _hand.stderr)
+        check("...and the refusal states every CONDITION it tested, not just the marker it found — "
+              "two consumers asked for this independently, one after bisecting to find the trigger",
+              "WHAT WAS TESTED" in _hand.stderr
+              and "SOMEPKG_INSTALL" in _hand.stderr
+              and "not inside this project" in _hand.stderr.replace("NOT", "not"))
+        # A DECLARED CALLER, for packagers the path test cannot see: one vendoring into a shared
+        # store rather than into the consumer. The variable is DERIVED from the marker's own name, so
+        # this file still names no package manager -- the principle that produced the better fix
+        # earlier today. A packager calling itself `somepkg` sets SOMEPKG_INSTALL.
+        _declared = dict(_env(), SOMEPKG_INSTALL="1")
+        _dec = subprocess.run(["bash", _inst, vend], capture_output=True, text=True, env=_declared)
+        check("...while the packager DECLARING itself the caller proceeds, derived from the marker's "
+              "own name so no packager is hardcoded here",
+              _dec.returncode == 0)
+        _wrong = subprocess.run(["bash", _inst, vend], capture_output=True, text=True,
+                                env=dict(_env(), OTHERPKG_INSTALL="1"))
+        check("...and a DIFFERENT packager's variable does not open the door — the signal is scoped "
+              "to whoever the marker says placed the payload, not to any caller who sets something",
+              _wrong.returncode != 0)
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 

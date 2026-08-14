@@ -6352,6 +6352,39 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("watchdog: the waiting seam is READABLE without parsing a rule file (#67):")
+    # An orchestrator is the only party that can answer "is this run waiting on work it dispatched",
+    # and it had no way to check whether the seam was armed except parsing config.json -- the exact
+    # coupling owned --porcelain and worktree --porcelain exist to end. It was also WRITING that
+    # file, which is a rule file byte-compared between a parent checkout and its worktrees, so the
+    # layer above was authoring rules it does not own.
+    #
+    # READ ONLY, AND THE REFUSAL TO ADD A SETTER IS THE MORE IMPORTANT HALF. waiting_probe is
+    # config-only because a wait a session can declare for itself is an off switch for the watchdog.
+    # A verb that sets it is callable by the agent being watched: `--waiting-probe true` is a probe
+    # that always exits 0, which is "always waiting", which is the watchdog disarmed by the thing it
+    # watches. The orchestrator really is a different process -- and the verb cannot tell.
+    wdp = make_sandbox()
+    _bare = gl(wdp, "watchdog")
+    check("with no probe configured it says so, and names the file to arm it in — not config.json, "
+          "which is byte-compared at spawn and would report as drift",
+          "NOT CONFIGURED" in _bare.stdout and 'config.local.json' in _bare.stdout)
+    check("...and it states there is NO setter and why, so the next reader does not file the same "
+          "request — a verb that cannot identify its caller must assume the worst one",
+          "no verb that sets it" in _bare.stdout and "off switch" in _bare.stdout)
+    _bj = json.loads(gl(wdp, "watchdog", "--porcelain").stdout)
+    check("...and the porcelain says configured:false with a last verdict of None — 'never ran' is "
+          "not the same as a verdict of 'not waiting', which is the distinction this seam is for",
+          _bj["configured"] is False and _bj["last"] is None and _bj["armed_in"] is None)
+    # ARMED FROM THE FILE THE ISSUE SHOULD HAVE USED, which is the whole answer to its write half.
+    with open(os.path.join(wdp, ".game_loop", 'config.local.json'), "w") as f:
+        json.dump({"watchdog": {"waiting_probe": "exit 1"}}, f)
+    _armed = json.loads(gl(wdp, "watchdog", "--porcelain").stdout)
+    check("...and arming it in the LOCAL config is seen, and reported as the file that carries it, "
+          "so a layer above can set this without touching a rule file at all",
+          _armed["configured"] is True and _armed["armed_in"] == 'config.local.json'
+          and _armed["command"] == "exit 1")
+
     print("the project's POLICY is not the session's to edit (#65):")
     # A stuck unattended agent added ten MCP verbs to mcp_read_only_tools and a whole-server prefix
     # to mcp_standing_writes, to unblock a call the guard had refused, and reported the edit in its

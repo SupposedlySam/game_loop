@@ -4354,6 +4354,94 @@ def _compare_versions(repo, api_base, base, head):
         return None
 
 
+def waiting_state():
+    """The waiting seam as data: configured? last verdict? failing? (#67)
+
+    THE READ SIDE ONLY, DELIBERATELY. There is no setter and there will not be one: `waiting_probe`
+    is config-only because a wait an agent can declare for itself is an off switch for the watchdog,
+    and a verb that sets it is callable by the agent being watched. `--waiting-probe true` is a probe
+    that always exits 0, which is the watchdog disarmed by the thing it watches. An orchestrator IS a
+    different process and could be trusted with it — but the verb cannot tell who called it, and a
+    guard that cannot identify its caller must assume the worst caller.
+
+    To ARM it, write config.local.json: it is not an owned file, not byte-compared between a parent
+    and its worktrees, and every config reader merges it — so a layer above can set this without
+    authoring rules it does not own, which was the actual problem behind the request for a setter.
+    """
+    cmd = str(((config().get("watchdog") or {}).get("waiting_probe") or "")).strip()
+    out = {"configured": bool(cmd), "command": cmd or None,
+           "armed_in": None, "last": None, "failing": None,
+           "set_it_by": ".game_loop/config.local.json -> watchdog.waiting_probe (NOT config.json, "
+                        "which is a rule file byte-compared at spawn)"}
+    if cmd:
+        # WHICH FILE actually carries it, so a caller fixing a wrong value knows where to look
+        # rather than editing the tracked one and having it byte-compare as drift.
+        for name in ("config.local.json", "config.json"):
+            try:
+                with open(os.path.join(ROOT, name)) as f:
+                    if str(((json.load(f).get("watchdog") or {}).get("waiting_probe") or "")).strip():
+                        out["armed_in"] = name
+                        break
+            except (OSError, ValueError):
+                continue
+    if not cmd:
+        return out
+    last = None
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                if '"watchdog_wait' not in ln:
+                    continue
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("kind") in ("watchdog_waiting", "watchdog_wait_held"):
+                    last = r
+    except OSError:
+        last = None
+    if not last:
+        return out                       # configured and never run: last stays None, not a verdict
+    out["failing"] = last.get("answered") is False
+    out["last"] = {"at": last.get("t"), "detail": last.get("detail") or "",
+                   "waiting": bool(last.get("waiting")
+                                   or last.get("kind") == "watchdog_wait_held"),
+                   "answered": last.get("answered") is not False}
+    return out
+
+
+def cmd_watchdog(s, a):
+    """Report the waiting seam. READ ONLY — see waiting_state for why there is no setter."""
+    st = waiting_state()
+    if getattr(a, "porcelain", False):
+        out(json.dumps(st, indent=2))
+        return
+    if not st["configured"]:
+        out("waiting probe: NOT CONFIGURED — the watchdog rings on idle with no way to know whether "
+            "this run is",
+            "  waiting on work it dispatched. Arm it by setting watchdog.waiting_probe in",
+            "  .game_loop/config.local.json — NOT config.json, which is a rule file byte-compared "
+            "between a",
+            "  parent checkout and its worktrees, so writing it there reports as drift.",
+            "  There is no verb that sets it: a wait a session can declare for itself is an off "
+            "switch for",
+            "  the watchdog, and this verb cannot tell a session from the orchestrator above it.")
+        return
+    out(f"waiting probe: configured in {st['armed_in'] or 'an unknown file'}",
+        f"  {st['command']}")
+    if st["failing"]:
+        out("  ⚠ FAILING — it is not answering. Until it does, 'no work outstanding' and 'the probe "
+            "is broken'",
+            "    look the same from here.")
+    elif st["last"]:
+        out(f"  last verdict: {'WAITING' if st['last']['waiting'] else 'not waiting'} "
+            f"as of {st['last']['at']}"
+            + (f" · {st['last']['detail']}" if st["last"]["detail"] else ""))
+    else:
+        out("  the watchdog has not run it yet — no verdict to report, which is not the same as a "
+            "verdict of 'not waiting'.")
+
+
 def waiting_report():
     """What the watchdog last concluded about a declared wait. Silent unless a probe is configured.
 
@@ -6803,6 +6891,13 @@ def main():
     ow = sub.add_parser("owned")  # the user-owned file set, published so nobody re-lists it (#30)
     ow.add_argument("--porcelain", action="store_true", help="emit the set as JSON, for tools")
 
+    wd = sub.add_parser("watchdog")  # is the waiting seam armed, and what did it last say? (#67)
+    wd.add_argument("--porcelain", action="store_true",
+                    help="emit the waiting seam as JSON: configured, which file arms it, the last "
+                         "verdict and whether the probe is FAILING. READ ONLY — there is no setter, "
+                         "because a wait a session can declare for itself is an off switch for the "
+                         "watchdog, and this verb cannot tell a session from the layer above it. "
+                         "Arm it in config.local.json, which is not byte-compared at spawn.")
     wt = sub.add_parser("worktree")  # does this tree carry the PROJECT's rules, or its own? (#30)
     wt.add_argument("--porcelain", action="store_true",
                     help="emit the verdict as JSON: `rules` (differ ⇒ the trees enforce different "
@@ -6877,7 +6972,8 @@ def main():
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix, "owned": cmd_owned,
-     "worktree": cmd_worktree, "self": cmd_self, "confidence": cmd_confidence,
+     "worktree": cmd_worktree, "watchdog": cmd_watchdog, "self": cmd_self,
+     "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model}[a.cmd](s, a)
 

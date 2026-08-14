@@ -131,7 +131,7 @@
     },
     {
       "seq": 11,
-      "sha": "PENDING",
+      "sha": "a0a234a",
       "notice": true,
       "verb": "Write/Edit on config.local.json \u00b7 worktree --porcelain",
       "change": "seq 10 denied the RULE files and left config.local.json open. A session could widen its own effective policy through it, because its keys merge with UNION semantics \u2014 read_roots, allow_write_roots, deploy_verbs, generated_globs and every mcp_* grant are additive there and cannot be narrowed by the project's own config. It is now denied too, whether or not the file exists. Separately, `worktree --porcelain` now COMPARES config.local.json and reports notes-drifted (exit 3) when both trees carry one and they disagree.",

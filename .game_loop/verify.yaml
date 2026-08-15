@@ -115,6 +115,13 @@
   - "python3 test/run.py"
 "llms.txt":
   - "python3 test/run.py"
+# THE ONE TRACKED FILE WHOSE CONTENTS EXECUTE IN SOMEBODY ELSE'S CHECKOUT. It sat in unchecked-ok
+# under "covered for exactly one property -- the house word", which was true until this repo grew
+# assertions about what is IN it: no home-anchored path, every hook anchored to $CLAUDE_PROJECT_DIR.
+# A home path here was reported once, the installer was fixed, and nothing stopped it returning.
+# Third entry in that list found stale today; the list is right and its membership goes out of date.
+".claude/settings.json":
+  - "python3 test/run.py"
 
 # Deliberately unchecked for their CONTENT, and it stays visible here. Prose, licence text, editor
 # config and the payload copied verbatim into other projects: no command exists that fails when what
@@ -130,7 +137,10 @@
   - "templates/**"
   - "LICENSE"
   - ".gitignore"
-  - ".claude/**"
+  # .claude/settings.json is NOT here -- it has its own rule above. The rest of .claude/ is local
+  # session wiring nobody else runs.
+  - ".claude/agents/**"
+  - ".claude/skills/**"
   - ".game_loop/*.md"
   - ".game_loop/config.json"
   - ".game_loop/notify.json"

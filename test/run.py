@@ -7380,6 +7380,129 @@ def main():
     finally:
         shutil.rmtree(bg, ignore_errors=True)
 
+    # THE SKILLS THIS SHIPS ARE THE ONE THING THE INSTALLER WRITES OUTSIDE THE TARGET — into the
+    # user's home, where every project sees them. Two failures are possible there and both are
+    # silent: installing them when nobody asked, and destroying a skill of the same name that
+    # somebody else wrote. The name collision is the ONLY evidence a hand-written skill ever
+    # existed, so a copy over it leaves nothing to notice afterwards. Driven through the real
+    # installer's real interface, like every other install test here.
+    print("the shipped skills are asked for, and never clobber somebody else's (#skills):")
+    _sk_src = os.path.join(REPO, "templates", "skills")
+    _sk_names = sorted(d for d in os.listdir(_sk_src)
+                       if os.path.isfile(os.path.join(_sk_src, d, "SKILL.md"))) \
+        if os.path.isdir(_sk_src) else []
+    # A scan over an empty set passes in perfect silence — the same denominator problem the theme
+    # scan and the mutation sweep both carry. Say the count is real before trusting what it checks.
+    check("there are skills to ship at all, so the checks below have a subject",
+          len(_sk_names) >= 2 and "gl-install" in _sk_names)
+    _bad_front = []
+    for _n in _sk_names:
+        with open(os.path.join(_sk_src, _n, "SKILL.md")) as f:
+            _head = f.read(4000)
+        if not re.search(r"^name:\s*" + re.escape(_n) + r"\s*$", _head, re.M) \
+           or not re.search(r"^description:\s*\S", _head, re.M):
+            _bad_front.append(_n)
+    check("every shipped skill's frontmatter names ITSELF and carries a description — a skill whose "
+          "name disagrees with its directory is loaded under a name nobody can invoke",
+          not _bad_front)
+    if _bad_front:
+        print("       offenders: " + ", ".join(_bad_front))
+
+    _skh = tempfile.mkdtemp(prefix="gameloop-skills-")
+    try:
+        _sdest = os.path.join(_skh, "skills")
+
+        def _inst(*args, **extra):
+            return subprocess.run([os.path.join(REPO, "install.sh"), *args],
+                                  capture_output=True, text=True,
+                                  env=_env(GAME_LOOP_SKILLS_DIR=_sdest, **extra))
+
+        _r = _inst("--skills-only")
+        _landed = sorted(os.listdir(_sdest)) if os.path.isdir(_sdest) else []
+        check("--skills-only installs every shipped skill and touches no project",
+              _r.returncode == 0 and _landed == _sk_names)
+        check("...and each landed entry actually resolves to a readable SKILL.md, so a broken "
+              "symlink cannot pass as an installed skill",
+              all(os.path.isfile(os.path.join(_sdest, n, "SKILL.md")) for n in _landed))
+        # From a CHECKOUT they are symlinks, so `git pull` in that checkout upgrades them all. (The
+        # fetched-payload path copies instead — its source is a temp dir this installer deletes on
+        # exit, and a link into it would dangle within the second.)
+        check("...as symlinks into the source checkout, which is what makes updating them a pull",
+              all(os.path.islink(os.path.join(_sdest, n)) for n in _landed))
+
+        _r2 = _inst("--skills-only")
+        check("...and re-running is idempotent rather than stacking or failing",
+              _r2.returncode == 0 and sorted(os.listdir(_sdest)) == _sk_names)
+
+        # SOMEBODY ELSE'S SKILL, in both shapes it can arrive in: a plain directory somebody wrote by
+        # hand, and a symlink another tool installed.
+        _victim = os.path.join(_sdest, _sk_names[0])
+        os.remove(_victim) if os.path.islink(_victim) else shutil.rmtree(_victim)
+        os.makedirs(_victim)
+        with open(os.path.join(_victim, "SKILL.md"), "w") as f:
+            f.write("---\nname: " + _sk_names[0] + "\ndescription: MINE, hand written\n---\n")
+        _other = os.path.join(_skh, "someone-elses", _sk_names[1])
+        os.makedirs(_other)
+        with open(os.path.join(_other, "SKILL.md"), "w") as f:
+            f.write("---\nname: " + _sk_names[1] + "\ndescription: THEIRS\n---\n")
+        _link_victim = os.path.join(_sdest, _sk_names[1])
+        os.remove(_link_victim) if os.path.islink(_link_victim) else shutil.rmtree(_link_victim)
+        os.symlink(_other, _link_victim)
+
+        _r3 = _inst("--skills-only")
+
+        def _read(*p):
+            with open(os.path.join(*p)) as f:
+                return f.read()
+
+        check("a hand-written skill of the same name is KEPT, not overwritten — the collision is the "
+              "only evidence it existed, so replacing it destroys the notice too",
+              "MINE, hand written" in _read(_victim, "SKILL.md"))
+        check("...and a symlink pointing at somebody ELSE's tree is kept too",
+              os.path.islink(_link_victim) and "THEIRS" in _read(_link_victim, "SKILL.md"))
+        check("...and both refusals are SAID rather than passed over in silence, naming what was "
+              "kept and where ours is",
+              _r3.returncode == 0 and _r3.stdout.count("kept") >= 2
+              and _sk_names[0] in _r3.stdout and _sk_names[1] in _r3.stdout)
+        check("...while every OTHER skill still installs — one foreign name does not stop the rest",
+              all(os.path.isfile(os.path.join(_sdest, n, "SKILL.md")) for n in _sk_names))
+
+        # THE CONSENT HALF. A project install must not reach into the user's home uninvited, and a
+        # run with nobody to ask is not consent — it is the absence of an answer.
+        _sdest2 = os.path.join(_skh, "skills-untouched")
+        _proj = os.path.join(_skh, "proj")
+        os.makedirs(_proj)
+        _rp = subprocess.run([os.path.join(REPO, "install.sh"), _proj],
+                             capture_output=True, text=True,
+                             env=_env(GAME_LOOP_SKILLS_DIR=_sdest2))
+        check("a plain install with no tty to ask at installs NO skills — silence is not a yes for "
+              "the one action that writes outside the directory the user named",
+              _rp.returncode == 0 and not os.path.exists(_sdest2))
+        check("...and it SAYS so, with the command that adds them later, rather than leaving the "
+              "user to discover a feature that never appeared",
+              "no terminal to ask at" in _rp.stdout and "--skills-only" in _rp.stdout)
+        check("...and nothing about skills is written into the TARGET either — they are user-level, "
+              "and a copy in the project would be a second one to drift",
+              not os.path.exists(os.path.join(_proj, ".claude", "skills")))
+
+        _proj2 = os.path.join(_skh, "proj2")
+        os.makedirs(_proj2)
+        _rn = subprocess.run([os.path.join(REPO, "install.sh"), "--no-skills", _proj2],
+                             capture_output=True, text=True,
+                             env=_env(GAME_LOOP_SKILLS_DIR=_sdest2))
+        check("--no-skills is honoured and asks nothing",
+              _rn.returncode == 0 and not os.path.exists(_sdest2)
+              and "Install them?" not in _rn.stdout)
+
+        _rc = subprocess.run([os.path.join(REPO, "install.sh"), "--skills-only", _proj2],
+                             capture_output=True, text=True,
+                             env=_env(GAME_LOOP_SKILLS_DIR=_sdest2))
+        check("--skills-only with a target directory is REFUSED rather than silently ignoring one "
+              "of the two things it was told to do",
+              _rc.returncode == 1 and "takes no target" in _rc.stderr)
+    finally:
+        shutil.rmtree(_skh, ignore_errors=True)
+
     print("the house voice is enforced, not remembered (#33):")
     _w = "sys" + "tem"
     _banned = re.compile(r"\b" + _w + r"s?\b", re.I)

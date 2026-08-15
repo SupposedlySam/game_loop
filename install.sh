@@ -126,7 +126,9 @@ fi
 
 usage() {
   cat <<'USAGE'
-usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] /path/to/your/project
+usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--skills|--no-skills]
+                    /path/to/your/project
+       ./install.sh --skills-only          (user-level skills, no project touched)
        (or pipe via curl: ... | bash -s -- .)
 
   --same-as <checkout>  carry the SAME harness as <checkout>: copy ITS owned files rather than
@@ -142,6 +144,14 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] /path/to/your/p
                         only signal a consumer has. Mark the source commit instead.
   --fresh               seed the blank templates even in a linked worktree whose main checkout has
                         no harness. The refusal's escape hatch: say it, and it is yours.
+  --skills / --no-skills
+                        install (or don't) the Claude Code SKILLS this ships — gl-install,
+                        gl-refused, gl-mandate, gl-harden and game_loop. They are USER-level, so
+                        they land in ~/.claude/skills/ and apply in every project, NOT in the
+                        target. Neither flag given: you are ASKED, and a run with no terminal to
+                        ask (CI, a piped script with no tty) installs none.
+  --skills-only         install just those skills and exit. Takes no target directory — nothing
+                        about this touches a project.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
                         shims that run it from a shared, machine-wide install instead (set up once
                         with `game_loop self --pin <ref> --dest ~/.claude/game_loop-central`, or
@@ -158,8 +168,13 @@ OVER_BLESSED=0
 SAME_AS=""
 FORCE_FRESH=0
 CENTRAL=0
+WANT_SKILLS=""      # "" = nobody said; ask if there is a terminal to ask at
+SKILLS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --skills)      WANT_SKILLS="yes"; shift ;;
+    --no-skills)   WANT_SKILLS="no";  shift ;;
+    --skills-only) SKILLS_ONLY=1; WANT_SKILLS="yes"; shift ;;
     --same-as)
       if [ $# -lt 2 ]; then
         echo "--same-as needs the path of the checkout whose harness this tree should carry." >&2
@@ -182,6 +197,138 @@ while [ $# -gt 0 ]; do
       TARGET="$1"; shift ;;
   esac
 done
+
+# ── the skills this ships ────────────────────────────────────────────────────────────────────────
+#
+# game_loop ships Claude Code SKILLS (templates/skills/<name>/SKILL.md). They are USER-level, not
+# project-level: they teach a session how to install this thing, how to read one of its refusals, and
+# how to run under a mandate — none of which is knowledge about the project being installed into. So
+# they land in the user's global skills directory and apply everywhere, and NOTHING about them is
+# written into $TARGET.
+#
+# Which is exactly why they are OPTIONAL and ASKED FOR. Every other line this installer writes lands
+# inside a directory the user named; this one reaches into their home. A tool that quietly installs
+# global behaviour while you were asking it to set up one repo is the kind of thing you rip out.
+#
+# LINK when the payload is durable, COPY when it is not. Running from a real checkout, a symlink
+# makes `git pull` there the upgrade path for every skill at once. Piped through `curl | bash` the
+# payload is a temp dir this script deletes on exit, so a link would dangle within the second — copy,
+# and SAY which of the two happened rather than leaving the user to discover it from an edit that did
+# not stick.
+SKILLS_SRC="$SRC/templates/skills"
+SKILLS_DEST="${GAME_LOOP_SKILLS_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills}"
+SKILL_MARK=".installed-by-game_loop"
+
+skills_available() {
+  [ -d "$SKILLS_SRC" ] && [ -n "$(ls -A "$SKILLS_SRC" 2>/dev/null || true)" ]
+}
+
+# The list, for the prompt — read off disk, so adding a skill never means editing this question.
+skills_list() {
+  local d
+  for d in "$SKILLS_SRC"/*/; do
+    [ -f "$d/SKILL.md" ] || continue
+    printf '%s ' "$(basename "$d")"
+  done
+}
+
+ask_skills() {
+  [ -z "$WANT_SKILLS" ] || return 0
+  skills_available || { WANT_SKILLS="no"; return 0; }
+  # STDIN IS THE SCRIPT under the documented `curl ... | bash` one-liner, so a bare `read` there
+  # consumes the rest of the installer and the run dies somewhere unrelated. /dev/tty or nothing.
+  #
+  # And the probe is an OPEN, not `[ -r /dev/tty ]`. Measured: with no controlling terminal the node
+  # is still present and still passes the -r permission test, then the open fails "Device not
+  # configured" — so the test said yes, the prompt printed to nobody, and bash raised the error. A
+  # check that passes while the thing it stands for is false is the exact shape this tool exists to
+  # refuse; asking the device whether it opens is the only question with the right answer.
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    WANT_SKILLS="no"
+    echo
+    echo "  skills  NOT installed — no terminal to ask at (CI, or a pipe with no tty)."
+    echo "          They are user-level and this is the one thing here that writes outside the"
+    echo "          target, so silence is a no. To add them: ./install.sh --skills-only"
+    return 0
+  fi
+  echo
+  echo "  This also ships Claude Code SKILLS — user-level, so they work in EVERY project:"
+  echo "    $(skills_list)"
+  echo "  They go to $SKILLS_DEST (your home), not to the project."
+  printf "  Install them? [y/N] "
+  local reply=""
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    y|Y|yes|YES|Yes) WANT_SKILLS="yes" ;;
+    *)               WANT_SKILLS="no" ;;
+  esac
+}
+
+install_skills() {
+  [ "$WANT_SKILLS" = "yes" ] || return 0
+  if ! skills_available; then
+    echo "  ⚠ no skills in this payload ($SKILLS_SRC) — nothing to install."
+    return 0
+  fi
+  mkdir -p "$SKILLS_DEST"
+  local mode="linked"
+  # FETCHED is set only where we downloaded the payload into $TMP, which the EXIT trap removes.
+  [ "${FETCHED:-0}" = 1 ] && mode="copied"
+  echo
+  echo "  skills → $SKILLS_DEST"
+  local d name dest
+  for d in "$SKILLS_SRC"/*/; do
+    [ -f "$d/SKILL.md" ] || continue
+    name="$(basename "$d")"
+    dest="$SKILLS_DEST/$name"
+    # SOMEBODY ELSE'S SKILL OF THE SAME NAME IS NOT OURS TO REPLACE. A hand-written skill, or one
+    # another tool installed, is destroyed silently by a copy — and the name collision is the ONLY
+    # evidence it ever existed. Ours are recognisable two ways: a symlink into a templates/skills
+    # tree, or a copy carrying the marker file we wrote next to it.
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      if [ -L "$dest" ]; then
+        case "$(readlink "$dest")" in
+          */templates/skills/*) : ;;
+          *) echo "    ⚠ kept    $name — a symlink that is not game_loop's ($(readlink "$dest"))"; continue ;;
+        esac
+      elif [ ! -f "$dest/$SKILL_MARK" ]; then
+        echo "    ⚠ kept    $name — already there and NOT installed by game_loop. Yours, untouched."
+        echo "              Ours is at $d — merge by hand if you want it."
+        continue
+      fi
+      rm -rf "$dest"
+    fi
+    if [ "$mode" = "linked" ]; then
+      ln -s "${d%/}" "$dest"
+      echo "    linked  $name"
+    else
+      mkdir -p "$dest"
+      cp "$d/SKILL.md" "$dest/SKILL.md"
+      printf '%s\n' "installed by game_loop install.sh — safe to delete; a re-install replaces it." \
+        > "$dest/$SKILL_MARK"
+      echo "    copied  $name"
+    fi
+  done
+  if [ "$mode" = "linked" ]; then
+    echo "    (symlinks into $SKILLS_SRC — updating that checkout updates these)"
+  else
+    echo "    (copies — the payload was fetched into a temp dir, so there was nothing to link to."
+    echo "     Re-run --skills-only from a clone to get symlinks that follow git pull instead.)"
+  fi
+  echo "    Skills are read at session start — start a new Claude Code session to use them."
+}
+
+if [ "$SKILLS_ONLY" = 1 ]; then
+  if [ -n "$TARGET" ]; then
+    echo "--skills-only installs user-level skills and touches no project, so it takes no target" >&2
+    echo "directory (got '$TARGET'). Drop it, or drop --skills-only." >&2
+    exit 1
+  fi
+  install_skills
+  echo
+  echo "Done — skills only. No project was touched."
+  exit 0
+fi
 
 if [ -z "$TARGET" ]; then
   usage >&2
@@ -899,6 +1046,12 @@ except Exception:
   echo "    then retire the old one:"
   echo "      GAME_LOOP_SESSION= ./.game_loop/bin/game_loop mandate --clear --notes \"migrated to per-session state\""
 fi
+
+# ASKED LAST, deliberately. The project install is finished and reported by this point, so the one
+# question this installer asks lands after the thing the user actually came for — not in front of it,
+# where an unanswered prompt would hold up the install they asked for.
+ask_skills
+install_skills
 
 echo
 if [ "$FRESH" = 1 ] && [ -n "$ADOPT_FROM" ]; then

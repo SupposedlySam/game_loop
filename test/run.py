@@ -6384,6 +6384,32 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("the one tracked file whose contents EXECUTE in somebody else's checkout:")
+    # .claude/settings.json is the only tracked thing here that RUNS in a cloner's machine, and it
+    # is in verify.yaml's unchecked-ok list -- "prose, no command exists that fails when they are
+    # broken" was true of the rest of that list and never of this file. A home-anchored path in it
+    # was reported once before; the installer was fixed and nothing stopped it coming back.
+    #
+    # Passed on by llm_chat's owner, who added the same check after their own verify reported this
+    # file matched no rule. THE THIRD ASSERTION IS THEIRS and is the one I would have missed: a scan
+    # over an empty hook list passes while examining nothing.
+    _set = os.path.join(REPO, ".claude", "settings.json")
+    with open(_set) as f:
+        _raw = f.read()
+    _cfg = json.loads(_raw)
+    _hooks = [h for group in (_cfg.get("hooks") or {}).values() for entry in group
+              for h in (entry.get("hooks") or [])]
+    check("the tracked settings.json carries NO home-anchored path — one there ships a machine's "
+          "own layout to every cloner, and it executes rather than merely misleading",
+          "/Users/" not in _raw and "$HOME" not in _raw and '"~/' not in _raw)
+    _cmds = [str(h.get("command") or "") for h in _hooks]
+    check("...and every hook command is anchored to $CLAUDE_PROJECT_DIR, so it resolves in the "
+          "checkout that is running rather than the one that wrote it",
+          all("CLAUDE_PROJECT_DIR" in c for c in _cmds))
+    check("...and the scan EXAMINED something — an empty hook list would satisfy both checks above "
+          "while looking at nothing, which is the pass-by-silence this whole suite is about",
+          len(_cmds) >= 3)
+
     print("watchdog: the STOP seam is readable too — blocked looks like working from outside:")
     # A launched Crawler's stop-gate refused a turn-end, correctly, and then sat inert for 44
     # minutes: 29s of CPU over 48, hook polling and nothing else. Live pid, open leaf, exit 0,

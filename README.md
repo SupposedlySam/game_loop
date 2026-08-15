@@ -352,6 +352,12 @@ Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees 
   visible before it lands.
 - **verify** — your own map from "you changed X" to "these checks must pass". Refuses a commit when the
   evidence is older than the change. Ships empty; it does nothing until you add rules.
+  **Gate on the command CI runs, not a local equivalent.** The ergonomic local command is the natural
+  thing to write and inherits none of this gate's promise: one consumer ran `flutter analyze lib` for
+  a year against a CI running `dart analyze --fatal-infos` over the whole tree — different scope,
+  different severity, neither visible by reading the rule, same green either way. If CI's exact
+  command cannot run locally, say so in a comment above the rule and name the two things that
+  diverge: what it covers, and what it treats as fatal.
 
 ## The verbs
 

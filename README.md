@@ -233,21 +233,34 @@ It finds the **nearest** harness walking up, which is what you want — and does
 harness left in `/tmp` made every path under `/tmp` resolve to it. Harmless, but surprising if you
 have forgotten it is there.)
 
-## Optional: a Claude Code skill so a session never has to guess
+## Optional: Claude Code skills so a session never has to guess
 
-`templates/skills/game_loop/SKILL.md` is a **user-level** skill (not installed by `install.sh` —
-that only ever writes inside the project it targets, never to your personal `~/.claude/`). Copy it
-once to make it available in every project you work in:
+`templates/skills/` ships five **user-level** skills. User-level, because none of them is knowledge
+about the project being installed into — they teach a session how to install this tool, how to read
+one of its refusals, and how to run under a mandate, which is the same everywhere:
+
+| Skill | Answers |
+|---|---|
+| `gl-install` | install it here, or refresh what's here — reading the disk to decide local vs `--central`, asking only when the disk genuinely doesn't say |
+| `gl-refused` | a gate just said no — what it means, and which escape hatches are the human's to open |
+| `gl-mandate` | run unattended: bind, checkpoint, arm a question, park/resume, clear |
+| `gl-harden` | turn a learning into something enforced instead of remembered |
+| `game_loop` | is this project guarded at all, and what does `status` actually want right now |
+
+The installer **asks** before installing them, because they land in `~/.claude/skills/` — your home,
+every project — and that is the one thing it writes outside the directory you named:
 
 ```bash
-mkdir -p ~/.claude/skills/game_loop
-cp templates/skills/game_loop/SKILL.md ~/.claude/skills/game_loop/SKILL.md
+./install.sh --skills-only          # just the skills, no project touched
+./install.sh --skills /path/to/proj # skip the question, yes
+./install.sh --no-skills /path/to/proj
 ```
 
-It teaches a session to detect whether the current project has game_loop installed, offer to install
-it (plain or `--central`) if not, and otherwise run and correctly interpret `game_loop status` —
-including composing a "doctor"-style health check out of real verbs (`status`, `confidence`,
-`worktree --porcelain`) rather than guessing at one that doesn't exist.
+With no flag you're asked, and a run with no terminal to ask at (CI, a pipe with no tty) installs
+none — silence isn't a yes. From a clone they're installed as **symlinks**, so `git pull` here
+upgrades every one of them at once; through the `curl | bash` one-liner they're copies, because the
+payload is a temp dir the installer deletes on exit. A skill of the same name that game_loop didn't
+install is never overwritten — it's kept, and named.
 
 A shell function cannot reach non-interactive shells that skip your profile, so this is a convenience
 for you and never something the tool relies on. Everything game_loop prints names the explicit path

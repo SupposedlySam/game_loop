@@ -48,3 +48,4 @@ countable instead of accumulating quietly.
 | What a change owes | `.game_loop/verify.yaml` |
 | The guarantees, as tests | `test/run.py` |
 | Installing into another project | `install.sh`, `README.md` |
+| The skills this ships (user-level) | `templates/skills/*/SKILL.md` |

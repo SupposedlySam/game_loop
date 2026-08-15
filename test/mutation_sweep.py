@@ -465,6 +465,25 @@ MUTANTS = [
 #
 # Writing "not a real producer" for something that is one clears the list and re-creates the bug.
 NOT_SWEPT = {
+    # --- A DEBT, STATED AS ONE. Both are producers that gate turn-end, both SHOULD be swept, and
+    # neither has a measured floor yet. They landed with 8 named assertions written the same commit
+    # (the retro debt: held / paid by a harden / opened by a recorded decline / refused with no
+    # reason; the nudge: advice at the threshold, gate at twice it), so they are not untested —
+    # they are unmeasured, which is a different and smaller claim.
+    #
+    # WHY NOT A NUMBER: my hand-rolled instrument returned 0 kills for one and 1008-of-1031 for the
+    # other. The first was true and useful — it had no tests at all, which is what prompted writing
+    # them. The second is a corrupted tree reporting as coverage, and a floor taken from it would be
+    # farmed rather than measured. The real sweep is a ~17-minute full run with no per-producer
+    # filter; the next one measures these, and this entry is what stops that being forgotten.
+    ".game_loop/bin/game_loop::retro_overdue": "UNMEASURED, not unswept — 8 assertions cover both "
+            "arms (advice at the nudge threshold, gate at twice it). Measured 0 kills BEFORE those "
+            "assertions existed, which is the finding that produced them. Floor owed on the next "
+            "full sweep.",
+    ".game_loop/bin/game_loop::retro_debt_open": "UNMEASURED, not unswept — 8 assertions cover held "
+            "/ paid-by-harden / opened-by-recorded-decline / refused-without-reason. My own "
+            "measurement returned 1008 of 1031 kills, which is a broken tree rather than coverage, "
+            "and a floor read off it would be a farmed number. Floor owed on the next full sweep.",
     # --- EXCLUDED: pure git helpers. Their None means "git failed / no such ref / no repo", which
     # is a mechanical outcome, not a verdict about the project. Each is swept through the producer
     # that calls it — the config-paths block already asserts BOTH arms in one observation ("a

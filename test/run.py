@@ -6384,6 +6384,74 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("a retro that encodes nothing did not happen — and an ignored nudge becomes a gate:")
+    # Reported by a human running several machines: one ran `stepback`, produced a full reflection
+    # and hardened nothing; others ignore the nudge entirely and, asked later, will say the retro is
+    # past due. The verb PRINTS the ladder and the exact harden command -- an instruction, which is
+    # the one thing INV1 says never to enforce with. Its only real check fired at the NEXT retro,
+    # days later, usually to a different session.
+    rw = make_sandbox()
+
+    def _gate(sid):
+        return subprocess.run([os.path.join(rw, ".game_loop", "bin", "game_loop"), "stopgate"],
+                              cwd=rw, input=json.dumps({"session_id": sid}),
+                              capture_output=True, text=True, env=_env(rw, sid=sid))
+
+    check("a session with no retro and no mandate ends its turn — the control, or every arm below "
+          "would be a gate that simply always closes",
+          _gate("sess-r1").returncode == 0)
+    gl(rw, "stepback", "--notes", "a real retro naming real learnings", sid="sess-r1")
+    _held = _gate("sess-r1")
+    check("...and after a RETRO with nothing encoded, turn-end is HELD — the reflection was never "
+          "the point, and a retro that encodes nothing is indistinguishable a week later from one "
+          "that never happened",
+          _held.returncode == 2 and "encoded nothing" in _held.stderr)
+    check("...and the refusal names BOTH ways out, because a gate with no honest exit is one people "
+          "route around rather than satisfy",
+          "game_loop harden" in _held.stderr and "--nothing-to-harden" in _held.stderr)
+    _art = os.path.join(rw, ".game_loop", "config.json")
+    _h = gl(rw, "harden", "--learning", "x", "--artifact", _art, "--mechanism", "y", "--rung", "3",
+            sid="sess-r1")
+    check("...and a SUCCEEDING harden pays the debt, so doing the right thing opens the gate — the "
+          "arm I first read as broken, from a harden that had been refused for a bad artifact path",
+          _h.returncode == 0 and _gate("sess-r1").returncode == 0)
+    gl(rw, "stepback", "--notes", "another chapter", sid="sess-r1")
+    _dec = gl(rw, "stepback", "--nothing-to-harden", "--reason", "this chapter taught nothing",
+              sid="sess-r1")
+    check("...and DECLINING on the record opens it too: an empty chapter is a legitimate outcome, "
+          "and it costs one sentence that lands in the log rather than a silence",
+          _dec.returncode == 0 and _gate("sess-r1").returncode == 0)
+    _refused = gl(rw, "stepback", "--nothing-to-harden", sid="sess-r1")
+    check("...while declining with NO reason is refused — a decision with no reason recorded is "
+          "indistinguishable from the silence this gate exists to stop",
+          _refused.returncode != 0)
+
+    # THE NUDGE ITSELF, escalating. A printed nudge is a thing to remember; agents pass over it and
+    # never re-check. It stays advice for a whole threshold, then closes.
+    _sd = os.path.join(rw, ".game_loop", "sessions", "sess-r2")
+    os.makedirs(_sd, exist_ok=True)
+    _sf = os.path.join(_sd, "state.json")
+
+    def _work(n):
+        try:
+            with open(_sf) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d["work_since_stepback"] = n
+        with open(_sf, "w") as f:
+            json.dump(d, f)
+
+    _work(8)
+    check("at the NUDGE threshold the turn still ends — an agent mid-chapter is not yanked out of "
+          "it, which is why the gate sits a full threshold further out",
+          _gate("sess-r2").returncode == 0)
+    _work(16)
+    _over = _gate("sess-r2")
+    check("...and at twice the threshold the nudge becomes a GATE, because `status` printing 'due' "
+          "is advice and this project's first invariant is that advice is followed only sometimes",
+          _over.returncode == 2 and "overdue" in _over.stderr)
+
     print("the one tracked file whose contents EXECUTE in somebody else's checkout:")
     # .claude/settings.json is the only tracked thing here that RUNS in a cloner's machine, and it
     # is in verify.yaml's unchecked-ok list -- "prose, no command exists that fails when they are

@@ -6410,12 +6410,18 @@ def main():
     # prevent something small. The narrow defect was never the vocabulary; it was that a DEBT
     # written in another shape is invisible to a report that greps for one. So the debts are pinned
     # by name, and the prose stays free.
-    _debts = sorted(k for k, why in _ns.items() if (why or "").strip().startswith("KNOWN GAP"))
-    check("the two producers gating turn-end are declared as KNOWN GAPS, so the sweep's own report "
-          "names them — they were unswept AND unlisted for an hour, invisible by how their reason "
-          "happened to be worded, while the run printed 'no producer is unprotected'",
-          all(any(n in k for k in _debts)
-              for n in ("retro_overdue", "retro_debt_open")))
+    # THE ASSERTION MOVED WITH THE FACT. It first pinned these two as declared KNOWN GAPS, because
+    # they were unswept AND unlisted — invisible by how their reason happened to be worded, while
+    # the run printed "no producer is unprotected". They are now SWEPT, with floors measured at 3
+    # and 4 by a 28-minute run of all 47 producers, which is strictly better than being declared.
+    # So this pins the stronger property, and the weaker one is gone because it stopped being true.
+    _mut_src = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+    check("the two producers gating turn-end are SWEPT with measured floors, not excluded — an "
+          "entry in NOT_SWEPT is invisible to the instrument by construction, so paying 'floor owed "
+          "on the next sweep' meant ceasing to exclude them",
+          all(f'game_loop::{n}"' in _mut_src for n in ("retro_overdue", "retro_debt_open"))
+          and not [k for k in _ns
+                   if k.endswith("::retro_overdue") or k.endswith("::retro_debt_open")])
     check("...and the KNOWN GAP category is not empty, or the check above would pass by there being "
           "nothing to classify",
           any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))

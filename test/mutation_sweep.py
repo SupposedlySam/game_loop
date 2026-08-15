@@ -163,6 +163,18 @@ def verdict(killed):
 #  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
+    # THE DEBT THE LAST SWEEP COULD NOT PAY. Both gate turn-end. They sat in NOT_SWEPT for one run
+    # — which is what excludes a producer from the instrument — and were ALSO missing from the
+    # KNOWN GAPS report because that list matches a prose prefix theirs did not have. Swept now,
+    # with floors MEASURED — 3 and 4, from a 28-minute run of all 47 producers, not guessed at.
+    # The debt is why they are here: an entry in NOT_SWEPT is invisible to the instrument by
+    # construction, so the only way to pay "floor owed on the next sweep" was to stop excluding them.
+    ("retro_overdue -> the nudge never escalates",
+     ".game_loop/bin/game_loop::retro_overdue", "    return None\n",
+     ["retro", "overdue", "threshold"], None, 3),
+    ("retro_debt_open -> the retro never owes its encoding",
+     ".game_loop/bin/game_loop::retro_debt_open", "    return None\n",
+     ["retro", "encoded", "harden"], None, 4),
     # THE CLAIMS EXERCISE. Both floors were MEASURED, and the first measurement of both was 0 —
     # against a tree copied without .git, which cost 166 baseline assertions including the ones
     # being measured, so nothing could FLIP. The control reproduced its floor anyway, because its
@@ -476,18 +488,6 @@ NOT_SWEPT = {
     # them. The second is a corrupted tree reporting as coverage, and a floor taken from it would be
     # farmed rather than measured. The real sweep is a ~17-minute full run with no per-producer
     # filter; the next one measures these, and this entry is what stops that being forgotten.
-    ".game_loop/bin/game_loop::retro_overdue": "KNOWN GAP — unmeasured, not untested. 8 assertions cover both "
-            "arms (advice at the nudge threshold, gate at twice it). Measured 0 kills BEFORE those "
-            "assertions existed, which is the finding that produced them. Floor owed on the next "
-            "full sweep.",
-    ".game_loop/bin/game_loop::retro_debt_open": "KNOWN GAP — unmeasured, not untested. 8 assertions cover held "
-            "/ paid-by-harden / opened-by-recorded-decline / refused-without-reason. My own "
-            "measurement returned 1008 of 1031 kills, which is a broken tree rather than coverage, "
-            "and a floor read off it would be a farmed number. Floor owed on the next full sweep.",
-    # --- EXCLUDED: pure git helpers. Their None means "git failed / no such ref / no repo", which
-    # is a mechanical outcome, not a verdict about the project. Each is swept through the producer
-    # that calls it — the config-paths block already asserts BOTH arms in one observation ("a
-    # failing git degrades to silence" beside "the same config on a working git DOES warn").
     ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
             "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
             "git-failed arm beside the git-worked one",

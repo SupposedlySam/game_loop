@@ -125,6 +125,49 @@
     }
   ],
 
+  "//question-gate": [
+    "A FOURTH SHAPE, and the one the examples above do not suggest (#73). Every gate here VERIFIES",
+    "something — the room was answered, the option is documented. This one cannot, and is useful",
+    "anyway. Copy it when the question is real and the answer is a judgement no command can make:",
+    "is this copy right for the audience, does this migration need a backfill, is this string",
+    "user-visible, should this default change.",
+    "",
+    "THREE PARTS, and the middle one is what people get wrong:",
+    "  1. a detector for the SHAPE that raises the question — a path glob, a regex over the diff, a",
+    "     changed-file list. NOT a detector for the defect: if you could detect the defect you would",
+    "     not need the question.",
+    "  2. the question itself, printed with the concrete failure that earned it. A gate that says",
+    "     'consider the user' teaches nothing; one that says 'the last time this file changed, the",
+    "     button read Submit in a flow that deletes an account' is a question somebody can answer.",
+    "  3. a LEDGER file the agent writes the answer into. The gate checks only that the site is",
+    "     NAMED there — never that the answer is any good, because it cannot be.",
+    "",
+    "THE LEDGER IS GAMEABLE AND THAT IS FINE, said out loud rather than apologised for. Writing a",
+    "line without thinking satisfies it. What it converts is 'nobody considered this' into",
+    "'somebody wrote a line', which is a lower bar than correctness and a far higher one than",
+    "silence — and unlike the silence, it leaves a record with a name and a date on it that a",
+    "reviewer can disagree with. Do not add a second gate to check the quality of ledger entries;",
+    "that is the same unanswerable question one level up, and it is where this pattern goes wrong.",
+    "",
+    "EXIT 0 WHEN THE DETECTOR DOES NOT FIRE, and exit 0 when you cannot read the ledger — an",
+    "unreadable ledger is 'could not tell', and a gate that blocks when it cannot see blocks",
+    "forever the day it breaks. Only an un-named site earns the refusal."
+  ],
+  "//question-gate-example": [
+    "In `stop`, alongside the example above. The detector is a glob; the ledger is a tracked file",
+    "the reviewer reads. Substitute your own paths.",
+    "",
+    "  changed=$(git diff --name-only HEAD 2>/dev/null | grep '^src/ui/' ) || exit 0",
+    "  [ -z \"$changed\" ] && exit 0",
+    "  for f in $changed; do",
+    "    grep -qF \"$f\" docs/copy-decisions.md && continue",
+    "    echo \"$f changes user-visible copy and is not in docs/copy-decisions.md.\" >&2",
+    "    echo \"Add a line saying who it is for and what it now says. Nothing here can check\" >&2",
+    "    echo \"whether the copy is RIGHT — this only refuses to let the question go unasked.\" >&2",
+    "    exit 1",
+    "  done; exit 0"
+  ],
+
   "stepback": [
     {
       "name": "example-read-something",

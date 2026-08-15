@@ -577,6 +577,16 @@ its own command on a moment in the loop. Nothing is attached by default.
 | `session_start` | a session started, or was compacted | act **once** on the session's behalf — register with a local tool, join a room, claim a name |
 | `stop` | the turn is about to end | **refuse** it — a question left unanswered, a branch left unpushed |
 
+**A fourth shape worth knowing: the question gate.** Every trigger above *verifies* something. A
+question gate cannot — it detects the **shape** that raises a question (a path glob, a regex over the
+diff), prints the question with the concrete failure that earned it, and checks only that the agent
+NAMED the site in a ledger file. It never checks that the answer is any good, because it cannot.
+That ledger is gameable, and worth having anyway: it converts *"nobody considered this"* into
+*"somebody wrote a line"* — a lower bar than correctness and a much higher one than silence, and
+unlike silence it leaves something dated that a reviewer can disagree with. Use it where the answer
+is a judgement no command can make: is this copy right for the audience, does this migration need a
+backfill. `templates/triggers.example.json` carries the full shape and a worked example.
+
 A trigger gets a JSON payload on stdin and its stdout comes back to the agent. It **never blocks**
 the verb, it is **never silent** — `status` lists each one with its last run, and a failing trigger
 is shown as FAILING with its error rather than passing quietly. `stop` is the exception to the first

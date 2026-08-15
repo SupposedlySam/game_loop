@@ -1941,6 +1941,96 @@ def cmd_arm(s, a):
     flair_out(s, "arm")
 
 
+def cmd_mutate(s, a):
+    """Prove a test PINS something, by breaking the code and watching it go red (#71).
+
+    The tool runs both halves. A self-report cannot satisfy it, which is the whole point: a reviewer
+    mutation-tested eight leaves that had each reported a revert-proof in prose, and three stayed
+    green with the bug reintroduced. The sentence reads identically either way.
+    """
+    if not (a.prove and a.test and a.file and a.replace is not None and a.with_ is not None):
+        die("mutate needs --prove \"<what the test pins>\" --test \"<command>\" --file <path> "
+            "--replace \"<text>\" --with \"<text>\".\n"
+            "The tool runs the test twice and compares. You supply the mutation; it supplies the "
+            "verdict — a revert-proof you report yourself reads the same whether or not it happened.")
+    path = os.path.realpath(os.path.expanduser(a.file))
+    if not os.path.isfile(path):
+        die(f"--file is not a real file: {path}")
+    orig = open(path).read()
+    n = orig.count(a.replace)
+    if n != 1:
+        die(f"--replace must appear EXACTLY once in {a.file}; it appears {n} times.\n"
+            "Ambiguity here would mutate a line you did not mean and prove something about it.")
+
+    def run_test():
+        r = subprocess.run(["bash", "-c", a.test], cwd=REPO_ROOT, capture_output=True, text=True,
+                           timeout=int(a.timeout or 900))
+        return r.returncode
+
+    try:
+        before = run_test()
+    except subprocess.TimeoutExpired:
+        die("the test timed out on the UNMUTATED tree — nothing can be concluded. --timeout to raise.")
+    if before != 0:
+        die(f"the test already FAILS on the unmutated tree (exit {before}).\n"
+            "A red test proves nothing about what it pins: it is red either way. Get it green first.")
+    restored, after = False, None
+    try:
+        with open(path, "w") as f:
+            f.write(orig.replace(a.replace, a.with_, 1))
+        # BUMP THE MTIME, or a same-size mutation is invisible to every cache keyed on (mtime, size).
+        # Found by this verb returning NOT PROVED for a test that demonstrably DOES go red: `a + b`
+        # -> `a - b` is byte-for-byte the same length, both writes landed inside one filesystem mtime
+        # tick, and Python reused its .pyc. The verb built to catch a test that cannot fail was
+        # itself reporting a confident wrong verdict for the same reason.
+        _future = time.time() + 5
+        try:
+            os.utime(path, (_future, _future))
+        except OSError:
+            pass                    # best effort: a filesystem that refuses this is not a reason to
+                                    # abandon the proof, but the caller may see a stale-cache pass
+        try:
+            after = run_test()
+        except subprocess.TimeoutExpired:
+            after = None
+    finally:
+        try:
+            with open(path, "w") as f:
+                f.write(orig)
+            restored = True
+        except OSError as exc:
+            print(f"\n!! COULD NOT RESTORE {path}: {exc}\n"
+                  f"!! The file is MUTATED on disk. Restore it before anything else.",
+                  file=sys.stderr)
+    if not restored:
+        die("refusing to record a proof while the tree is left mutated.")
+    if after is None:
+        die("the test timed out on the MUTATED tree. That is not a failure — it is a run that could "
+            "not answer, and treating it as red would be the exact substitution this verb exists to "
+            "stop.")
+    if after == 0:
+        die(f"NOT PROVED — the test still PASSED with the mutation applied (exit 0).\n\n"
+            f"  {a.file}: {a.replace!r} -> {a.with_!r}\n"
+            f"  {a.test}\n\n"
+            "This test does not pin what you said it pins. That is the finding, and it is the one "
+            "worth having: a reviewer found three of eight leaves in this state, each having "
+            "reported a revert-proof in prose. Either the test is not covering this line, or the "
+            "mutation is not the behaviour it covers.")
+    logline({"kind": "mutate_prove", "prove": a.prove, "file": path, "test": a.test,
+             "replace": a.replace[:120], "with": a.with_[:120], "before": before, "after": after})
+    s["mutate_proofs"] = s.get("mutate_proofs", 0) + 1
+    save(s)
+    out("✓ PROVED — the test goes RED when that line changes.",
+        f"  pins   : {a.prove}",
+        f"  file   : {a.file}",
+        f"  test   : {a.test}",
+        f"  before : exit {before} (green, unmutated)   after: exit {after} (red, mutated)",
+        "  tree restored.",
+        "",
+        "WHAT THIS DOES NOT SAY: that the test is good, that this mutation is the bug the fix was",
+        "for, or that anything else is covered. It says this one line is pinned by that one test.")
+
+
 def cmd_authorize(s, a):
     """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
 
@@ -7071,6 +7161,13 @@ def main():
     n.add_argument("--text")
 
     hd = sub.add_parser("harden")
+    mu = sub.add_parser("mutate")   # a revert-proof the TOOL performs, not one you report (#71)
+    mu.add_argument("--prove", help="what this test is claimed to pin")
+    mu.add_argument("--test", help="the test command; must be GREEN before, RED after")
+    mu.add_argument("--file", help="the production file to break")
+    mu.add_argument("--replace", help="text to replace — must appear exactly once")
+    mu.add_argument("--with", dest="with_", help="what to replace it with")
+    mu.add_argument("--timeout", help="seconds per test run (default 900)")
     hd.add_argument("--learning", help="the one-line rule you'd otherwise have to REMEMBER")
     hd.add_argument("--artifact", help="real path[,path] to the code/assert/check/tool that enforces it")
     hd.add_argument("--mechanism", help="how it now fails loudly / becomes impossible")
@@ -7265,7 +7362,7 @@ def main():
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix,
      "checkpoint": cmd_checkpoint, "authorize": cmd_authorize, "notify": cmd_notify,
      "pin": cmd_pin, "effector": cmd_effector, "fix": cmd_fix, "owned": cmd_owned,
-     "worktree": cmd_worktree, "watchdog": cmd_watchdog, "self": cmd_self,
+     "mutate": cmd_mutate, "worktree": cmd_worktree, "watchdog": cmd_watchdog, "self": cmd_self,
      "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model}[a.cmd](s, a)

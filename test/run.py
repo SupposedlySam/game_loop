@@ -6384,6 +6384,47 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("a revert-proof the TOOL performs, because a reported one reads the same either way (#71):")
+    # "Reverted the fix, watched it fail, restored" is ONE SENTENCE whether or not it happened. A
+    # consumer fanned out eight leaves that each reported exactly that; an independent reviewer
+    # mutation-tested the branch and THREE OF EIGHT stayed green with the bug reintroduced.
+    mt = tempfile.mkdtemp(prefix="gameloop-mutate-")
+    try:
+        _prod = os.path.join(mt, "prod.py")
+        with open(_prod, "w") as f:
+            f.write("def add(a, b):\n    return a + b\n")
+        for nm, body in (("t_good.py", "from prod import add\nassert add(2,2)==4\n"),
+                         ("t_weak.py", "from prod import add\nassert add is not None\n")):
+            with open(os.path.join(mt, nm), "w") as f:
+                f.write(body)
+
+        def _mut(test, extra=()):
+            return gl(REPO_SANDBOX_NA if False else mtw, "mutate", "--prove", "add adds",
+                      "--test", f"cd {mt} && python3 {test}", "--file", _prod,
+                      "--replace", "a + b", "--with", "a - b", *extra)
+
+        mtw = make_sandbox()
+        _good = _mut("t_good.py")
+        check("a test that DOES pin the line proves it — the tool ran both halves itself, so no "
+              "sentence could have produced this receipt",
+              _good.returncode == 0 and "PROVED" in _good.stdout)
+        _weak = _mut("t_weak.py")
+        check("...and a test that passes with the bug reintroduced is REFUSED, which is the finding "
+              "worth having: three of eight leaves were in exactly this state",
+              _weak.returncode != 0 and "NOT PROVED" in (_weak.stdout + _weak.stderr))
+        check("...and the tree is RESTORED either way — a verb that mutates somebody's source and "
+              "leaves it mutated is worse than the self-report it replaces",
+              open(_prod).read().strip().endswith("return a + b"))
+        # A SAME-SIZE MUTATION IS INVISIBLE to any cache keyed on (mtime, size). This verb reported
+        # NOT PROVED for a test that demonstrably goes red, because `a + b` -> `a - b` is the same
+        # length and both writes landed in one mtime tick, so Python reused its .pyc. The verb built
+        # to catch a test that cannot fail was itself returning a confident wrong verdict.
+        check("...and a same-SIZE mutation still registers, so a stale bytecode cache cannot make a "
+              "working test look like one that pins nothing",
+              len("a + b") == len("a - b") and _good.returncode == 0)
+    finally:
+        shutil.rmtree(mt, ignore_errors=True)
+
     print("a retro that encodes nothing did not happen — and an ignored nudge becomes a gate:")
     # Reported by a human running several machines: one ran `stepback`, produced a full reflection
     # and hardened nothing; others ignore the nudge entirely and, asked later, will say the retro is

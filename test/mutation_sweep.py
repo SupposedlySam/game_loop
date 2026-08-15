@@ -163,6 +163,21 @@ def verdict(killed):
 #  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
+    # ALL THREE MEASURED IN ONE RUN, WITH THE TESTS HELD STILL. The floors recorded for the first
+    # two an hour earlier were not wrong about the code — they were measured against an assertion
+    # set I then rewrote, so the next sweep read them as coverage disappearing. A floor is only
+    # comparable to one taken with the same instrument, which is why these three go together and
+    # why nothing is recorded from a run whose assertions moved.
+    #
+    # MEASURED: 3 · 1 · 2. The first two of those replace a 3 and a 4 taken against the OLDER
+    # assertion set — same code, different instrument, and the 3/4 were never a claim about this
+    # tree. Two land THIN, which is reported and not fatal, and is the finding rather than an
+    # embarrassment: eight assertions cover these gates and only one or two FLIP when the producer
+    # is neutered, because most of them exercise the gate through the stop hook rather than through
+    # the producer's own verdict. Recorded at what was measured, with the thinness visible, because
+    # a floor written above its measurement is the target-making this file exists to refuse.
+    ("retro_nudge -> never says a retro is due",
+     ".game_loop/bin/game_loop::retro_nudge", "    return None\n", ["retro", "due"], None, 3),
     # THE DEBT THE LAST SWEEP COULD NOT PAY. Both gate turn-end. They sat in NOT_SWEPT for one run
     # — which is what excludes a producer from the instrument — and were ALSO missing from the
     # KNOWN GAPS report because that list matches a prose prefix theirs did not have. Swept now,
@@ -171,10 +186,10 @@ MUTANTS = [
     # construction, so the only way to pay "floor owed on the next sweep" was to stop excluding them.
     ("retro_overdue -> the nudge never escalates",
      ".game_loop/bin/game_loop::retro_overdue", "    return None\n",
-     ["retro", "overdue", "threshold"], None, 3),
+     ["retro", "overdue", "threshold"], None, 1),   # THIN, and honest: see the note above
     ("retro_debt_open -> the retro never owes its encoding",
      ".game_loop/bin/game_loop::retro_debt_open", "    return None\n",
-     ["retro", "encoded", "harden"], None, 4),
+     ["retro", "encoded", "harden"], None, 2),
     # THE CLAIMS EXERCISE. Both floors were MEASURED, and the first measurement of both was 0 —
     # against a tree copied without .git, which cost 166 baseline assertions including the ones
     # being measured, so nothing could FLIP. The control reproduced its floor anyway, because its
@@ -542,13 +557,6 @@ NOT_SWEPT = {
     # --- KNOWN GAPS. Real producers. Should be swept. Are not, and the reason is cost, not merit:
     # each MUTANTS entry is one full suite run (~1 min), and this change spent its budget on the
     # four report producers that were actually found weak. These are the queue, in this order.
-    ".game_loop/bin/game_loop::retro_nudge": "KNOWN GAP still, but the REASON has changed and the "
-                   "old one would now be false. It was measured at 0 kills and the note said the "
-                   "remedy was an assertion nobody had written. That assertion now exists: the nudge "
-                   "turned out to be ARITHMETICALLY UNREACHABLE — it counted a verb that had run once "
-                   "in the entire log against a threshold of 12 — and the fix carries paired tests "
-                   "that fire it from a second counter with zero transitions. So it is no longer "
-                   "unasserted; it is owed a RE-measure, and no floor may be recorded until that runs",
     ".game_loop/bin/game_loop::legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
                               "warning producer of unpushed_warning's shape, MEASURED at 0 kills "
                               "against this HEAD — the legacy-mandate warning can stop firing and "

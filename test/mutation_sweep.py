@@ -476,11 +476,11 @@ NOT_SWEPT = {
     # them. The second is a corrupted tree reporting as coverage, and a floor taken from it would be
     # farmed rather than measured. The real sweep is a ~17-minute full run with no per-producer
     # filter; the next one measures these, and this entry is what stops that being forgotten.
-    ".game_loop/bin/game_loop::retro_overdue": "UNMEASURED, not unswept — 8 assertions cover both "
+    ".game_loop/bin/game_loop::retro_overdue": "KNOWN GAP — unmeasured, not untested. 8 assertions cover both "
             "arms (advice at the nudge threshold, gate at twice it). Measured 0 kills BEFORE those "
             "assertions existed, which is the finding that produced them. Floor owed on the next "
             "full sweep.",
-    ".game_loop/bin/game_loop::retro_debt_open": "UNMEASURED, not unswept — 8 assertions cover held "
+    ".game_loop/bin/game_loop::retro_debt_open": "KNOWN GAP — unmeasured, not untested. 8 assertions cover held "
             "/ paid-by-harden / opened-by-recorded-decline / refused-without-reason. My own "
             "measurement returned 1008 of 1031 kills, which is a broken tree rather than coverage, "
             "and a floor read off it would be a farmed number. Floor owed on the next full sweep.",

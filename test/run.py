@@ -6384,6 +6384,42 @@ def main():
     finally:
         shutil.rmtree(vend, ignore_errors=True)
 
+    print("an exclusion cannot become invisible by how its reason is WORDED:")
+    # The sweep reports KNOWN GAPS by matching a PROSE PREFIX on each NOT_SWEPT reason. Two
+    # producers written an hour earlier began "UNMEASURED", so they were neither swept nor listed —
+    # excluded twice over, by phrasing, while the run printed "no producer is unprotected". The
+    # denominator failure this file exists to prevent, inside the file that prevents it.
+    #
+    # NOT fixed by naming every unmatched entry: 32 of 39 are legitimate permanent exclusions whose
+    # reasons simply start with other words, and a report with that noise ratio gets deleted. Fixed
+    # by making the SHAPE enforced — an unrecognised prefix fails here rather than disappearing.
+    # READ the table, never EXECUTE the module: importing mutation_sweep runs its top level, and
+    # this block sat in a suite that ran 20+ minutes instead of 3 before I noticed. A test that
+    # executes the thing it is asking a question about is paying that thing's full cost to read one
+    # dict.
+    _msrc = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+    _tree = ast.parse(_msrc)
+    _ns = {}
+    for _node in _tree.body:
+        if isinstance(_node, ast.Assign) and any(
+                getattr(t, "id", "") == "NOT_SWEPT" for t in _node.targets):
+            _ns = ast.literal_eval(_node.value)
+    # I FIRST DEMANDED A PREFIX VOCABULARY of every entry, and backed it out: 26 of 39 reasons open
+    # with things like "a loader", "a normalizer", "helper of config_paths_report" — good prose that
+    # explains, and forcing a keyword onto it is 26 rewrites plus a format to fight forever, to
+    # prevent something small. The narrow defect was never the vocabulary; it was that a DEBT
+    # written in another shape is invisible to a report that greps for one. So the debts are pinned
+    # by name, and the prose stays free.
+    _debts = sorted(k for k, why in _ns.items() if (why or "").strip().startswith("KNOWN GAP"))
+    check("the two producers gating turn-end are declared as KNOWN GAPS, so the sweep's own report "
+          "names them — they were unswept AND unlisted for an hour, invisible by how their reason "
+          "happened to be worded, while the run printed 'no producer is unprotected'",
+          all(any(n in k for k in _debts)
+              for n in ("retro_overdue", "retro_debt_open")))
+    check("...and the KNOWN GAP category is not empty, or the check above would pass by there being "
+          "nothing to classify",
+          any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
+
     print("a revert-proof the TOOL performs, because a reported one reads the same either way (#71):")
     # "Reverted the fix, watched it fail, restored" is ONE SENTENCE whether or not it happened. A
     # consumer fanned out eight leaves that each reported exactly that; an independent reviewer

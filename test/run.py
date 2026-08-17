@@ -6426,6 +6426,47 @@ def main():
           "nothing to classify",
           any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
 
+    print("a commit into an unharnessed tree is REFUSED, and the refusal is not invisible (#74):")
+    # The refusal is right and its REMEDY SHAPE was the problem: install-it-there is a manual step
+    # nobody is prompted to take, commit-from-the-parent is impossible when the changes are in the
+    # worktree, and --no-verify always works. So the escape wins every time. Four of them in one day
+    # across two hand-made worktrees, each honestly documented in the commit message.
+    #
+    # AND THE PATTERN WAS INVISIBLE: the worktree has no .game_loop/, so no log.jsonl, so the
+    # PARENT's log recorded zero of these. Grepping the parent — where a reviewer looks — found
+    # nothing. A guard that cannot report how often it is bypassed cannot be argued about.
+    wt = make_sandbox()
+
+    def _wgit(*a):
+        return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                               "-c", "commit.gpgsign=false", *a], cwd=wt,
+                              capture_output=True, text=True)
+
+    _wgit("init", "-q", ".")
+    _wgit("commit", "-q", "--allow-empty", "-m", "base")
+    _hand = os.path.join(wt, ".worktrees", "hand")
+    _wgit("worktree", "add", "-q", _hand, "-b", "hand")
+    _gl_dir = os.path.join(wt, ".game_loop")
+    _log = os.path.join(_gl_dir, "log.jsonl")
+    _before = len(open(_log).read().splitlines()) if os.path.exists(_log) else 0
+    _r = subprocess.run(["bash", os.path.join(_gl_dir, "bin", "guard-writes.sh")],
+                        input=json.dumps({"tool_name": "Bash", "tool_input": {
+                            "command": f"git -C {_hand} commit -m x"}}),
+                        capture_output=True, text=True,
+                        env=dict(os.environ, CLAUDE_PROJECT_DIR=wt, GAME_LOOP_HOME=_gl_dir))
+    check("committing into a worktree that carries no harness is still REFUSED — its owed checks "
+          "cannot be read, and reading a different tree's record would report confidence either way",
+          "deny" in (_r.stdout or ""))
+    check("...and the refusal names a PASTEABLE install for that exact path, so the honest remedy "
+          "costs one line rather than being a manual step nobody is prompted to take",
+          "install.sh" in (_r.stdout or "") and _hand in (_r.stdout or ""))
+    _after = len(open(_log).read().splitlines()) if os.path.exists(_log) else 0
+    check("...and it is recorded in the PARENT's log, the only tree here that has one — otherwise "
+          "every bypass it prompts is invisible where a reviewer would grep for the pattern",
+          _after > _before
+          and any(json.loads(l).get("kind") == "commit_gate_unharnessed_tree"
+                  for l in open(_log).read().splitlines() if l.strip()))
+
     print("a revert-proof the TOOL performs, because a reported one reads the same either way (#71):")
     # "Reverted the fix, watched it fail, restored" is ONE SENTENCE whether or not it happened. A
     # consumer fanned out eight leaves that each reported exactly that; an independent reviewer

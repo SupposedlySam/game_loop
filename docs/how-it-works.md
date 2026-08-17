@@ -387,13 +387,37 @@ it. That gap is why "hand off when the context gets big" stayed something a run 
 gate could refuse work, but the only way out of a large context was an action no verb performed.
 
 `successor` mints a session id, points the next session at this session's handoff file, and either
-prints the command or opens it, per `limits.successor.mode` (`print` — the default and the portable
-floor — or `warp-tab`). It never copies state into the prompt: the handoff file *is* the state, and a
+prints the command or opens it. It never copies state into the prompt: the handoff file *is* the state, and a
 prompt that paraphrased it would be a second copy free to disagree with the first, in the one session
 with no way to check. It refuses when there is no handoff to hand over, and where the *gate* rejects
 the auto-generated handoff, this accepts it and says so — the gate is asking the agent for its own
 account, while this is the last act of a run that may be out of road, and the generated floor beats
 starting the successor blind.
+
+**Which one it does is READ, not configured.** `limits.successor.mode` defaults to `auto`: under Warp
+(`TERM_PROGRAM=WarpTerminal`) it writes a tab config to `~/.warp/tab_configs/<name>.toml` and opens it
+with `warp://tab_config/<name>`, starting a new tab **in the current window** that runs the command
+itself; everywhere else it prints the command, which every host can run. A mode string you had to know
+existed made "open the tab" one more thing a session had to remember, at the exact moment the run has
+no road left.
+
+Two overrides remain, because each covers something detection cannot do:
+
+| `limits.successor.mode` | what it is for |
+|---|---|
+| `auto` (default) | read the terminal |
+| `print` | pin the portable floor even under Warp — nothing outside this repo is written |
+| `warp-tab` | force the tab where detection is **blind**: `TERM_PROGRAM` is unset in a hook's environment, so a hook-invoked `successor` reads "not Warp" whether or not Warp is on screen |
+
+That blindness fails toward `print` — a command a human can run anywhere — so it costs a keystroke,
+never a lost handoff. The INV3 cost is real and stated rather than hidden: `warp-tab` **writes outside
+this repo**, and `auto` makes that a default under Warp. What keeps it honest is that the path written
+is named in the output every time, with the opt-out printed beside it.
+
+The tab is titled `<R> | <task>` — the repo's initial so a row of tabs stays readable, plus what that
+session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than
+letting a narrow tab truncate it; `--title` is the uncapped, verbatim override. This is the same
+convention as the `handoff` skill's `new-tab.sh`, which uses the same Warp mechanism.
 
 ### The unpushed check — `checkpoint` / `mandate --clear`
 

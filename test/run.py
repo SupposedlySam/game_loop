@@ -76,6 +76,11 @@ def _env(proj=None, sid=None, **extra):
     # .game_loop — the tests would write their state into it and every "unset" control would
     # silently be an "override set" case, passing for the wrong reason.
     env.pop("GAME_LOOP_HOME", None)
+    # And once more for the terminal (#78): `successor` resolves mode "auto" by reading TERM_PROGRAM,
+    # and this suite is typically run FROM Warp. Letting it through would mean every test of the
+    # portable floor silently exercised the warp-tab path instead — writing ~/.warp/tab_configs and
+    # opening real tabs on the developer's screen, from a test asserting nothing was opened.
+    env.pop("TERM_PROGRAM", None)
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -84,9 +89,9 @@ def _env(proj=None, sid=None, **extra):
     return env
 
 
-def gl(proj, *args, stdin=None, sid=None):
+def gl(proj, *args, stdin=None, sid=None, **envx):
     return subprocess.run([os.path.join(proj, ".game_loop", "bin", "game_loop"), *args],
-                          input=stdin, capture_output=True, text=True, env=_env(sid=sid))
+                          input=stdin, capture_output=True, text=True, env=_env(sid=sid, **envx))
 
 
 # The watchdog can legitimately BLOCK FOREVER: poll_slack_replies is a `while True:` whose exits all
@@ -892,8 +897,62 @@ def main():
         check("handing over the GENERATED handoff is allowed, and announced as such",
               r.returncode == 0 and "GENERATED handoff" in r.stdout)
         r = gl(proj, "successor", sid="sess-succ")
-        check("the default mode opens nothing by itself — it prints the command to run",
-              r.returncode == 0 and "mode                : print" in r.stdout)
+        check("off a non-Warp terminal the default resolves to print — it opens nothing itself",
+              r.returncode == 0 and "mode                : print" in r.stdout
+              and "no Warp detected" in r.stdout)
+
+        # The terminal is READ, not configured (#78). These four cases are the whole switch: the two
+        # things detection decides, and the two overrides that exist because detection is blind in a
+        # hook (TERM_PROGRAM unset there) and because ~/.warp/ is outside the repo.
+        #
+        # Every Warp-detected case below is --dry-run on purpose: a test that let the real path run
+        # would write ~/.warp/tab_configs/ and open tabs on the machine running the suite.
+        def succ_mode(*args, **envx):
+            return gl(proj, "successor", "--dry-run", *args, sid="sess-succ", **envx).stdout
+
+        check("under Warp the default resolves to warp-tab with no config at all",
+              "mode                : warp-tab — Warp detected"
+              in succ_mode(TERM_PROGRAM="WarpTerminal"))
+        check("a terminal that is not Warp resolves to print", "mode                : print"
+              in succ_mode(TERM_PROGRAM="Apple_Terminal"))
+
+        def succ_cfg(mode):
+            c = json.load(open(ctx_cf))
+            lim = c.get("limits") or {}
+            lim["successor"] = {"mode": mode}
+            c["limits"] = lim
+            json.dump(c, open(ctx_cf, "w"))
+
+        succ_cfg("print")
+        check("mode \"print\" pins the portable floor even under Warp — the opt-out opts out",
+              "mode                : print" in succ_mode(TERM_PROGRAM="WarpTerminal"))
+        succ_cfg("warp-tab")
+        check("mode \"warp-tab\" forces the tab where detection is blind (a hook: no TERM_PROGRAM)",
+              "mode                : warp-tab" in succ_mode())
+        succ_cfg("nonsense")
+        check("an unreadable mode falls back to auto, never to a silent no-op",
+              "mode                : warp-tab — Warp detected"
+              in succ_mode(TERM_PROGRAM="WarpTerminal"))
+        succ_cfg("auto")
+
+        # The tab title. A tab is narrow, so the cap is a REFUSAL — prose guidance did not hold it in
+        # the sibling launcher, which shipped `O | push and scope backups` into a truncating tab.
+        check("the title defaults to `<R> | successor` — the repo's initial, so a row of tabs reads",
+              re.search(r"tab title           : \S \| successor", succ_mode()))
+        check("--task names the work inside that convention",
+              "| fix auth" in succ_mode("--task", "fix auth"))
+        r = gl(proj, "successor", "--dry-run", "--task", "push and scope backups", sid="sess-succ")
+        check("--task refuses more than 3 words / 20 chars rather than truncating in the tab",
+              r.returncode != 0 and "too long" in (r.stdout + r.stderr))
+        r = gl(proj, "successor", "--dry-run", "--task", "a", "--title", "b", sid="sess-succ")
+        check("--task and --title are mutually exclusive",
+              r.returncode != 0 and "mutually exclusive" in (r.stdout + r.stderr))
+        r = gl(proj, "successor", "--dry-run", "--title", "T | {{x}}", sid="sess-succ")
+        check("a title carrying {{ is refused — Warp reads it as a parameter placeholder",
+              r.returncode != 0 and "{{" in (r.stdout + r.stderr))
+        check("--title is uncapped — it is the deliberate override",
+              "tab title           : a much longer deliberate title"
+              in succ_mode("--title", "a much longer deliberate title"))
 
         print("watchdog parks at an exhausted limit and rings at reset:")
         gl(proj, "mandate", "--set", "limit park work", sid="sess-park")

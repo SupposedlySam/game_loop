@@ -235,7 +235,9 @@ DEFAULT_CONFIG = {
     # Three NESTED sub-dicts are read by their own helpers rather than listed here, because
     # limits_cfg() is a shallow merge and a partial override would silently drop the keys it did not
     # name: "probe" (probe_cfg), "context" (context_cfg — the context-size trigger on the same gate)
-    # and "successor" (successor_cfg — how the next session is started). All three default OFF/inert.
+    # and "successor" (successor_cfg — how the next session is started). The first two default
+    # OFF/inert; "successor" defaults to "auto", which is inert until somebody RUNS the verb and
+    # then reads the terminal rather than a config key.
     "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
     # Update check: on `status`, compare the installed game_loop commit (.game_loop/VERSION, written by
     # install.sh) against the latest on the source repo's main, and note when a re-install is due. Best
@@ -5259,19 +5261,96 @@ SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes
                     "It is a handoff from a previous session; you have no other context.")
 
 
-def successor_cfg():
-    """How `successor` starts the next session. PRINT unless a human chose otherwise.
+# Warp's own identification of itself to child processes. Read off a live environment rather than
+# guessed: TERM_PROGRAM=WarpTerminal, beside TERM_PROGRAM_VERSION=v0.2026.07.29.09.05.stable_02.
+WARP_TERM_PROGRAM = "WarpTerminal"
 
-    Default 'print' for two reasons. It is portable — every host can run a printed command, and no
-    host but this one has Warp. And opening a tab means WRITING OUTSIDE THIS REPO (a config under
-    ~/.warp/), which INV3 makes a deliberate act rather than a default somebody inherits: the mode
-    switch in config.json is where that decision is recorded.
+
+def in_warp():
+    """Whether THIS process is running under Warp.
+
+    WHAT IT MISSES, which is the whole reason detection is a resolvable default and not a fact:
+    TERM_PROGRAM is set by the terminal for its shell's children, so it reaches a verb the agent
+    runs through Bash — which is how `successor` is invoked — and it is UNSET in a hook's
+    environment (test/run.py asserts exactly that). A hook-invoked caller therefore reads
+    "not Warp" whether or not Warp is on screen, and falls through to `print`. That is the safe
+    direction — the fallback is a command a human can run anywhere — but it is a blind spot, not a
+    negative result, so nothing here may report "you are not in Warp" as a finding.
+
+    Nor does it distinguish Warp from something else exporting the same string; it is a self-report
+    by the host, which is all any terminal offers.
+    """
+    return os.environ.get("TERM_PROGRAM") == WARP_TERM_PROGRAM
+
+
+SUCCESSOR_MODES = ("auto", "print", "warp-tab")
+
+
+def successor_cfg():
+    """How `successor` starts the next session: AUTO by default — open a Warp tab when this is
+    running under Warp, and print the command everywhere else.
+
+    `print` is the portable floor: every host can run a printed command, and only some have Warp.
+    But a printed command is also a step a tired human has to perform, at exactly the moment the
+    run has no road left, and the mode string that avoided it was something you had to know existed
+    — which made "open the tab" a thing sessions REMEMBERED rather than something the tool did.
+
+    So the terminal is READ instead of configured, and the config keeps the two overrides that
+    matter: `print` pins the portable floor even under Warp, `warp-tab` forces the tab even where
+    detection is blind (a hook, a tmux pane that does not forward TERM_PROGRAM).
+
+    THE INV3 COST, stated because it is real: warp-tab WRITES OUTSIDE THIS REPO (a tab config under
+    ~/.warp/), and auto makes that the default under Warp rather than a choice each install records.
+    What keeps it honest is that the write is named in the output every time, and the opt-out is
+    printed beside it — a default nobody can inherit silently.
     """
     lc = (config().get("limits") or {})
     c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
-    mode = str(c.get("mode") or "print")
-    return {"mode": mode if mode in ("print", "warp-tab") else "print",
+    configured = str(c.get("mode") or "auto")
+    if configured not in SUCCESSOR_MODES:
+        configured = "auto"
+    detected = in_warp()
+    mode = ("warp-tab" if detected else "print") if configured == "auto" else configured
+    return {"mode": mode, "configured": configured, "detected": detected,
+            "term_program": os.environ.get("TERM_PROGRAM") or "",
             "name": str(c.get("name") or "game-loop-successor")}
+
+
+# A tab is NARROW. Prose guidance did not hold this in the sibling launcher — a real handoff shipped
+# `O | push and scope backups`, which a narrow tab truncates into uselessness — so the limit is a
+# refusal, and --title stays uncapped as the deliberate override.
+TASK_MAX_WORDS, TASK_MAX_CHARS = 3, 20
+
+
+def successor_title(task=None, title=None, cwd=None):
+    """`<R> | <task>` — the repo's initial, so a row of tabs stays readable at a glance, plus what
+    that session is actually doing. Same convention as the handoff skill's new-tab.sh.
+
+    The refusals differ from that script's on purpose, because the quoting does. new-tab.sh embeds
+    the title in a single-quoted shell word inside a heredoc, so a single quote breaks it; here the
+    title is written straight into a TOML basic string with `\\` and `"` escaped, so a quote is
+    safe and refusing it would be cargo-culted. A NEWLINE still breaks the TOML line, and `{{` is
+    read by Warp as a parameter — both are refused.
+    """
+    if task and title:
+        die("--task and --title are mutually exclusive: --task names the work and this builds the\n"
+            "  title around it; --title is the verbatim override.")
+    if task:
+        words = task.split()
+        if len(words) > TASK_MAX_WORDS or len(task) > TASK_MAX_CHARS:
+            die(f"--task is too long: \"{task}\" ({len(words)} words, {len(task)} chars)\n"
+                f"  limit: {TASK_MAX_WORDS} words and {TASK_MAX_CHARS} chars — a tab is narrow, so "
+                "the tail gets cut off.\n"
+                "  Name the successor's job, not the whole plan: \"scope backups\", not \"push and\n"
+                "  scope backups\". Use --title to override verbatim.")
+    if not title:
+        initial = (os.path.basename(cwd or REPO_ROOT) or "?")[:1].upper() or "?"
+        title = f"{initial} | {task or 'successor'}"
+    if "\n" in title:
+        die("--task/--title must be a single line — the tab config writes it on one.")
+    if "{{" in title:
+        die("--task/--title must not contain {{ — Warp reads that as a parameter placeholder.")
+    return title
 
 
 def _warp_tab(name, cwd, cmd, title):
@@ -5327,23 +5406,37 @@ def cmd_successor(s, a):
     prompt = SUCCESSOR_PROMPT.format(handoff=hp)
     cmd = " ".join(shlex.quote(x) for x in ["claude", "--session-id", sid, prompt])
     sc = successor_cfg()
-    title = a.title or f"{(os.path.basename(REPO_ROOT) or '?')[:1].upper()} | successor"
+    title = successor_title(a.task, a.title, cwd)
+    why = ("Warp detected (TERM_PROGRAM=" + WARP_TERM_PROGRAM + ")" if sc["detected"]
+           else "no Warp detected (TERM_PROGRAM="
+                + (sc["term_program"] or "unset") + ")")
     lines = [f"successor session id : {sid}",
              f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
              f"working directory   : {cwd}",
+             f"tab title           : {title}",
              f"command             : {cmd}"]
     if a.dry_run:
-        lines.append(f"mode                : {sc['mode']} (DRY RUN — nothing was started)")
+        lines.append(f"mode                : {sc['mode']} — {why}, configured "
+                     f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
     elif sc["mode"] == "warp-tab":
         conf = _warp_tab(sc["name"], cwd, cmd, title)
-        lines.append(f"mode                : warp-tab — wrote {conf} and opened it")
+        lines += [f"mode                : warp-tab — {why}. Wrote {conf} and opened it.",
+                  "                      That path is OUTSIDE this repo; pin "
+                  "limits.successor.mode to \"print\"",
+                  "                      in .game_loop/config.json to keep it that way."]
     else:
-        lines += ["mode                : print — RUN THE COMMAND ABOVE to start the successor.",
-                  "                      (set limits.successor.mode to \"warp-tab\" in "
-                  ".game_loop/config.json to open",
-                  "                       the tab from here instead; it writes a config under "
-                  "~/.warp/, which is",
-                  "                       outside this repo and so is a choice, not a default.)"]
+        lines.append("mode                : print — RUN THE COMMAND ABOVE to start the successor.")
+        if sc["configured"] == "print":
+            lines.append("                      (pinned by limits.successor.mode; \"auto\" opens "
+                         "the tab itself under Warp.)")
+        else:
+            lines += [f"                      ({why}. Under Warp this opens the tab itself — and "
+                      "detection is",
+                      "                       blind in a hook, where TERM_PROGRAM is unset, so set "
+                      "limits.successor.mode",
+                      "                       to \"warp-tab\" in .game_loop/config.json to force "
+                      "it. That writes a config",
+                      "                       under ~/.warp/, outside this repo.)"]
     if auto:
         lines += ["",
                   "⚠ THIS IS THE GENERATED HANDOFF, not your own account of the run. It says what "
@@ -5352,6 +5445,7 @@ def cmd_successor(s, a):
                   "turn before",
                   "  the successor starts, because it is the only part nothing can reconstruct."]
     logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
+             "configured_mode": sc["configured"], "warp_detected": sc["detected"], "title": title,
              "dry_run": bool(a.dry_run), "auto_handoff": auto})
     out("\n".join(lines))
 
@@ -7667,7 +7761,11 @@ def main():
     sc.add_argument("--session-id", dest="session_id",
                     help="use this id instead of minting one (a prewarmed session, say)")
     sc.add_argument("--cwd", help="where the successor starts (default: this repo)")
-    sc.add_argument("--title", help="tab title, verbatim — only used by the warp-tab mode")
+    sc.add_argument("--task", help=f"what the successor is doing, {TASK_MAX_WORDS} words / "
+                                   f"{TASK_MAX_CHARS} chars at most — becomes the tab title "
+                                   "`<R> | <task>`")
+    sc.add_argument("--title", help="tab title, verbatim and uncapped — the override for when "
+                                    "--task is too small a box")
     sc.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="print the id, the prompt and the command, and start nothing")
     cf = sub.add_parser("confidence")

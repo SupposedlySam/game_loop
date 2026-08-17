@@ -514,62 +514,75 @@ MUTANTS = [
 # are measured in one run — a floor is only comparable to one taken with the same instrument, which
 # this file learned the expensive way.
 #
-# FLOORS ARE 0 = NOT YET MEASURED, stated rather than guessed. 0 can never read as BELOW FLOOR, so
-# these enforce nothing until the run that follows records real numbers. An unmeasured number that
-# LOOKS measured is worse than an honest zero.
+# FLOORS MEASURED at aff65a3 — one instrument, one 38.3-minute run of all 67 producers, never
+# rounded and never guessed. Two sweeps were KILLED before this one rather than recording their
+# numbers: a peer session pushed to main mid-run both times, changing test/run.py by 355 and then 67
+# lines, and a kill count is a set difference over the WHOLE suite — so those numbers would have
+# described a tree nobody would ever have. That is this file's own rule about comparability, paid
+# rather than quoted.
+#
+# THE BIG TWO ARE FLOORED WELL BELOW THEIR READING, deliberately. ci_commands and ci_gap each killed
+# 222, and _scan_transcript 171 — those are not 222 assertions ABOUT the CI gap, they are most of the
+# suite noticing that `verify` changed shape. A floor set at the reading would trip on any unrelated
+# edit, and a floor that cries wolf gets lowered until it means nothing.
+#
+# STILL 0: pin_status, running_host_version and _upstream_fetch came back UNPROTECTED — nothing in
+# the suite noticed them stopping. Each now has a PAIR (it fires / it declines), written after that
+# reading, so their floors are owed by the NEXT sweep and cannot honestly be filled in from this one:
+# the assertions that would flip did not exist when this was measured.
 MUTANTS += [
     ("_stop_verdict -> the stop gate always allows the turn to end",
      ".game_loop/bin/game_loop::_stop_verdict", "    return True, \"\", None\n",
-     ["stop gate", "stop_verdict", "turn-end", "mandate"], None, 0),
+     ["stop gate", "stop_verdict", "turn-end", "mandate"], None, 12),
     ("waiting_verdict -> the watchdog never sees a run as waiting",
      ".game_loop/bin/watchdog::waiting_verdict", "    return False, \"\"\n",
-     ["waiting", "watchdog", "subagent", "idle"], None, 0),
+     ["waiting", "watchdog", "subagent", "idle"], None, 12),
     ("upstream_check -> the upstream watcher reports nothing, ever",
      ".game_loop/bin/game_loop::upstream_check", "    return [], \"off\"\n",
-     ["#76", "upstream"], None, 0),
+     ["#76", "upstream"], None, 14),
     ("ahead_of_upstream -> never sees an unpushed commit",
      ".game_loop/bin/game_loop::ahead_of_upstream", "    return 0, None, None\n",
-     ["unpushed", "upstream", "ahead"], None, 0),
+     ["unpushed", "upstream", "ahead"], None, 5),
     ("working_tree -> never resolves a worktree",
      ".game_loop/bin/game_loop::working_tree", "    return None, None\n",
-     ["worktree", "working tree", "checkout"], None, 0),
+     ["worktree", "working tree", "checkout"], None, 3),
     ("pin_status -> never reports a tree as pinned",
      ".game_loop/bin/game_loop::pin_status", "    return False, None\n",
      ["pin", "pinned"], None, 0),
     ("probe_reading -> a probe's output never yields a reading",
      ".game_loop/bin/game_loop::probe_reading", "    return {}, None\n",
-     ["probe", "rate-limit", "context window"], None, 0),
+     ["probe", "rate-limit", "context window"], None, 3),
     ("running_host_version -> the running host's version is never known",
      ".game_loop/bin/game_loop::running_host_version", "    return None, \"neutered\"\n",
      ["host", "version", "EXECPATH"], None, 0),
     ("_scan_transcript -> the transcript never yields records",
      ".game_loop/bin/game_loop::_scan_transcript",
      "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
-     ["transcript", "denial", "oversized"], None, 0),
+     ["transcript", "denial", "oversized"], None, 120),
     ("ci_commands -> CI's commands are never read",
      ".game_loop/bin/verify::ci_commands", "    return [], \"neutered\"\n",
-     ["CI", "workflow"], None, 0),
+     ["CI", "workflow"], None, 150),
     ("ci_gap -> no CI command is ever reported as ungated",
      ".game_loop/bin/verify::ci_gap", "    return [], \"\"\n",
-     ["CI", "workflow", "gap"], None, 0),
+     ["CI", "workflow", "gap"], None, 150),
     ("milestones -> flair never marks a milestone",
      ".game_loop/bin/flair.py::milestones", "    return [], []\n",
-     ["flair", "milestone"], None, 0),
+     ["flair", "milestone"], None, 4),
     ("_limitgate_verdict -> the limit gate always allows the turn to end",
      ".game_loop/bin/game_loop::_limitgate_verdict", "    return True, None\n",
-     ["limit gate", "limit", "window"], None, 0),
+     ["limit gate", "limit", "window"], None, 8),
     ("_last_assistant_text -> the closing message is never recoverable",
      ".game_loop/bin/game_loop::_last_assistant_text", "    return None, \"neutered\"\n",
-     ["closing message", "assistant text", "stop gate"], None, 0),
+     ["closing message", "assistant text", "stop gate"], None, 3),
     ("merge_files -> a merge never yields the paths it touched",
      ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
-     ["merge", "attribute", "merge-base"], None, 0),
+     ["merge", "attribute", "merge-base"], None, 10),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
      ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
      ["#76", "upstream"], None, 0),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
-     ["notify", "probe", "read"], None, 0),
+     ["notify", "probe", "read"], None, 3),
 ]
 
 

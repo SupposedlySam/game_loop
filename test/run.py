@@ -8993,6 +8993,105 @@ def main():
     finally:
         shutil.rmtree(_pv, ignore_errors=True)
 
+    # ---- the three the sweep called UNPROTECTED: neutering them killed nothing ----
+    _up3 = tempfile.mkdtemp(prefix="gl_unprot_")
+    try:
+        _u3h = os.path.join(_up3, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _u3h,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        _l3 = importlib.machinery.SourceFileLoader("gl_u3", os.path.join(_u3h, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _u3h
+        _g3 = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_u3", _l3))
+        _l3.exec_module(_g3)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        # pin_status — "is this tree running PINNED code, and at which sha". Neutered to a constant
+        # "not pinned" it went in green, which means the harness could have been silently running
+        # the repo copy while reporting a pin.
+        check("pin_status on a tree with no pinned checkout reports NOT pinned, and names no sha",
+              _g3.pin_status(_u3h) == (False, None))
+        _pind = os.path.join(_up3, _g3.PINNED_DIRNAME, ".game_loop")
+        os.makedirs(_pind)
+        check("...a pin marker with no VERSION file is still PINNED — the tree is running other "
+              "code and the sha merely unknown, which is not the same as unpinned",
+              _g3.pin_status(_u3h) == (True, None))
+        with open(os.path.join(_pind, "VERSION"), "w") as f:
+            f.write("  deadbeef1234  \n")
+        check("...and with a VERSION it reports the sha it is pinned to, stripped — so the two "
+              "answers above are verdicts rather than one constant",
+              _g3.pin_status(_u3h) == (True, "deadbeef1234"))
+
+        # running_host_version — which Claude Code binary is actually running. Its NOTHING arm
+        # carries a reason, and the reasons differ: unset is a different fact from set-but-shapeless.
+        _saved = os.environ.pop("CLAUDE_CODE_EXECPATH", None)
+        try:
+            _v, _why = _g3.running_host_version()
+            check("running_host_version with no CLAUDE_CODE_EXECPATH reports no version AND says "
+                  "why — a version nobody could read is not version 'none'",
+                  _v is None and "no CLAUDE_CODE_EXECPATH" in _why)
+            os.environ["CLAUDE_CODE_EXECPATH"] = "/opt/claude/nonsense/cli.js"
+            _v2, _why2 = _g3.running_host_version()
+            check("...set but carrying no version is a DIFFERENT nothing, with its own reason — "
+                  "the two silences are not interchangeable",
+                  _v2 is None and "carries no version" in _why2 and _why2 != _why)
+            # the real shape: the installer's directory carries the version in its NAME, which is
+            # why this is read from the path instead of by forking the binary
+            os.environ["CLAUDE_CODE_EXECPATH"] = "/opt/claude-code-1.2.34/cli.js"
+            _v3, _why3 = _g3.running_host_version()
+            check("...and a path carrying a version yields it, so the two nothings above are "
+                  "verdicts and not a function that can only decline",
+                  _v3 == "1.2.34")
+        finally:
+            os.environ.pop("CLAUDE_CODE_EXECPATH", None)
+            if _saved is not None:
+                os.environ["CLAUDE_CODE_EXECPATH"] = _saved
+
+        # _upstream_fetch — the watcher's only network path. Its failure arm is load-bearing far
+        # beyond itself: `None` is what makes an unchecked repo's baseline HOLD, so a version that
+        # returned an empty dict on failure would silently convert every outage into "nothing moved
+        # here" and advance the baseline over it.
+        _fake = os.path.join(_up3, "bin")
+        os.makedirs(_fake, exist_ok=True)
+        _issues, _rel, _why4 = None, None, None
+        _env0 = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = _fake          # a PATH with no `gh` on it at all
+            _issues, _rel, _why4 = _g3._upstream_fetch("o/a", timeout=10)
+        finally:
+            os.environ["PATH"] = _env0
+        check("_upstream_fetch with no `gh` reachable returns None for the issue set — NOT an "
+              "empty one. That distinction is what holds an unchecked repo's baseline still, so "
+              "an outage cannot be recorded as 'nothing moved here'",
+              _issues is None and _why4)
+        with open(os.path.join(_fake, "gh"), "w") as f:
+            f.write("#!/bin/sh\nexit 4\n")     # present, and failing
+        os.chmod(os.path.join(_fake, "gh"), 0o755)
+        try:
+            os.environ["PATH"] = _fake
+            _i5, _r5, _why5 = _g3._upstream_fetch("o/a", timeout=10)
+        finally:
+            os.environ["PATH"] = _env0
+        check("...a `gh` that runs and FAILS is also a None, with its own reason — could-not-look "
+              "never collapses into looked-and-found-nothing",
+              _i5 is None and _why5)
+        with open(os.path.join(_fake, "gh"), "w") as f:
+            f.write('#!/bin/sh\ncase "$*" in *"release list"*) echo \'[{"tagName":"v9"}]\';; '
+                    '*) echo \'[{"number":5,"title":"t","updatedAt":"T1"}]\';; esac\n')
+        os.chmod(os.path.join(_fake, "gh"), 0o755)
+        try:
+            os.environ["PATH"] = _fake
+            _i6, _r6, _why6 = _g3._upstream_fetch("o/a", timeout=10)
+        finally:
+            os.environ["PATH"] = _env0
+        check("...and a `gh` that answers yields the issues and the release, so both refusals "
+              "above are verdicts rather than a fetch that can only fail",
+              _why6 is None and _i6 == {"5": {"updatedAt": "T1", "title": "t"}} and _r6 == "v9")
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_up3, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

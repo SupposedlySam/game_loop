@@ -14,6 +14,7 @@
 .game_loop/.limits.lock
 .game_loop/HANDOFF.md
 .game_loop/.update_cache.json
+.game_loop/upstream.json
 .game_loop/config.local.json
 .game_loop/triggers.json
 .game_loop/triggers.d/

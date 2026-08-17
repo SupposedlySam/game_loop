@@ -2059,6 +2059,163 @@ def ritual_checkpoints():
     return n
 
 
+# THE CAVEATS ARE FIXED STRINGS AND MUST STAY THAT WAY (#76). Counts and names interpolate; the
+# sentence explaining what a number does NOT mean must not. An assembled caveat can render empty
+# under exactly the conditions that make it matter most, and a caveat that renders empty is worse
+# than no caveat at all — it reads as a clean result.
+_UP_MOVEMENT_CAVEAT = (
+    "MOVEMENT IS NOT AN ANSWER. This compares counts and states; it has not read a word of any\n"
+    "  of them. A label change, a drive-by '+1' and the reply you have been blocked on are the\n"
+    "  same event here.")
+_UP_QUIET_CAVEAT = (
+    "A QUIET RUN IS WEAK EVIDENCE, not a clean bill. GitHub's search index lags publication:\n"
+    "  two issues filed from one machine were observed absent from --involves results for over\n"
+    "  an hour after they existed. So 'no movement' means the index showed none, which is a\n"
+    "  fact about the index.")
+_UP_PARTIAL_CAVEAT = (
+    "A PARTIAL RESULT IS NOT A RESULT. What moved in the repo(s) that could not be checked is\n"
+    "  UNKNOWN, not absent. Their stored baseline was deliberately NOT advanced, so the next\n"
+    "  successful run reports what moved in the meantime instead of swallowing it.")
+_UP_OUTAGE_CAVEAT = (
+    "This is NOT 'no movement'. Nothing was compared, the stored baseline is UNCHANGED, and the\n"
+    "  next run will report anything that moved in the meantime rather than skipping it.")
+
+UPSTREAM_F = os.path.join(ROOT, "upstream.json")
+
+
+def upstream_repos():
+    """Repos to watch. EMPTY BY DEFAULT, so this is inert until somebody opts in."""
+    v = config().get("upstream_repos", [])
+    return [r for r in v if isinstance(r, str) and "/" in r] if isinstance(v, list) else []
+
+
+def _upstream_baseline():
+    try:
+        with open(UPSTREAM_F) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _upstream_fetch(repo, timeout=25):
+    """({issue_no: updatedAt}, latest_release_tag, None) or (None, None, "why").
+
+    A failure here must be DISTINGUISHABLE from an empty result all the way up. `{}` is "this repo
+    has no open issues involving you", which is a fact; `None` is "nobody knows", which is not.
+    """
+    try:
+        r = subprocess.run(
+            ["gh", "search", "issues", "--involves", "@me", "--state", "open", "--repo", repo,
+             "--json", "number,title,updatedAt", "--limit", "100"],
+            capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, None, f"search did not return ({type(exc).__name__})"
+    if r.returncode != 0:
+        return None, None, (r.stderr or "").strip().split("\n")[-1][:120] or "search failed"
+    try:
+        items = json.loads(r.stdout or "[]")
+    except ValueError:
+        return None, None, "search returned output that is not JSON"
+    issues = {str(i["number"]): {"updatedAt": i.get("updatedAt", ""), "title": i.get("title", "")}
+              for i in items if isinstance(i, dict) and "number" in i}
+    rel = ""
+    try:                        # a missing release list is not a failed check: repos need no releases
+        rr = subprocess.run(["gh", "release", "list", "--repo", repo, "--limit", "1",
+                             "--json", "tagName"], capture_output=True, text=True, timeout=timeout)
+        if rr.returncode == 0:
+            tags = json.loads(rr.stdout or "[]")
+            rel = tags[0].get("tagName", "") if tags else ""
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, AttributeError):
+        rel = None              # unknown, and unknown must not overwrite a known baseline
+    return issues, rel, None
+
+
+def upstream_check(write=True):
+    """Compare watched repos against the stored baseline. Returns (lines, state).
+
+    state: "off" | "first" | "movement" | "quiet" | "partial" | "outage".
+    Never raises and never blocks — the whole value is in the report, and a watcher that can break
+    a checkpoint is a watcher that gets removed before it ever reports anything.
+    """
+    repos = upstream_repos()
+    if not repos:
+        return [], "off"
+    base = _upstream_baseline()
+    first_run = not base.get("repos")
+    stored = dict(base.get("repos") or {})
+    moved, failed, checked = [], [], []
+    for repo in repos:
+        issues, rel, why = _upstream_fetch(repo)
+        if issues is None:
+            # THE BASELINE FOR AN UNCHECKED REPO MUST NOT ADVANCE. Advancing it here would make one
+            # outage a permanent blind spot: everything that moved during it becomes part of the new
+            # "before", and the next successful run reports calm.
+            failed.append((repo, why))
+            continue
+        checked.append(repo)
+        prev = stored.get(repo) or {}
+        prev_issues = prev.get("issues") or {}
+        if not first_run and prev:
+            for num, cur in sorted(issues.items(), key=lambda kv: int(kv[0])):
+                was = prev_issues.get(num)
+                if was is None:
+                    moved.append((repo, num, "NEW", cur.get("title", "")))
+                elif was.get("updatedAt") != cur.get("updatedAt"):
+                    moved.append((repo, num, "moved", cur.get("title", "")))
+            for num, was in sorted(prev_issues.items(), key=lambda kv: int(kv[0])):
+                if num not in issues:
+                    # Gone from a state:open search. Closed is by far the likeliest reading and the
+                    # one you most want — but it is an INFERENCE from an absence, so it is worded as
+                    # one rather than asserted as a close.
+                    moved.append((repo, num, "no longer open", was.get("title", "")))
+            if rel is not None and prev.get("release") and rel and rel != prev["release"]:
+                moved.append((repo, "", f"RELEASE {prev['release']} -> {rel}", ""))
+        entry = {"issues": issues, "checked": now()}
+        entry["release"] = prev.get("release", "") if rel is None else rel
+        stored[repo] = entry
+    if write and checked:
+        try:
+            with open(UPSTREAM_F, "w") as f:
+                json.dump({"repos": stored}, f, indent=2)
+        except OSError:
+            pass
+    n_iss = sum(len((stored.get(r) or {}).get("issues") or {}) for r in checked)
+    if first_run and checked:
+        return ([f"upstream: baseline recorded — {n_iss} issue(s) involving you across "
+                 f"{len(checked)} repo(s).",
+                 "  Nothing is reported on a first run. Everything after this point is a CHANGE",
+                 "  against this snapshot; if this gate had spoken now it would have handed you",
+                 f"  {n_iss} historical item(s) at once, and a gate whose first act is a backlog is",
+                 "  a gate somebody removes."]
+                + ([f"  NOTE: {len(failed)} repo(s) could not be reached, so they are NOT in the "
+                    "baseline", "  and will record theirs on a later run."] if failed else []),
+                "first")
+    if not checked:
+        return ([f"upstream: COULD NOT CHECK — {len(failed)} of {len(repos)} repo(s) failed.",
+                 *[f"    {r}: {w}" for r, w in failed],
+                 "  " + _UP_OUTAGE_CAVEAT], "outage")
+    lines = []
+    if moved:
+        lines.append(f"upstream: {len(moved)} item(s) moved since the last check —")
+        for repo, num, what, title in moved[:12]:
+            where = f"{repo}#{num}" if num else repo
+            lines.append(f"    {where}  {what}" + (f"  {title[:60]}" if title else ""))
+        if len(moved) > 12:
+            lines.append(f"    ... and {len(moved) - 12} more (all recorded; only 12 shown)")
+    else:
+        lines.append("upstream: no movement in the index across "
+                     f"{len(checked)} repo(s), {n_iss} issue(s).")
+    if failed:
+        lines.append(f"  {len(failed)} of {len(repos)} repo(s) COULD NOT BE CHECKED:")
+        lines += [f"    {r}: {w}" for r, w in failed]
+        lines.append("  " + _UP_PARTIAL_CAVEAT)
+    # ALWAYS, never only on the ambiguous runs. A caveat that appears only sometimes teaches that its
+    # absence means certainty — which is the exact false green this repo exists to refuse.
+    lines.append("  " + (_UP_MOVEMENT_CAVEAT if moved else _UP_QUIET_CAVEAT))
+    return lines, ("partial" if failed else ("movement" if moved else "quiet"))
+
+
 def cmd_checkpoint(s, a):
     """Declare that this turn-end REPORTS rather than ASKS. Buys exactly one turn-end.
 
@@ -2092,6 +2249,13 @@ def cmd_checkpoint(s, a):
         out(w)
     if (w := fix_warning(s, a.notes)):
         out(w)
+    try:
+        _up_lines, _up_state = upstream_check()
+    except Exception:           # never let the watcher break the verb it reports inside of
+        _up_lines, _up_state = [], "off"
+    if _up_lines:
+        out("", *_up_lines)
+        logline({"kind": "upstream_check", "state": _up_state})
     flair_out(s, "checkpoint")
 
 

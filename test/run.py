@@ -8746,6 +8746,140 @@ def main():
     finally:
         shutil.rmtree(_disp, ignore_errors=True)
 
+    # ---- #76: the upstream watcher. Five states, and the two that get merged are the point. ----
+    _up = tempfile.mkdtemp(prefix="gl_upstream_")
+    try:
+        _uh = os.path.join(_up, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _uh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json"))
+        _uld = importlib.machinery.SourceFileLoader(
+            "gl_up", os.path.join(_uh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _uh
+        _u = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_up", _uld))
+        _uld.exec_module(_u)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        _feed = {}
+
+        def _stub(repo, timeout=25):
+            v = _feed.get(repo)
+            return v if v else (None, None, "stubbed outage")
+
+        _u._upstream_fetch = _stub
+
+        def _cfg(repos):
+            with open(os.path.join(_uh, "config.json")) as f:
+                d = json.load(f)
+            d["upstream_repos"] = repos
+            with open(os.path.join(_uh, "config.json"), "w") as f:
+                json.dump(d, f)
+
+        def _wipe():
+            try:
+                os.remove(_u.UPSTREAM_F)
+            except OSError:
+                pass
+
+        # INERT BY DEFAULT. An unscoped watcher surfaced unrelated side projects on the reporter's
+        # first attempt and "would have been switched off inside a day" — so empty means silent,
+        # not means-everything.
+        _cfg([])
+        _wipe()
+        _l, _st = _u.upstream_check()
+        check("#76: no upstream_repos configured → the watcher is INERT, not implicitly global",
+              _st == "off" and _l == [])
+
+        # FIRST RUN records the world and reports NO items.
+        _cfg(["o/a"])
+        _feed["o/a"] = ({"1": {"updatedAt": "T1", "title": "one"},
+                         "2": {"updatedAt": "T1", "title": "two"}}, "v1", None)
+        _l, _st = _u.upstream_check()
+        _txt = "\n".join(_l)
+        check("#76: the FIRST run records a baseline and reports no items — a gate whose first act "
+              "is a backlog is a gate somebody removes",
+              _st == "first" and "baseline recorded" in _txt
+              and "#1" not in _txt and "#2" not in _txt)
+
+        # QUIET is not a clean bill, and says so.
+        _l, _st = _u.upstream_check()
+        check("#76: nothing moved → QUIET, and it is named weak evidence about the INDEX rather "
+              "than a clean bill",
+              _st == "quiet" and "WEAK EVIDENCE" in "\n".join(_l)
+              and "lags publication" in "\n".join(_l))
+
+        # MOVEMENT: a reply, a new issue, a close-shaped absence, a release.
+        _feed["o/a"] = ({"1": {"updatedAt": "T2", "title": "one"},
+                         "3": {"updatedAt": "T2", "title": "three"}}, "v2", None)
+        _l, _st = _u.upstream_check()
+        _txt = "\n".join(_l)
+        check("#76: an issue whose updatedAt moved is reported",
+              _st == "movement" and "o/a#1" in _txt and "moved" in _txt)
+        check("#76: ...an issue absent from a state:open search is reported as NO LONGER OPEN — "
+              "worded as the inference it is, not asserted as a close",
+              "o/a#2" in _txt and "no longer open" in _txt)
+        check("#76: ...a new issue involving you is reported", "o/a#3" in _txt and "NEW" in _txt)
+        check("#76: ...and a RELEASE is watched, because 'did the fix I need ship' is a release or "
+              "a close and never a commit",
+              "RELEASE v1 -> v2" in _txt)
+        check("#76: the movement caveat says it has read NOTHING — a label change and the reply "
+              "you are blocked on are the same event here",
+              "MOVEMENT IS NOT AN ANSWER" in _txt)
+
+        # THE CAVEAT IS UNCONDITIONAL. One that appears only on ambiguous runs teaches that its
+        # absence means certainty, which is the false green this repo exists to refuse.
+        _l2, _ = _u.upstream_check()
+        check("#76: a caveat is printed on EVERY run, quiet or not — an intermittent caveat teaches "
+              "that its absence means certainty",
+              any("WEAK EVIDENCE" in x or "NOT AN ANSWER" in x for x in _l2))
+
+        # COULD NOT LOOK is not QUIET. This is the whole three-outcome contract.
+        _feed.pop("o/a")
+        _before = open(_u.UPSTREAM_F).read()
+        _l, _st = _u.upstream_check()
+        _txt = "\n".join(_l)
+        check("#76: every repo failing is COULD NOT CHECK, a distinct state from 'no movement'",
+              _st == "outage" and "COULD NOT CHECK" in _txt
+              and "upstream: no movement" not in _txt   # the REPORT line; the caveat says the
+              and "WEAK EVIDENCE" not in _txt)          # phrase on purpose, to deny it
+        check("#76: ...it says the baseline is UNCHANGED and the next run will report what moved "
+              "in the meantime — outage, not hole",
+              "NOT 'no movement'" in _txt and "UNCHANGED" in _txt)
+        check("#76: ...and the stored baseline is in fact untouched by a failed check",
+              open(_u.UPSTREAM_F).read() == _before)
+
+        # PARTIAL, and the property that makes an outage temporary instead of permanent.
+        _cfg(["o/a", "o/b"])
+        _feed["o/a"] = ({"1": {"updatedAt": "T9", "title": "one"}}, "v2", None)
+        _wipe()
+        _feed["o/b"] = ({"7": {"updatedAt": "B1", "title": "b-one"}}, "v1", None)
+        _u.upstream_check()                     # baseline both
+        _b_before = json.load(open(_u.UPSTREAM_F))["repos"]["o/b"]
+        _feed.pop("o/b")                        # now o/b cannot be reached
+        _feed["o/a"] = ({"1": {"updatedAt": "TZ", "title": "one"}}, "v2", None)
+        _l, _st = _u.upstream_check()
+        _txt = "\n".join(_l)
+        check("#76: one repo up and one down is PARTIAL — reported as a subset, not as a result",
+              _st == "partial" and "COULD NOT BE CHECKED" in _txt
+              and "A PARTIAL RESULT IS NOT A RESULT" in _txt)
+        _b_after = json.load(open(_u.UPSTREAM_F))["repos"]["o/b"]
+        check("#76: THE LOAD-BEARING ONE — an unchecked repo's baseline does NOT advance, so one "
+              "outage cannot become a permanent blind spot the next run reports as calm",
+              _b_after == _b_before)
+        check("#76: ...while the repo that DID answer still advances, so a partial run is not a "
+              "wasted one",
+              json.load(open(_u.UPSTREAM_F))["repos"]["o/a"]["issues"]["1"]["updatedAt"] == "TZ")
+
+        # The wording rules, checked as text because that is what they are.
+        for _name, _c in (("movement", _u._UP_MOVEMENT_CAVEAT), ("quiet", _u._UP_QUIET_CAVEAT),
+                          ("partial", _u._UP_PARTIAL_CAVEAT), ("outage", _u._UP_OUTAGE_CAVEAT)):
+            check(f"#76: the {_name} caveat is a FIXED string — no interpolation, because an "
+                  "assembled caveat can render empty exactly when it matters most",
+                  "{" not in _c and "%s" not in _c and len(_c) > 60)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_up, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

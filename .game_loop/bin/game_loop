@@ -1866,6 +1866,35 @@ def cmd_mandate(s, a):
     flair_out(s, "mandate_set")
 
 
+def ritual_checkpoints():
+    """Checkpoints since the last piece of EVIDENCE WORK, from the shared log (#75).
+
+    NOT a gate, deliberately. `checkpoint` is cheap so a stop is always DELIBERATE, and pricing it
+    would push the next agent toward `--park`, which claims a human called a break when none did —
+    a worse failure than the one being fixed. What changes is the RECORD: repetition becomes
+    visible, which is what makes "this mandate is being ritualised" arguable with evidence instead
+    of something a human has to notice and say twice.
+    """
+    WORK = {"claim", "harden", "fix_prove", "effector_prove", "mutate_prove", "trans", "stepback",
+            "measure", "instrument", "confidence", "authorize"}
+    n = 0
+    try:
+        with open(LOG_F) as f:
+            recs = [l for l in f if '"kind"' in l]
+    except OSError:
+        return 0
+    for line in reversed(recs):
+        try:
+            k = json.loads(line).get("kind")
+        except ValueError:
+            continue
+        if k == "checkpoint":
+            n += 1
+        elif k in WORK:
+            break
+    return n
+
+
 def cmd_checkpoint(s, a):
     """Declare that this turn-end REPORTS rather than ASKS. Buys exactly one turn-end.
 
@@ -1882,8 +1911,15 @@ def cmd_checkpoint(s, a):
     save(s)
     if notify:
         notify.send("checkpoint", f"📍 checkpoint — {a.notes}")  # default-off event; opt in to page
+    _rit = ritual_checkpoints()
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
+        *([f"⚠ {_rit + 1} CHECKPOINTS SINCE ANY EVIDENCE WORK — no claim, harden, proof, phase or",
+           "  retro has been logged in between. That is not progress reported N times; it is the",
+           "  same turn-end bought N times, and it is the shape a mandate gets ritualised into.",
+           "  Nothing is blocked: this is cheap so a stop stays deliberate, and pricing it would",
+           "  push the next agent toward `--park`, which lies about a human calling a break."]
+          if _rit >= 2 else []),
         "→ if your closing message asks the human anything, the gate still blocks it. Report, don't ask.")
     # The handback is where the human forms their picture of what exists; "14 commits that only exist
     # here" belongs in that picture — and so does "the fix in those commits was never exercised".

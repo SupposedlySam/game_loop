@@ -6426,6 +6426,35 @@ def main():
           "nothing to classify",
           any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
 
+    print("checkpoint is the escape that always works, so it gets ritualised (#75):")
+    # Measured from ONE session — mine: 16 checkpoints, 14 stop-gate blocks, 3 mandate events. The
+    # gate refused fourteen turn-ends and was paid off sixteen times, and the human had to say twice
+    # that there was no reason to stop. Identical shape to #74, which I had fixed hours earlier:
+    # `arm` needs a real question, `--clear` needs the work done, `--park` needs a human's break.
+    # `checkpoint` needs nothing, so it wins. NOT gated: pricing it pushes the next agent toward
+    # `--park`, which lies about a human having called a break. The RECORD is what changes.
+    rq = make_sandbox()
+    _rlog = os.path.join(rq, ".game_loop", "log.jsonl")
+
+    def _cp(msg):
+        return gl(rq, "checkpoint", "--notes", msg, sid="sess-rit").stdout
+
+    def _log(kind):
+        with open(_rlog, "a") as f:
+            f.write(json.dumps({"t": "2026-08-17T00:00:00", "kind": kind}) + "\n")
+
+    check("one checkpoint against a clean log says nothing — reporting progress under a mandate is "
+          "legitimate, and a warning that fires on the first one would be noise people learn to skip",
+          "CHECKPOINTS SINCE" not in _cp("first"))
+    _log("checkpoint"); _log("checkpoint")
+    check("...but a RUN of them with no claim, harden, proof, phase or retro between is named — that "
+          "is not progress reported N times, it is the same turn-end bought N times",
+          "CHECKPOINTS SINCE" in _cp("third"))
+    _log("harden")
+    check("...and any real evidence work RESETS it, so the counter measures ritual rather than "
+          "counting checkpoints, which a working session legitimately accumulates",
+          "CHECKPOINTS SINCE" not in _cp("after work"))
+
     print("a gate can be a plausible local approximation of CI and report the same green (#72):")
     # A consumer ran `flutter analyze lib` for a year against a CI running `dart analyze
     # --fatal-infos` over the whole tree. Different scope, different severity, neither visible by

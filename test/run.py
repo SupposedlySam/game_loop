@@ -6454,6 +6454,22 @@ def main():
     check("...and any real evidence work RESETS it, so the counter measures ritual rather than "
           "counting checkpoints, which a working session legitimately accumulates",
           "CHECKPOINTS SINCE" not in _cp("after work"))
+    # THE HALF THE AGENT DOES NOT AUTHOR. Every name in the verb set is one the agent CHOOSES to
+    # call, so a session doing real work without narrating it gets told it is ritualising — and the
+    # remedy it reaches for is to call a verb rather than to do something. A consumer built this same
+    # counter, made the same choice, and measured the consequence before I had.
+    _rgit = lambda *a: subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                                       "-c", "commit.gpgsign=false", *a], cwd=rq,
+                                      capture_output=True, text=True)
+    _rgit("init", "-q", ".")
+    _log("checkpoint"); _log("checkpoint")
+    check("...a run of checkpoints with NO commit and no verb is still named — the paired arm, or "
+          "the commit check below would be indistinguishable from the counter never firing",
+          "CHECKPOINTS SINCE" in _cp("stalled"))
+    _rgit("commit", "-q", "--allow-empty", "-m", "real work, never narrated")
+    check("...but a COMMIT since those checkpoints resets it, because work that landed in git is "
+          "work whether or not the agent called a verb about it",
+          "CHECKPOINTS SINCE" not in _cp("committed"))
 
     print("a gate can be a plausible local approximation of CI and report the same green (#72):")
     # A consumer ran `flutter analyze lib` for a year against a CI running `dart analyze

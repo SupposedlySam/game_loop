@@ -1877,7 +1877,7 @@ def ritual_checkpoints():
     """
     WORK = {"claim", "harden", "fix_prove", "effector_prove", "mutate_prove", "trans", "stepback",
             "measure", "instrument", "confidence", "authorize"}
-    n = 0
+    n, oldest = 0, None
     try:
         with open(LOG_F) as f:
             recs = [l for l in f if '"kind"' in l]
@@ -1885,13 +1885,29 @@ def ritual_checkpoints():
         return 0
     for line in reversed(recs):
         try:
-            k = json.loads(line).get("kind")
+            r = json.loads(line)
         except ValueError:
             continue
+        k = r.get("kind")
         if k == "checkpoint":
             n += 1
+            oldest = r.get("t") or oldest
         elif k in WORK:
             break
+    # A COMMIT IS THE HALF THE AGENT DOES NOT AUTHOR, and without it this counter measures narration
+    # rather than work. Every name in WORK is a verb the agent CHOOSES to call: a session that stalls
+    # also fails to call them, which is the case we want — but a session doing real work without
+    # narrating it gets told it is ritualising, and the remedy it will reach for is to call a verb
+    # rather than to do something. Found by a consumer who built this same counter, made the same
+    # choice, and measured its consequence before I had.
+    if n >= 2 and oldest:
+        try:
+            r = subprocess.run(["git", "log", "--all", f"--since={oldest}", "--format=%h"],
+                               cwd=REPO_ROOT, capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 and r.stdout.strip():
+                return 0            # real work landed; the checkpoints were reporting it
+        except (OSError, subprocess.SubprocessError):
+            pass                    # no git, no answer: fall through to the verb-only count
     return n
 
 
@@ -1914,8 +1930,9 @@ def cmd_checkpoint(s, a):
     _rit = ritual_checkpoints()
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
-        *([f"⚠ {_rit + 1} CHECKPOINTS SINCE ANY EVIDENCE WORK — no claim, harden, proof, phase or",
-           "  retro has been logged in between. That is not progress reported N times; it is the",
+        *([f"⚠ {_rit + 1} CHECKPOINTS SINCE ANY EVIDENCE WORK — no commit anywhere in this repo,",
+           "  and no claim, harden, proof, phase or retro logged in between. That is not progress",
+           "  reported N times; it is the",
            "  same turn-end bought N times, and it is the shape a mandate gets ritualised into.",
            "  Nothing is blocked: this is cheap so a stop stays deliberate, and pricing it would",
            "  push the next agent toward `--park`, which lies about a human calling a break."]

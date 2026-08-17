@@ -6990,13 +6990,21 @@ def retro_outcome():
     except (OSError, ValueError):
         return []
     last = max((i for i, r in enumerate(recs) if r.get("kind") == "stepback"), default=None)
+    # NO PRIOR RETRO IS NOT NO PRIOR WORK. This returned "this is the first" and counted nothing, so
+    # everything encoded before a tree's FIRST retro fell into a window no retro ever read — real
+    # hardens, invisible, with the counter reading zero. Found by probing a consumer's report whose
+    # stated mechanism did NOT reproduce: their symptom was real and their cause was not this, and
+    # the probe written to check them surfaced this instead. The first chapter is the whole log.
     if last is None:
-        return ["  (no previous retro in this log — this is the first)"]
-    after = recs[last + 1:]
+        after = recs
+        when = "the beginning of this tree's record — no previous retro"
+    else:
+        after = recs[last + 1:]
     counts = collections.Counter(r.get("kind") for r in after)
-    when = recs[last].get("t") or "?"
+    if last is not None:
+        when = recs[last].get("t") or "?"
     hardened = counts.get("harden", 0)
-    lines = [f"  since the last retro ({when}): {hardened} hardened · "
+    lines = [f"  since {when}: {hardened} hardened · "
              f"{counts.get('claim', 0)} claims · {counts.get('fix_proof', 0)} fix proofs · "
              f"{counts.get('trigger', 0)} triggers fired"]
     if not hardened:

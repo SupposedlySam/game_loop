@@ -6426,6 +6426,28 @@ def main():
           "nothing to classify",
           any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
 
+    print("a tree's FIRST retro counts its chapter, rather than reporting nothing (#77):")
+    # "No previous retro" returned "this is the first" and counted NOTHING, so everything encoded
+    # before a tree's first stepback fell into a window no retro ever read — real hardens, invisible,
+    # counter reading zero. Found while probing a consumer report whose stated MECHANISM did not
+    # reproduce: their symptom was real, their cause was not this, and the probe written to check
+    # them surfaced this instead. A non-reproduction that produces a different true finding.
+    fw = make_sandbox()
+    _art = os.path.join(fw, ".game_loop", "config.json")
+    gl(fw, "harden", "--learning", "x", "--artifact", _art, "--mechanism", "y", "--rung", "3",
+       sid="sess-fr")
+    _first = gl(fw, "stepback", "--notes", "the first retro of this tree", sid="sess-fr").stdout
+    check("the FIRST retro reports the work encoded before it — 'no previous retro' is not 'no "
+          "previous work', and counting nothing made a real harden invisible to every later reader",
+          "1 hardened" in _first)
+    check("...and it says WHICH window it counted, so a reader cannot mistake a whole-log count for "
+          "a since-last-retro one",
+          "beginning of this tree's record" in _first)
+    _second = gl(fw, "stepback", "--notes", "second", sid="sess-fr").stdout
+    check("...while the SECOND retro goes back to counting since the last one — the paired arm, or "
+          "every retro would report the whole log forever",
+          "beginning of this tree's record" not in _second)
+
     print("checkpoint is the escape that always works, so it gets ritualised (#75):")
     # Measured from ONE session — mine: 16 checkpoints, 14 stop-gate blocks, 3 mandate events. The
     # gate refused fourteen turn-ends and was paid off sixteen times, and the human had to say twice

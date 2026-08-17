@@ -30,6 +30,7 @@ __pycache__/
 
 # session handoff (local only)
 NEXT_SESSION.md
+.claude/handoff/
 
 # macOS
 .DS_Store
@@ -39,3 +40,6 @@ NEXT_SESSION.md
 
 # machine-local hook config (absolute paths)
 .claude/settings.local.json
+
+# llm_chat identity for this project
+.llm_chat/

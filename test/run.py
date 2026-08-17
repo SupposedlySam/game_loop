@@ -6426,6 +6426,37 @@ def main():
           "nothing to classify",
           any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
 
+    print("a gate can be a plausible local approximation of CI and report the same green (#72):")
+    # A consumer ran `flutter analyze lib` for a year against a CI running `dart analyze
+    # --fatal-infos` over the whole tree. Different scope, different severity, neither visible by
+    # reading the rule. I first shipped only a WARNING IN PROSE — enforcement by instruction, for an
+    # issue whose framing is "the check that cannot fail, one level up" — and declined the real
+    # check because this repo has no CI to exercise it against. That reason does not survive: this
+    # suite runs on invented sandboxes and invented configs, and a workflow file is no different.
+    cw = make_sandbox()
+    _wf = os.path.join(cw, ".github", "workflows")
+    os.makedirs(_wf, exist_ok=True)
+    _cov = lambda: subprocess.run([os.path.join(cw, ".game_loop", "bin", "verify"), "--coverage"],
+                                  cwd=cw, capture_output=True, text=True, env=_env(cw)).stdout
+    check("with NO workflows it SAYS there is nothing to compare against, rather than printing a "
+          "clean cross-check that reads as cover it does not have",
+          "nothing to compare against" in _cov())
+    with open(os.path.join(cw, ".game_loop", "verify.yaml"), "a") as f:
+        f.write('\n"src/**":\n  - "python3 test/run.py"\n')
+    with open(os.path.join(_wf, "ci.yml"), "w") as f:
+        f.write("jobs:\n  t:\n    steps:\n      - run: dart analyze --fatal-infos app/\n"
+                "      - run: |\n          python3 test/run.py\n")
+    _out = _cov()
+    check("...and a CI command that NO gate runs is named, which is the difference a human could "
+          "not see by reading the rule",
+          "dart analyze --fatal-infos" in _out and "NO GATE RUNS" in _out)
+    check("...while a CI command a gate DOES run is not reported — it discriminates rather than "
+          "listing every line of the workflow, which is the noise ratio that gets a check deleted",
+          "python3 test/run.py" not in _out.split("NO GATE RUNS")[1].split("Paste CI")[0])
+    check("...and it says it compares TEXT and not behaviour, so two spellings of one check read as "
+          "a difference and the report stays a difference for a human to judge, never a verdict",
+          "COMPARES COMMAND TEXT, NOT BEHAVIOUR" in _out)
+
     print("a commit into an unharnessed tree is REFUSED, and the refusal is not invisible (#74):")
     # The refusal is right and its REMEDY SHAPE was the problem: install-it-there is a manual step
     # nobody is prompted to take, commit-from-the-parent is impossible when the changes are in the

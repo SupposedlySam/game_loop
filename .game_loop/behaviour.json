@@ -149,7 +149,7 @@
     },
     {
       "seq": 13,
-      "sha": "PENDING",
+      "sha": "a63005e",
       "notice": true,
       "verb": "the commit gate, on a tree with no harness",
       "change": "the refusal now prints a PASTEABLE install command for the exact unharnessed tree, and records itself in the PARENT's log as kind commit_gate_unharnessed_tree. The refusal itself is unchanged in what it refuses.",

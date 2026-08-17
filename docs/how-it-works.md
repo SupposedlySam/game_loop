@@ -431,6 +431,34 @@ a block** (holding commits back is sometimes right), and a branch with **no upst
 nobody was ever promised that branch. What it misses is stated in the code: uncommitted work, stashes,
 other local branches, and the fact that "pushed" is not "merged".
 
+### The upstream watcher — `checkpoint`, opt-in via `upstream_repos`
+
+An agent files an issue against its own tooling *while blocked*, moves on, and never reads the thread
+again. Two measured cases from a consumer: they asked for a session reaper that **already existed** and
+was better than the local duplicate they kept maintaining, and a verb shipped mid-session that replaced
+a script they kept patching. Both times the answer arrived and nothing surfaced it.
+
+So `checkpoint` reports movement on issues that **involve you** — `--involves @me`, not `--author`,
+because author misses the threads you *commented* on, which is exactly where "I asked and they
+answered" lives — plus new releases per watched repo. **Not commits:** an issue with your name on it is
+already scoped to you, a commit stream is not, and "did the fix I need ship" is a release or a close.
+
+Five states, and the two usually merged are the point:
+
+| | |
+|---|---|
+| **first run** | records the world and reports **nothing** — a gate whose first act is a backlog gets removed |
+| **movement** | lists what moved, and always says it has read *none* of it: a label change and the reply you are blocked on are the same event here |
+| **quiet** | named as weak evidence about the *index*, which lags publication — measured at over an hour on issues that plainly existed |
+| **could not look** | **not** quiet. Nothing was compared and the baseline is **unchanged** |
+| **partial** | not a result. The baseline of an unchecked repo **does not advance**, or one outage becomes a permanent blind spot the next run reports as calm |
+
+Caveats are fixed strings printed on *every* run: an assembled caveat can render empty exactly when it
+matters, and one that appears only sometimes teaches that its absence means certainty.
+
+Empty `upstream_repos` means off. Scope it tightly — unscoped, it surfaces unrelated side projects and
+gets switched off inside a day.
+
 ### The transcript reader — and the harness's own refusals
 
 The Stop gate's fallback input is the live session transcript, which is an adversarial file: it is

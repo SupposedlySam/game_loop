@@ -386,6 +386,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `read_roots` | Extra directories a `claim --read` may cite, beyond this repo. |
 | `allow_write_roots` | Extra roots the write guard permits. **An absolute home path here ships a write permission to everyone who clones you.** |
 | `deploy_verbs` | Extra deploy/publish commands to block outright. This rail is a *denylist* — a verb nobody listed is not blocked. |
+| `upstream_repos` | Repos to watch for movement on issues that **involve you** (replies, closes, new ones) and for new releases, reported at `checkpoint`. Empty = off. Scope it tightly: an unscoped watcher surfaces unrelated side projects and gets switched off inside a day. |
 | `mcp_writes` | `"gated"` (default: a mutating MCP call is refused, and you may open it once with `authorize`) or `"disabled"` (refused outright, no hatch offered). |
 | `mcp_trusted_servers` | Whole servers your project OWNS. Every call to them is allowed, destructive included — the widest door here. See below. |
 | `mcp_standing_writes` | A narrow set of MCP writes that need no human, in either of two grains — an exact `mcp__server__tool`, or a whole-server `mcp__server__` prefix. See below. |

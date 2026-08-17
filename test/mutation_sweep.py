@@ -507,18 +507,73 @@ MUTANTS = [
 #   default-deny shape exists to prevent: it looks identical to a decision and never gets revisited.
 #
 # Writing "not a real producer" for something that is one clears the list and re-creates the bug.
+
+# ---- THE TUPLE-SHAPED PRODUCERS (#76 fallout) --------------------------------------------------
+# Every one of these was OUTSIDE the denominator until `_returns_nothing` learned to look inside a
+# returned tuple. They are listed together because they were discovered together and their floors
+# are measured in one run — a floor is only comparable to one taken with the same instrument, which
+# this file learned the expensive way.
+#
+# FLOORS ARE 0 = NOT YET MEASURED, stated rather than guessed. 0 can never read as BELOW FLOOR, so
+# these enforce nothing until the run that follows records real numbers. An unmeasured number that
+# LOOKS measured is worse than an honest zero.
+MUTANTS += [
+    ("_stop_verdict -> the stop gate always allows the turn to end",
+     ".game_loop/bin/game_loop::_stop_verdict", "    return True, \"\", None\n",
+     ["stop gate", "stop_verdict", "turn-end", "mandate"], None, 0),
+    ("waiting_verdict -> the watchdog never sees a run as waiting",
+     ".game_loop/bin/watchdog::waiting_verdict", "    return False, \"\"\n",
+     ["waiting", "watchdog", "subagent", "idle"], None, 0),
+    ("upstream_check -> the upstream watcher reports nothing, ever",
+     ".game_loop/bin/game_loop::upstream_check", "    return [], \"off\"\n",
+     ["#76", "upstream"], None, 0),
+    ("ahead_of_upstream -> never sees an unpushed commit",
+     ".game_loop/bin/game_loop::ahead_of_upstream", "    return 0, None, None\n",
+     ["unpushed", "upstream", "ahead"], None, 0),
+    ("working_tree -> never resolves a worktree",
+     ".game_loop/bin/game_loop::working_tree", "    return None, None\n",
+     ["worktree", "working tree", "checkout"], None, 0),
+    ("pin_status -> never reports a tree as pinned",
+     ".game_loop/bin/game_loop::pin_status", "    return False, None\n",
+     ["pin", "pinned"], None, 0),
+    ("probe_reading -> a probe's output never yields a reading",
+     ".game_loop/bin/game_loop::probe_reading", "    return {}, None\n",
+     ["probe", "rate-limit", "context window"], None, 0),
+    ("running_host_version -> the running host's version is never known",
+     ".game_loop/bin/game_loop::running_host_version", "    return None, \"neutered\"\n",
+     ["host", "version", "EXECPATH"], None, 0),
+    ("_scan_transcript -> the transcript never yields records",
+     ".game_loop/bin/game_loop::_scan_transcript",
+     "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
+     ["transcript", "denial", "oversized"], None, 0),
+    ("ci_commands -> CI's commands are never read",
+     ".game_loop/bin/verify::ci_commands", "    return [], \"neutered\"\n",
+     ["CI", "workflow"], None, 0),
+    ("ci_gap -> no CI command is ever reported as ungated",
+     ".game_loop/bin/verify::ci_gap", "    return [], \"\"\n",
+     ["CI", "workflow", "gap"], None, 0),
+    ("milestones -> flair never marks a milestone",
+     ".game_loop/bin/flair.py::milestones", "    return [], []\n",
+     ["flair", "milestone"], None, 0),
+    ("_limitgate_verdict -> the limit gate always allows the turn to end",
+     ".game_loop/bin/game_loop::_limitgate_verdict", "    return True, None\n",
+     ["limit gate", "limit", "window"], None, 0),
+    ("_last_assistant_text -> the closing message is never recoverable",
+     ".game_loop/bin/game_loop::_last_assistant_text", "    return None, \"neutered\"\n",
+     ["closing message", "assistant text", "stop gate"], None, 0),
+    ("merge_files -> a merge never yields the paths it touched",
+     ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
+     ["merge", "attribute", "merge-base"], None, 0),
+    ("_upstream_fetch -> every upstream repo reads as unreachable",
+     ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
+     ["#76", "upstream"], None, 0),
+    ("read_probe -> notify never reports whether replies can be read",
+     ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
+     ["notify", "probe", "read"], None, 0),
+]
+
+
 NOT_SWEPT = {
-    # --- A DEBT, STATED AS ONE. Both are producers that gate turn-end, both SHOULD be swept, and
-    # neither has a measured floor yet. They landed with 8 named assertions written the same commit
-    # (the retro debt: held / paid by a harden / opened by a recorded decline / refused with no
-    # reason; the nudge: advice at the threshold, gate at twice it), so they are not untested —
-    # they are unmeasured, which is a different and smaller claim.
-    #
-    # WHY NOT A NUMBER: my hand-rolled instrument returned 0 kills for one and 1008-of-1031 for the
-    # other. The first was true and useful — it had no tests at all, which is what prompted writing
-    # them. The second is a corrupted tree reporting as coverage, and a floor taken from it would be
-    # farmed rather than measured. The real sweep is a ~17-minute full run with no per-producer
-    # filter; the next one measures these, and this entry is what stops that being forgotten.
     ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
             "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
             "git-failed arm beside the git-worked one",
@@ -721,7 +776,23 @@ def _returns_nothing(ret):
         return True
     if isinstance(v, ast.Constant) and (v.value is None or v.value is False):
         return True
-    return isinstance(v, ast.List) and not v.elts    # `return []`
+    if isinstance(v, ast.List) and not v.elts:        # `return []`
+        return True
+    # AND INSIDE A TUPLE, IN THE PAYLOAD SLOT (#76 fallout). A producer whose contract is
+    # `(finding, why)` or `(allow, reason, log)` reports its nothing in the FIRST position —
+    # `([], "off")`, `(False, "")`, `(None, "no EXECPATH")`. Reading only the outer node left every
+    # such producer outside the denominator: not excluded, not listed, never enumerated. Eleven of
+    # them, including the stop gate's own verdict and the watchdog's.
+    #
+    # FIRST ELEMENT, NOT ANY ELEMENT, and the difference is not style. `any` marks `(value, None)`
+    # as a nothing — so a function whose every return carries a trailing None loses its OTHER arm,
+    # `candidates()` stops seeing a pair, and the function DROPS OUT of discovery. Widening the
+    # definition made the set SHRINK: `_home_keyed` was enumerated before the change and not after.
+    # That is this file's own short-denominator bug committed inside the fix for it, caught by the
+    # stale-exclusion gate rather than by me. The monotonicity assertion in test/run.py is the part
+    # that stops it recurring: a change here may only ADD.
+    return (isinstance(v, ast.Tuple) and bool(v.elts)
+            and _returns_nothing(ast.Return(value=v.elts[0])))
 
 
 def _accumulates_then_returns(fn):

@@ -8608,6 +8608,54 @@ def main():
            "update_notice"} <= set(real_cands)
           and "pins_report" not in real_cands)
 
+    # MONOTONICITY. Widening what counts as a "nothing" made the candidate set SHRINK — `any slot
+    # is nothing` marked `(value, None)` as a nothing, which cost such functions their OTHER arm, and
+    # `candidates()` needs a PAIR. `_home_keyed` was enumerated before that change and not after: the
+    # denominator bug this file exists to catch, committed inside a fix for it. Caught by the stale
+    # exclusion gate, not by intent, so it gets an assertion of its own.
+    _narrow = sweep._returns_nothing
+
+    def _old_rule(ret):
+        """The definition BEFORE tuples were understood — bare, None, False, []."""
+        v = ret.value
+        if v is None:
+            return True
+        if isinstance(v, ast.Constant) and (v.value is None or v.value is False):
+            return True
+        return isinstance(v, ast.List) and not v.elts
+
+    try:
+        sweep._returns_nothing = _old_rule
+        _before = set(sweep.all_candidates())
+    finally:
+        sweep._returns_nothing = _narrow
+    _after = set(sweep.all_candidates())
+    check("a wider definition of 'reports nothing' may only ADD producers — the version that "
+          "dropped one while claiming to widen is the short-denominator bug inside its own fix",
+          _before <= _after and len(_after) > len(_before))
+    check("...and the assertion can actually fail: the rejected 'any slot' rule loses a producer "
+          "the narrow rule found, so the subset above is a verdict rather than a tautology",
+          any(k not in {
+              f"{rel}::{n}"
+              for rel in sweep.source_files(sweep.REPO)
+              for n in (lambda src: [fn.name for fn in
+                                     [x for x in ast.walk(ast.parse(src))
+                                      if isinstance(x, ast.FunctionDef)]
+                                     if any((lambda r: r.value is not None
+                                             and isinstance(r.value, ast.Tuple)
+                                             and any(_old_rule(ast.Return(value=e))
+                                                     for e in r.value.elts))(r)
+                                            or _old_rule(r)
+                                            for r in ast.walk(fn) if isinstance(r, ast.Return))
+                                     and any(not ((lambda r: r.value is not None
+                                                   and isinstance(r.value, ast.Tuple)
+                                                   and any(_old_rule(ast.Return(value=e))
+                                                           for e in r.value.elts))(r)
+                                                  or _old_rule(r))
+                                             for r in ast.walk(fn) if isinstance(r, ast.Return))])(
+                  open(os.path.join(sweep.REPO, rel)).read())}
+              for k in _before))
+
     # The gate is the whole point of the change: a producer nobody decided about has to FAIL the
     # run, not be quietly absent from it. Checked in BOTH directions in one observation, because "the
     # gate passed" and "the gate is dead" produce the same output.

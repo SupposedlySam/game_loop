@@ -89,6 +89,37 @@ Two different gates wear this coat. Read which:
   is the one move that converts a caught problem into a silent one. If the rule is genuinely wrong,
   say so to the human and change it as its own deliberate commit.
 
+## `LIMIT GATE CLOSED` — a tool call refused with no handoff written
+
+Two triggers wear this coat, and the refusal says which. Both want the same thing first: the run's
+state written down, at the exact path the message names (**your** session's, under
+`.game_loop/sessions/<id>/`). Write it with the `Write` tool — that path is explicitly allowed while
+the gate is closed, as is any `game_loop` verb. The gate opens the moment a real, non-empty handoff
+exists that you wrote *after* the crossing.
+
+The auto-generated handoff does **not** satisfy it, deliberately: it refreshes itself every turn-end,
+so accepting it would make the gate pass forever without anyone doing anything. What is owed is your
+own account — what is DONE and VERIFIED with the paths that prove it, what you were mid-flight on, the
+exact next actions. `game_loop checkpoint --notes ".."` puts your words into the generated file.
+
+Then read which trigger fired:
+
+- **a usage window** (`5h`/`7d` at N% used) — the account is nearly out and the session will die
+  mid-action. Once the handoff exists you keep working until the window actually runs dry; the
+  watchdog parks an exhausted run and rings it awake after the reset.
+- **the context cap** (`N K tokens on the last call, over the M K cap`) — the handoff is only half of
+  it. Writing it opens the gate but does not shrink the context, and every further call re-sends the
+  whole of it. Finish the job:
+
+  ```bash
+  ./.game_loop/bin/game_loop successor   # mints the next session's id, points it at your handoff
+  ```
+
+  Then stop. Carrying on in this session is the thing the cap exists to stop.
+
+Never work around either one by editing `.game_loop/config.json` to raise a threshold. That is the
+human's decision, and moving it mid-run deletes the evidence that the gate ever fired.
+
 ## A refused `claim`
 
 The one hard rule: name a real file before asserting anything about external reality.

@@ -152,6 +152,14 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--skills|--no-
                         ask (CI, a piped script with no tty) installs none.
   --skills-only         install just those skills and exit. Takes no target directory — nothing
                         about this touches a project.
+  --context-cap[=N] / --no-context-cap
+                        turn the limit gate's CONTEXT trigger on (or off) in the target's config,
+                        capping a session at N tokens (default 300000). Neither flag given: you are
+                        ASKED, once, and the answer is REMEMBERED for 15 days in
+                        ~/.game_loop/install-answers.json so installing across several repos is not
+                        the same question N times. A run with no terminal to ask at leaves it off.
+                        A target whose config already decides this is never asked and never
+                        rewritten.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
                         shims that run it from a shared, machine-wide install instead (set up once
                         with `game_loop self --pin <ref> --dest ~/.claude/game_loop-central`, or
@@ -170,11 +178,21 @@ FORCE_FRESH=0
 CENTRAL=0
 WANT_SKILLS=""      # "" = nobody said; ask if there is a terminal to ask at
 SKILLS_ONLY=0
+CONTEXT_CAP=""             # "" = nobody said; ask, or read a remembered answer
+CONTEXT_CAP_TOKENS=300000
+CONTEXT_CAP_WHY=""         # HOW the answer was reached — printed, so nothing decides this silently
 while [ $# -gt 0 ]; do
   case "$1" in
     --skills)      WANT_SKILLS="yes"; shift ;;
     --no-skills)   WANT_SKILLS="no";  shift ;;
     --skills-only) SKILLS_ONLY=1; WANT_SKILLS="yes"; shift ;;
+    --context-cap) CONTEXT_CAP="yes"; shift ;;
+    --context-cap=*)
+      CONTEXT_CAP="yes"; CONTEXT_CAP_TOKENS="${1#--context-cap=}"; shift
+      case "$CONTEXT_CAP_TOKENS" in
+        ''|*[!0-9]*) echo "--context-cap takes a token count, e.g. --context-cap=200000" >&2; exit 1 ;;
+      esac ;;
+    --no-context-cap) CONTEXT_CAP="no"; shift ;;
     --same-as)
       if [ $# -lt 2 ]; then
         echo "--same-as needs the path of the checkout whose harness this tree should carry." >&2
@@ -262,6 +280,216 @@ ask_skills() {
     y|Y|yes|YES|Yes) WANT_SKILLS="yes" ;;
     *)               WANT_SKILLS="no" ;;
   esac
+}
+
+# ── the context cap: the one question this installer REMEMBERS ───────────────────────────────────
+#
+# game_loop's limit gate has a second trigger: a session whose CONTEXT has grown past a cap is
+# refused ordinary tool calls until it hands off. A session re-sends its whole context on every
+# call, so a long run pays for its entire history every turn — measured over one week on one
+# account, 80.7% of the spend was exactly that, and capping at 300K would have taken the week from
+# 62% of the usage window to 45% for the same work.
+#
+# It ships OFF, like the probe, because it INTERRUPTS a run somebody is watching, and a behaviour
+# change that interrupts you should be a decision you made rather than one you inherited. So the
+# installer asks — and REMEMBERS the answer for $ANSWER_TTL_DAYS.
+#
+# The memory is the point, not a convenience. Anyone running this across several repos would
+# otherwise answer the identical question once per repo, and a prompt that fires every time is a
+# prompt people learn to hit enter through — which is indistinguishable from not asking, while
+# looking like consent. It is machine-wide (~/.game_loop/, where the guards already read a
+# machine-wide config from) because the answer is about the PERSON, not the project.
+#
+# THREE THINGS OUTRANK IT, in this order: a flag on the command line, an explicit
+# limits.context.enabled already in the target's config (that tree has decided; re-asking invites
+# overwriting it), and then the remembered answer. Below all three, no terminal means no.
+ANSWERS_F="${GAME_LOOP_ANSWERS_FILE:-${HOME:-/nonexistent}/.game_loop/install-answers.json}"
+ANSWER_TTL_DAYS="${GAME_LOOP_ANSWER_TTL_DAYS:-15}"
+# Below this a cap stops being a guardrail and becomes a wall the harness cannot get out from
+# behind — every call refused, including the ones that would fix the setting.
+CONTEXT_CAP_FLOOR=50000
+
+# BOTH LAYERS, because the gitignored one is where this answer most belongs. config.json is TRACKED
+# and is the seed a fresh install copies from, so a site's own answer written there is handed to
+# everybody who installs from that checkout — this project shipped exactly that leak for the length
+# of one commit. config.local.json is the documented home for a value true of one machine. Reading
+# only the tracked file would re-ask somebody who has already answered in the right place, and then
+# write a second, disagreeing copy of the answer into the wrong one.
+context_cap_already_set() {
+  python3 - "$TARGET/.game_loop/config.json" "$TARGET/.game_loop/config.local.json" <<'PY'
+import json, sys
+for p in sys.argv[1:]:
+    try:
+        with open(p) as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        continue         # absent, or unreadable — neither is "already decided"
+    lim = c.get("limits") if isinstance(c.get("limits"), dict) else {}
+    ctx = lim.get("context") if isinstance(lim.get("context"), dict) else {}
+    if "enabled" in ctx:
+        print(p)          # NAME the file that decided, so "left as it was" is checkable, not a claim
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+# Prints "<yes|no> <tokens> <age-in-days>" if a live answer is on record, and nothing otherwise.
+remembered_answer() {
+  ANSWERS_F="$ANSWERS_F" TTL="$ANSWER_TTL_DAYS" python3 <<'PY'
+import json, os, time
+try:
+    with open(os.environ["ANSWERS_F"]) as f:
+        a = json.load(f)["context_cap"]
+    age = (time.time() - float(a["asked_at"])) / 86400.0
+    ttl = float(os.environ["TTL"])
+except (OSError, ValueError, KeyError, TypeError):
+    raise SystemExit(0)                      # no memory, or one that will not parse: ask
+if ttl <= 0 or age > ttl or age < 0 or a.get("answer") not in ("yes", "no"):
+    raise SystemExit(0)                      # expired, or nothing usable: ask again
+print(f'{a["answer"]} {int(a.get("threshold_tokens") or 300000)} {int(age)}')
+PY
+}
+
+remember_answer() {
+  ANSWERS_F="$ANSWERS_F" ANS="$1" TOK="$2" TTL="$ANSWER_TTL_DAYS" python3 <<'PY'
+import json, os, tempfile, time
+p = os.environ["ANSWERS_F"]
+try:
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    try:
+        with open(p) as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            d = {}
+    except (OSError, ValueError):
+        d = {}
+    d["context_cap"] = {"answer": os.environ["ANS"],
+                        "threshold_tokens": int(os.environ["TOK"]),
+                        "asked_at": int(time.time()),
+                        "asked_at_local": time.strftime("%Y-%m-%d %H:%M"),
+                        "ttl_days": float(os.environ["TTL"]),
+                        "note": "delete this key (or this file) to be asked again next install"}
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p) or ".", prefix=".answers.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, p)
+except OSError:
+    pass          # a memory that cannot be written costs one extra question, never the install
+PY
+}
+
+ask_context_cap() {
+  if [ -n "$CONTEXT_CAP" ]; then
+    CONTEXT_CAP_WHY="you said so on the command line"
+    return 0
+  fi
+  local decided=""
+  decided="$(context_cap_already_set || true)"
+  if [ -n "$decided" ]; then
+    CONTEXT_CAP="keep"
+    CONTEXT_CAP_WHY="$decided already decides it"
+    return 0
+  fi
+  local mem=""
+  mem="$(remembered_answer 2>/dev/null || true)"
+  if [ -n "$mem" ]; then
+    # shellcheck disable=SC2086 — three space-separated fields this script printed itself
+    set -- $mem
+    CONTEXT_CAP="$1"; CONTEXT_CAP_TOKENS="$2"
+    CONTEXT_CAP_WHY="remembered — you answered $3 day(s) ago, and this is kept for $ANSWER_TTL_DAYS days in $ANSWERS_F"
+    return 0
+  fi
+  # /dev/tty or nothing, and the probe is an OPEN rather than a permission test — the reasoning is
+  # spelled out at ask_skills above, where it was measured. STDIN is the script itself under the
+  # documented `curl ... | bash` one-liner.
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    CONTEXT_CAP="no"
+    CONTEXT_CAP_WHY="no terminal to ask at (CI, or a pipe with no tty) — silence is a no, and nothing was remembered"
+    return 0
+  fi
+  echo
+  echo "  CONTEXT CAP — the limit gate's second trigger. It INTERRUPTS you, so it is asked."
+  echo "    A session re-sends its WHOLE context on every call, so a long run pays for its entire"
+  echo "    history every turn. Measured over one week on one account: 80.7% of the spend. With"
+  echo "    this on, a session past the cap is refused ordinary tool calls until it writes a"
+  echo "    handoff, and is pointed at \`game_loop successor\` to start a fresh session cheaply."
+  echo "    Off unless you say yes. Changeable any time in .game_loop/config.json."
+  printf "  Turn it on? [y/N, or a cap in tokens like 200000] "
+  local reply=""
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    y|Y|yes|YES|Yes) CONTEXT_CAP="yes" ;;
+    ''|*[!0-9]*)     CONTEXT_CAP="no" ;;
+    *)               CONTEXT_CAP="yes"; CONTEXT_CAP_TOKENS="$reply" ;;
+  esac
+  if [ "$CONTEXT_CAP" = "yes" ] && [ "$CONTEXT_CAP_TOKENS" -lt "$CONTEXT_CAP_FLOOR" ]; then
+    echo "  $CONTEXT_CAP_TOKENS is below the floor — a cap that low refuses every call including the"
+    echo "  ones that would raise it. Using $CONTEXT_CAP_FLOOR."
+    CONTEXT_CAP_TOKENS="$CONTEXT_CAP_FLOOR"
+  fi
+  remember_answer "$CONTEXT_CAP" "$CONTEXT_CAP_TOKENS"
+  CONTEXT_CAP_WHY="you answered just now, and it is kept for $ANSWER_TTL_DAYS days in $ANSWERS_F"
+}
+
+apply_context_cap() {
+  case "$CONTEXT_CAP" in
+    keep)
+      echo
+      echo "  context cap  left exactly as it was — $CONTEXT_CAP_WHY"
+      return 0 ;;
+    yes) ;;
+    *)
+      echo
+      echo "  context cap  OFF — $CONTEXT_CAP_WHY"
+      echo "               Turn it on later:  ./install.sh --context-cap $TARGET"
+      return 0 ;;
+  esac
+  # INTO config.local.json, THE GITIGNORED LAYER — not the tracked config.json, and this is the
+  # whole lesson of the leak above. The question was asked of a PERSON and the answer is remembered
+  # machine-wide, so writing it to a tracked file would push one person's answer to their whole team
+  # through git, and then to everyone who installs from that checkout. The local layer is read by
+  # every component (config() merges it over config.json) and is ignored by the .gitignore this
+  # installer wrote a moment ago.
+  #
+  # NEVER a blind rewrite: an unparseable config is not a config with nothing in it, and clobbering
+  # one would delete whatever the site was relying on it to say.
+  if ! CFG="$TARGET/.game_loop/config.local.json" TOK="$CONTEXT_CAP_TOKENS" python3 <<'PY'
+import json, os, tempfile
+p = os.environ["CFG"]
+try:
+    with open(p) as f:
+        c = json.load(f)
+    if not isinstance(c, dict):
+        raise ValueError("not an object")
+except FileNotFoundError:
+    c = {}                      # absent is the ordinary case — this file is created on demand
+except (OSError, ValueError):
+    raise SystemExit(1)
+lim = c.get("limits") if isinstance(c.get("limits"), dict) else {}
+ctx = lim.get("context") if isinstance(lim.get("context"), dict) else {}
+ctx["enabled"] = True
+ctx["threshold_tokens"] = int(os.environ["TOK"])
+lim["context"] = ctx
+c["limits"] = lim
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p) or ".", prefix=".config.")
+with os.fdopen(fd, "w") as f:
+    json.dump(c, f, indent=2)
+    f.write("\n")
+os.replace(tmp, p)
+PY
+  then
+    echo
+    echo "  ⚠ context cap NOT enabled — $TARGET/.game_loop/config.local.json could not be read as"
+    echo "    JSON, and rewriting a config nobody can parse would delete whatever it meant to say."
+    echo "    Fix that file, then:  ./install.sh --context-cap $TARGET"
+    return 0
+  fi
+  echo
+  echo "  context cap  ON at $CONTEXT_CAP_TOKENS tokens — $CONTEXT_CAP_WHY"
+  echo "               .game_loop/config.local.json -> limits.context (the GITIGNORED layer: your"
+  echo "               answer, not your team's). Past that cap a session is refused"
+  echo "               ordinary tool calls until it hands off; \`game_loop successor\` starts the next."
 }
 
 install_skills() {
@@ -1047,11 +1275,13 @@ except Exception:
   echo "      GAME_LOOP_SESSION= ./.game_loop/bin/game_loop mandate --clear --notes \"migrated to per-session state\""
 fi
 
-# ASKED LAST, deliberately. The project install is finished and reported by this point, so the one
-# question this installer asks lands after the thing the user actually came for — not in front of it,
-# where an unanswered prompt would hold up the install they asked for.
+# ASKED LAST, deliberately. The project install is finished and reported by this point, so the
+# questions this installer asks land after the thing the user actually came for — not in front of
+# them, where an unanswered prompt would hold up the install they asked for.
 ask_skills
 install_skills
+ask_context_cap
+apply_context_cap
 
 echo
 if [ "$FRESH" = 1 ] && [ -n "$ADOPT_FROM" ]; then

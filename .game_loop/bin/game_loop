@@ -41,11 +41,13 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for the local flair/notify modules
 try:
@@ -230,6 +232,10 @@ DEFAULT_CONFIG = {
     # Usage-limit survival (statusline tap + limitgate + watchdog park). threshold_pct is where the
     # handoff gate closes; exhausted_pct is where the watchdog treats the session as rate-limited
     # and parks until the window resets; handoff_file resolves relative to .game_loop/.
+    # Three NESTED sub-dicts are read by their own helpers rather than listed here, because
+    # limits_cfg() is a shallow merge and a partial override would silently drop the keys it did not
+    # name: "probe" (probe_cfg), "context" (context_cfg — the context-size trigger on the same gate)
+    # and "successor" (successor_cfg — how the next session is started). All three default OFF/inert.
     "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
     # Update check: on `status`, compare the installed game_loop commit (.game_loop/VERSION, written by
     # install.sh) against the latest on the source repo's main, and note when a re-install is due. Best
@@ -867,6 +873,35 @@ def limits_cfg():
     return merged
 
 
+def context_cfg():
+    """The context-size trigger's settings, OFF unless a human turned it on.
+
+    A SECOND TRIGGER ON MACHINERY THAT ALREADY EXISTS. The usage trigger asks "is the account nearly
+    out"; this one asks "is this session's context now so large that every remaining call overpays
+    for it". They want the same thing at the end — the run's state written down before it moves —
+    so they share one gate rather than growing a second one beside it.
+
+    Why context is worth a trigger at all, measured rather than assumed: over one week on this
+    account, 80.7% of the spend was cache reads — the same context re-sent on every call, 5.87
+    billion tokens across 25,546 calls against 15.7M output tokens. Cost is the integral of context
+    size over calls, so a session that never resets pays for its whole history on every turn.
+
+    Default-OFF, like probe_cfg() and for the same reason: it interrupts a run somebody is watching,
+    which should be a decision they made rather than one they inherited.
+
+    It reads its own sub-dict with its own defaults instead of joining DEFAULT_CONFIG["limits"],
+    because limits_cfg() is a SHALLOW merge — a user who set only `threshold_tokens` there would
+    silently lose every key they did not name.
+    """
+    lc = (config().get("limits") or {})
+    c = lc.get("context") if isinstance(lc.get("context"), dict) else {}
+    try:
+        thr = int(c.get("threshold_tokens", 300000) or 300000)
+    except (TypeError, ValueError):
+        thr = 300000                    # a threshold nobody can parse is not a threshold
+    return {"enabled": bool(c.get("enabled", False)), "threshold_tokens": thr}
+
+
 def handoff_path():
     """PER SESSION, like all written state: two sessions sharing a checkout each hand off into their
     own sessions/<id>/ dir, so one run's dying words can never overwrite another's. No session id
@@ -948,6 +983,63 @@ def binding_windows(snap, pct, now_epoch):
         except (TypeError, ValueError):
             continue
     return out
+
+
+def record_context_reading(s, tokens, now_epoch):
+    """Cache this turn's context size in session state, carrying the crossing forward.
+
+    WHY CACHED AT TURN-END RATHER THAN READ AT THE GATE. The reading comes off the transcript, and
+    `transcript_path` is a key this repo has READ on the Stop payload (cmd_stopgate does it every
+    turn) and has NEVER checked for on the PreToolUse one. A gate that parsed the transcript itself
+    would rest on a key nobody has observed, and would re-read a file on every single tool call to
+    learn a number that changes once a turn.
+
+    crossed_at is stamped the first turn the reading is at/over threshold and CLEARED the first turn
+    it drops back under — the same carry-forward absorb_rate_limits does for a usage window, and for
+    the same reason. Without it every turn-end would move the bar: a handoff written one turn ago
+    would read as older than the newest reading, and the gate could never be satisfied at all.
+    Dropping back under is this trigger's analogue of a window resetting — a compaction, or a fresh
+    successor session — and it ends the crossing rather than leaving a stamp nothing can clear.
+    """
+    if not tokens:
+        return                          # no reading is not a small reading (INV5)
+    cc = context_cfg()
+    prev = s.get("context_reading") or {}
+    rec = {"tokens": int(tokens), "observed_at": int(now_epoch),
+           "threshold_tokens": cc["threshold_tokens"], "crossed_at": prev.get("crossed_at")}
+    if rec["tokens"] >= cc["threshold_tokens"]:
+        if not rec["crossed_at"]:
+            rec["crossed_at"] = int(now_epoch)
+            logline({"kind": "context_threshold", "tokens": rec["tokens"],
+                     "threshold_tokens": cc["threshold_tokens"], "enabled": cc["enabled"]})
+    else:
+        rec["crossed_at"] = None
+    s["context_reading"] = rec
+    return rec
+
+
+def binding_context(s):
+    """This session's context reading if it binds the gate, else None.
+
+    Fail-OPEN wherever the signal is missing (INV5): the trigger switched off, no reading recorded
+    yet, a reading that will not parse — none of those is evidence that the context is large, and a
+    gate that blocks on absent evidence blocks its own fix. It closes only on a POSITIVE signal: a
+    recorded reading at or over the configured cap.
+
+    The threshold is re-read from config here rather than trusted from the stored record, so raising
+    the cap opens the gate on the next tool call instead of on the next turn-end.
+    """
+    cc = context_cfg()
+    if not cc["enabled"]:
+        return None
+    rec = s.get("context_reading") or {}
+    try:
+        tokens = int(rec.get("tokens") or 0)
+    except (TypeError, ValueError):
+        return None
+    if tokens < cc["threshold_tokens"]:
+        return None
+    return dict(rec, tokens=tokens, threshold_tokens=cc["threshold_tokens"])
 
 
 def _fmt_reset(epoch):
@@ -1089,33 +1181,54 @@ def cmd_statusline(s, a, payload):
     row = " · ".join(x for x in ["🎮 " + model if model else "🎮", ctx, lim] if x)
     if over:
         row += "  ⚠ LIMIT — HANDOFF DUE"
+    # The context trigger gets a row of its own: it fires on a reading the statusline's own
+    # `ctx N%` cannot produce (that is a percentage of the window, this is the cap in tokens), and
+    # a gate whose first appearance is a refused tool call is a gate nobody saw coming.
+    if binding_context(s):
+        row += "  ⚠ CONTEXT OVER CAP — HAND OFF"
     print(row)
 
 
 def _limitgate_verdict(s, payload, now_epoch):
-    """Decide whether this tool call may proceed at/over the limit threshold.
+    """Decide whether this tool call may proceed — at/over a usage window, or over the context cap.
 
     Returns (allow: bool, reason: str|None). Pure decision so tests can drive every branch.
 
-    Fail-OPEN everywhere the signal is missing: no snapshot, unparseable snapshot, or windows that
-    already reset all mean "no evidence of a binding limit", and a gate that blocks on absent
-    evidence blocks its own fix (INV5). The gate closes only on a POSITIVE signal: a window at/over
-    threshold_pct whose reset is still ahead, with no handoff written since it crossed.
+    TWO TRIGGERS, ONE GATE. A nearly-exhausted usage window and a session whose context has grown
+    past the cap want the same thing — the run's state written down before it moves — so the second
+    trigger was added to this machinery rather than beside it. Everything below the trigger is
+    shared: the same handoff check, the same auto-handoff exclusion, the same allow-list, the same
+    fail-open. A second gate would have been a second chance to get those six things wrong.
+
+    Fail-OPEN everywhere the signal is missing: no snapshot, unparseable snapshot, windows that
+    already reset, no context reading recorded yet, the context trigger switched off — none of those
+    is evidence of a binding limit, and a gate that blocks on absent evidence blocks its own fix
+    (INV5). The gate closes only on a POSITIVE signal: a window at/over threshold_pct whose reset is
+    still ahead, or a context reading at/over threshold_tokens — with no handoff written since it
+    crossed.
 
     While closed, exactly the handoff work stays allowed: Write/Edit to the handoff file, and any
-    game_loop invocation (checkpoint/arm/mandate/notify are how a dying run reports). Yes, a Bash
-    command merely MENTIONING the handoff file passes — this gate nudges the handoff into existence,
-    it is not a security boundary; the write guard still owns what may be mutated.
+    game_loop invocation (checkpoint/arm/mandate/notify are how a dying run reports, and `successor`
+    is how an over-cap one leaves). Yes, a Bash command merely MENTIONING the handoff file passes —
+    this gate nudges the handoff into existence, it is not a security boundary; the write guard still
+    owns what may be mutated.
     """
     snap = load_limits()
-    if not snap:
-        return True, None
     lc = limits_cfg()
-    over = binding_windows(snap, float(lc["threshold_pct"]), now_epoch)
-    if not over:
+    over = binding_windows(snap, float(lc["threshold_pct"]), now_epoch) if snap else []
+    ctx = binding_context(s)
+    if not over and not ctx:
         return True, None
     hp = handoff_path()
-    crossed = min((w.get("crossed_at") or snap.get("captured_at") or now_epoch) for _, w in over)
+    # The earliest crossing among everything currently binding: a handoff must postdate the crossing
+    # it is answering, and when both triggers bind it is the older one that sets the bar.
+    stamps = [(w.get("crossed_at") or (snap or {}).get("captured_at") or now_epoch) for _, w in over]
+    if ctx:
+        stamps.append(ctx.get("crossed_at") or ctx.get("observed_at") or now_epoch)
+    try:
+        crossed = min(float(x) for x in stamps)
+    except (TypeError, ValueError):
+        crossed = now_epoch
     try:
         if os.path.getsize(hp) > 0 and os.path.getmtime(hp) >= float(crossed):
             with open(hp) as f:
@@ -1140,15 +1253,47 @@ def _limitgate_verdict(s, payload, now_epoch):
         if ".game_loop/bin/" in cmd or "game_loop " in cmd or os.path.basename(hp) in cmd:
             return True, None
     detail = "\n".join(
-        f"  {WINDOW_LABELS.get(n, n)} window: {float(w.get('used_percentage', 0)):.0f}% used, "
-        f"resets {_fmt_reset(w.get('resets_at'))}" for n, w in over)
+        [f"  {WINDOW_LABELS.get(n, n)} window: {float(w.get('used_percentage', 0)):.0f}% used, "
+         f"resets {_fmt_reset(w.get('resets_at'))}" for n, w in over]
+        + ([f"  context: {ctx['tokens'] / 1000:.0f}K tokens on the last call, over the "
+            f"{ctx['threshold_tokens'] / 1000:.0f}K cap"] if ctx else []))
+    if over and ctx:
+        head = ("LIMIT GATE CLOSED — a usage window is nearly exhausted AND this session's context "
+                "is over the cap.\nNo handoff exists yet.")
+        why = ("Either one alone ends this run: the window dying kills it MID-ACTION, and the "
+               "context is\nre-sent whole on every remaining call. Everything you know right now — "
+               "where you are, what\nis verified, what you planned next — is only in this session. "
+               "Write it down first.")
+    elif ctx:
+        head = ("LIMIT GATE CLOSED — this session's context is over the cap and no handoff exists "
+                "yet.")
+        why = ("Every call from here re-sends this whole context, so the same work costs more the "
+               "longer this\nsession runs — cache reads, not output, are where a week's usage "
+               "actually goes. The fix is a\nSUCCESSOR: hand the state over and let a fresh session "
+               "carry on cheaply. Nothing is lost that\nyou write down, and everything is lost that "
+               "you do not.")
+    else:
+        head = "LIMIT GATE CLOSED — a usage window is nearly exhausted and no handoff exists yet."
+        why = ("When this window runs dry the session dies MID-ACTION and everything you know right "
+               "now —\nwhere you are, what is verified, what you planned next — dies with it. Write "
+               "it down first.")
+    if ctx:
+        tail = ("Then START THE SUCCESSOR — writing the handoff opens this gate, but it does not "
+                "shrink the\ncontext, and carrying on here keeps paying for it:\n"
+                "  ./.game_loop/bin/game_loop successor\n\n"
+                "It mints the session id, points the next session at the handoff above, and prints "
+                "(or opens)\nthe command that starts it. Your context does not come back down any "
+                "other way.")
+    else:
+        tail = ("Once the handoff is written, this gate opens and you may keep working until the "
+                "window\nactually resets — the watchdog will park an exhausted run and ring it "
+                "awake after the\nreset, pointing at your handoff.")
     ph = s.get("phase") or {}
     m = s.get("mandate") or {}
     return False, (
-        "LIMIT GATE CLOSED — a usage window is nearly exhausted and no handoff exists yet.\n\n"
+        head + "\n\n"
         + detail + "\n\n"
-        "When this window runs dry the session dies MID-ACTION and everything you know right now —\n"
-        "where you are, what is verified, what you planned next — dies with it. Write it down first.\n\n"
+        + why + "\n\n"
         f"Write the handoff NOW (the Write tool to exactly this path is allowed):\n  {hp}\n\n"
         "Include, concretely:\n"
         f"  * the mandate: {m.get('text') or '(none bound)'}\n"
@@ -1156,9 +1301,7 @@ def _limitgate_verdict(s, payload, now_epoch):
         "  * what is DONE and VERIFIED (with the file paths that prove it)\n"
         "  * what you were IN THE MIDDLE OF, and the exact next actions you had planned\n"
         "  * how to resume (commands, branch, open questions)\n\n"
-        "Once the handoff is written, this gate opens and you may keep working until the window\n"
-        "actually resets — the watchdog will park an exhausted run and ring it awake after the\n"
-        "reset, pointing at your handoff.")
+        + tail)
 
 
 def cmd_limitgate(s, a, payload):
@@ -1167,7 +1310,10 @@ def cmd_limitgate(s, a, payload):
     allow, reason = _limitgate_verdict(s, payload, time.time())
     if allow:
         sys.exit(0)
-    logline({"kind": "limit_gate_block", "tool": payload.get("tool_name")})
+    # WHICH trigger closed it, in the log: two triggers share this gate, and a block count that
+    # cannot say which one fired cannot tell "the cap is set too low" from "the account ran dry".
+    logline({"kind": "limit_gate_block", "tool": payload.get("tool_name"),
+             "context_bound": bool(binding_context(s))})
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
         "permissionDecisionReason": reason}}))
@@ -4121,7 +4267,11 @@ def cmd_stopgate(s, a, payload):
     # A limit death then costs at most one turn, in any host, with no number to invent.
     refresh_handoff(s)
     if (_u := trailing_usage(payload.get("transcript_path"))):
-        logline({"kind": "usage_window", **_u})   # evidence for a future gate; gates nothing today
+        logline({"kind": "usage_window", **_u})   # output_tokens is evidence; context_tokens gates
+        # The one place the context reading is taken. Turn-end is where transcript_path has actually
+        # been OBSERVED on the payload, and the number only changes once a turn — so the gate reads
+        # this cache rather than re-parsing a transcript on every tool call.
+        record_context_reading(s, _u.get("context_tokens"), time.time())
 
     # Remember where the live transcript is. The gate fires every turn-end, so this is the reliable
     # way `status` can later count the harness's own tool-denials; the watchdog records the same key.
@@ -5027,16 +5177,29 @@ _USAGE_TAIL_BYTES = 2 * 1024 * 1024
 
 
 def trailing_usage(transcript_path, window_sec=5 * 3600):
-    """Output tokens recorded in the transcript's trailing window, or None.
+    """Two readings from ONE pass over the transcript's tail, or None.
 
-    EVIDENCE, GATING NOTHING. There is no honest threshold to compare this against: the raw counts
-    do not map to the account's real limit -- one session showed 1.59M output against 766G
-    cache-read, weighted server-side in ways nothing local can see -- and a limit being hit leaves
-    no trace in any transcript, so it cannot learn the number by watching itself get cut off.
+    `output_tokens` is EVIDENCE, GATING NOTHING. There is no honest threshold to compare it against:
+    the raw counts do not map to the account's real limit -- one session showed 1.59M output against
+    766G cache-read, weighted server-side in ways nothing local can see -- and a limit being hit
+    leaves no trace in any transcript, so it cannot learn the number by watching itself get cut off.
 
     Recording it anyway is INV4 applied to ourselves: no gate without a logged, observed failure. A
     threshold invented today would be a number standing for nothing, which is exactly the defect the
     landed half of #45 fixed. A threshold in a few weeks would be measured.
+
+    `context_tokens` IS load-bearing -- the context trigger reads it -- and it is a different kind
+    of number entirely: input_tokens + cache_read_input_tokens + cache_creation_input_tokens on the
+    last assistant record is exactly what was sent on that call. Nothing is mapped, weighted or
+    guessed, so unlike the output count there is a threshold it can honestly be compared against.
+    It is computed HERE rather than by a second reader, because two transcript parsers is two
+    chances to disagree about which record is last.
+
+    It is taken from the last record in the file rather than the last inside `window_sec`: the Stop
+    hook runs seconds after the turn it is reading, so the newest record IS this turn, and filtering
+    it by a five-hour cutoff would only ever drop a reading in a session that had gone quiet.
+    Sidechain records are skipped -- a subagent's turn carries its own context, and reading one as
+    the main thread's would report a collapse the parent never had.
 
     Bounded: only the transcript's tail is read, so a long session does not pay for its own history.
     """
@@ -5053,7 +5216,7 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
     if start and lines:
         lines = lines[1:]               # a tail read can slice a line in half
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=window_sec)
-    total, seen = 0, 0
+    total, seen, ctx = 0, 0, None
     for ln in lines:
         if '"usage"' not in ln:
             continue
@@ -5063,7 +5226,16 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
             continue
         u = (r.get("message") or {}).get("usage") or {}
         ts = r.get("timestamp")
-        if not u or not ts:
+        if not u:
+            continue
+        if not r.get("isSidechain"):
+            try:
+                ctx = (int(u.get("input_tokens") or 0)
+                       + int(u.get("cache_read_input_tokens") or 0)
+                       + int(u.get("cache_creation_input_tokens") or 0)) or ctx
+            except (TypeError, ValueError):
+                pass                    # a record that will not add up is not a reading of zero
+        if not ts:
             continue
         try:
             when = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
@@ -5073,7 +5245,115 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
             continue
         total += int(u.get("output_tokens") or 0)
         seen += 1
-    return {"output_tokens": total, "records": seen, "window_sec": window_sec} if seen else None
+    if not seen and not ctx:
+        return None
+    rec = {"output_tokens": total, "records": seen, "window_sec": window_sec}
+    if ctx:
+        rec["context_tokens"] = ctx
+    return rec
+
+
+# ── successor ────────────────────────────────────────────────────────────────────────────────────
+
+SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes. "
+                    "It is a handoff from a previous session; you have no other context.")
+
+
+def successor_cfg():
+    """How `successor` starts the next session. PRINT unless a human chose otherwise.
+
+    Default 'print' for two reasons. It is portable — every host can run a printed command, and no
+    host but this one has Warp. And opening a tab means WRITING OUTSIDE THIS REPO (a config under
+    ~/.warp/), which INV3 makes a deliberate act rather than a default somebody inherits: the mode
+    switch in config.json is where that decision is recorded.
+    """
+    lc = (config().get("limits") or {})
+    c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
+    mode = str(c.get("mode") or "print")
+    return {"mode": mode if mode in ("print", "warp-tab") else "print",
+            "name": str(c.get("name") or "game-loop-successor")}
+
+
+def _warp_tab(name, cwd, cmd, title):
+    """Write a Warp tab config and open it; returns the config path.
+
+    The mechanism, read off a working launcher rather than guessed: a tab config at
+    ~/.warp/tab_configs/<name>.toml opened via `warp://tab_config/<name>` starts a new tab in the
+    ACTIVE window and runs the commands in its pane. The older launch_configurations/*.yaml route
+    also runs a command but always opens a new WINDOW, since that format is defined in terms of
+    `windows:` — which is the wrong shape for a successor that should sit beside its predecessor.
+    """
+    conf = os.path.expanduser(os.path.join("~", ".warp", "tab_configs", name + ".toml"))
+    os.makedirs(os.path.dirname(conf), exist_ok=True)
+    esc = lambda v: v.replace("\\", "\\\\").replace('"', '\\"')  # noqa: E731 — TOML basic string
+    with open(conf, "w") as f:
+        f.write(f'name = "{esc(name)}"\ntitle = "{esc(title)}"\n\n'
+                f'[[panes]]\nid = "main"\ntype = "terminal"\n'
+                f'directory = "{esc(cwd)}"\ncommands = ["{esc(cmd)}"]\n')
+    subprocess.run(["open", f"warp://tab_config/{name}"], check=False)
+    return conf
+
+
+def cmd_successor(s, a):
+    """Start the session that takes over from this one — the capability the handoff never had.
+
+    game_loop has WRITTEN a handoff at every turn-end since #45 and has never started the session
+    that reads it. That gap is why "hand off when the context gets big" stayed something a run had
+    to REMEMBER: the gate could refuse work, but the only way out of a large context was an action
+    no verb performed, so the refusal had nowhere to send anyone. This performs it.
+
+    It never copies state into the prompt. The handoff file IS the state; a prompt that paraphrased
+    it would be a second copy, free to disagree with the first, and the disagreement would surface
+    in the one session with no way to check.
+
+    It does not refuse an auto-generated handoff the way the GATE does. The gate is asking the agent
+    for its own account and must not accept a file that writes itself; this is the last action of a
+    session that may be out of road, and the generated floor beats starting the successor blind.
+    It says which one it is handing over, so nobody has to guess.
+    """
+    hp = os.path.abspath(os.path.expanduser(a.handoff)) if a.handoff else handoff_path()
+    if not os.path.isfile(hp) or os.path.getsize(hp) == 0:
+        die(f"no handoff to hand over: {hp}\n"
+            "  A successor with nothing to read is a session that starts from zero, which is the\n"
+            "  cost this verb exists to avoid. Write it first (or run `checkpoint --notes \"..\"`,\n"
+            "  which puts your words into the generated one), then run this again.")
+    try:
+        with open(hp) as f:
+            auto = AUTO_HANDOFF_MARK in f.read(200)
+    except OSError:
+        auto = False
+    sid = a.session_id or str(uuid.uuid4())
+    cwd = a.cwd or REPO_ROOT
+    prompt = SUCCESSOR_PROMPT.format(handoff=hp)
+    cmd = " ".join(shlex.quote(x) for x in ["claude", "--session-id", sid, prompt])
+    sc = successor_cfg()
+    title = a.title or f"{(os.path.basename(REPO_ROOT) or '?')[:1].upper()} | successor"
+    lines = [f"successor session id : {sid}",
+             f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
+             f"working directory   : {cwd}",
+             f"command             : {cmd}"]
+    if a.dry_run:
+        lines.append(f"mode                : {sc['mode']} (DRY RUN — nothing was started)")
+    elif sc["mode"] == "warp-tab":
+        conf = _warp_tab(sc["name"], cwd, cmd, title)
+        lines.append(f"mode                : warp-tab — wrote {conf} and opened it")
+    else:
+        lines += ["mode                : print — RUN THE COMMAND ABOVE to start the successor.",
+                  "                      (set limits.successor.mode to \"warp-tab\" in "
+                  ".game_loop/config.json to open",
+                  "                       the tab from here instead; it writes a config under "
+                  "~/.warp/, which is",
+                  "                       outside this repo and so is a choice, not a default.)"]
+    if auto:
+        lines += ["",
+                  "⚠ THIS IS THE GENERATED HANDOFF, not your own account of the run. It says what "
+                  "the run was",
+                  "  DOING, never why. `checkpoint --notes \"..\"` puts your words in it — worth one "
+                  "turn before",
+                  "  the successor starts, because it is the only part nothing can reconstruct."]
+    logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
+             "dry_run": bool(a.dry_run), "auto_handoff": auto})
+    out("\n".join(lines))
 
 
 # ── confidence ───────────────────────────────────────────────────────────────────────────────────
@@ -7381,6 +7661,15 @@ def main():
     lp.add_argument("--force", action="store_true",
                     help="run it even though limits.probe.enabled is false — it costs ~24k input "
                          "tokens, so the default is off")
+    sc = sub.add_parser("successor")
+    sc.add_argument("--handoff", help="the file the successor should read (default: this session's "
+                                      "handoff)")
+    sc.add_argument("--session-id", dest="session_id",
+                    help="use this id instead of minting one (a prewarmed session, say)")
+    sc.add_argument("--cwd", help="where the successor starts (default: this repo)")
+    sc.add_argument("--title", help="tab title, verbatim — only used by the warp-tab mode")
+    sc.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="print the id, the prompt and the command, and start nothing")
     cf = sub.add_parser("confidence")
     cf.add_argument("--mark", help="beta | stable — refused unless the evidence for it exists")
     cf.add_argument("--ref", help="the commit to report on (default HEAD)")
@@ -7426,7 +7715,8 @@ def main():
      "mutate": cmd_mutate, "worktree": cmd_worktree, "watchdog": cmd_watchdog, "self": cmd_self,
      "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
-     "limitprobe": cmd_limitprobe, "model": cmd_model}[a.cmd](s, a)
+     "limitprobe": cmd_limitprobe, "model": cmd_model,
+     "successor": cmd_successor}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

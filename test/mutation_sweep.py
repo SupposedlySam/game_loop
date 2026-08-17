@@ -281,6 +281,22 @@ MUTANTS = [
      None, 6),
     ("fire_triggers -> a project's attachments never run", ".game_loop/bin/game_loop::fire_triggers", "    return []\n",
      ["trigger", "attach", "harden", "stepback"], None, 9),
+    # THE CONTEXT TRIGGER'S TWO HALVES — the one that RECORDS the reading at turn-end, and the one
+    # that decides whether it binds. Both MEASURED on the working tree rather than on HEAD, for the
+    # reason external_claims_report and fire_triggers above record: the code did not exist in HEAD
+    # when this was taken, so an archived baseline could not hold the assertions that flip.
+    #
+    # Neither count contains bookkeeping noise. `return None` leaves both out of the candidate set,
+    # but nothing in this file is keyed on their NAMES the way NOT_SWEPT staleness is, so unlike
+    # `superseded` there is no artifact to subtract: all 9 and all 5 are assertions written for the
+    # trigger. The recorder scores higher because it also owns the readings the gate never sees —
+    # the sidechain skip, the crossing carried forward, the drop back under the cap.
+    ("record_context_reading -> no turn-end ever records a context reading",
+     ".game_loop/bin/game_loop::record_context_reading", "    return None\n",
+     ["context", "cap", "crossing", "sidechain", "successor verb"], None, 9),
+    ("binding_context -> a recorded reading never binds the gate",
+     ".game_loop/bin/game_loop::binding_context", "    return None\n",
+     ["context", "cap", "crossing", "successor verb"], None, 5),
     # THE MOMENT THAT DECIDES (#64), and the most expensive silence in this file: neutered, no
     # attachment can ever refuse a turn-end, every `stop` trigger in every tree becomes advisory,
     # and nothing about a run looks different — a gate that has stopped gating is exactly what this
@@ -664,6 +680,13 @@ NOT_SWEPT = {
         "suite. Neutered it finds no writes, so its own gate passes over an empty set — which is "
         "why the arm beside it asserts there IS a write to find, and a third arm feeds it a "
         "deliberate offender. Both decide it in-suite rather than by mutation.",
+    "test/run.py::cc_limits":
+        "reads the limits block an install wrote, inside the suite. Its None is the ordinary "
+        "answer — most of the cases it serves assert the installer wrote NOTHING — so neutering "
+        "it to a constant None would make roughly half the context-cap arms pass vacuously and "
+        "the other half fail. The arms are paired against each other rather than by mutation: "
+        "every 'wrote nothing' assertion has a 'wrote exactly this' assertion beside it reading "
+        "the same helper, so a reader stuck on one answer cannot satisfy both.",
     "test/run.py::_parses":
         "ast.parse with a boolean face, inside the suite. Neutered to a constant it either passes "
         "everything or fails everything, and the paired 'a deliberately broken program fails to "

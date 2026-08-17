@@ -118,6 +118,33 @@ To upgrade the shared copy that every central repo runs, re-pin it once — the 
 ./.game_loop/bin/game_loop self --pin <ref> --dest ~/.claude/game_loop-central
 ```
 
+## Step 4b — The one question the installer remembers: the context cap
+
+At the end of a run the installer asks whether to turn on the limit gate's **context trigger** — a
+session past a token cap (default 300000) is refused ordinary tool calls until it hands off, because
+a session re-sends its whole context on every call and a long run pays for its entire history every
+turn. It is off unless somebody says yes, because it interrupts a run they are watching.
+
+The answer is remembered for **15 days** in `~/.game_loop/install-answers.json`, so installing across
+several repos is not the same question N times. Three things outrank the memory, in order: a flag,
+an explicit `limits.context.enabled` already in the target's config, then the remembered answer.
+Under all three, **no terminal means no** — which is what a piped `curl | bash` install gets, so
+that path never enables it.
+
+Answer for the human when they have already said what they want, rather than making them wait on a
+prompt they cannot see:
+
+```bash
+./install.sh --context-cap /path/to/project            # on, at 300000
+./install.sh --context-cap=200000 /path/to/project     # on, at a cap they named
+./install.sh --no-context-cap /path/to/project         # off, and not remembered
+```
+
+A flag is that run's decision and is **not** cached — so `--no-context-cap` in CI never silences the
+question a human would have been asked. The answer lands in `.game_loop/config.local.json`, the
+gitignored layer: it is one person's preference, and the tracked `config.json` is the file every
+fresh install copies from.
+
 ## Step 5 — Two refusals that are the installer working
 
 - **`installed-by.json` present** — a package manager placed a blessed release here. Installing over

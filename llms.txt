@@ -92,11 +92,18 @@ turn-end). If you can predict the human's answer, don't ask; make the call and c
 
 ## Usage limits: the handoff gate and the park
 
-If a tool call is refused with **LIMIT GATE CLOSED**, a Claude Code usage window is nearly exhausted
-and the session will soon die mid-action. Do not argue with it and do not route around it — write the
-handoff file at the exact path the gate names (YOUR session's own, under `.game_loop/sessions/<id>/`):
-the mandate, where you are, what is DONE and VERIFIED (with proving paths), what you were mid-flight
-on, exact next actions, how to resume. The gate opens the moment that file exists, and you keep
+If a tool call is refused with **LIMIT GATE CLOSED**, either a Claude Code usage window is nearly
+exhausted and the session will soon die mid-action, or this session's context has grown past the
+configured cap and every remaining call is re-sending the whole of it. The refusal says which. Do not
+argue with it and do not route around it — write the handoff file at the exact path the gate names
+(YOUR session's own, under `.game_loop/sessions/<id>/`): the mandate, where you are, what is DONE and
+VERIFIED (with proving paths), what you were mid-flight on, exact next actions, how to resume. The
+gate opens the moment that file exists.
+
+If the refusal named the **context cap**, the handoff is only half of it: writing it opens the gate
+but does not shrink the context, so carrying on here keeps paying for it. Run
+`./.game_loop/bin/game_loop successor` — it mints the next session's id, points it at your handoff and
+prints (or opens) the command that starts it — and then stop. If it named a **usage window**, you keep
 working until the window actually runs dry.
 
 If you are woken with **"the exhausted usage window has reset"**, you are the resumed run: run

@@ -341,6 +341,60 @@ any missing signal (no snapshot, a window that already reset) because a gate tha
 evidence blocks its own fix — and it says what it is not: a nudge that the handoff exist, not a
 security boundary (the write guard still owns what may be mutated).
 
+**A second trigger on the same gate: context size.** A nearly-exhausted window is only one way to run
+out of road. A session's whole context is re-sent on every call, so a long-running run pays for its
+entire history on every turn — measured over one week on one account, **80.7% of the spend was cache
+reads**, 5.87 billion tokens re-sent across 25,546 calls against 15.7M tokens of output. Capping
+session context at 300K, simulated against that week's real per-call series, would have landed it at
+45% of the weekly window instead of 62% — the same work, the same calls.
+
+So `limits.context` (`{"enabled": true, "threshold_tokens": 300000}`) adds context as a second
+condition on the *same* gate rather than a second gate beside it: same handoff keystone, same
+allow-list, same fail-open, same refusal to be satisfied by the auto-generated handoff. It is
+**off unless you turn it on**, like the probe, because it interrupts a run somebody is watching.
+
+**The installer asks, once, and remembers the answer.** `install.sh` puts the question at the end of
+a run (`--context-cap[=N]` / `--no-context-cap` answer it without being asked) and caches the reply
+for 15 days in `~/.game_loop/install-answers.json`. The memory is the point rather than a
+convenience: a prompt that fires on every install into every repo is a prompt people learn to hit
+return through, which is indistinguishable from not asking while looking exactly like consent.
+Three things outrank it, in order — a flag, an explicit `limits.context.enabled` already in the
+target's config (that tree decided; re-asking is how a remembered *yes* silently turns a deliberate
+*no* back on at the next upgrade), then the remembered answer. Below all three, **no terminal means
+no**, so a piped `curl | bash` install never switches it on. A flag is that run's decision and is
+deliberately *not* cached, so `--no-context-cap` in CI cannot silence a question a human would have
+been asked.
+
+The answer is written to `.game_loop/config.local.json`, the **gitignored** layer — not to the
+tracked `config.json`. That file is the seed every fresh install copies from, so a site's own answer
+written there is handed to everybody who installs from that checkout, unasked. This project shipped
+exactly that leak for the length of one commit; a test now asserts the seed carries no answer.
+
+The reading is taken at **turn-end**, not at the gate: `input + cache_read + cache_creation` on the
+last non-sidechain assistant record of the transcript is exactly what was sent on that call, and the
+Stop payload is where `transcript_path` has actually been observed. It is cached into session state
+with a `crossed_at` that is stamped once on the way up and cleared on the way back down — the same
+carry-forward a usage window gets, and for the same reason: without it every turn-end would move the
+bar, and a handoff written one turn ago would read as stale forever.
+
+Writing the handoff opens the gate but does **not** shrink the context, so the refusal points at the
+one verb that finishes the job.
+
+### The successor — `game_loop successor`
+
+game_loop has written a handoff at every turn-end since #45 and never started the session that reads
+it. That gap is why "hand off when the context gets big" stayed something a run had to *remember*: the
+gate could refuse work, but the only way out of a large context was an action no verb performed.
+
+`successor` mints a session id, points the next session at this session's handoff file, and either
+prints the command or opens it, per `limits.successor.mode` (`print` — the default and the portable
+floor — or `warp-tab`). It never copies state into the prompt: the handoff file *is* the state, and a
+prompt that paraphrased it would be a second copy free to disagree with the first, in the one session
+with no way to check. It refuses when there is no handoff to hand over, and where the *gate* rejects
+the auto-generated handoff, this accepts it and says so — the gate is asking the agent for its own
+account, while this is the last act of a run that may be out of road, and the generated floor beats
+starting the successor blind.
+
 ### The unpushed check — `checkpoint` / `mandate --clear`
 
 Agents commit constantly and push rarely, and committed-but-unpushed work is invisible to everyone

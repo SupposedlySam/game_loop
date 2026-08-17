@@ -12,7 +12,7 @@ project have it, and what does it want right now" — deterministically, from re
 
 There is **no `game_loop doctor` subcommand** (verified against the CLI's argparse subcommands: `status,
 claim, note, harden, stepback, trans, authorize, attribute, mandate, arm, checkpoint, pin, effector,
-instrument, fix, measure, notify, owned, worktree, self, limitprobe, confidence`, plus hook-only
+instrument, fix, measure, notify, owned, worktree, self, limitprobe, successor, confidence`, plus hook-only
 entrypoints `stopgate/limitgate/statusline/sessionstart`). Never invent one. "Doctor" below is a
 composition of `status` (always) plus `confidence` and `worktree` (situationally) — nothing else.
 
@@ -89,6 +89,7 @@ summarize from memory of a prior run. Known blocks, top to bottom, and what each
 | `RULED OUT (N)` | claims already refuted with evidence — don't re-walk these |
 | denials / triggers / working-tree / waiting reports | the harness actually refusing a tool call; trigger last-run status; which tree is being edited |
 | `limits: ...` | usage-limit snapshot; `⚠ HANDOFF DUE` means the limitgate is currently closed |
+| `⚠ CONTEXT OVER CAP — HAND OFF` (statusline) | the limitgate's **second** trigger: this session's context passed `limits.context.threshold_tokens`. Write the handoff, then `game_loop successor` — the handoff alone opens the gate but does not shrink the context |
 | `⚠ USAGE-LIMIT PROTECTION IS INERT` | no statusline snapshot — only matters if you're relying on usage-limit survival |
 | `notify: ...` | Slack paging configured or not |
 | `⚠ HOOKS NOT LIVE` | **the most important one** — no record of the Stop gate ever firing in this checkout; hooks are read at session start, so a mid-session install leaves gates silently unwired. Fix: new session (or VSCode window reload) |

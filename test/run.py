@@ -752,6 +752,149 @@ def main():
         check("...but not for a sibling session that wrote nothing", denied(limitgate(p2)))
         os.remove(limits_f)
 
+        # A SECOND TRIGGER ON THE SAME GATE. A nearly-exhausted usage window is only one way to run
+        # out of road: a session whose context has grown past the cap re-sends that whole context on
+        # every remaining call, and over one measured week 80.7% of the account's spend was exactly
+        # that. So the same six properties are owed here as above — denies ordinary work, allows the
+        # handoff Write, allows game_loop verbs, opens on a written handoff, fails open with no
+        # reading, isolates per session — plus the two this trigger adds: the crossing must not move
+        # under it, and the auto handoff must not satisfy it.
+        #
+        # limits.json is GONE at this point, deliberately: every deny below is the context trigger
+        # closing the gate entirely on its own, not a usage window doing it quietly.
+        print("limit gate (context-size trigger):")
+        ctx_cf = os.path.join(proj, ".game_loop", "config.json")
+
+        def ctx_enable(on, threshold=300000):
+            c = json.load(open(ctx_cf))
+            c["limits"] = {"context": {"enabled": on, "threshold_tokens": threshold}}
+            json.dump(c, open(ctx_cf, "w"))
+
+        tctx = os.path.join(proj, "ctx-transcript.jsonl")
+
+        def ctx_record(tokens, sidechain=False):
+            """One assistant record shaped like a real transcript's: the call's context is
+            input + cache_read + cache_creation, and isSidechain says whose context it is."""
+            return {"type": "assistant", "isSidechain": sidechain,
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc)
+                                         .strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "message": {"usage": {"input_tokens": 2, "cache_creation_input_tokens": 0,
+                                          "cache_read_input_tokens": tokens - 2,
+                                          "output_tokens": 50}}}
+
+        def turn_end(sid, *recs):
+            """A real turn-end: the Stop gate is what reads the transcript and caches the reading,
+            so the tests drive it through the hook rather than reaching past it."""
+            with open(tctx, "w") as f:
+                for r in recs:
+                    f.write(json.dumps(r) + "\n")
+            return gl(proj, "stopgate",
+                      stdin=json.dumps({"session_id": sid, "transcript_path": tctx}))
+
+        def ctx_state(sid):
+            with open(os.path.join(proj, ".game_loop", "sessions", sid, "state.json")) as f:
+                return json.load(f).get("context_reading") or {}
+
+        ctx_enable(True)
+        p_ctx = dict(bash_rm, session_id="sess-ctx")
+        hpc = os.path.join(proj, ".game_loop", "sessions", "sess-ctx", "HANDOFF.md")
+        turn_end("sess-ctx", ctx_record(120000))
+        check("a turn-end records the context reading off the transcript",
+              ctx_state("sess-ctx").get("tokens") == 120000
+              and ctx_state("sess-ctx").get("crossed_at") is None)
+        check("under the cap the gate stays open", not denied(limitgate(p_ctx)))
+        turn_end("sess-ctx", ctx_record(350000))
+        crossed_1 = ctx_state("sess-ctx").get("crossed_at")
+        check("over the cap the crossing is stamped",
+              ctx_state("sess-ctx").get("tokens") == 350000 and crossed_1)
+        r = limitgate(p_ctx)
+        check("gate denies ordinary work over the context cap, with no usage snapshot at all",
+              denied(r) and "350K tokens" in r.stdout and "300K cap" in r.stdout)
+        check("the context deny sends the run somewhere — it names the successor verb",
+              "game_loop successor" in r.stdout)
+        # The auto handoff was refreshed by the very turn-end that recorded the crossing, so it is
+        # newer than crossed_at and would open a gate that accepted it (#45's failure, ported).
+        check("...and the AUTO handoff that same turn-end just wrote does NOT satisfy it",
+              os.path.getsize(hpc) > 0 and denied(limitgate(p_ctx)))
+        check("gate allows the Write that creates the handoff",
+              not denied(limitgate(dict(p_ctx, tool_name="Write",
+                                        tool_input={"file_path": hpc}))))
+        check("gate allows game_loop verbs while closed on context",
+              not denied(limitgate(dict(p_ctx, tool_input={
+                  "command": "./.game_loop/bin/game_loop successor"}))))
+        with open(hpc, "w") as f:
+            f.write("# handing over\nwhere I was, what is next\n")
+        check("a hand-written handoff opens the context gate", not denied(limitgate(p_ctx)))
+        # THE BAR MUST NOT MOVE. The reading is refreshed every turn-end; if the gate compared the
+        # handoff against the newest READING rather than the CROSSING, the handoff written a turn
+        # ago would read as stale and the gate could never be satisfied at all.
+        turn_end("sess-ctx", ctx_record(360000))
+        check("a later reading carries the crossing forward, so the handoff still counts",
+              ctx_state("sess-ctx").get("crossed_at") == crossed_1
+              and ctx_state("sess-ctx").get("tokens") == 360000
+              and not denied(limitgate(p_ctx)))
+        os.remove(hpc)
+        check("removing the handoff closes it again", denied(limitgate(p_ctx)))
+        # Dropping back under is this trigger's analogue of a usage window resetting.
+        turn_end("sess-ctx", ctx_record(90000))
+        check("dropping back under the cap ends the crossing and opens the gate",
+              ctx_state("sess-ctx").get("crossed_at") is None
+              and not denied(limitgate(p_ctx)))
+        check("one session's context reading never gates a sibling",
+              not denied(limitgate(dict(bash_rm, session_id="sess-ctx-B"))))
+        check("no reading recorded at all means no gate (fail open)",
+              not denied(limitgate(dict(bash_rm, session_id="sess-ctx-C"))))
+        turn_end("sess-ctx-D", ctx_record(80000), ctx_record(900000, sidechain=True))
+        check("a subagent's sidechain record is not read as the main thread's context",
+              ctx_state("sess-ctx-D").get("tokens") == 80000)
+        # DEFAULT-OFF is the whole reason this can ship enabled nowhere: the same recorded reading,
+        # the same absent handoff, and the gate must not fire for anyone who did not ask for it.
+        turn_end("sess-ctx-E", ctx_record(400000))
+        p_off = dict(bash_rm, session_id="sess-ctx-E")
+        os.remove(os.path.join(proj, ".game_loop", "sessions", "sess-ctx-E", "HANDOFF.md"))
+        check("with the trigger on, that reading closes the gate", denied(limitgate(p_off)))
+        ctx_enable(False)
+        check("with the trigger off, the identical reading gates nothing",
+              not denied(limitgate(p_off)))
+        ctx_enable(True, threshold=500000)
+        check("raising the cap opens the gate on the next call, not the next turn-end",
+              not denied(limitgate(p_off)))
+        # Left OFF for the rest of the suite. Everything below this point drives stopgate with other
+        # fixtures, and a trigger left armed would gate those sessions on a reading they never asked
+        # for — the test equivalent of the default this feature deliberately ships with.
+        ctx_enable(False)
+
+        print("the successor verb:")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("successor refuses when there is nothing to hand over",
+              r.returncode != 0 and "no handoff" in (r.stdout + r.stderr))
+        hps = os.path.join(proj, ".game_loop", "sessions", "sess-succ", "HANDOFF.md")
+        os.makedirs(os.path.dirname(hps), exist_ok=True)
+        with open(hps, "w") as f:
+            f.write("# handing over\nthe successor reads this\n")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        sid_1 = re.search(r"successor session id : (\S+)", r.stdout)
+        check("successor points the next session at THIS session's handoff and mints it an id",
+              r.returncode == 0 and os.path.join("sessions", "sess-succ", "HANDOFF.md") in r.stdout
+              and "claude --session-id" in r.stdout and sid_1 and len(sid_1.group(1)) == 36)
+        check("--dry-run starts nothing", "DRY RUN" in r.stdout)
+        r2 = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("each run mints a NEW id — a successor is never handed a live session's",
+              re.search(r"successor session id : (\S+)", r2.stdout).group(1) != sid_1.group(1))
+        r = gl(proj, "successor", "--dry-run", "--session-id", "given-id", sid="sess-succ")
+        check("...unless one is given (a prewarmed session)", "given-id" in r.stdout)
+        # The GATE refuses the generated handoff; this verb accepts it and says so. Different jobs:
+        # the gate is asking the agent for its own account, this is the last act of a run that may
+        # be out of road, and the generated floor beats starting the successor blind.
+        with open(hps, "w") as f:
+            f.write("<!-- game_loop:auto -->\n# HANDOFF\n")   # AUTO_HANDOFF_MARK
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("handing over the GENERATED handoff is allowed, and announced as such",
+              r.returncode == 0 and "GENERATED handoff" in r.stdout)
+        r = gl(proj, "successor", sid="sess-succ")
+        check("the default mode opens nothing by itself — it prints the command to run",
+              r.returncode == 0 and "mode                : print" in r.stdout)
+
         print("watchdog parks at an exhausted limit and rings at reset:")
         gl(proj, "mandate", "--set", "limit park work", sid="sess-park")
         json.dump({"captured_at": _t.time(),
@@ -4230,6 +4373,218 @@ def main():
               "disabled" in _mg.stdout)
     finally:
         shutil.rmtree(cl, ignore_errors=True)
+
+    # THE ONE QUESTION THIS INSTALLER REMEMBERS. The context cap INTERRUPTS a run somebody is
+    # watching, so it is asked rather than inherited — but a prompt that fires on every install into
+    # every repo is a prompt people learn to hit return through, which is indistinguishable from not
+    # asking while looking exactly like consent. So the answer is remembered, and a memory is only
+    # worth anything if its expiry, its precedence and its refusal to leak are all real.
+    print("install.sh asks about the context cap, and remembers the answer:")
+    ctxcap = tempfile.mkdtemp(prefix="ctxcap-")
+    try:
+        cc_home = os.path.join(ctxcap, "home")
+        os.makedirs(cc_home)
+        cc_answers = os.path.join(cc_home, ".game_loop", "install-answers.json")
+        cc_installer = os.path.join(REPO, "install.sh")
+
+        def cc_mk(name):
+            p = os.path.join(ctxcap, name)
+            os.makedirs(p)
+            subprocess.run(["git", "init", "-q", "."], cwd=p, capture_output=True)
+            with open(os.path.join(p, "README.md"), "w") as f:
+                f.write("x\n")
+            return p
+
+        def cc_install(target, *args, home=None):
+            """The REAL installer, through its real interface, with a fake HOME so the memory it
+            writes lands in this test's sandbox and never in the developer's own."""
+            return subprocess.run([cc_installer, *args, target], capture_output=True, text=True,
+                                  input="", env=_env(HOME=home or cc_home))
+
+        def cc_limits(p, local=True):
+            f = os.path.join(p, ".game_loop",
+                             "config.local.json" if local else "config.json")
+            try:
+                with open(f) as fh:
+                    return (json.load(fh) or {}).get("limits")
+            except (OSError, ValueError):
+                return None
+
+        def cc_remember(answer, tokens, days_ago):
+            os.makedirs(os.path.dirname(cc_answers), exist_ok=True)
+            with open(cc_answers, "w") as f:
+                json.dump({"context_cap": {"answer": answer, "threshold_tokens": tokens,
+                                           "asked_at": int(time.time()) - days_ago * 86400}}, f)
+
+        # THE SEED MUST NOT CARRY A SITE'S ANSWER — and this repo shipped that leak for the length of
+        # one commit. config.json is TRACKED and is the file every fresh install copies from, so
+        # enabling the cap there hands the interrupting behaviour to everybody who installs from this
+        # checkout, unasked, which is the precise thing the question exists to prevent. The site's
+        # own answer belongs in the gitignored layer.
+        with open(os.path.join(REPO, ".game_loop", "config.json")) as f:
+            cc_seed = json.load(f)
+        check("the SEED config ships NO context-cap answer — it is asked for, never inherited",
+              "context" not in (cc_seed.get("limits") or {}))
+
+        cc_a = cc_mk("a")
+        r = cc_install(cc_a)
+        check("no terminal to ask at leaves the cap off, and says so rather than going quiet",
+              cc_limits(cc_a) is None and "no terminal to ask at" in r.stdout)
+        check("...and remembers nothing: a silence is not an answer, and caching it as one would "
+              "make the next fortnight's installs silent for a reason nobody gave",
+              not os.path.exists(cc_answers))
+
+        cc_b = cc_mk("b")
+        cc_install(cc_b, "--context-cap")
+        check("--context-cap enables it at the default 300K",
+              cc_limits(cc_b) == {"context": {"enabled": True, "threshold_tokens": 300000}})
+        check("...in the GITIGNORED layer, never in the tracked config every install copies",
+              "context" not in (cc_limits(cc_b, local=False) or {}))
+        cc_c = cc_mk("c")
+        cc_install(cc_c, "--context-cap=200000")
+        check("--context-cap=N sets the cap to N",
+              (cc_limits(cc_c) or {}).get("context", {}).get("threshold_tokens") == 200000)
+        check("a flag is THIS run's decision and is not remembered — otherwise one "
+              "--no-context-cap would silence the question for a fortnight nobody agreed to",
+              not os.path.exists(cc_answers))
+        cc_d = cc_mk("d")
+        cc_install(cc_d, "--no-context-cap")
+        check("--no-context-cap writes nothing at all — the code default is already off, and a "
+              "written `false` would read as a decision the project made",
+              cc_limits(cc_d) is None)
+        r = cc_install(cc_mk("bad"), "--context-cap=lots")
+        check("--context-cap refuses a non-numeric cap rather than silently falling back",
+              r.returncode != 0 and "token count" in (r.stdout + r.stderr))
+
+        cc_remember("yes", 250000, 3)
+        cc_e = cc_mk("e")
+        r = cc_install(cc_e)
+        check("a remembered YES applies with no terminal and no question, at the remembered cap",
+              (cc_limits(cc_e) or {}).get("context", {}).get("threshold_tokens") == 250000)
+        check("...and says WHEN it was answered and where that is kept, so it can be undone",
+              "3 day(s) ago" in r.stdout and cc_answers in r.stdout)
+        cc_remember("no", 300000, 2)
+        cc_f = cc_mk("f")
+        r = cc_install(cc_f)
+        check("a remembered NO is honoured too — what is cached is the ANSWER, not a yes",
+              cc_limits(cc_f) is None and "remembered" in r.stdout)
+        cc_remember("yes", 250000, 20)
+        cc_g = cc_mk("g")
+        r = cc_install(cc_g)
+        check("past the 15-day TTL the memory is not used — the question comes back",
+              cc_limits(cc_g) is None and "day(s) ago" not in r.stdout
+              and "no terminal to ask at" in r.stdout)
+        cc_remember("yes", 250000, 1)
+        cc_h = cc_mk("h")
+        cc_install(cc_h, "--no-context-cap")
+        check("a flag outranks a live remembered answer", cc_limits(cc_h) is None)
+
+        # THE PROJECT'S OWN ANSWER OUTRANKS BOTH. Re-asking a tree that has already decided is how a
+        # remembered yes silently turns a deliberate `false` back on at the next upgrade.
+        cc_i = cc_mk("i")
+        cc_install(cc_i)                                   # the remembered yes lands
+        with open(os.path.join(cc_i, ".game_loop", "config.local.json")) as fh:
+            _ci = json.load(fh)
+        _ci["limits"]["context"] = {"enabled": False, "threshold_tokens": 111111}
+        with open(os.path.join(cc_i, ".game_loop", "config.local.json"), "w") as fh:
+            json.dump(_ci, fh)
+        r = cc_install(cc_i)
+        check("a tree that has already DECIDED is never re-asked and never overwritten, even with "
+              "a live remembered yes sitting beside it",
+              cc_limits(cc_i) == {"context": {"enabled": False, "threshold_tokens": 111111}}
+              and "left exactly as it was" in r.stdout)
+        check("...and it NAMES the file that decided, so that line is checkable rather than a claim",
+              "config.local.json already decides it" in r.stdout)
+        cc_j = cc_mk("j")
+        cc_install(cc_j, "--no-context-cap")
+        _cj = os.path.join(cc_j, ".game_loop", "config.json")
+        with open(_cj) as fh:
+            _c = json.load(fh)
+        _c["limits"] = {"context": {"enabled": False}}
+        with open(_cj, "w") as fh:
+            json.dump(_c, fh)
+        r = cc_install(cc_j)
+        check("a decision in the TRACKED config counts as decided too — reading only the local "
+              "layer would write a second, disagreeing copy of the answer",
+              cc_limits(cc_j) is None and "config.json already decides it" in r.stdout)
+
+        cc_k = cc_mk("k")
+        cc_install(cc_k, "--no-context-cap")
+        _ck = os.path.join(cc_k, ".game_loop", "config.local.json")
+        with open(_ck, "w") as fh:
+            fh.write("{ this is not json")
+        r = cc_install(cc_k, "--context-cap")
+        with open(_ck) as fh:
+            _kept = fh.read()
+        check("an unparseable local config is REFUSED, not clobbered — an unreadable config is not "
+              "a config with nothing in it, and rewriting one deletes whatever it meant to say",
+              "could not be read as" in r.stdout and _kept == "{ this is not json")
+
+        # THE QUESTION ITSELF. Everything above exercises what happens when nobody is asked; this is
+        # the one path where somebody is. It needs a real terminal because the installer reads from
+        # /dev/tty on purpose — stdin is the SCRIPT under the documented `curl ... | bash`.
+        def cc_ask(target, replies, home=None):
+            import pty
+            import select as _select
+            env = _env(HOME=home or cc_home)
+            pid, fd = pty.fork()
+            if pid == 0:                                   # pragma: no cover — the child execs away
+                try:
+                    os.execve(cc_installer, [cc_installer, target], env)
+                finally:
+                    os._exit(127)
+            chunks, deadline = [], time.time() + 120
+            try:
+                os.write(fd, replies.encode())             # canonical mode buffers until `read` asks
+                while time.time() < deadline:
+                    if not _select.select([fd], [], [], 1.0)[0]:
+                        continue
+                    try:
+                        buf = os.read(fd, 65536)
+                    except OSError:
+                        break                              # the child closed the pty: normal exit
+                    if not buf:
+                        break
+                    chunks.append(buf)
+            finally:
+                os.close(fd)
+                os.waitpid(pid, 0)
+            return b"".join(chunks).decode("utf-8", "replace")
+
+        cc_home2 = os.path.join(ctxcap, "home2")            # a fresh memory, so nothing is recalled
+        os.makedirs(cc_home2)
+        cc_answers2 = os.path.join(cc_home2, ".game_loop", "install-answers.json")
+        cc_p = cc_mk("prompt-yes")
+        out = cc_ask(cc_p, "n\ny\n", home=cc_home2)         # no to skills, yes to the cap
+        check("with a terminal the question is actually ASKED, and names what it costs you",
+              "Turn it on?" in out and "INTERRUPTS" in out)
+        check("...and a yes enables it at the default cap",
+              cc_limits(cc_p) == {"context": {"enabled": True, "threshold_tokens": 300000}})
+        with open(cc_answers2) as fh:
+            _mem = json.load(fh)["context_cap"]
+        check("...and an ANSWERED question is what gets remembered, with its TTL on the record",
+              _mem["answer"] == "yes" and _mem["threshold_tokens"] == 300000
+              and _mem["ttl_days"] == 15)
+        os.remove(cc_answers2)
+        cc_q = cc_mk("prompt-num")
+        cc_ask(cc_q, "n\n120000\n", home=cc_home2)
+        check("answering with a NUMBER sets that cap — one question, not two",
+              (cc_limits(cc_q) or {}).get("context", {}).get("threshold_tokens") == 120000)
+        os.remove(cc_answers2)
+        cc_r = cc_mk("prompt-floor")
+        out = cc_ask(cc_r, "n\n900\n", home=cc_home2)
+        check("a cap below the floor is raised to it, out loud — a cap that low refuses every call "
+              "including the ones that would raise it, which is a guard blocking its own fix",
+              (cc_limits(cc_r) or {}).get("context", {}).get("threshold_tokens") == 50000
+              and "below the floor" in out)
+        os.remove(cc_answers2)
+        cc_s = cc_mk("prompt-no")
+        cc_ask(cc_s, "n\n\n", home=cc_home2)                # bare return
+        check("a bare return is a no, and the no is remembered like any other answer",
+              cc_limits(cc_s) is None
+              and json.load(open(cc_answers2))["context_cap"]["answer"] == "no")
+    finally:
+        shutil.rmtree(ctxcap, ignore_errors=True)
 
     # A MACHINE-WIDE THIRD LAYER (~/.game_loop/config.json), on top of config.json + config.local.json.
     # Unlike config.local.json (a site override for ONE project), this is read by EVERY project's own

@@ -311,7 +311,25 @@ measure --instrument <name> --before <n> --after <n> --events <per-event values>
 fix --prove <name> --promises ".." --produces <the fix's own output> \
     --diagnosis <the repro> --before <verdict> --observed <verdict>
 #   a verified diagnosis is NOT a verified fix — exercise what the fix PRODUCES
+mutate --prove ".." --test <command> --file <path> --replace ".." --with ".."
+#   prove a TEST pins something: the tool runs it green, applies your mutation, runs it
+#   again, restores the file, and compares. "I reverted the fix and watched it fail" is
+#   one sentence whether or not it happened — a reviewer mutation-tested eight leaves that
+#   each reported exactly that, and three stayed GREEN with the bug reintroduced.
+#   --replace must appear EXACTLY once. --timeout <sec> per run (default 900).
+#   A green mutated run is decisive; a red one is one specific claim, not a good test.
+stepback [--notes ".."] | stepback --nothing-to-harden --reason ".."
+#   the retro. The second form is the honest escape when a chapter truly yielded no rule —
+#   it takes a reason, because "nothing to learn" is a claim like any other.
+successor [--handoff <path>] [--task ".."] [--title ".."] [--cwd <dir>] [--dry-run]
+#   mint the next session and hand over: it points the successor at your handoff rather
+#   than hoping it finds one. --dry-run prints what it would do without doing it.
 ```
+
+**The `proved` moment.** `fix --prove`, `effector --prove` and `mutate --prove` each fire a
+`proved` trigger — the instant a change is demonstrated to behave differently, which is when
+documentation goes stale and is still cheap to fix. Attach your documentation checks THERE, not
+to `confidence`: at publish you are asked about a dozen changes at once, each decided days ago.
 
 **`confidence` — how much this project stands behind a commit.** Three levels, each meaning only
 what was *checked*, never that the code is correct: **alpha** (the absence of a mark), **beta**

@@ -8928,6 +8928,71 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_up, ignore_errors=True)
 
+    # ---- the `proved` moment: documentation belongs at the verb that ships, not at the publish ----
+    _pv = tempfile.mkdtemp(prefix="gl_proved_")
+    try:
+        _ph = os.path.join(_pv, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _ph,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        subprocess.run(["git", "init", "-q", _pv], check=True)
+        _tgt = os.path.join(_pv, "subject.py")
+        with open(_tgt, "w") as f:
+            f.write("VALUE = 1\n")
+        _probe = os.path.join(_pv, "probe.py")
+        with open(_probe, "w") as f:
+            f.write("import sys\nsys.path.insert(0, %r)\n"
+                    "import subject\nsys.exit(0 if subject.VALUE == 1 else 1)\n" % _pv)
+
+        def _gl(*args):
+            return subprocess.run(
+                [os.path.join(_ph, "bin", "game_loop"), *args],
+                capture_output=True, text=True, cwd=_pv,
+                env=dict(os.environ, GAME_LOOP_HOME=_ph))
+
+        def _wire(evt):
+            with open(os.path.join(_ph, "triggers.json"), "w") as f:
+                json.dump({evt: [{"name": "docs", "command": "cat >/dev/null; echo DOCS-CHECKED"}]},
+                          f)
+
+        _wire("proved")
+        _r = _gl("mutate", "--prove", "the probe pins VALUE",
+                 "--test", f"python3 {_probe}", "--file", _tgt,
+                 "--replace", "VALUE = 1", "--with", "VALUE = 2")
+        check("a proof verb fires the `proved` moment, so a documentation check runs when the "
+              "change LANDS rather than at publish, a dozen changes later",
+              _r.returncode == 0 and "DOCS-CHECKED" in _r.stdout
+              and "triggers · proved" in _r.stdout)
+        check("...and the file it mutated is restored, so the moment does not fire over a tree "
+              "left broken",
+              open(_tgt).read() == "VALUE = 1\n")
+
+        # THE CONTROL. "The trigger fired" and "the verb prints that string anyway" produce the
+        # same stdout, so the same command with nothing wired has to come back silent.
+        with open(os.path.join(_ph, "triggers.json"), "w") as f:
+            json.dump({}, f)
+        _r2 = _gl("mutate", "--prove", "the probe pins VALUE",
+                  "--test", f"python3 {_probe}", "--file", _tgt,
+                  "--replace", "VALUE = 1", "--with", "VALUE = 2")
+        check("...and with nothing wired the same verb says nothing about triggers — so the line "
+              "above is an attachment firing, not the verb's own output",
+              _r2.returncode == 0 and "DOCS-CHECKED" not in _r2.stdout
+              and "triggers · proved" not in _r2.stdout)
+
+        # A FAILED PROOF MUST NOT FIRE IT. `proved` means "this now behaves differently and it was
+        # demonstrated"; firing on a mutation the test slept through would attach documentation
+        # work to the exact case where nothing was established.
+        _wire("proved")
+        _r3 = _gl("mutate", "--prove", "a claim the test does not pin",
+                  "--test", "python3 -c \"import sys; sys.exit(0)\"", "--file", _tgt,
+                  "--replace", "VALUE = 1", "--with", "VALUE = 3")
+        check("a proof that FAILS does not fire `proved` — the moment means something was "
+              "demonstrated, and NOT PROVED is the case where nothing was",
+              _r3.returncode != 0 and "DOCS-CHECKED" not in _r3.stdout)
+    finally:
+        shutil.rmtree(_pv, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

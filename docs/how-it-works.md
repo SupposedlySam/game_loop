@@ -655,9 +655,16 @@ Three rules, each of them a scar:
 
 **Moments published so far:** `harden` (a learning was just encoded — the moment to generalise and
 share it), `stepback` (a retro just began, fired **before** its output, so what other agents
-learned is an input to the reflection rather than an appendix to it), `confidence` (a commit was
-just marked — the moment anything that *distributes* this project belongs on), `session_start` and
-`stop`.
+learned is an input to the reflection rather than an appendix to it), `proved` (a change was just
+demonstrated to behave differently — see below), `confidence` (a commit was just marked — the moment
+anything that *distributes* this project belongs on), `session_start` and `stop`.
+
+`proved` fires from `fix --prove`, `effector --prove` and `mutate --prove`, and it exists because of
+where documentation checks were landing. The undocumented-surface check here was attached to
+`confidence` only — correct, and far too late: at publish it asks about a dozen changes at once, each
+of which was decided days earlier. The proof verbs are the moment a change *lands*, which is exactly
+when its documentation goes stale and still costs one line to fix. It **reports and never blocks** —
+pricing a proof on a stale README would stop agents running proofs, not start them writing docs.
 
 `session_start` is the only moment that is **not a verb somebody typed**. The entry point below
 already runs at the right instant and injects `status` as additional context, so a new session can

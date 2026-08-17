@@ -2385,6 +2385,10 @@ def cmd_mutate(s, a):
              "replace": a.replace[:120], "with": a.with_[:120], "before": before, "after": after})
     s["mutate_proofs"] = s.get("mutate_proofs", 0) + 1
     save(s)
+    _proved = fire_triggers(s, "proved", {"event": "proved", "verb": "mutate", "what": a.prove,
+                                          "artifact": [path],
+                                          "project": config().get("project_name"),
+                                          "session": SESSION})
     out("✓ PROVED — the test goes RED when that line changes.",
         f"  pins   : {a.prove}",
         f"  file   : {a.file}",
@@ -2393,7 +2397,8 @@ def cmd_mutate(s, a):
         "  tree restored.",
         "",
         "WHAT THIS DOES NOT SAY: that the test is good, that this mutation is the bug the fix was",
-        "for, or that anything else is covered. It says this one line is pinned by that one test.")
+        "for, or that anything else is covered. It says this one line is pinned by that one test.",
+        *_proved)
 
 
 def cmd_authorize(s, a):
@@ -3089,6 +3094,11 @@ def cmd_effector(s, a):
     logline({"kind": "effector_proof", **{k: proof[k] for k in
                                           ("name", "known_state", "before", "observed",
                                            "before_digest", "observed_digest", "expect", "scale")}})
+    out(*fire_triggers(s, "proved", {"event": "proved", "verb": "effector",
+                                     "what": proof.get("name"),
+                                     "artifact": [proof.get("known_state")],
+                                     "project": config().get("project_name"),
+                                     "session": SESSION}))
     sym, note = effector_state(proof)
     out(f"{sym} EFFECTOR PROVED — {a.prove} actually acts. Findings may now lean on it.",
         f"  known state: {a.known_state}",
@@ -3897,6 +3907,11 @@ def cmd_fix(s, a):
                                      ("name", "promises", "produces", "diagnosis", "before",
                                       "observed", "produces_digest", "diagnosis_digest",
                                       "before_digest", "observed_digest", "expect")}})
+    out(*fire_triggers(s, "proved", {"event": "proved", "verb": "fix",
+                                     "what": proof.get("name"),
+                                     "artifact": [proof.get("produces")],
+                                     "project": config().get("project_name"),
+                                     "session": SESSION}))
     s["work_since_stepback"] = s.get("work_since_stepback", 0) + 1
     save(s)          # this verb had no other reason to persist state; without it the count is lost
     sym, note = fix_state(proof)

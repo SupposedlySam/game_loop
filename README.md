@@ -374,6 +374,10 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `harden --learning .. --artifact <path>` | Turn a lesson into something enforced instead of remembered. |
 | `authorize --path <prefix> --reason ".." [--uses N]` | Your one-time, logged permission for a single write outside the repo. `--uses N` when you authorised a run of several, rather than being interrupted once per call. A reason citing the agent's *own* brief rather than you is refused — see below. |
 | `confidence --mark beta\|stable [--ref <sha>] [--recheck]` | Record how much this project stands behind a commit. `--recheck` re-runs the gate instead of trusting the tag. |
+| `mutate --prove ".." --test <cmd> --file <path> --replace ".." --with ".."` | Prove a test actually **pins** something: the tool runs the test green, applies your one-line mutation, runs it again, and restores the file. A revert-proof you *report* reads the same whether or not it happened. `--timeout` sets seconds per run (default 900). |
+| `fix --prove` / `effector --prove` | Prove a fix or an action by what it **produces** — a before/after pair the tool compares, not a sentence. |
+| `stepback` | The retro. `--nothing-to-harden` is the honest escape when a chapter really yielded no rule, and it requires a `--reason`. |
+| `successor` | Mint the next session's id, point it at your handoff, and hand over. `--handoff <path>`, `--task ".."`, `--title ".."`, `--cwd <dir>`, `--session-id <id>`, `--dry-run`. |
 | `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 
 ## Configure
@@ -392,6 +396,8 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `mcp_standing_writes` | A narrow set of MCP writes that need no human, in either of two grains — an exact `mcp__server__tool`, or a whole-server `mcp__server__` prefix. See below. |
 | `mcp_read_only_tools` | Teaches the MCP guard which *ambiguous* tools of a server you trust are read-only. It can only resolve ambiguity — never silence a mutating verb or a mutating argument. |
 | `watchdog` | Ring timing, ring cap, and `waiting_probe`. |
+| `retro_overdue_factor` | How far past the retro interval counts as *overdue* (the gate, as opposed to the nudge). |
+| `limits.rate_limits`, `limits.threshold_tokens` | The usage-limit readings the handoff gate and the park are measured against. |
 | `limits` | Usage-limit thresholds for the handoff gate and the park. |
 | `update_check`, `update_repo` | Whether to check for a newer game_loop, and where from. `update_api_base` / `update_raw_base` retarget those lookups (GitHub Enterprise, a mirror, or a test). |
 | *(not config)* `.game_loop/installed-by.json` | Written by a **packager**, not by you — see below. |

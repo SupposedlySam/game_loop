@@ -450,7 +450,9 @@ apply_context_cap() {
   # machine-wide, so writing it to a tracked file would push one person's answer to their whole team
   # through git, and then to everyone who installs from that checkout. The local layer is read by
   # every component (config() merges it over config.json) and is ignored by the .gitignore this
-  # installer wrote a moment ago.
+  # installer writes — on a fresh install, and, since the migration above, on an upgrade too. That
+  # second half was FALSE for every tree installed before the entry existed, and this paragraph
+  # asserted it anyway: the module that argues a rule is the likeliest place to violate it.
   #
   # NEVER a blind rewrite: an unparseable config is not a config with nothing in it, and clobbering
   # one would delete whatever the site was relying on it to say.
@@ -1250,6 +1252,16 @@ else
     echo "  updated .game_loop/.gitignore (+ edited.txt — what this session actually wrote)"
   fi
   # the write guard's invocation mark, same fallback shape: runtime state, never committed.
+  # AN IGNORE LIST ONLY PROTECTS THE INSTALLS THAT RECEIVE IT. config.local.json shipped in the
+  # fresh-install block with no migration, so every tree installed before that line existed still
+  # TRACKS the file this project names as the place for machine-local values — in a public repo,
+  # for anyone who cloned it. Reported by a consumer running git check-ignore against their own
+  # installed tree, which is a check I never ran against anyone's.
+  if ! grep -q '^config.local.json$' "$GI"; then
+    echo "config.local.json" >> "$GI"
+    echo "  updated .game_loop/.gitignore (+ config.local.json — MACHINE-LOCAL settings, which"
+    echo "          were tracked until now on installs older than that entry)"
+  fi
   if ! grep -q '^write-guard-probe$' "$GI"; then
     echo "write-guard-probe" >> "$GI"
     echo "  updated .game_loop/.gitignore (+ write-guard-probe — the write guard's run mark)"

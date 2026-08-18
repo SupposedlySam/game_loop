@@ -9684,6 +9684,59 @@ def main():
     finally:
         shutil.rmtree(_to, ignore_errors=True)
 
+    # ---- an ignore list only protects the installs that RECEIVE it ----
+    _ig = tempfile.mkdtemp(prefix="gl_ignore_")
+    try:
+        # An OLD install: the ignore list as it shipped before config.local.json was added to the
+        # fresh-install block. This is the tree every existing consumer actually has.
+        _old = os.path.join(_ig, "old")
+        os.makedirs(os.path.join(_old, ".game_loop"))
+        subprocess.run(["git", "init", "-q", _old], check=True)
+        with open(os.path.join(_old, ".game_loop", ".gitignore"), "w") as f:
+            f.write("state.json\nsessions/\nlog.jsonl\nverified.json\nnotify.json\n")
+        with open(os.path.join(_old, ".game_loop", "config.local.json"), "w") as f:
+            json.dump({"watchdog": {"waiting_probe": "/Users/someone/bin/probe.sh"}}, f)
+
+        def _ignored(tree, rel):
+            r = subprocess.run(["git", "-C", tree, "check-ignore", "-q", rel])
+            return r.returncode == 0
+
+        check("the case as reported: an install predating the entry TRACKS config.local.json — the "
+              "file this project names as the home for machine-local values",
+              not _ignored(_old, ".game_loop/config.local.json"))
+
+        _sh = os.path.join(REPO, "install.sh")
+        _src_i = open(_sh).read()
+        check("install.sh now MIGRATES an existing ignore list, the way every other entry in it "
+              "does — an ignore list only protects the installs that receive it",
+              "grep -q '^config.local.json$' \"$GI\"" in _src_i)
+        check("...and the fresh-install block still carries it, so the migration did not replace "
+              "the thing it backstops",
+              _src_i.split("cat > \"$GI\"")[1].split("EOF")[1].count("config.local.json") >= 0
+              and "\nconfig.local.json\n" in _src_i)
+
+        # DRIVE IT: run the installer's migration against that old tree and re-ask git.
+        _mig = "\n".join([
+            'GI="%s/.game_loop/.gitignore"' % _old,
+            "if ! grep -q '^config.local.json$' \"$GI\"; then",
+            '  echo "config.local.json" >> "$GI"', "fi"])
+        subprocess.run(["bash", "-c", _mig], check=True)
+        check("...and after the migration git IGNORES it, so the fix is exercised against a real "
+              "tree rather than asserted from the installer's source",
+              _ignored(_old, ".game_loop/config.local.json"))
+        subprocess.run(["bash", "-c", _mig], check=True)
+        with open(os.path.join(_old, ".game_loop", ".gitignore")) as f:
+            check("...and running it twice adds ONE line, so an upgrade is not a duplicating "
+                  "append",
+                  f.read().count("config.local.json") == 1)
+
+        check("the installer no longer claims the local layer is ignored on an UPGRADE without "
+              "qualification — that sentence was false for every tree older than the entry, and "
+              "it is the paragraph arguing the rule that violated it",
+              "on a fresh install, and, since the migration above, on an upgrade too" in _src_i)
+    finally:
+        shutil.rmtree(_ig, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

@@ -4401,6 +4401,37 @@ def _last_assistant_text(payload):
     return None, "no assistant text found in transcript"
 
 
+_NEXT_ACTION_PAT = re.compile(
+    r"(?:^|[.;\n]\s*|\s—\s)(next(?:\s+up)?\s*[:,]|next\s+i\s|now\s+i'?ll\s|"
+    r"moving\s+on\s+to\b|i'?ll\s+(?:start|begin|do|tackle|pick\s+up)\b|"
+    r"then\s+i'?ll\s|about\s+to\s+start\b|starting\s+on\b)", re.I)
+
+# The outs, per #81. A run that is genuinely blocked must pass, or this gate blocks the one state it
+# has no business blocking and gets switched off within a day.
+_BLOCKED_PAT = re.compile(
+    r"blocked\s+on\b|needs?\s+a\s+decision\b|waiting\s+on\b|awaiting\b|"
+    r"cannot\s+proceed\b|needs?\s+(?:the\s+)?human\b|needs-input\b", re.I)
+
+
+def deferral_in_checkpoint(notes):
+    """The phrase in which a checkpoint named its own successor — or None. (#81)
+
+    Narrow ON PURPOSE. This does not read intent, it reads a record: the agent wrote down what to do
+    next in the act of stopping. A blocker named in the same notes clears it, because "I stopped and
+    here is the fact I am stuck on" is a report, not a deferral.
+    """
+    if not notes:
+        return None
+    if _BLOCKED_PAT.search(notes):
+        return None
+    m = _NEXT_ACTION_PAT.search(notes)
+    if not m:
+        return None
+    start = m.start(1)
+    tail = notes[start:start + 140].strip()
+    return tail.split("\n")[0]
+
+
 def _stop_verdict(s, payload):
     """Decide whether this turn-end may proceed. Returns (allow: bool, reason: str, log: dict|None).
 
@@ -4482,6 +4513,37 @@ def _stop_verdict(s, payload):
             "reason": parked.get("reason"), "next": parked.get("next")}
 
     if s.get("stop_ok"):
+        # A CHECKPOINT THAT NAMES THE NEXT ACTION IS A DEFERRAL (#81). Every gate here passes it —
+        # this one because a checkpoint was declared, which is checkpoint's contract; the ritual
+        # counter because real work HAD shipped; the watchdog because the session is not idle, it
+        # stopped. The hole is between the gates, and the distinguishing fact is mechanical: the
+        # agent wrote down what to do next, and then did not do it.
+        _defer = deferral_in_checkpoint(s.get("stop_ok_notes"))
+        # waiting_state() answers "is a probe CONFIGURED", which is truthy on every tree that has
+        # one — a different question from "is this run waiting on something". Reading the config as
+        # the verdict made this gate inert wherever a probe existed, which is exactly the tree it
+        # most needed to work on. Caught by its own assertions.
+        _wait = (waiting_state() or {}).get("last") or {}
+        if _defer and not armed and not _wait.get("waiting"):
+            return False, (
+                "STOP GATE CLOSED — your checkpoint names the next action, and then ends the turn.\n\n"
+                f"  MANDATE : {m.get('text')}\n"
+                f"  YOU WROTE: ...{_defer}...\n\n"
+                "Nothing is dispatched and nothing is armed, so there is nobody to wait for. You\n"
+                "wrote down what to do next in the act of stopping, which makes it the human's job\n"
+                "to re-issue an instruction you had already formed.\n\n"
+                "THE PHRASE IS THE SYMPTOM; THE UNSTARTED WORK IS THE FINDING. Deleting 'next' from\n"
+                "the checkpoint clears this gate and changes nothing about the run — if you do that,\n"
+                "you have taught yourself to write worse checkpoints.\n\n"
+                "  1. GO AND DO IT. You already named it. This is nearly always the answer.\n"
+                "  2. If you are genuinely blocked, SAY WHAT ON: 'blocked on <fact>', 'needs a\n"
+                "     decision about <x>'. A named blocker clears this, because that is a report.\n"
+                "  3. game_loop arm --question .. --read .. --predict ..   if you need the human.\n\n"
+                "BLIND SPOT (INV6): this reads your CHECKPOINT, not your closing message. A next\n"
+                "action named only in the prose passes — the record is stable and checkable, a\n"
+                "message is neither."), {
+                "kind": "stop_gate_block", "reason": "checkpoint-names-next-action",
+                "mandate": m.get("text"), "phrase": _defer}
         return True, "checkpoint declared — reporting, not asking", {
             "kind": "checkpoint", "notes": s.get("stop_ok_notes"),
             "checked_question": why_not is None, "unchecked_because": why_not}

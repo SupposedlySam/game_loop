@@ -9464,6 +9464,70 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_ct, ignore_errors=True)
 
+    # ---- #81: a checkpoint that names the next action is a deferral, and every gate passed it ----
+    _df = tempfile.mkdtemp(prefix="gl_defer81_")
+    try:
+        _dfh = os.path.join(_df, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _dfh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        _dl = importlib.machinery.SourceFileLoader("gl_df", os.path.join(_dfh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _dfh
+        _gd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_df", _dl))
+        _dl.exec_module(_gd)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        for _notes in ("DROP-4110 shipped as PR 824. Declined the cascade. Next: DROP-3624.",
+                       "Shipped the guard. Next up: the docs pass.",
+                       "Fixed it; I'll start on the sweep now.",
+                       "Landed #79. Moving on to #78."):
+            check(f"#81: a checkpoint naming its successor is a DEFERRAL — {_notes[:34]!r}",
+                  bool(_gd.deferral_in_checkpoint(_notes)))
+        check("#81: ...and the phrase itself is returned, so a refusal can QUOTE it — 'you named "
+              "the next action' is arguable, the sentence is not",
+              "DROP-3624" in (_gd.deferral_in_checkpoint(
+                  "Shipped PR 824. Next: DROP-3624.") or ""))
+
+        # THE OUTS. Without them this blocks a legitimately-blocked run, which is the one state it
+        # has no business blocking — and a gate that does that is switched off within a day.
+        for _ok in ("Shipped the watcher and published wish #64. 1167 passing.",
+                    "Answered #77; blocked on their version stamp before anything else.",
+                    "Reviewed the floors. Next: re-measure — but blocked on a peer pushing mid-run.",
+                    "Recorded the retro. Needs a decision from the human about scope.",
+                    ""):
+            check(f"#81: ...while {_ok[:40]!r} is NOT a deferral — a named blocker is a report, and "
+                  "an ordinary progress note names no successor",
+                  _gd.deferral_in_checkpoint(_ok) is None)
+
+        # The refusal text carries the two sentences the reporter said to keep verbatim, because the
+        # cheapest way to clear this gate is to delete the word rather than do the work.
+        _st = {"mandate": {"text": "keep going", "active": True}, "stop_ok": True,
+               "stop_ok_notes": "Shipped PR 824. Next: DROP-3624."}
+        _allow, _why, _log = _gd._stop_verdict(_st, {})
+        check("#81: the stop gate REFUSES a checkpoint that names the next action while nothing is "
+              "dispatched and nothing armed — the hole was between the gates, not in any of them",
+              _allow is False and (_log or {}).get("reason") == "checkpoint-names-next-action")
+        check("#81: ...and it quotes the phrase back",
+              "DROP-3624" in _why)
+        check("#81: ...and states that deleting the word is not the fix — the phrase is the "
+              "symptom, the unstarted work is the finding. Without this the gate teaches worse "
+              "checkpoints, which is strictly worse than not having it",
+              "THE PHRASE IS THE SYMPTOM" in _why and "worse checkpoints" in _why)
+        check("#81: ...and names its own blind spot: it reads the CHECKPOINT, not the closing "
+              "prose, so a successor named only in the message passes",
+              "BLIND SPOT" in _why and "closing message" in _why)
+
+        _st2 = {"mandate": {"text": "keep going", "active": True}, "stop_ok": True,
+                "stop_ok_notes": "Shipped PR 824. 1200 passing."}
+        check("#81: THE CONTROL — the same state with an ordinary checkpoint is ALLOWED, so the "
+              "refusal above is about the phrase and not about checkpointing under a mandate",
+              _gd._stop_verdict(_st2, {})[0] is True)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_df, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

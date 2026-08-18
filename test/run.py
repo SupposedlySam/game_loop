@@ -9737,6 +9737,72 @@ def main():
     finally:
         shutil.rmtree(_ig, ignore_errors=True)
 
+    # ---- committed and pushed is NOT released: the distance, said at the handback ----
+    # A consumer upgraded, did not get a fix, and diagnosed it themselves — four commits past the
+    # newest mark, pushed, verified on the remote, and installable by nobody. The unpushed check
+    # built the day before covers the step AFTER the one that stranded them.
+    _rd = tempfile.mkdtemp(prefix="gl_reldist_")
+    try:
+        _rdh = os.path.join(_rd, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _rdh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        subprocess.run(["git", "init", "-q", _rd], check=True)
+        _rg = ["git", "-C", _rd]
+        subprocess.run(_rg + ["config", "user.email", "t@t"], check=True)
+        subprocess.run(_rg + ["config", "user.name", "t"], check=True)
+
+        def _rcommit(msg):
+            with open(os.path.join(_rd, "f"), "a") as f:
+                f.write(msg + "\n")
+            subprocess.run(_rg + ["add", "-A"], check=True)
+            subprocess.run(_rg + ["commit", "-q", "-m", msg], check=True)
+
+        _rdl = importlib.machinery.SourceFileLoader("gl_rd", os.path.join(_rdh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _rdh
+        _grd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rd", _rdl))
+        _rdl.exec_module(_grd)
+        os.environ.pop("GAME_LOOP_HOME", None)
+        _grd.REPO_ROOT = _rd
+
+        _rcommit("one")
+        check("a project that has NEVER released owes no distance and is told nothing — a warning "
+              "on every commit of an unreleased repo is one nobody reads",
+              _grd.release_distance() == (0, None, None)
+              and _grd.release_distance_warning() is None)
+
+        subprocess.run(_rg + ["tag", "stable-aaa"], check=True)
+        check("...and HEAD being the newest mark is silent too",
+              _grd.release_distance()[0] == 0 and _grd.release_distance_warning() is None)
+
+        _rcommit("two")
+        check("...and ONE commit past the mark stays silent: mid-work drift is the normal state, "
+              "and a warning that fires there is one people learn to skip",
+              _grd.release_distance()[0] == 1 and _grd.release_distance_warning() is None)
+
+        _rcommit("three")
+        _rcommit("four")
+        _n, _sha, _lvl = _grd.release_distance()
+        _w = _grd.release_distance_warning()
+        check("three commits past the newest mark WARNS at the handback — committed and pushed is "
+              "not released, and only one of those is a thing a consumer can install",
+              _n == 3 and _lvl == "stable" and _w and "3 COMMIT(S) BEHIND" in _w)
+        check("...and it names the mark it is measuring against, so the number is checkable rather "
+              "than asserted",
+              _sha[:8] in _w)
+        check("...and it states what it CANNOT know — whether anyone consumes this repo at all. "
+              "The number that would actually move you is 'N consumers are bound to the older "
+              "one', and that lives in a package manager's registry, not in git",
+              "declines to guess at the audience" in _w)
+        check("...and it is measured against the CONFIDENCE MARKS, not a branch — what consumers "
+              "install is the tag, so that is the gap that matters",
+              "newest mark" in _w)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_rd, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

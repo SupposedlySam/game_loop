@@ -2341,6 +2341,56 @@ def cmd_contribute(s, a):
         "that a learning which never went through `harden` was considered at all.")
 
 
+def release_distance():
+    """(commits ahead, newest marked sha, level) — or (0, None, None) when there is nothing to say.
+
+    Nothing to say covers: no git, no marks at all (an unreleased project owes no distance), and
+    HEAD already being the newest mark. Deliberately measured against the CONFIDENCE MARKS rather
+    than against a branch: `stable`/`beta` are what this project tells consumers to install, and the
+    gap that matters is between what exists and what they can get.
+    """
+    tags = _git("tag", "-l", "stable-*", "beta-*") or ""
+    marked = [t for t in tags.split("\n") if t.strip()]
+    if not marked:
+        return 0, None, None          # never released: no distance is owed, and none is implied
+    best_n, best_sha, best_lvl = None, None, None
+    for t in marked:
+        sha = _git("rev-list", "-n", "1", t)
+        if not sha:
+            continue
+        n = _git("rev-list", "--count", f"{sha}..HEAD")
+        if n is None or not str(n).strip().isdigit():
+            continue
+        n = int(n)
+        if best_n is None or n < best_n:
+            best_n, best_sha, best_lvl = n, sha, t.split("-")[0]
+    if not best_sha or not best_n:
+        return 0, None, None
+    return best_n, best_sha, best_lvl
+
+
+def release_distance_warning():
+    """Say it at the handback, where the human forms their picture of what exists (#: showrunner)."""
+    n, sha, lvl = release_distance()
+    if not n or n < 2:
+        return None
+    return "\n".join([
+        f"⚠ THE NEWEST RELEASE IS {n} COMMIT(S) BEHIND THIS TREE.",
+        f"    newest mark : {lvl} {sha[:8]}",
+        f"    HEAD        : {(_git('rev-parse', '--short', 'HEAD') or '?')}",
+        "  Committed and pushed is NOT released. A consumer who upgrades right now gets the mark,",
+        "  not this tree — which is how a fix can be finished, verified, on the remote, and still",
+        "  absent for everyone who installs it. That happened here: a consumer upgraded, did not",
+        "  get the fix, and diagnosed it themselves.",
+        "",
+        "    game_loop confidence --mark beta|stable --notes \"..\"",
+        "",
+        "  WHAT THIS DOES NOT KNOW (INV6): whether anyone consumes this repo at all, or how many.",
+        "  The number that would actually move you is 'N consumers are bound to the older one', and",
+        "  that lives in a package manager's registry rather than in git — so this reports the",
+        "  distance and declines to guess at the audience."])
+
+
 def cmd_checkpoint(s, a):
     """Declare that this turn-end REPORTS rather than ASKS. Buys exactly one turn-end.
 
@@ -2372,6 +2422,8 @@ def cmd_checkpoint(s, a):
     # here" belongs in that picture — and so does "the fix in those commits was never exercised".
     if (w := unpushed_warning(a.notes)):
         out(w)
+    if (w := release_distance_warning()):
+        out("", w)
     if (w := fix_warning(s, a.notes)):
         out(w)
     try:

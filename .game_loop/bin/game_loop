@@ -2217,6 +2217,130 @@ def upstream_check(write=True):
     return lines, ("partial" if failed else ("movement" if moved else "quiet"))
 
 
+LEDGER_F = os.path.join(ROOT, "UPSTREAM_LEDGER.md")
+
+_LEDGER_HEAD = """# Upstream review ledger
+
+One line per review of hardened learnings, asking of each: does this name a TOOL's behaviour, or
+this REPO's? The gate below reads the last timestamp here and counts `harden` entries after it.
+
+"All of them were project-specific" is a COMPLETE answer — recording the review is what clears it.
+A gate that only cleared on a filed issue would manufacture noise issues, which is worse than
+silence.
+"""
+
+
+def _ledger_last():
+    """(iso timestamp of the last review, or None). None means this project has never reviewed."""
+    try:
+        with open(LEDGER_F) as f:
+            lines = [l for l in f if l.startswith("- ")]
+    except OSError:
+        return None
+    for line in reversed(lines):
+        m = re.match(r"- (\S+)", line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def ledger_record(when, n, filed, note):
+    """Append a review. Creates the ledger with its header if this is the first line."""
+    fresh = not os.path.exists(LEDGER_F)
+    with open(LEDGER_F, "a") as f:
+        if fresh:
+            f.write(_LEDGER_HEAD + "\n")
+        f.write(f"- {when} — reviewed {n} learning(s); filed: {filed or 'none'}; "
+                f"note: {note or '(none)'}\n")
+
+
+def hardens_since_review():
+    """Learnings hardened since the last ledger line. ([(t, learning)], baseline_just_written).
+
+    THE FIRST ENCOUNTER RECORDS A BASELINE AND REPORTS NOTHING (#78). The reporter's version exits
+    quiet with no ledger, to avoid a first appearance that is a 200-item wall of every harden ever
+    recorded — right about the hazard, but it leaves the gate inert until a human bootstraps it,
+    which is the manual-step-nobody-takes failure from #74. Recording the world instead gives the
+    same protection and starts the gate on its own.
+    """
+    last = _ledger_last()
+    if last is None:
+        ledger_record(now(), 0, "none", "baseline — everything before this line is history, and "
+                                        "reporting it would make this gate's first appearance a "
+                                        "wall nobody reads")
+        return [], True
+    out = []
+    try:
+        with open(LOG_F) as f:
+            for line in f:
+                if '"harden"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("kind") == "harden" and (d.get("t") or "") > last:
+                    out.append((d.get("t", ""), d.get("learning", "")))
+    except OSError:
+        return [], False
+    return out, False
+
+
+def upstream_review_nudge(s):
+    """Are enough learnings unreviewed to be worth asking whose defect they were? (#78)
+
+    Not a gate and not a block. The judgement — tool or repo — is unmakeable from a count, so this
+    LISTS THE LEARNINGS and asks. That listing is the mechanism: the reporter said seeing four side
+    by side is what made the pattern obvious, and that three of their four were phrased as facts
+    about a TOOL, which is itself the tell.
+    """
+    every = config().get("upstream_review_every", 6)
+    items, baseline = hardens_since_review()
+    if baseline or len(items) < every:
+        return None
+    lines = [f"⚠ {len(items)} learning(s) hardened since your last upstream review.",
+             "  For each: does it name a TOOL's behaviour, or THIS REPO's?", ""]
+    for t, learning in items[-12:]:
+        lines.append(f"    {t[:16]}  {learning[:96]}")
+    if len(items) > 12:
+        lines.append(f"    ... and {len(items) - 12} more")
+    lines += [
+        "",
+        "  A learning phrased as a fact about a tool usually IS one. Encoded locally it is fixed",
+        "  for one agent, in one repo, for as long as that harness copy survives — and everybody",
+        "  else using that tool rediscovers it.",
+        "",
+        '  game_loop contribute --reviewed --filed "<urls, or none>" --note ".."',
+        "",
+        '  "All of them were project-specific" is a COMPLETE answer. Recording the review clears',
+        "  this; a gate that only cleared on a filed issue would manufacture noise issues.",
+        "  RAISING upstream_review_every is the cheapest way to silence this, and it is not the",
+        "  finding. WHAT THIS CANNOT SEE: whether a learning generalises, whether an issue you",
+        "  file is any good, or anything that never went through `harden` at all."]
+    return "\n".join(lines)
+
+
+def cmd_contribute(s, a):
+    """Record an upstream review: N learnings looked at, what was filed, one line of judgement."""
+    if not a.reviewed:
+        die("contribute needs --reviewed (with --filed and --note).\n"
+            "It records that you ASKED, of each learning hardened since your last review, whether "
+            "it named a tool's behaviour or this repo's.")
+    items, baseline = hardens_since_review()
+    if baseline:
+        out("✓ baseline recorded — nothing to review yet.",
+            "  Everything hardened before now is history; the next review covers what follows.")
+        return
+    ledger_record(now(), len(items), a.filed, a.note)
+    logline({"kind": "upstream_review", "n": len(items), "filed": a.filed, "note": a.note})
+    out(f"✓ REVIEWED — {len(items)} learning(s), recorded in {os.path.basename(LEDGER_F)}.",
+        f"  filed: {a.filed or 'none'}",
+        f"  note : {a.note or '(none)'}",
+        "",
+        "WHAT THIS DOES NOT SAY: that the judgement was right, that a filed issue is any good, or",
+        "that a learning which never went through `harden` was considered at all.")
+
+
 def cmd_checkpoint(s, a):
     """Declare that this turn-end REPORTS rather than ASKS. Buys exactly one turn-end.
 
@@ -7754,6 +7878,11 @@ def cmd_stepback(s, a):
     save(s)
     if incoming:
         out(*incoming)
+    # THE RETRO IS WHERE THIS BELONGS (#78). It already counts hardens since the last one, and it is
+    # the moment an agent is looking BACK at a chapter's learnings — which is exactly when "whose
+    # defect was that?" is answerable and cheap. Asked at any other moment it is an interruption.
+    if (_up := upstream_review_nudge(s)):
+        out("", _up, "")
     out("=== WHAT THE LAST RETRO YIELDED ===", *prior, "")
     out("=== STEP-BACK — invariants re-injected ===")
     try:
@@ -7939,6 +8068,14 @@ def main():
     hd.add_argument("--rung", help="ladder rung 1..6 (1 IMPOSSIBLE .. 6 doc-last-resort)")
     hd.add_argument("--general", help="the TRANSFERABLE form — what another agent could use without "
                                       "knowing this codebase (fed to any `harden` trigger)")
+
+    cb = sub.add_parser("contribute")
+    cb.add_argument("--reviewed", action="store_true",
+                    help="record that you asked, of each learning hardened since the last review, "
+                         "whether it named a TOOL's behaviour or this repo's")
+    cb.add_argument("--filed", help="issue URLs you opened upstream, or 'none' — which is a "
+                                    "complete answer")
+    cb.add_argument("--note", help="one line of judgement, for the human reading the ledger")
 
     sb = sub.add_parser("stepback")
     sb.add_argument("--nothing-to-harden", action="store_true",
@@ -8144,7 +8281,7 @@ def main():
      "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model,
-     "successor": cmd_successor}[a.cmd](s, a)
+     "successor": cmd_successor, "contribute": cmd_contribute}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

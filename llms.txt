@@ -318,6 +318,13 @@ mutate --prove ".." --test <command> --file <path> --replace ".." --with ".."
 #   each reported exactly that, and three stayed GREEN with the bug reintroduced.
 #   --replace must appear EXACTLY once. --timeout <sec> per run (default 900).
 #   A green mutated run is decisive; a red one is one specific claim, not a good test.
+contribute --reviewed --filed "<urls, or none>" --note ".."
+#   record that you asked, of each learning hardened since the last review: does this name a
+#   TOOL's behaviour, or THIS REPO's? `stepback` nudges once enough have accumulated and LISTS
+#   them, because the judgement is unmakeable from a count. A learning phrased as a fact about
+#   a tool usually IS one — encoded locally it is fixed for one agent, in one repo, and every
+#   other agent using that tool rediscovers it. "All project-specific" is a COMPLETE answer;
+#   recording the review is what clears it, so the gate cannot manufacture noise issues.
 stepback [--notes ".."] | stepback --nothing-to-harden --reason ".."
 #   the retro. The second form is the honest escape when a chapter truly yielded no rule —
 #   it takes a reason, because "nothing to learn" is a claim like any other.

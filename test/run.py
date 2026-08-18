@@ -9385,6 +9385,85 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rr, ignore_errors=True)
 
+    # ---- #78: nobody ever asks whether a learning was about the TOOL rather than the project ----
+    _ct = tempfile.mkdtemp(prefix="gl_contrib_")
+    try:
+        _cth = os.path.join(_ct, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _cth,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        _cl = importlib.machinery.SourceFileLoader("gl_ct", os.path.join(_cth, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _cth
+        _gc = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_ct", _cl))
+        _cl.exec_module(_gc)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        def _seed(n, after):
+            t = datetime.datetime.fromisoformat(after)
+            with open(_gc.LOG_F, "w") as f:
+                for i in range(n):
+                    t += datetime.timedelta(seconds=1)
+                    f.write(json.dumps({"t": t.isoformat(timespec="seconds"), "kind": "harden",
+                                        "learning": f"spawn's base comes from HEAD ({i})"}) + "\n")
+
+        # THE FIRST ENCOUNTER RECORDS THE WORLD AND SAYS NOTHING. Firing on every harden ever
+        # recorded makes the gate's first appearance a wall, and a wall gets switched off.
+        with open(_gc.LOG_F, "w") as f:
+            for i in range(40):
+                f.write(json.dumps({"t": "2020-01-01T00:00:00", "kind": "harden",
+                                    "learning": "ancient history"}) + "\n")
+        check("#78: the FIRST encounter records a baseline and reports nothing — 40 historical "
+              "hardens do not become the gate's opening move",
+              _gc.upstream_review_nudge({}) is None and os.path.exists(_gc.LEDGER_F))
+        # PIN THE BASELINE IN THE PAST. Left at now(), a review recorded microseconds later shares
+        # its second, and hardens seeded "just after the baseline" are then also just after the
+        # REVIEW — so the clearing assertion fails on the clock rather than on the code. Found by
+        # this exact failure.
+        _led = open(_gc.LEDGER_F).read().replace(_gc._ledger_last(), "2026-01-01T00:00:00")
+        with open(_gc.LEDGER_F, "w") as f:
+            f.write(_led)
+        _base = _gc._ledger_last()
+        check("#78: ...and the baseline is a real timestamped ledger line, so the next review has "
+              "something to count from rather than a flag nobody can read",
+              bool(_base) and "baseline" in open(_gc.LEDGER_F).read())
+
+        _seed(5, _base)
+        check("#78: five learnings is under the threshold and stays quiet — the boundary is "
+              "asserted, not the middle",
+              _gc.upstream_review_nudge({}) is None)
+
+        _seed(7, _base)
+        _n = _gc.upstream_review_nudge({})
+        check("#78: at the threshold it fires and LISTS THE LEARNING TEXT — the judgement 'tool or "
+              "repo' is unmakeable from a count, and seeing them side by side is the mechanism",
+              _n and "7 learning(s)" in _n and "spawn's base comes from HEAD" in _n)
+        check("#78: ...and it asks the actual question rather than instructing a contribution",
+              "TOOL's behaviour, or THIS REPO's" in _n)
+        check("#78: ...and it names raising the threshold as the cheap way out, out loud, because "
+              "that is the first thing anyone reaches for",
+              "cheapest way to silence this" in _n)
+        check("#78: ...and states what it cannot see — whether a learning generalises, whether a "
+              "filed issue is any good, anything that never went through `harden`",
+              "CANNOT SEE" in _n and "never went through" in _n)
+
+        # "ALL PROJECT-SPECIFIC" IS A COMPLETE ANSWER. A gate that only cleared on a filed issue
+        # would manufacture noise issues, which is worse than the silence it replaced.
+        class _A:
+            reviewed, filed, note = True, "none", "all of them were about this repo"
+        _gc.cmd_contribute({}, _A())
+        check("#78: recording a review with NOTHING filed clears the nudge — the review is what "
+              "clears it, so the gate cannot manufacture noise issues to satisfy itself",
+              _gc.upstream_review_nudge({}) is None
+              and "filed: none" in open(_gc.LEDGER_F).read())
+        check("#78: ...and the ledger keeps the human-readable line, since a human reads this file "
+              "to see whether the question is being asked honestly",
+              "all of them were about this repo" in open(_gc.LEDGER_F).read())
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_ct, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

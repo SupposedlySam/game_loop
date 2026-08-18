@@ -601,6 +601,12 @@ MUTANTS += [
     ("merge_files -> a merge never yields the paths it touched",
      ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
      ["merge", "attribute", "merge-base"], None, 10),
+    ("upstream_review_nudge -> nobody is ever asked whose defect a learning was",
+     ".game_loop/bin/game_loop::upstream_review_nudge", "    return None\n",
+     ["#78", "upstream review", "TOOL's behaviour"], None, 0),
+    ("hardens_since_review -> no learning is ever counted as unreviewed",
+     ".game_loop/bin/game_loop::hardens_since_review", "    return [], True\n",
+     ["#78", "baseline", "threshold"], None, 0),
     ("mutation_liveness -> the probe never establishes anything",
      ".game_loop/bin/game_loop::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
      ["#80", "liveness", "INERT"], None, 0),
@@ -617,6 +623,12 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    ".game_loop/bin/game_loop::_ledger_last": "reads the last timestamp out of the ledger (#78). "
+            "Neutered to None it declares every project un-baselined, which the FIRST-ENCOUNTER "
+            "assertion catches directly and loudly; neutered to a constant it breaks the counting "
+            "the threshold assertions drive. Both arms are asserted through the producers above "
+            "rather than through this reader, which is where the behaviour actually lives.",
+
     ".game_loop/bin/game_loop::_py_parses": "ast.parse with a boolean face (#80). Neutered to a "
             "constant it either passes every mutated file — which the COULD-NOT-PROVE assertion "
             "beside it catches directly — or refuses every one, which the ✓ PROVED assertion "

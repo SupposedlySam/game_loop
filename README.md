@@ -378,6 +378,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `fix --prove` / `effector --prove` | Prove a fix or an action by what it **produces** — a before/after pair the tool compares, not a sentence. |
 | `stepback` | The retro. `--nothing-to-harden` is the honest escape when a chapter really yielded no rule, and it requires a `--reason`. |
 | `successor` | Mint the next session's id, point it at your handoff, and hand over. `--handoff <path>`, `--task ".."`, `--title ".."`, `--cwd <dir>`, `--session-id <id>`, `--dry-run`. |
+| `contribute --reviewed --filed ".." --note ".."` | Record that you asked, of each learning hardened since your last review, whether it named a **tool's** behaviour or **this repo's**. "All project-specific" is a complete answer — recording the review is what clears the nudge. |
 | `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 
 ## Configure
@@ -396,6 +397,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `mcp_standing_writes` | A narrow set of MCP writes that need no human, in either of two grains — an exact `mcp__server__tool`, or a whole-server `mcp__server__` prefix. See below. |
 | `mcp_read_only_tools` | Teaches the MCP guard which *ambiguous* tools of a server you trust are read-only. It can only resolve ambiguity — never silence a mutating verb or a mutating argument. |
 | `watchdog` | Ring timing, ring cap, and `waiting_probe`. |
+| `upstream_review_every` | How many hardened learnings accumulate before `stepback` asks whether any were about the tool rather than this repo. Default 6. |
 | `retro_overdue_factor` | How far past the retro interval counts as *overdue* (the gate, as opposed to the nudge). |
 | `limits.rate_limits`, `limits.threshold_tokens` | The usage-limit readings the handoff gate and the park are measured against. |
 | `limits` | Usage-limit thresholds for the handoff gate and the park. |

@@ -9144,6 +9144,66 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rn, ignore_errors=True)
 
+    # ---- `confidence --mark` must not END on a success banner for refs that are still local ----
+    _mp = tempfile.mkdtemp(prefix="gl_markpush_")
+    try:
+        _mph = os.path.join(_mp, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _mph,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        _mpl = importlib.machinery.SourceFileLoader("gl_mp", os.path.join(_mph, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _mph
+        _gm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_mp", _mpl))
+        _mpl.exec_module(_gm)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        _seen = {}
+
+        def _fake(ref, timeout=20):
+            return _seen.get(ref)
+
+        _real, _gm.remote_has_ref = _gm.remote_has_ref, _fake
+        try:
+            _seen = {"stable-abc": True, "stable": True}
+            _ok = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            check("with both refs on the remote, the mark's last word says consumers can reach it",
+                  "BOTH refs" in _ok and "ONLY LOCAL" not in _ok)
+
+            _seen = {"stable-abc": False, "stable": True}
+            _bad = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            check("an immutable tag that never left this machine is named as STILL ONLY LOCAL, and "
+                  "the release announced above it is called what it is — about a commit the remote "
+                  "cannot serve",
+                  "ONLY LOCAL" in _bad and "stable-abc" in _bad
+                  and "cannot serve" in _bad and "git push origin stable-abc" in _bad)
+
+            _seen = {"stable-abc": True, "stable": False}
+            _ptr = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            check("...and a pushed tag with an UNPUSHED channel pointer is still a failure — that "
+                  "is the case where consumers installing the channel get the PREVIOUS release",
+                  "ONLY LOCAL" in _ptr and "channel pointer" in _ptr)
+
+            # THREE OUTCOMES. `ls-remote` failing offline must never render as "pushed" — that is
+            # the substitution this whole project exists to refuse.
+            _seen = {"stable-abc": None, "stable": True}
+            _unk = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            check("a remote that could not be ASKED is its own outcome — not 'pushed', and it says "
+                  "nothing was compared rather than reporting either way",
+                  "COULD NOT CHECK" in _unk and "NOT 'they are pushed'" in _unk
+                  and "BOTH refs" not in _unk)
+        finally:
+            _gm.remote_has_ref = _real
+
+        check("...and the check is the LAST thing the mark does, after the triggers — because a "
+              "publish trigger's success banner is what a reader sees last, which is how two marks "
+              "here ended with the record local and the announcement already out",
+              inspect.getsource(_gm.cmd_confidence).rindex("mark_publication_state")
+              > inspect.getsource(_gm.cmd_confidence).rindex('fire_triggers(s, "confidence"'))
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_mp, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

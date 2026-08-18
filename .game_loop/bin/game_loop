@@ -5669,6 +5669,59 @@ def confidence_of(ref="HEAD"):
     return best, tag, (body or "").strip()
 
 
+def remote_has_ref(ref, timeout=20):
+    """Is `ref` on the default remote? True / False / None for COULD NOT ASK — never conflated.
+
+    None is the whole point. An `ls-remote` that fails offline, or against a repo with no remote at
+    all, must not render as "it is up there": a confidence record that exists only locally is the
+    unpushed-work failure one level up, and reporting it as published is worse than saying nothing.
+    """
+    try:
+        r = subprocess.run(["git", "ls-remote", "--tags", "origin", ref],
+                           cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return bool((r.stdout or "").strip())
+
+
+def mark_publication_state(tag, channel):
+    """The LAST word after a mark: are the refs consumers install from actually reachable?
+
+    Ordering is the mechanism this exists for. `--mark` prints its push instructions and THEN fires
+    the confidence triggers, so a publish trigger's success banner is the final thing on screen —
+    announcing to consumers a commit whose tag is still local. Twice here. The remedy is not to move
+    the instructions (they belong where they are, beside what they describe) but to give the ending
+    to the thing the ending was being mistaken for.
+    """
+    immutable, pointer = remote_has_ref(tag), remote_has_ref(channel)
+    if immutable is None or pointer is None:
+        return ["", "⚠ COULD NOT CHECK whether the remote has these refs — `git ls-remote` did not "
+                "answer.",
+                "  That is NOT 'they are pushed'. Nothing was compared. If a publish trigger",
+                "  announced a release above, it announced one this check cannot confirm anyone",
+                "  else can reach."]
+    if immutable and pointer:
+        return ["", f"✓ the remote has BOTH refs — {tag} and the {channel} pointer. Consumers can "
+                "reach this."]
+    missing = [n for n, ok in ((tag, immutable), (f"{channel} (the channel pointer)", pointer))
+               if not ok]
+    return ["", "⚠ THESE REFS ARE STILL ONLY LOCAL: " + " · ".join(missing),
+            "",
+            "  Anything printed above about a release — a wish granted, consumers behind — is",
+            f"  about a commit the remote cannot serve. A consumer following it finds the",
+            "  PREVIOUS release, or no tag at all.",
+            "",
+            "  This is the last line on purpose: the push instructions are further up, and a",
+            "  publish trigger's success banner is what a reader sees last. That ordering has",
+            "  ended two marks here with the record local and the announcement already out.",
+            "",
+            f"    git push origin HEAD",
+            f"    git push origin {tag}",
+            f"    git push origin --force {channel}"]
+
+
 def cmd_confidence(s, a):
     """Report what this project is willing to say about a commit — or mark one, with the evidence.
 
@@ -5817,6 +5870,7 @@ def cmd_confidence(s, a):
     out(*fire_triggers(s, "confidence", {
         "event": "confidence", "level": a.mark, "sha": sha, "tag": tag, "notes": a.notes,
         "project": config().get("project_name"), "session": SESSION}))
+    out(*mark_publication_state(tag, a.mark))
 
 
 def pinned_sha():

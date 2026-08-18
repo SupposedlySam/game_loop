@@ -4413,6 +4413,23 @@ _BLOCKED_PAT = re.compile(
     r"cannot\s+proceed\b|needs?\s+(?:the\s+)?human\b|needs-input\b", re.I)
 
 
+# #84: THE SECOND GRAMMAR. Instead of naming a successor, the checkpoint ENUMERATES THE REMAINDER —
+# "Mandate has 4108, 4109, 4111 left" — and every alternative in _NEXT_ACTION_PAT passes it. The
+# reporter calls this the worse of the two, and they are right about why: a tidy summary of
+# outstanding work reads as THOROUGH. It is what a good handoff looks like, so it does not feel like
+# a deferral while you are writing it.
+#
+# BOTH HALVES ARE REQUIRED — a remaining-word AND a work-item token — because a remaining-word alone
+# over-fires on legitimate findings. Their must-pass case: "the remaining 19 failures are
+# pre-existing GCP credential errors" has the word, names no work item, and stays clean.
+_DEFERS_WORK_PAT = re.compile(
+    r"(?:\bmandate\b|\bepic\b|\bsprint\b|\bcycle\b|\bqueue\b|\bhas\b|\bhave\b)"
+    r"[^.]{0,80}\bleft\b"
+    r"|\bleft to (?:do|ship|land|start|pick up)\b"
+    r"|\b(?:remaining|outstanding|still open|still to do)\b\s*[:\-]"
+    r"|\b\d+ (?:items?|tickets?|stories|leaves|issues?) (?:left|remaining|outstanding)\b", re.I)
+
+
 def deferral_in_checkpoint(notes):
     """The phrase in which a checkpoint named its own successor — or None. (#81)
 
@@ -4426,10 +4443,51 @@ def deferral_in_checkpoint(notes):
         return None
     m = _NEXT_ACTION_PAT.search(notes)
     if not m:
-        return None
+        m = _DEFERS_WORK_PAT.search(notes)
+        if not m:
+            return None
+        tail = notes[m.start():m.start() + 140].strip()
+        return tail.split("\n")[0]
     start = m.start(1)
     tail = notes[start:start + 140].strip()
     return tail.split("\n")[0]
+
+
+def work_since_last_block():
+    """Did anything happen since the Stop gate last refused? (True/False/None-for-unanswerable) (#82)
+
+    `stop_hook_active` exists so a refusing gate cannot loop the agent forever, and in isolation that
+    is right. Combined with what an agent actually does it becomes a reliable escape: a block reads
+    as "your closing message was wrong", so the locally obvious response is to REWRITE THE MESSAGE.
+    Doing the work costs a tool call; re-stopping costs a sentence. The pricing is inverted from the
+    intent, and the enforcement budget for a turn-end turns out to be exactly one refusal — cheapest
+    spent on prose.
+
+    Measured by a consumer across two overnight strandings: both times the gates fired correctly,
+    `consecutive` never reached the stand-down bound, and the turn ended anyway.
+
+    None means UNANSWERABLE (no log, unreadable) and callers must treat it as "allow", never as
+    "nothing happened" — a gate that cannot read its own record must not start refusing on that.
+    """
+    BOOKKEEPING = {"stop_gate_block", "stop_after_block", "checkpoint", "watchdog_quiet",
+                   "stop_gate_exhausted", "mandate_park_stop", "t3_spend"}
+    try:
+        with open(LOG_F) as f:
+            recs = [l for l in f if '"kind"' in l]
+    except OSError:
+        return None
+    seen_block = False
+    for line in reversed(recs):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        k = d.get("kind")
+        if k == "stop_gate_block":
+            return False if not seen_block else True
+        if k not in BOOKKEEPING:
+            seen_block = True          # real work, newer than any block below it
+    return None                        # no block on record at all — nothing to launder
 
 
 def _stop_verdict(s, payload):
@@ -4451,7 +4509,34 @@ def _stop_verdict(s, payload):
         return True, "no mandate bound — gate inert", None
 
     if payload.get("stop_hook_active"):
-        return True, "stop_hook_active — harness is already re-entering; not stacking a block", None
+        # #82: `stop_hook_active` must not LAUNDER a reworded stop. It is here so a refusing gate
+        # cannot loop forever — but if the gate refused and then NOTHING happened, this is the same
+        # turn-end wearing new prose, and allowing it spends the whole enforcement budget on a
+        # sentence. Unanswerable (no log) allows, because a gate that cannot read its record must
+        # not start refusing on that.
+        _worked = work_since_last_block()
+        if _worked is False:
+            return False, (
+                "STOP GATE CLOSED — you were refused, and nothing has happened since.\n\n"
+                f"  MANDATE: {m.get('text')}\n\n"
+                "No commit, no claim, harden, proof, phase or retro is on the record between that\n"
+                "refusal and this turn-end. A block reads as 'your closing message was wrong', so\n"
+                "the cheap response is to rewrite the message — doing the work costs a tool call,\n"
+                "re-stopping costs a sentence. That is the pricing this refuses to accept.\n\n"
+                "THIS BUDGET IS NOT UNLIMITED, and you should know the number: after two\n"
+                "consecutive blocks the circuit breaker stands this gate down and your next\n"
+                "turn-end succeeds regardless. That exists so a gate can never trap a session — it\n"
+                "is not an invitation to spend it. Rewording again reaches it without doing\n"
+                "anything; one tool call clears this honestly.\n\n"
+                "  Go and do the next thing. Then stop, if you still want to."), {
+                "kind": "stop_after_block", "outcome": "refused-again-nothing-happened",
+                "mandate": m.get("text")}
+        # Log the OUTCOME of a block, not just the block (#82). Nothing recorded whether a refused
+        # turn then ended anyway, so "are this gate's refusals being obeyed or spent?" — the single
+        # most useful number in the file — could only be answered by hand-diffing a transcript.
+        return True, "stop_hook_active — harness is already re-entering; not stacking a block", (
+            {"kind": "stop_after_block", "outcome": "allowed-after-work"}
+            if _worked else None)
 
     armed = s.get("t3_armed")
     text, why_not = _last_assistant_text(payload)

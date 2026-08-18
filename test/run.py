@@ -9528,6 +9528,109 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_df, ignore_errors=True)
 
+    # ---- #82 / #83 / #84: three follow-ups on gates shipped the day before ----
+    _f3 = tempfile.mkdtemp(prefix="gl_follow_")
+    try:
+        _f3h = os.path.join(_f3, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _f3h,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        _f3l = importlib.machinery.SourceFileLoader("gl_f3", os.path.join(_f3h, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _f3h
+        _gf = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_f3", _f3l))
+        _f3l.exec_module(_gf)
+        os.environ.pop("GAME_LOOP_HOME", None)
+        _V = "\x72\x6d"
+
+        # ---- #83: writing ABOUT a verb is not running it ----
+        def _guard(cmd):
+            r = subprocess.run(["bash", os.path.join(_f3h, "bin", "guard-writes-impl.sh")],
+                               input=json.dumps({"tool_name": "Bash",
+                                                 "tool_input": {"command": cmd},
+                                                 "session_id": "s1"}),
+                               capture_output=True, text=True, cwd=_f3)
+            return "recursive+force" in r.stdout
+
+        _sd3 = os.path.join(_f3h, "sessions", "s1")
+        os.makedirs(_sd3, exist_ok=True)
+        with open(os.path.join(_sd3, "state.json"), "w") as f:
+            json.dump({"mandate": {"text": "keep going"}}, f)
+
+        check("#83: a grep whose SEARCH PATTERN contains the verb is allowed — splitting on shell "
+              "operators before tokenising tore the quoted regex apart and left the verb in command "
+              "position, so a read-only grep for this very guard was refused",
+              not _guard(f'grep -nE "permission prompt|{_V} -rf|recursive" .game_loop/bin/game_loop'))
+        check("#83: ...and a single-quoted search pattern too",
+              not _guard(f"grep -n '{_V} -rf' notes.md"))
+        check("#83: ...and prose about it in an echo or a commit message",
+              not _guard(f"echo the guard refuses {_V} -rf now")
+              and not _guard(f'git commit -m "guard: refuse {_V} -rf under a mandate"'))
+        for _spell in (f"{_V} -rf /tmp/x", f"{_V} -r -f /tmp/x", f"{_V} --recursive --force /tmp/x",
+                       f"/usr/bin/{_V} -rf /tmp/x", f"sudo {_V} -rf /tmp/x",
+                       f"cd /tmp && {_V} -rf x", f"true; {_V} -rf /tmp/x"):
+            check(f"#83: ...while the real command still DENIES ({_spell[:26]!r}) — the fix must not "
+                  "buy its false-positive cure with a false negative",
+                  _guard(_spell))
+        for _ok in (f"{_V} /tmp/one.txt", f"{_V} -r /tmp/dir", f"{_V} -f /tmp/f", "rmdir /tmp/d"):
+            check(f"#83: ...and the harmless forms stay allowed ({_ok[:22]!r})", not _guard(_ok))
+
+        # ---- #84: the deferral's SECOND grammar — enumerating the remainder ----
+        check("#84: a checkpoint that ENUMERATES what is left is a deferral too — it never says "
+              "'next', and it is the worse shape because a tidy summary of outstanding work reads "
+              "as thorough",
+              bool(_gf.deferral_in_checkpoint(
+                  "Second wave: PR 824, PR 826. Mandate has 4108, 4109, 4111 left.")))
+        check("#84: ...and other enumerations of remaining work are caught",
+              bool(_gf.deferral_in_checkpoint("Shipped three. Queue has #82, #83, #84 left."))
+              and bool(_gf.deferral_in_checkpoint("Outstanding: the sweep, the docs.")))
+        check("#84: THE MUST-PASS CASE — a remaining-word with NO work item is a finding, not a "
+              "deferral. Both halves are required, or this over-fires on ordinary reporting",
+              _gf.deferral_in_checkpoint(
+                  "Backend suite matches main exactly: 3065 passing, and the remaining 19 failures "
+                  "are pre-existing GCP credential errors.") is None)
+        check("#84: ...and an enumeration WITH a named blocker still passes, since that is a report",
+              _gf.deferral_in_checkpoint(
+                  "Mandate has three items left, but I am blocked on their version stamp.") is None)
+
+        # ---- #82: stop_hook_active must not LAUNDER a reworded stop ----
+        def _log(*kinds):
+            with open(_gf.LOG_F, "w") as f:
+                t = datetime.datetime(2026, 1, 1)
+                for k in kinds:
+                    t += datetime.timedelta(seconds=1)
+                    f.write(json.dumps({"t": t.isoformat(timespec="seconds"), "kind": k}) + "\n")
+
+        _m82 = {"mandate": {"text": "keep going", "active": True}}
+        _log("stop_gate_block")
+        _allow, _why, _lg = _gf._stop_verdict(_m82, {"stop_hook_active": True})
+        check("#82: refused, then NOTHING happened, then a reworded turn-end — REFUSED. The "
+              "enforcement budget for a turn-end was exactly one refusal, and the cheapest way to "
+              "spend it was on prose",
+              _allow is False and (_lg or {}).get("outcome") == "refused-again-nothing-happened")
+        check("#82: ...and the refusal states the real budget out loud — two consecutive blocks and "
+              "the breaker stands it down — because an agent that knows the number behaves "
+              "differently from one assuming the gate holds",
+              "circuit breaker" in _why and "not an invitation" in _why)
+        _log("stop_gate_block", "checkpoint")
+        check("#82: ...a CHECKPOINT between the block and the stop does not clear it — bookkeeping "
+              "is exactly the sentence being substituted for the work",
+              _gf._stop_verdict(_m82, {"stop_hook_active": True})[0] is False)
+        _log("stop_gate_block", "harden")
+        _a2, _w2, _l2 = _gf._stop_verdict(_m82, {"stop_hook_active": True})
+        check("#82: ...while real work between them ALLOWS the stop, and now LOGS THE OUTCOME of "
+              "the block rather than only the block — whether refusals are obeyed or spent was "
+              "previously answerable only by hand-diffing a transcript",
+              _a2 is True and (_l2 or {}).get("outcome") == "allowed-after-work")
+        os.remove(_gf.LOG_F)
+        check("#82: ...and an unreadable record ALLOWS — a gate that cannot read its own log must "
+                  "not start refusing on that",
+              _gf._stop_verdict(_m82, {"stop_hook_active": True})[0] is True)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_f3, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

@@ -636,37 +636,52 @@ print("yes" if m.get("text") and not m.get("parked") else "")' 2>/dev/null)
         # I had in mind and failed the fifth. Matched against scan_cmd, so a commit message that
         # merely WRITES ABOUT rm -rf is not a command that runs one.
         _gl_rmrf=$(SCAN="$scan_cmd" python3 -c '
-import os, re, shlex, sys
+import os, shlex, sys
 scan = os.environ["SCAN"]
-hit = ""
-for seg in re.split(r"[;&|\n]+|\$\(|\)", scan):
-    try:
-        parts = shlex.split(seg)
-    except ValueError:
-        parts = seg.split()
-    # COMMAND POSITION ONLY. `echo rm -rf is refused now` contains the token and runs no delete —
-    # and prose about this guard is exactly what gets written while building it. A leading
-    # sudo/env/time/nohup still counts, since those execute what follows.
-    PREFIX = {"sudo", "env", "time", "nohup", "command", "exec"}
-    for i, tok in enumerate(parts):
-        if os.path.basename(tok) != "rm":
-            continue
-        if any(os.path.basename(p_) not in PREFIX and not p_.startswith("-")
-               for p_ in parts[:i]):
-            continue
+# TOKENISE FIRST, THEN SPLIT (#83). Splitting on shell operators BEFORE tokenising tears a quoted
+# string apart: a grep whose SEARCH PATTERN contains the verb, with alternation bars in it, split
+# into pieces and left the verb sitting in command position — so a READ-ONLY grep for this very
+# guard was refused. The first thing anyone does with a new guard is grep for it. guard-sdb.sh
+# already carries this lesson in its header: writing ABOUT a verb is not running it.
+#
+# It reproduced on me while I was FIXING it: the patch command carrying this comment was itself
+# refused, because a heredoc fed to an interpreter is kept for scanning and rightly so.
+try:
+    lex = shlex.shlex(scan, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    toks = list(lex)
+except ValueError:
+    sys.exit(0)          # unbalanced quotes: say nothing rather than guess at a command
+OPS = {";", "&", "&&", "|", "||", "(", ")"}
+PREFIX = {"sudo", "env", "time", "nohup", "command", "exec"}
+at_start, i, hit = True, 0, ""
+while i < len(toks):
+    t = toks[i]
+    if t in OPS:
+        at_start = True
+        i += 1
+        continue
+    if at_start and os.path.basename(t) in PREFIX:
+        i += 1
+        continue
+    if at_start and os.path.basename(t) == "rm":
         rec = force = False
-        for opt in parts[i + 1:]:
-            if not opt.startswith("-"):
-                continue
-            if opt == "--recursive" or opt == "-R":
-                rec = True
-            elif opt == "--force":
-                force = True
-            elif not opt.startswith("--"):
-                rec = rec or "r" in opt or "R" in opt
-                force = force or "f" in opt
+        j = i + 1
+        while j < len(toks) and toks[j] not in OPS:
+            o = toks[j]
+            if o.startswith("--"):
+                rec = rec or o == "--recursive"
+                force = force or o == "--force"
+            elif o.startswith("-") and len(o) > 1:
+                rec = rec or "r" in o or "R" in o
+                force = force or "f" in o
+            j += 1
         if rec and force:
             hit = "yes"
+        i = j
+        continue
+    at_start = False
+    i += 1
 if hit:
     sys.stdout.write(hit)
 ' 2>/dev/null)

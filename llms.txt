@@ -185,9 +185,13 @@ reduces the damage, it does not remove the class.
   real routes: `arm` the question, whose reply is words you did not write; or report the refusal
   upward, because whoever briefed you is who must ask. An unattended session did exactly this twice
   in one run, and the log then read as human-sanctioned when nobody had been asked.
-- **The project's own policy files are not yours to edit.** Write/Edit to `.game_loop/config.json`,
-  `INVARIANTS.md` and `verify.yaml` is REFUSED once the file exists, and `.game_loop/config.local.json`
-  is refused whether or not it does — its keys merge with UNION semantics, so anything written there
+- **The project's own policy files are not yours to edit.** `.game_loop/config.json`,
+  `INVARIANTS.md` and `verify.yaml` are REFUSED once the file exists, and `.game_loop/config.local.json`
+  is refused whether or not it does — through **Write/Edit and through the shell alike**: a redirect,
+  a heredoc append, `tee`, `sed -i`, or a `cp`/`mv` onto the path. (This paragraph used to say
+  "Write/Edit", which was accurate and read as "the file cannot be written" — and a consumer widened
+  `verify.yaml` with `cat >>`, exit 0, nothing logged. What it CANNOT see is still real: a
+  `python3 -c` that writes the file, a path built from a shell variable, or any MCP tool.) — its keys merge with UNION semantics, so anything written there
   is additive and cannot be narrowed by the project's own config. This is the file that decides what
   you are allowed to do; a session that can widen it has a suggestion rather than a guardrail. It
   closed a real case: a blocked agent added ten MCP verbs and a whole-server prefix to unblock

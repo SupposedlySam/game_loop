@@ -192,7 +192,7 @@ MUTANTS = [
     # it with the same instrument; raising it from the run that prompted the fix would be a number
     # from a different experiment.
 ("retro_nudge -> never says a retro is due",
-     ".game_loop/bin/game_loop::retro_nudge", "    return None\n", ["retro", "due"], None, 3),
+     ".game_loop/bin/game_loop::retro_nudge", "    return None\n", ["retro", "due"], None, 4),
     # THE DEBT THE LAST SWEEP COULD NOT PAY. Both gate turn-end. They sat in NOT_SWEPT for one run
     # — which is what excludes a producer from the instrument — and were ALSO missing from the
     # KNOWN GAPS report because that list matches a prose prefix theirs did not have. Swept now,
@@ -541,10 +541,19 @@ MUTANTS = [
 # suite noticing that `verify` changed shape. A floor set at the reading would trip on any unrelated
 # edit, and a floor that cries wolf gets lowered until it means nothing.
 #
-# STILL 0: pin_status, running_host_version and _upstream_fetch came back UNPROTECTED — nothing in
-# the suite noticed them stopping. Each now has a PAIR (it fires / it declines), written after that
-# reading, so their floors are owed by the NEXT sweep and cannot honestly be filled in from this one:
-# the assertions that would flip did not exist when this was measured.
+# PAID at 87b40d2, the sweep AFTER the one that found them UNPROTECTED: pin_status 2,
+# running_host_version 3, _upstream_fetch 1. Thin, and honestly thin — few arms by nature.
+#
+# retro_nudge went 1 -> 5, and its floor rises 3 -> 4. The one floor here that moves UP, and it is
+# legitimate: it came back below floor, was chased instead of lowered, was found to have real
+# coverage loss, and got six assertions plus a mutate --prove. Measured on the run after that fix,
+# with the same instrument.
+#
+# remote_has_ref STAYS 0 and came back UNPROTECTED, for a reason worth writing down: the assertions
+# I wrote for mark_publication_state STUB IT OUT, so they exercise the reporter and leave the thing
+# reported on unmeasured. Covering the report and not the reported thing is the trick every stamp in
+# this project hides behind — and I did it inside a fix for exactly that. Three direct assertions
+# against a real bare remote now exist; its floor is owed by the next sweep.
 MUTANTS += [
     ("_stop_verdict -> the stop gate always allows the turn to end",
      ".game_loop/bin/game_loop::_stop_verdict", "    return True, \"\", None\n",
@@ -563,13 +572,13 @@ MUTANTS += [
      ["worktree", "working tree", "checkout"], None, 3),
     ("pin_status -> never reports a tree as pinned",
      ".game_loop/bin/game_loop::pin_status", "    return False, None\n",
-     ["pin", "pinned"], None, 0),
+     ["pin", "pinned"], None, 2),
     ("probe_reading -> a probe's output never yields a reading",
      ".game_loop/bin/game_loop::probe_reading", "    return {}, None\n",
      ["probe", "rate-limit", "context window"], None, 3),
     ("running_host_version -> the running host's version is never known",
      ".game_loop/bin/game_loop::running_host_version", "    return None, \"neutered\"\n",
-     ["host", "version", "EXECPATH"], None, 0),
+     ["host", "version", "EXECPATH"], None, 3),
     ("_scan_transcript -> the transcript never yields records",
      ".game_loop/bin/game_loop::_scan_transcript",
      "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
@@ -600,7 +609,7 @@ MUTANTS += [
      ["remote", "ref", "ONLY LOCAL", "push"], None, 0),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
      ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
-     ["#76", "upstream"], None, 0),
+     ["#76", "upstream"], None, 1),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
      ["notify", "probe", "read"], None, 3),

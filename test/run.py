@@ -9338,6 +9338,53 @@ def main():
     finally:
         shutil.rmtree(_pp, ignore_errors=True)
 
+    # ---- remote_has_ref itself, against a REAL remote. The sweep found it UNPROTECTED at 0. ----
+    # I tested mark_publication_state with remote_has_ref STUBBED, which exercises the reporter and
+    # leaves the thing being reported on unmeasured. Covering the report and not the reported thing
+    # is the same trick every stamp in this project hides behind, and I did it while fixing one.
+    _rr = tempfile.mkdtemp(prefix="gl_remoteref_")
+    try:
+        _bare = os.path.join(_rr, "origin.git")
+        _work = os.path.join(_rr, "work")
+        subprocess.run(["git", "init", "-q", "--bare", _bare], check=True)
+        subprocess.run(["git", "init", "-q", _work], check=True)
+        _g = ["git", "-C", _work]
+        subprocess.run(_g + ["config", "user.email", "t@t"], check=True)
+        subprocess.run(_g + ["config", "user.name", "t"], check=True)
+        with open(os.path.join(_work, "f"), "w") as f:
+            f.write("x")
+        subprocess.run(_g + ["add", "-A"], check=True)
+        subprocess.run(_g + ["commit", "-q", "-m", "c"], check=True)
+        subprocess.run(_g + ["remote", "add", "origin", _bare], check=True)
+        subprocess.run(_g + ["tag", "stable-local-only"], check=True)
+        subprocess.run(_g + ["tag", "stable-pushed"], check=True)
+        subprocess.run(_g + ["push", "-q", "origin", "stable-pushed"], check=True)
+
+        _rrh = os.path.join(_work, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _rrh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        _rl = importlib.machinery.SourceFileLoader("gl_rr", os.path.join(_rrh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _rrh
+        _grr = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rr", _rl))
+        _rl.exec_module(_grr)
+        os.environ.pop("GAME_LOOP_HOME", None)
+        _grr.REPO_ROOT = _work
+
+        check("remote_has_ref finds a tag that was actually PUSHED",
+              _grr.remote_has_ref("stable-pushed") is True)
+        check("...and returns False — not None — for a tag that exists locally and was never "
+              "pushed, which is the case the whole check was built for",
+              _grr.remote_has_ref("stable-local-only") is False)
+        subprocess.run(_g + ["remote", "remove", "origin"], check=True)
+        check("...and a tree with NO remote is COULD NOT ASK (None), never False. An unanswerable "
+              "question rendered as 'not pushed' would be a confident answer nobody established",
+              _grr.remote_has_ref("stable-pushed") is None)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_rr, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

@@ -194,7 +194,7 @@
     },
     {
       "seq": 18,
-      "sha": "pending",
+      "sha": "f9d0a01",
       "notice": true,
       "verb": "the write guard, on Bash writes to .game_loop policy files",
       "change": "a NEW refusal. `.game_loop/verify.yaml`, `config.json`, `INVARIANTS.md` (once they exist) and `config.local.json` (always) are now refused through Bash as well as Write/Edit \u2014 redirects, heredoc appends, `tee`, `sed -i`, and `cp`/`mv` onto the path. Reading, grepping and writing LEDGER.md are unaffected.",
@@ -203,7 +203,7 @@
     },
     {
       "seq": 19,
-      "sha": "pending",
+      "sha": "f9d0a01",
       "notice": true,
       "verb": "mutate --prove",
       "change": "two new COULD NOT PROVE outcomes. A test command that reports ZERO selected tests is refused in both directions. And a mutated run that PASSES while printing no recognisable test count AND whose anchor could not be liveness-probed is refused rather than reported as NOT PROVED.",

@@ -34,6 +34,7 @@ session (a human terminal, an older harness) state falls back to the repo-global
 Every event appends to the shared .game_loop/log.jsonl, stamped with the session that wrote it.
 Configuration lives in .game_loop/config.json. Nothing here needs any dependency beyond Python 3 stdlib.
 """
+import ast
 import argparse
 import collections
 import datetime
@@ -2306,6 +2307,61 @@ def cmd_arm(s, a):
     flair_out(s, "arm")
 
 
+_MUTATE_MARKER = "GL_MUTATE_LIVENESS_PROBE"
+
+
+def _py_parses(src):
+    """Does this source still compile? None when the question does not apply."""
+    try:
+        ast.parse(src)
+        return True
+    except SyntaxError:
+        return False
+
+
+def mutation_liveness(orig, replace, path, run):
+    """Is the anchor ON the test's execution path? ("live"|"inert"|"unknown", why).
+
+    THE POSITIVE CONTROL THIS VERB SHIPPED WITHOUT (#80). A green run under mutation has two very
+    different causes — the test does not cover this line, or the mutation never executed — and they
+    are indistinguishable from the outside. Reported as the first, the verb sends an agent to rewrite
+    a test that was fine, and it is the answer that ENDS the investigation, so it is the one least
+    likely to be questioned.
+
+    The probe replaces the anchor with a bare `raise` and demands the test fail CARRYING THE MARKER.
+    Failing for any other reason is not evidence: the reporter's own first cut matched the marker
+    inside a PARSE ERROR and called a dead anchor live, which is why the compile check comes first
+    and why the marker must appear in the output rather than merely somewhere in a red run.
+    """
+    if not path.endswith(".py"):
+        return "unknown", ("liveness probing is Python-only — it has to parse what it writes, and "
+                           "this file is not Python")
+    at = orig.index(replace)
+    line_start = orig.rfind("\n", 0, at) + 1
+    prefix = orig[line_start:at]
+    # THE ANCHOR OFTEN CARRIES ITS OWN INDENTATION ("    x = 1"), in which case the prefix is empty
+    # and the raise would land at column 0 inside a function — an IndentationError that reads as
+    # "not a whole statement" and hides a perfectly probeable anchor behind the unknown outcome.
+    first = replace.split("\n", 1)[0]
+    indent = prefix + first[:len(first) - len(first.lstrip())]
+    if prefix.strip():
+        return "unknown", ("the anchor starts mid-line, so a `raise` cannot be substituted for it "
+                           "without changing the surrounding expression")
+    poisoned = orig.replace(replace, f'{indent}raise SystemExit("{_MUTATE_MARKER}")', 1)
+    if not _py_parses(poisoned):
+        return "unknown", ("the anchor is not a whole statement — replacing it with a `raise` does "
+                           "not compile, so the probe cannot be run here")
+    rc, out = run(poisoned)
+    if rc is None:
+        return "unknown", "the probe run timed out, so nothing was established either way"
+    if rc != 0 and _MUTATE_MARKER in out:
+        return "live", "the probe raised and the test carried the marker"
+    if rc != 0:
+        return "unknown", ("the test failed under the probe but WITHOUT the marker, so something "
+                           "other than the probe broke it and liveness is unestablished")
+    return "inert", "the test passed with a `raise` at that anchor — it never runs that line"
+
+
 def cmd_mutate(s, a):
     """Prove a test PINS something, by breaking the code and watching it go red (#71).
 
@@ -2332,6 +2388,20 @@ def cmd_mutate(s, a):
                            timeout=int(a.timeout or 900))
         return r.returncode
 
+    def run_source(src):
+        """Run the test against `src` written to the file, restoring it afterwards. (rc, output)."""
+        try:
+            with open(path, "w") as f:
+                f.write(src)
+            r = subprocess.run(["bash", "-c", a.test], cwd=REPO_ROOT, capture_output=True,
+                               text=True, timeout=int(a.timeout or 900))
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+        except subprocess.TimeoutExpired:
+            return None, ""
+        finally:
+            with open(path, "w") as f:
+                f.write(orig)
+
     try:
         before = run_test()
     except subprocess.TimeoutExpired:
@@ -2339,10 +2409,32 @@ def cmd_mutate(s, a):
     if before != 0:
         die(f"the test already FAILS on the unmutated tree (exit {before}).\n"
             "A red test proves nothing about what it pins: it is red either way. Get it green first.")
+    # THE POSITIVE CONTROL, BEFORE THE RESULT IT QUALIFIES (#80). Run first so a green mutated run
+    # can be attributed: without it, "the test does not cover this" and "the mutation never ran"
+    # are the same observation, and the verb was reporting the first for both.
+    live, live_why = mutation_liveness(orig, a.replace, path, run_source)
+    if live == "inert":
+        die(f"YOUR MUTATION WOULD HAVE BEEN INERT — the anchor is not on this test's path.\n\n"
+            f"  {a.file}: {a.replace!r}\n"
+            f"  {a.test}\n"
+            f"  probe: {live_why}\n\n"
+            "A `raise` at that exact anchor did NOT make the test fail, so nothing you put there "
+            "can. This is NOT 'the test is vacuous' — that is the answer this verb used to give "
+            "here, and it sends you to rewrite a test that may be fine. A docstring, a comment, a "
+            "type annotation, an unreachable branch, or a line this test simply never reaches all "
+            "look like this. Move the anchor to code the test executes.")
+    mutated_src = orig.replace(a.replace, a.with_, 1)
+    if path.endswith(".py") and not _py_parses(mutated_src):
+        die(f"COULD NOT PROVE — the mutated file does not COMPILE.\n\n"
+            f"  {a.file}: {a.replace!r} -> {a.with_!r}\n\n"
+            "A test cannot fail 'because of your mutation' when the file has stopped being a "
+            "program: it fails on import, for every test, whatever they cover. This verb used to "
+            "report that red run as ✓ PROVED — the strongest thing it can say, about nothing at "
+            "all. Write a mutation that compiles.")
     restored, after = False, None
     try:
         with open(path, "w") as f:
-            f.write(orig.replace(a.replace, a.with_, 1))
+            f.write(mutated_src)
         # BUMP THE MTIME, or a same-size mutation is invisible to every cache keyed on (mtime, size).
         # Found by this verb returning NOT PROVED for a test that demonstrably DOES go red: `a + b`
         # -> `a - b` is byte-for-byte the same length, both writes landed inside one filesystem mtime
@@ -2377,10 +2469,14 @@ def cmd_mutate(s, a):
         die(f"NOT PROVED — the test still PASSED with the mutation applied (exit 0).\n\n"
             f"  {a.file}: {a.replace!r} -> {a.with_!r}\n"
             f"  {a.test}\n\n"
-            "This test does not pin what you said it pins. That is the finding, and it is the one "
-            "worth having: a reviewer found three of eight leaves in this state, each having "
-            "reported a revert-proof in prose. Either the test is not covering this line, or the "
-            "mutation is not the behaviour it covers.")
+            + ("The anchor IS on the test's path — a `raise` there does make this test fail — so "
+               "this is the real finding: the test runs that line and does not notice what it "
+               "does. A reviewer found three of eight leaves in exactly this state, each having "
+               "reported a revert-proof in prose."
+               if live == "live" else
+               f"LIVENESS UNESTABLISHED ({live_why}), so this is NOT yet a finding about the test. "
+               "The mutation may simply never have executed. Establish that the anchor runs before "
+               "concluding anything about coverage."))
     logline({"kind": "mutate_prove", "prove": a.prove, "file": path, "test": a.test,
              "replace": a.replace[:120], "with": a.with_[:120], "before": before, "after": after})
     s["mutate_proofs"] = s.get("mutate_proofs", 0) + 1
@@ -2398,6 +2494,7 @@ def cmd_mutate(s, a):
         "",
         "WHAT THIS DOES NOT SAY: that the test is good, that this mutation is the bug the fix was",
         "for, or that anything else is covered. It says this one line is pinned by that one test.",
+        f"  liveness probe: {live} — {live_why}",
         *_proved)
 
 

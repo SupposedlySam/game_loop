@@ -9204,6 +9204,68 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_mp, ignore_errors=True)
 
+    # ---- #80: an INERT mutation is not a vacuous test, and a broken file is not a proof ----
+    _mu = tempfile.mkdtemp(prefix="gl_mutate80_")
+    try:
+        _muh = os.path.join(_mu, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _muh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        subprocess.run(["git", "init", "-q", _mu], check=True)
+        _sub = os.path.join(_mu, "subject.py")
+        with open(_sub, "w") as f:
+            f.write('def used():\n'
+                    '    """doc mentioning THRESHOLD = 5 which is not code"""\n'
+                    '    return 5\n\n\n'
+                    'def never_called():\n'
+                    '    x = 1\n'
+                    '    return x\n')
+        _tst = os.path.join(_mu, "t.py")
+        with open(_tst, "w") as f:
+            f.write("import sys\nsys.path.insert(0, %r)\nimport subject\n"
+                    "sys.exit(0 if subject.used() == 5 else 1)\n" % _mu)
+
+        def _mut(replace, with_):
+            return subprocess.run(
+                [os.path.join(_muh, "bin", "game_loop"), "mutate", "--prove", "p",
+                 "--test", f"python3 {_tst}", "--file", _sub, "--replace", replace,
+                 "--with", with_],
+                capture_output=True, text=True, cwd=_mu,
+                env=dict(os.environ, GAME_LOOP_HOME=_muh))
+
+        _r = _mut("    return 5", "    return 5 +")
+        check("#80: a mutation that leaves the file UNPARSEABLE is COULD NOT PROVE — it used to "
+              "report ✓ PROVED, the strongest thing this verb can say, about a test that failed "
+              "on import",
+              _r.returncode != 0 and "COULD NOT PROVE" in _r.stderr + _r.stdout
+              and "PROVED — the test goes RED" not in _r.stdout)
+
+        _r2 = _mut("    x = 1", "    x = 2")
+        _t2 = _r2.stderr + _r2.stdout
+        check("#80: an anchor the test never executes is reported as YOUR MUTATION WOULD HAVE BEEN "
+              "INERT — not as a vacuous test, which is the answer that sends you to rewrite a test "
+              "that may be fine",
+              _r2.returncode != 0 and "INERT" in _t2 and "not on this test's path" in _t2
+              and "does not pin what you said it pins" not in _t2)
+
+        _r3 = _mut("    return 5", "    return 6")
+        check("#80: a real mutation still PROVES, and now states what the liveness probe "
+              "established rather than leaving the control invisible",
+              _r3.returncode == 0 and "PROVED — the test goes RED" in _r3.stdout
+              and "liveness probe: live" in _r3.stdout)
+        check("#80: ...and the tree is restored after every one of those paths, including the two "
+              "that refuse",
+              open(_sub).read().endswith("    x = 1\n    return x\n"))
+
+        _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
+        _t4 = _r4.stderr + _r4.stdout
+        check("#80: an anchor that cannot be probed says LIVENESS UNESTABLISHED and explicitly "
+              "declines to call it a finding — an absent control reported as absent, not implied",
+              "LIVENESS UNESTABLISHED" in _t4 and "NOT yet a finding" in _t4)
+    finally:
+        shutil.rmtree(_mu, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

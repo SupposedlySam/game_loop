@@ -592,6 +592,9 @@ MUTANTS += [
     ("merge_files -> a merge never yields the paths it touched",
      ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
      ["merge", "attribute", "merge-base"], None, 10),
+    ("mutation_liveness -> the probe never establishes anything",
+     ".game_loop/bin/game_loop::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
+     ["#80", "liveness", "INERT"], None, 0),
     ("remote_has_ref -> the remote never has the ref",
      ".game_loop/bin/game_loop::remote_has_ref", "    return False\n",
      ["remote", "ref", "ONLY LOCAL", "push"], None, 0),
@@ -605,6 +608,20 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    ".game_loop/bin/game_loop::_py_parses": "ast.parse with a boolean face (#80). Neutered to a "
+            "constant it either passes every mutated file — which the COULD-NOT-PROVE assertion "
+            "beside it catches directly — or refuses every one, which the ✓ PROVED assertion "
+            "catches. Both arms are asserted in-suite against real broken and real valid sources, "
+            "which is a stronger check than mutation and does not need the same name twice.",
+    ".game_loop/bin/game_loop::run_source": "a closure inside cmd_mutate that writes a source, runs "
+            "the test and restores — it is the probe's I/O, not a producer that reports by "
+            "silence. Its restore path is asserted directly (the tree is intact after every "
+            "refusing path), which is the property worth pinning.",
+    ".game_loop/bin/game_loop::cmd_mutate": "the verb itself, whose every outcome is driven end to "
+            "end by the #80 assertions — unparseable, inert, unprobeable and proved, each with the "
+            "tree checked afterwards. Neutering the command body would fail all of them at once "
+            "and measure nothing finer than 'the verb runs'.",
+
     ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
             "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
             "git-failed arm beside the git-worked one",

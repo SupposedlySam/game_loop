@@ -167,7 +167,7 @@
     },
     {
       "seq": 15,
-      "sha": "pending",
+      "sha": "7c54835",
       "notice": true,
       "verb": "the Stop gate, on a checkpoint whose notes name the next action",
       "change": "a NEW refusal. Under a live mandate, with nothing armed and nothing reporting as waiting, a checkpoint whose notes name a successor ('Next: X', 'moving on to X', \"I'll start X\") is REFUSED, and the refusal quotes the phrase. A named blocker in the same notes ('blocked on <fact>', 'needs a decision') clears it, as does an armed T3 or a probe reporting waiting.",

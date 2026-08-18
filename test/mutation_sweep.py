@@ -368,7 +368,7 @@ MUTANTS = [
     # Eight of the ten turned out to be genuinely well protected; the surprise was how well, which
     # is worth saying because the issue's framing (and mine) assumed the opposite.
     ("verify.changed_files -> no file ever looks changed", ".game_loop/bin/verify::changed_files",
-     "    return None\n", ["verify", "changed", "stale", "owes"], None, 55),
+     "    return None\n", ["verify", "changed", "stale", "owes"], None, 0),
     ("verify.staged_files -> nothing is ever staged", ".game_loop/bin/verify::staged_files",
      "    return []\n", ["staged", "blast", "commit"], None, 5),
     ("notify.send -> a page is never actually sent", ".game_loop/bin/notify.py::send",
@@ -506,7 +506,7 @@ MUTANTS = [
     # crash cascades, not coverage. A mutation has to be the producer's own silence.
     ("watchdog._merged_config -> the local config override is invisible to the watchdog",
      ".game_loop/bin/watchdog::_merged_config", "    return {}\n",
-     ["config.local", "override", "watchdog", "waiting"], None, 6),
+     ["config.local", "override", "watchdog", "waiting"], None, 0),
     ("notify._merged_config -> paging never sees the local override",
      ".game_loop/bin/notify.py::_merged_config", "    return {}\n",
      ["notify", "config.local", "project"],
@@ -543,10 +543,20 @@ MUTANTS = [
 # described a tree nobody would ever have. That is this file's own rule about comparability, paid
 # rather than quoted.
 #
-# THE BIG TWO ARE FLOORED WELL BELOW THEIR READING, deliberately. ci_commands and ci_gap each killed
-# 222, and _scan_transcript 171 — those are not 222 assertions ABOUT the CI gap, they are most of the
-# suite noticing that `verify` changed shape. A floor set at the reading would trip on any unrelated
-# edit, and a floor that cries wolf gets lowered until it means nothing.
+# THOSE THREE WERE NEVER MEASURED, and this comment used to explain their numbers.
+#
+# ci_commands 222, ci_gap 222, _scan_transcript 171. I saw three readings far outside every other
+# producer's range, invented "blast radius" to explain them, and then set floors BELOW readings I had
+# just decided were inflated — a number being managed rather than taken. A consumer said so plainly:
+# the rationalisation was doing the work the measurement should have.
+#
+# Re-measured with NOT MEASURED in place, all three came back NOT MEASURED: the suite never finished
+# under those mutants, so every assertion that never ran counted as killed. There was no reading to
+# explain. Their floors are 0 and owed, along with five more that were producing the same inflated
+# numbers unnoticed.
+#
+# The lesson is not about these three. It is that an explanation which fits a number is not evidence
+# the number exists.
 #
 # PAID at 87b40d2, the sweep AFTER the one that found them UNPROTECTED: pin_status 2,
 # running_host_version 3, _upstream_fetch 1. Thin, and honestly thin — few arms by nature.
@@ -570,7 +580,7 @@ MUTANTS += [
      ["waiting", "watchdog", "subagent", "idle"], None, 12),
     ("upstream_check -> the upstream watcher reports nothing, ever",
      ".game_loop/bin/game_loop::upstream_check", "    return [], \"off\"\n",
-     ["#76", "upstream"], None, 14),
+     ["#76", "upstream"], None, 0),
     ("ahead_of_upstream -> never sees an unpushed commit",
      ".game_loop/bin/game_loop::ahead_of_upstream", "    return 0, None, None\n",
      ["unpushed", "upstream", "ahead"], None, 5),
@@ -589,13 +599,13 @@ MUTANTS += [
     ("_scan_transcript -> the transcript never yields records",
      ".game_loop/bin/game_loop::_scan_transcript",
      "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
-     ["transcript", "denial", "oversized"], None, 120),
+     ["transcript", "denial", "oversized"], None, 0),
     ("ci_commands -> CI's commands are never read",
      ".game_loop/bin/verify::ci_commands", "    return [], \"neutered\"\n",
-     ["CI", "workflow"], None, 150),
+     ["CI", "workflow"], None, 0),
     ("ci_gap -> no CI command is ever reported as ungated",
      ".game_loop/bin/verify::ci_gap", "    return [], \"\"\n",
-     ["CI", "workflow", "gap"], None, 150),
+     ["CI", "workflow", "gap"], None, 0),
     ("milestones -> flair never marks a milestone",
      ".game_loop/bin/flair.py::milestones", "    return [], []\n",
      ["flair", "milestone"], None, 4),

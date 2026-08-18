@@ -176,7 +176,22 @@ MUTANTS = [
     # is neutered, because most of them exercise the gate through the stop hook rather than through
     # the producer's own verdict. Recorded at what was measured, with the thinness visible, because
     # a floor written above its measurement is the target-making this file exists to refuse.
-    ("retro_nudge -> never says a retro is due",
+        # CHASED, NOT LOWERED. This came back 1 < 3 and the drop was REAL: neutered with this file's
+    # own mutator against the archived tree, retro_nudge changed nothing observable at all. Three
+    # instrument explanations were ruled out by measurement first — duplicate assertion names (the
+    # suite has exactly one), the 7 archived-tree failures that cannot flip (all pin/central-install,
+    # none retro), and my own hand-rolled neutering, which broke the file and produced 58 failures
+    # across unrelated subsystems. That last one was not a result; it is why the real run used
+    # neuter().
+    #
+    # So the floor was measured against an assertion set that had stopped covering it, and this
+    # producer is the LINE THAT TELLS AN AGENT A RETRO IS DUE — with the reported symptom from a
+    # human running many agents being exactly "they ignore when a retro is due and never check
+    # again". Six assertions now cover both arms and both counters, and `mutate --prove` confirms the
+    # suite goes RED when it stops nudging. The floor STAYS 3 until the next full sweep re-measures
+    # it with the same instrument; raising it from the run that prompted the fix would be a number
+    # from a different experiment.
+("retro_nudge -> never says a retro is due",
      ".game_loop/bin/game_loop::retro_nudge", "    return None\n", ["retro", "due"], None, 3),
     # THE DEBT THE LAST SWEEP COULD NOT PAY. Both gate turn-end. They sat in NOT_SWEPT for one run
     # — which is what excludes a producer from the instrument — and were ALSO missing from the

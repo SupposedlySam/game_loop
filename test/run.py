@@ -9092,6 +9092,58 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_up3, ignore_errors=True)
 
+    # ---- retro_nudge: floor 3, measured 1, neutering it killed nothing. Chased, not lowered. ----
+    _rn = tempfile.mkdtemp(prefix="gl_nudge_")
+    try:
+        _rnh = os.path.join(_rn, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _rnh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        _rl = importlib.machinery.SourceFileLoader("gl_rn", os.path.join(_rnh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _rnh
+        _gr = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rn", _rl))
+        _rl.exec_module(_gr)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        check("retro_nudge stays SILENT with no work since the last retro — the decline arm, "
+              "without which every assertion below is satisfied by a function that always fires",
+              _gr.retro_nudge({"trans_since_stepback": 0, "work_since_stepback": 0}) is None)
+        check("...and stays silent one short of BOTH thresholds, so the boundary is asserted "
+              "rather than the middle of the range",
+              _gr.retro_nudge({"trans_since_stepback": 11, "work_since_stepback": 7}) is None)
+
+        _w = _gr.retro_nudge({"trans_since_stepback": 0, "work_since_stepback": 8})
+        check("EVIDENCE WORK alone fires it at 8 — this counter exists because the transitions one "
+              "counted a verb nobody ran, so a nudge that needs `trans` is the original bug",
+              _w and "evidence work" in _w and "stepback" in _w)
+        _t = _gr.retro_nudge({"trans_since_stepback": 12, "work_since_stepback": 0})
+        check("...and TRANSITIONS alone fires it at 12, so either counter reaches the nudge and "
+              "neither is load-bearing on its own",
+              _t and "transitions" in _t)
+        check("...and the two say DIFFERENT things, so a reader can tell which counter tripped "
+              "rather than being told a retro is due for reasons unknown",
+              _t != _w)
+
+        # THE THRESHOLDS ARE CONFIGURABLE, and a nudge that ignored config would be one nobody could
+        # tune to their own cadence — which is how a warning that fires too often gets ignored.
+        _cf = os.path.join(_rnh, "config.json")
+        with open(_cf) as f:
+            _orig_cfg = f.read()
+        try:
+            with open(_cf, "w") as f:
+                json.dump({**json.loads(_orig_cfg), "work_nudge_every": 3}, f)
+            _gr.config.cache_clear() if hasattr(_gr.config, "cache_clear") else None
+            check("a lowered work_nudge_every fires the nudge earlier — the threshold is read from "
+                  "config, not compiled in",
+                  bool(_gr.retro_nudge({"trans_since_stepback": 0, "work_since_stepback": 3})))
+        finally:
+            with open(_cf, "w") as f:
+                f.write(_orig_cfg)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_rn, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

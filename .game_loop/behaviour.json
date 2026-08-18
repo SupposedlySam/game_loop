@@ -191,6 +191,24 @@
       "change": "two widenings of seq 15. A checkpoint that lists what is LEFT ('mandate has 4108, 4109, 4111 left') is now a deferral even when it never says 'next' \u2014 both a remaining-word AND a work-item token are required, so an ordinary finding like 'the remaining 19 failures are pre-existing' still passes. And `stop_hook_active` no longer allows a turn-end when NOTHING is on the record since the gate's last refusal.",
       "consequence": "turn-ends that summarise outstanding work now stop, and answering a block by rewriting the closing message no longer succeeds on the second attempt \u2014 one tool call clears it. The two-block circuit breaker still stands the gate down, and the refusal now says so explicitly. An unreadable log allows, unchanged.",
       "why_it_qualifies": "a consumer who changed nothing is refused turn-ends that succeeded before. Both measured across two overnight strandings on the reporter's side, where every gate fired correctly, `consecutive` never reached the stand-down bound, and the run still ended: the enforcement budget for a turn-end was exactly one refusal, and the cheapest way to spend it was on prose."
+    },
+    {
+      "seq": 18,
+      "sha": "pending",
+      "notice": true,
+      "verb": "the write guard, on Bash writes to .game_loop policy files",
+      "change": "a NEW refusal. `.game_loop/verify.yaml`, `config.json`, `INVARIANTS.md` (once they exist) and `config.local.json` (always) are now refused through Bash as well as Write/Edit \u2014 redirects, heredoc appends, `tee`, `sed -i`, and `cp`/`mv` onto the path. Reading, grepping and writing LEDGER.md are unaffected.",
+      "consequence": "if you edit your own policy files with a shell redirect, that stops working and prints the same authorize hatch Write/Edit has printed since #65. Nothing that was refused becomes allowed.",
+      "why_it_qualifies": "a consumer who changed nothing is refused a command that previously succeeded. Reported with a reproduction: the guard was registered on Write/Edit only, so `cat >> .game_loop/verify.yaml` widened the file that bounds the session with exit 0 \u2014 and because nothing was refused, nothing was logged, which removes the very evidence #65 exists to preserve. They found it non-adversarially: the human had approved the change, they reached for a heredoc because they were appending rather than editing, and it simply worked."
+    },
+    {
+      "seq": 19,
+      "sha": "pending",
+      "notice": true,
+      "verb": "mutate --prove",
+      "change": "two new COULD NOT PROVE outcomes. A test command that reports ZERO selected tests is refused in both directions. And a mutated run that PASSES while printing no recognisable test count AND whose anchor could not be liveness-probed is refused rather than reported as NOT PROVED.",
+      "consequence": "a proof whose test filter matches nothing now stops instead of reporting NOT PROVED, and the refusal prints the tree the test ran in beside the file it mutated. A mutated run that goes RED is unaffected \u2014 redness is self-evidencing, since a command that selected nothing cannot fail.",
+      "why_it_qualifies": "a consumer who changed nothing gets a refusal where they previously got a verdict. Reported from a linked git worktree: --file resolved against their cwd while the test ran in another root, mocha's --grep matched nothing, zero tests were selected, and exit 0 was reported as NOT PROVED for a mutation that demonstrably fails the test."
     }
   ],
   "schema": 1

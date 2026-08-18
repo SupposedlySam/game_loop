@@ -2538,6 +2538,37 @@ def mutation_liveness(orig, replace, path, run):
     return "inert", "the test passed with a `raise` at that anchor — it never runs that line"
 
 
+# One line per runner, and the shapes are stable across their whole lifetimes. A parse that
+# recognises NOTHING is not a zero — it is an unreadable count, which is a different outcome.
+_TEST_COUNT_PATS = (
+    re.compile(r"^\s*(\d+) passing\b", re.M),                      # mocha
+    re.compile(r"\b(\d+) passed\b"),                               # pytest, vitest, jest, this repo
+    re.compile(r"^Ran (\d+) tests?\b", re.M),                       # python unittest
+    re.compile(r"^ok\s+(\d+)\b", re.M),                            # go test / TAP
+    re.compile(r"^\+(\d+)\s*[-~]", re.M),                          # flutter test
+    re.compile(r"\b(\d+) tests? ran\b", re.I),
+)
+
+
+def selected_tests(out):
+    """(count, why) from a runner's output. (None, why) when no shape is recognised.
+
+    ZERO IS THE FINDING (#85). A command that selects no tests exits 0, which is byte-identical to
+    a suite that ran and passed — so a mutation "surviving" it means nothing, and neither does a
+    mutation killing it. The reporter hit this from a linked worktree, where --file resolved against
+    one root and the test ran in another.
+    """
+    if not out:
+        return None, "the test produced no output to read a count from"
+    for pat in _TEST_COUNT_PATS:
+        m = pat.search(out)
+        if m:
+            n = int(m.group(1))
+            fails = re.search(r"\b(\d+) (?:failing|failed)\b", out)
+            return n + (int(fails.group(1)) if fails and n == 0 else 0), ""
+    return None, "no recognised test-count line (mocha, pytest, unittest, go, flutter, TAP)"
+
+
 def cmd_mutate(s, a):
     """Prove a test PINS something, by breaking the code and watching it go red (#71).
 
@@ -2562,7 +2593,7 @@ def cmd_mutate(s, a):
     def run_test():
         r = subprocess.run(["bash", "-c", a.test], cwd=REPO_ROOT, capture_output=True, text=True,
                            timeout=int(a.timeout or 900))
-        return r.returncode
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
 
     def run_source(src):
         """Run the test against `src` written to the file, restoring it afterwards. (rc, output)."""
@@ -2579,9 +2610,22 @@ def cmd_mutate(s, a):
                 f.write(orig)
 
     try:
-        before = run_test()
+        before, before_out = run_test()
     except subprocess.TimeoutExpired:
         die("the test timed out on the UNMUTATED tree — nothing can be concluded. --timeout to raise.")
+    n_sel, sel_why = selected_tests(before_out)
+    if n_sel == 0:
+        die(f"COULD NOT PROVE — the test command selected NO TESTS.\n\n"
+            f"  {a.test}\n"
+            f"  ran in : {REPO_ROOT}\n"
+            f"  mutating: {path}\n\n"
+            "A command that selects nothing exits 0, which is byte-identical to a suite that ran "
+            "and passed. So a mutation 'surviving' it means nothing, and a mutation killing it "
+            "would mean nothing either — this is refused in BOTH directions, because a "
+            "zero-selection run is not a result.\n\n"
+            "THE COMMON CAUSE IS TWO ROOTS. `--file` resolves against your cwd and the test runs in "
+            "the tree above; from a linked git worktree those are different places, and a filter "
+            "that matches nothing there fails silently. Compare the two paths printed above.")
     if before != 0:
         die(f"the test already FAILS on the unmutated tree (exit {before}).\n"
             "A red test proves nothing about what it pins: it is red either way. Get it green first.")
@@ -2623,7 +2667,7 @@ def cmd_mutate(s, a):
             pass                    # best effort: a filesystem that refuses this is not a reason to
                                     # abandon the proof, but the caller may see a stale-cache pass
         try:
-            after = run_test()
+            after, _after_out = run_test()
         except subprocess.TimeoutExpired:
             after = None
     finally:
@@ -2641,6 +2685,25 @@ def cmd_mutate(s, a):
         die("the test timed out on the MUTATED tree. That is not a failure — it is a run that could "
             "not answer, and treating it as red would be the exact substitution this verb exists to "
             "stop.")
+    # ONLY ON THE GREEN BRANCH, and the asymmetry is the whole point. A mutated run that goes RED
+    # is self-evidencing: a command that selected nothing cannot fail, so the redness IS the proof
+    # that tests ran and reacted. It is the GREEN result — "the test survived" — that a
+    # zero-selection run impersonates, which is exactly the false NOT PROVED that was reported.
+    #
+    # My first cut refused on both branches and the suite caught it immediately: a bare assert
+    # script prints no count, and a mid-line anchor cannot be probed, so both instruments are silent
+    # for a perfectly good proof. Refusing there would have priced the honest case to buy nothing.
+    if after == 0 and n_sel is None and live != "live":
+        die(f"COULD NOT PROVE — the test PASSED under mutation, and nothing establishes it RAN.\n\n"
+            f"  {a.test}\n"
+            f"  ran in : {REPO_ROOT}\n"
+            f"  mutating: {path}\n"
+            f"  count  : {sel_why}\n"
+            f"  probe  : {live_why}\n\n"
+            "Two instruments, and neither answered: no recognised test-count line, and the liveness "
+            "probe could not run here. Either one alone would have been enough — a count proves "
+            "tests were selected, a probe proves the anchor is on their path. With both silent, a "
+            "verdict in either direction would rest on nothing.")
     if after == 0:
         die(f"NOT PROVED — the test still PASSED with the mutation applied (exit 0).\n\n"
             f"  {a.file}: {a.replace!r} -> {a.with_!r}\n"
@@ -2671,6 +2734,8 @@ def cmd_mutate(s, a):
         "WHAT THIS DOES NOT SAY: that the test is good, that this mutation is the bug the fix was",
         "for, or that anything else is covered. It says this one line is pinned by that one test.",
         f"  liveness probe: {live} — {live_why}",
+        (f"  tests selected: {n_sel}" if n_sel is not None
+         else f"  tests selected: UNREADABLE ({sel_why}) — the probe above is what carries this"),
         *_proved)
 
 

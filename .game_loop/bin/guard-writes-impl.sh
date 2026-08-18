@@ -1248,7 +1248,7 @@ somebody meets it."
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.
-    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
+    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" SCAN_CMD="$scan_cmd" GAMELOOP_DIR="$GAMELOOP_DIR" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 
 payload = json.loads(sys.argv[1])
@@ -1345,6 +1345,29 @@ def offends(raw, cwd):
     return real
 
 
+def policy_name(raw, cwd):
+    """"<name>\t<realpath>" when this path IS a policy file, else None. Same rules as Write/Edit.
+
+    Rule files count only once they EXIST — seeding an absent one is an installer provisioning a
+    tree, not a session rewriting its own gate. config.local.json counts either way: its keys merge
+    with UNION semantics, so anything written there is strictly additive and cannot be narrowed by
+    the project's own config.
+    """
+    p = os.path.expanduser(raw.replace("$HOME", home))
+    if not os.path.isabs(p):
+        p = os.path.join(cwd, p)
+    real = os.path.realpath(p)
+    gl = os.path.realpath(os.environ.get("GAMELOOP_DIR", ""))
+    if not gl:
+        return None
+    for n in ("config.json", "INVARIANTS.md", "verify.yaml"):
+        if real == os.path.join(gl, n) and os.path.exists(real):
+            return n + "\t" + real
+    if real == os.path.join(gl, "config" + ".local.json"):
+        return "config" + ".local.json\t" + real
+    return None
+
+
 def redirect_targets(seg):
     """Redirect targets in one segment, QUOTE-AWARE in both directions: a redirect character inside
     quotes is data (a sed script, prose in a message) and must not be flagged, while a QUOTED target
@@ -1400,6 +1423,7 @@ def redirect_targets(seg):
 
 
 offenders = []
+policy_hits = []
 # Split on shell separators AND newlines. Omitting \n would collapse a multi-line command into one
 # segment whose verb is its first token, so a mutating later line would never be checked.
 for seg in re.split(r"&&|\|\||;|\||\n", cmd):
@@ -1435,11 +1459,50 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
         bad = offends(raw, cwd)
         if bad:
             offenders.append(bad)
+        # THE POLICY FILES, ON THE BASH PATH TOO (#86). Registered on Write/Edit only, the gate that
+        # bounds the session was a suggestion against `>>` — and because nothing was refused,
+        # nothing was logged either, which removes the very evidence #65 exists to preserve.
+        # Same resolved paths as the rule above, so redirects, sed -i, tee and cp/mv are covered by
+        # construction rather than by a second list of verbs to keep in step.
+        pol = policy_name(raw, cwd)
+        if pol:
+            policy_hits.append(pol)
 
 for o in dict.fromkeys(offenders):
     print(o)
+for p_ in dict.fromkeys(policy_hits):
+    print("POLICY\t" + p_)
 PY
 )
+
+    pol_line=$(printf '%s' "$offender" | grep '^POLICY\t' | head -1)
+    offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | head -1)
+    if [ -n "$pol_line" ]; then
+      pol_name=$(printf '%s' "$pol_line" | cut -f2)
+      pol_real=$(printf '%s' "$pol_line" | cut -f3)
+      consumed=$(consume_authorization "$pol_real")
+      if [ "$consumed" = "yes" ]; then
+        record_edit "$pol_real"
+        exit 0
+      fi
+      deny "BLOCKED: .game_loop/$pol_name is the PROJECT'S POLICY, and a shell write is still a write.
+
+This is the file that decides what you are allowed to do. Write/Edit to it has been refused since
+#65; a redirect, \`tee\`, \`sed -i\` or a copy onto it was not, so the gate that bounds this session
+was a suggestion against \`>>\`.
+
+THE AUDIT IS THE POINT. The refusal below prescribes \`authorize\`, which records a human's words in
+log.jsonl permanently. A write that is never REFUSED never reaches that hatch — so the policy could
+be widened with no entry anywhere saying it happened, which is the evidence this gate exists to
+preserve.
+
+If a HUMAN approved this change, quote them and it goes on the record:
+  \$GAMELOOP_DIR/bin/game_loop authorize --path $pol_real --reason \"<their exact words>\"
+
+WHAT THIS STILL CANNOT SEE (INV6): a \`python3 -c\` that writes the file, a path built from a shell
+variable, or any MCP tool. It reads the command string. Prevention where it is cheap; the file's
+own hash is the detection this does not yet do."
+    fi
 
     if [ -n "$offender" ]; then
       consumed=$(consume_authorization "$offender")

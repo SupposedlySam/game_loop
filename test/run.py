@@ -6988,8 +6988,16 @@ def main():
         _prod = os.path.join(mt, "prod.py")
         with open(_prod, "w") as f:
             f.write("def add(a, b):\n    return a + b\n")
-        for nm, body in (("t_good.py", "from prod import add\nassert add(2,2)==4\n"),
-                         ("t_weak.py", "from prod import add\nassert add is not None\n")):
+        # THE FIXTURES PRINT A COUNT, because every real runner does (#85). Without one, a weak
+        # test and a command that selected ZERO tests are indistinguishable — both exit 0 having
+        # printed nothing — and the honest verdict for that pair is COULD NOT PROVE, asserted
+        # separately below. Naming the weakness requires evidence that the test ran at all.
+        for nm, body in (("t_good.py",
+                          "from prod import add\nassert add(2,2)==4\nprint('1 passed')\n"),
+                         ("t_weak.py",
+                          "from prod import add\nassert add is not None\nprint('1 passed')\n"),
+                         ("t_silent.py", "from prod import add\nassert add is not None\n"),
+                         ("t_zero.py", "print('0 passing')\n")):
             with open(os.path.join(mt, nm), "w") as f:
                 f.write(body)
 
@@ -7007,6 +7015,23 @@ def main():
         check("...and a test that passes with the bug reintroduced is REFUSED, which is the finding "
               "worth having: three of eight leaves were in exactly this state",
               _weak.returncode != 0 and "NOT PROVED" in (_weak.stdout + _weak.stderr))
+        _zero = _mut("t_zero.py")
+        check("#85: a test command that selected ZERO tests is refused in BOTH directions — it "
+              "exits 0, which is byte-identical to a suite that ran and passed, so neither a "
+              "surviving nor a killed mutation means anything",
+              _zero.returncode != 0
+              and "selected NO TESTS" in (_zero.stdout + _zero.stderr))
+        check("#85: ...and the refusal prints the tree the test RAN IN beside the file it mutated, "
+              "because those resolve against different roots from a linked worktree and nothing "
+              "else in the output would say so",
+              "ran in :" in (_zero.stdout + _zero.stderr)
+              and "mutating:" in (_zero.stdout + _zero.stderr))
+        _silent = _mut("t_silent.py")
+        check("#85: ...and a test that prints NO count and cannot be probed is COULD NOT PROVE "
+              "rather than NOT PROVED — with both instruments silent, 'the test is weak' and 'the "
+              "command selected nothing' are the same observation",
+              _silent.returncode != 0
+              and "nothing establishes it RAN" in (_silent.stdout + _silent.stderr))
         check("...and the tree is RESTORED either way — a verb that mutates somebody's source and "
               "leaves it mutated is worse than the self-report it replaces",
               open(_prod).read().strip().endswith("return a + b"))
@@ -9260,9 +9285,10 @@ def main():
 
         _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
         _t4 = _r4.stderr + _r4.stdout
-        check("#80: an anchor that cannot be probed says LIVENESS UNESTABLISHED and explicitly "
-              "declines to call it a finding — an absent control reported as absent, not implied",
-              "LIVENESS UNESTABLISHED" in _t4 and "NOT yet a finding" in _t4)
+        check("#80/#85: an anchor that cannot be probed, in a run that also prints no test count, "
+              "is COULD NOT PROVE — two instruments silent, so 'the test is weak' and 'nothing "
+              "ran' are the same observation and neither may be reported as a finding",
+              "nothing establishes it RAN" in _t4 and "COULD NOT PROVE" in _t4)
     finally:
         shutil.rmtree(_mu, ignore_errors=True)
 
@@ -9802,6 +9828,85 @@ def main():
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rd, ignore_errors=True)
+
+    # ---- #86: the policy guard was registered on Write/Edit only ----
+    _pg = tempfile.mkdtemp(prefix="gl_policy86_")
+    try:
+        _pgh = os.path.join(_pg, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _pgh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        subprocess.run(["git", "init", "-q", _pg], check=True)
+
+        def _pol(cmd=None, tool="Bash", ti=None):
+            r = subprocess.run(["bash", os.path.join(_pgh, "bin", "guard-writes-impl.sh")],
+                               input=json.dumps({"tool_name": tool,
+                                                 "tool_input": ti or {"command": cmd},
+                                                 "session_id": "s1"}),
+                               capture_output=True, text=True, cwd=_pg,
+                               env=dict(os.environ, CLAUDE_PROJECT_DIR=_pg))
+            try:
+                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+            except ValueError:
+                return ""
+            return h.get("permissionDecisionReason", "") if h.get(
+                "permissionDecision") == "deny" else ""
+
+        _hd = "cat >> .game_loop/verify.yaml <<'YAML'\n\nx: 1\nYAML"
+        check("#86: THE REPORTED CASE — a heredoc append to verify.yaml is refused. The guard was "
+              "registered on Write/Edit only, so the file that decides what a session may do was a "
+              "suggestion against `>>`",
+              "PROJECT'S POLICY" in _pol(_hd))
+        for _w in ("echo hi >> .game_loop/verify.yaml",
+                   "echo hi > .game_loop/config.json",
+                   "sed -i '' s/a/b/ .game_loop/verify.yaml",
+                   "echo x | tee .game_loop/INVARIANTS.md",
+                   "cp /tmp/x .game_loop/verify.yaml",
+                   "echo x > .game_loop/config.local.json"):
+            check(f"#86: ...and so is {_w[:34]!r} — the check rides the path scan the outside-repo "
+                  "rule already does, so redirects, tee, sed -i and cp are covered by construction "
+                  "rather than by a second list of verbs",
+                  "PROJECT'S POLICY" in _pol(_w))
+        for _r in ("cat .game_loop/verify.yaml",
+                   "grep -n rules .game_loop/verify.yaml",
+                   "echo note >> .game_loop/LEDGER.md",
+                   "echo x >> README.md"):
+            check(f"#86: ...while {_r[:32]!r} is allowed — reading policy is ordinary work, and "
+                  "LEDGER.md is notes rather than a rule file",
+                  _pol(_r) == "")
+        check("#86: ...and the refusal names the AUDIT as the point: a write that is never refused "
+              "never reaches `authorize`, so the policy could be widened with nothing on the "
+              "record saying it happened",
+              "never reaches that hatch" in _pol(_hd))
+        check("#86: ...and it still states what it cannot see — an interpreter one-liner, a path "
+              "from a shell variable, an MCP tool",
+              "CANNOT SEE" in _pol(_hd) and "python3 -c" in _pol(_hd))
+    finally:
+        shutil.rmtree(_pg, ignore_errors=True)
+
+    # ---- #85: a run that selected ZERO tests is not a result in either direction ----
+    _sl = importlib.machinery.SourceFileLoader(
+        "gl_sel", os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    _gsel = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_sel", _sl))
+    _sl.exec_module(_gsel)
+    check("#85: a runner reporting zero selected is READ as zero, across the shapes runners use",
+          _gsel.selected_tests("0 passing")[0] == 0
+          and _gsel.selected_tests("0 passed in 0.01s")[0] == 0
+          and _gsel.selected_tests("Ran 0 tests in 0.000s")[0] == 0)
+    check("#85: ...and a real count is read as itself, so the zero above is a verdict rather than "
+          "a parser that only ever says zero",
+          _gsel.selected_tests("12 passing")[0] == 12
+          and _gsel.selected_tests("1247 passed, 0 failed")[0] == 1247
+          and _gsel.selected_tests("+37 -0")[0] == 37)
+    check("#85: ...and a run whose output matches NO known shape is UNREADABLE, not zero — those "
+          "are different outcomes and only one of them is a finding",
+          _gsel.selected_tests("build succeeded")[0] is None
+          and _gsel.selected_tests("")[0] is None)
+    check("#85: ...and a suite that ran and failed everything is not mistaken for an empty "
+          "selection",
+          _gsel.selected_tests("0 passing\n  3 failing")[0] == 3)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

@@ -158,7 +158,7 @@
     },
     {
       "seq": 14,
-      "sha": "pending",
+      "sha": "d24b430",
       "notice": true,
       "verb": "the write guard, on Bash `rm` with recursive+force, WHILE A MANDATE IS LIVE",
       "change": "a new refusal. `rm -rf` (and -fr, -r -f, --recursive --force, /bin/rm, behind sudo) is DENIED while an unparked mandate is set. Command position is required, and both flags: `rm -r`, `rm -f`, `rmdir`, a single-file `rm`, and prose mentioning the command are all untouched. With NO mandate, or a PARKED one, nothing changes at all.",

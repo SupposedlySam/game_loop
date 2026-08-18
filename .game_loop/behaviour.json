@@ -155,6 +155,15 @@
       "change": "the refusal now prints a PASTEABLE install command for the exact unharnessed tree, and records itself in the PARENT's log as kind commit_gate_unharnessed_tree. The refusal itself is unchanged in what it refuses.",
       "consequence": "if you grep your log for how often this gate fires, you will now find entries where before there were none \u2014 the commit tree has no .game_loop/ and therefore no log of its own, so every one of these was previously invisible in the only place a reviewer would look. Nothing is refused that was permitted before.",
       "why_it_qualifies": "a consumer who changed nothing sees different refusal text and new log lines. Reported after four --no-verify commits in one day: the honest remedies were a manual step and an impossibility, so the escape hatch won every time and left no trace of the gate that prompted it. The behaviour gate did NOT fire \u2014 no refusal line matched its regex \u2014 so this entry is a judgement."
+    },
+    {
+      "seq": 14,
+      "sha": "pending",
+      "notice": true,
+      "verb": "the write guard, on Bash `rm` with recursive+force, WHILE A MANDATE IS LIVE",
+      "change": "a new refusal. `rm -rf` (and -fr, -r -f, --recursive --force, /bin/rm, behind sudo) is DENIED while an unparked mandate is set. Command position is required, and both flags: `rm -r`, `rm -f`, `rmdir`, a single-file `rm`, and prose mentioning the command are all untouched. With NO mandate, or a PARKED one, nothing changes at all.",
+      "consequence": "if you run cleanup with `rm -rf` inside a mandated run, it now stops with a refusal naming non-prompting alternatives (mktemp -d and leave it, `git worktree remove`, `rmdir`, a plain `rm`) and the `authorize` hatch. Nothing outside a live mandate is affected, so a session that never sets one sees no change.",
+      "why_it_qualifies": "a consumer who changed nothing is refused a command that previously ran. Reported from a real unattended run: the permission layer escalated `rm -rf` to an interactive approval, and their owner happened to be at his desk. Unattended it would have blocked forever \u2014 no timeout, no log line, and the watchdog cannot help because a run waiting on a prompt is not idle. That is the one hazard here that fails SILENT, and it is a property of the PAIR (a mandate says nobody is watching; the permission model assumes somebody is), which only game_loop can see. Refusing converts an unbounded wait into an instant, self-serviceable error."
     }
   ],
   "schema": 1

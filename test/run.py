@@ -9266,6 +9266,78 @@ def main():
     finally:
         shutil.rmtree(_mu, ignore_errors=True)
 
+    # ---- #79: a permission prompt under a mandate is a park with no recovery ----
+    _pp = tempfile.mkdtemp(prefix="gl_prompt79_")
+    try:
+        _pph = os.path.join(_pp, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _pph,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d"))
+        subprocess.run(["git", "init", "-q", _pp], check=True)
+        _sd = os.path.join(_pph, "sessions", "s1")
+        os.makedirs(_sd)
+
+        def _state(mandate):
+            with open(os.path.join(_sd, "state.json"), "w") as f:
+                json.dump({"mandate": mandate} if mandate else {}, f)
+
+        def _ask(cmd):
+            r = subprocess.run(
+                ["bash", os.path.join(_pph, "bin", "guard-writes.sh")],
+                input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd},
+                                  "session_id": "s1"}),
+                capture_output=True, text=True, cwd=_pp,
+                env=dict(os.environ, CLAUDE_PROJECT_DIR=_pp))
+            try:
+                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+            except ValueError:
+                return ""
+            return h.get("permissionDecisionReason", "") if h.get(
+                "permissionDecision") == "deny" else ""
+
+        _state({"text": "keep going, nobody is watching"})
+        _d = _ask("rm -rf /tmp/gl-throwaway")
+        check("#79: `rm -rf` under a live mandate is REFUSED — an interactive approval is the one "
+              "hazard in an unattended run that fails silent, because a run blocked on a prompt is "
+              "not idle and the watchdog cannot see it",
+              "recursive+force" in _d and "MANDATE is live" in _d)
+        check("#79: ...and the refusal carries non-prompting alternatives plus the authorize hatch, "
+              "so it converts an unbounded wait into something the agent can service itself",
+              "worktree remove" in _d and "rmdir" in _d and "authorize" in _d)
+        check("#79: ...and it states what it cannot see — a delete inside a script, a python "
+              "rmtree, any MCP tool: an observed failure covered, never the class",
+              "CANNOT SEE" in _d and "never the class" in _d)
+
+        for _spelling in ("rm -fr /tmp/x", "rm -r -f /tmp/x", "rm -f -r /tmp/x",
+                          "rm --recursive --force /tmp/x", "/usr/bin/rm -rf /tmp/x",
+                          "sudo rm -rf /tmp/x", "cd /tmp && rm -rf x"):
+            check(f"#79: ...and the spelling {_spelling!r} is caught too — `rm -r -f` is the same "
+                  "command as `rm -rf`, and a pattern demanding one token carrying both letters "
+                  "misses it",
+                  "recursive+force" in _ask(_spelling))
+
+        # THE FALSE POSITIVES. Prose about this guard is exactly what gets written while building
+        # it, and a guard that denies its own commit message is one somebody switches off.
+        for _safe in ("rm /tmp/one.txt", "rm -r /tmp/dir", "rm -f /tmp/f", "rmdir /tmp/d",
+                      "echo rm -rf is refused now", "grep -r rm -rf notes.txt"):
+            check(f"#79: ...while {_safe!r} is ALLOWED — command position and both flags are "
+                  "required, so writing about a delete is not running one",
+                  _ask(_safe) == "")
+
+        # THE SCOPING IS THE WHOLE ARGUMENT. The permission model is right to assume a human is
+        # present; `mandate` is the one statement that says otherwise.
+        _state(None)
+        check("#79: THE LOAD-BEARING ARM — with NO mandate the same command is allowed. This gate "
+              "exists because a mandate claims nobody is watching, not because rm -rf is bad",
+              _ask("rm -rf /tmp/gl-throwaway") == "")
+        _state({"text": "a job", "parked": {"by": "human", "at": "now"}})
+        check("#79: ...and a PARKED mandate is allowed too — the human called the break, so by "
+              "definition they are present to answer a prompt",
+              _ask("rm -rf /tmp/gl-throwaway") == "")
+    finally:
+        shutil.rmtree(_pp, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

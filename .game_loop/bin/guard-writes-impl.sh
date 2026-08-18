@@ -607,6 +607,94 @@ sys.stdout.write(text)
 PY
 )
 
+    # 0a. A PERMISSION PROMPT UNDER A MANDATE IS A PARK WITH NO RECOVERY (#79).
+    #    Every other hazard here fails LOUD — the Stop gate refuses with a reason, this guard denies
+    #    with a path, verify names the check. An interactive approval just WAITS: no timeout, no log
+    #    line, and the watchdog cannot help because there is no idle to detect. The process is blocked
+    #    on a prompt, not quiet. An operator comes back hours later to a run that never advanced.
+    #
+    #    That is a property of the PAIR, which only game_loop can see: the permission model is right
+    #    to assume a human is present, and `mandate` exists to say precisely that nobody is. So this
+    #    fires ONLY while a mandate is live — with nobody watching, an unbounded wait is strictly
+    #    worse than an instant error the agent can service itself.
+    #
+    #    Reported by a consumer whose owner happened to be at his desk. It failed silently in their
+    #    favour, which is why they would not have found it either.
+    if [ -n "${STATE_F:-}" ] && [ -f "$STATE_F" ]; then
+      _gl_mandated=$(GL_S="$STATE_F" python3 -c 'import json,os,sys
+try:
+    d=json.load(open(os.environ["GL_S"]))
+except Exception:
+    sys.exit(0)
+m=d.get("mandate") or {}
+# a PARKED mandate is not an unattended run — the human called the break and is by definition present
+print("yes" if m.get("text") and not m.get("parked") else "")' 2>/dev/null)
+      if [ -n "$_gl_mandated" ]; then
+        # RECURSIVE AND FORCE, and they need not share a token: `rm -r -f` is the same command as
+        # `rm -rf`, and a regex demanding one flag carrying both letters misses it. Found by
+        # probing the eleven spellings rather than by reading my own pattern — it passed the four
+        # I had in mind and failed the fifth. Matched against scan_cmd, so a commit message that
+        # merely WRITES ABOUT rm -rf is not a command that runs one.
+        _gl_rmrf=$(SCAN="$scan_cmd" python3 -c '
+import os, re, shlex, sys
+scan = os.environ["SCAN"]
+hit = ""
+for seg in re.split(r"[;&|\n]+|\$\(|\)", scan):
+    try:
+        parts = shlex.split(seg)
+    except ValueError:
+        parts = seg.split()
+    # COMMAND POSITION ONLY. `echo rm -rf is refused now` contains the token and runs no delete —
+    # and prose about this guard is exactly what gets written while building it. A leading
+    # sudo/env/time/nohup still counts, since those execute what follows.
+    PREFIX = {"sudo", "env", "time", "nohup", "command", "exec"}
+    for i, tok in enumerate(parts):
+        if os.path.basename(tok) != "rm":
+            continue
+        if any(os.path.basename(p_) not in PREFIX and not p_.startswith("-")
+               for p_ in parts[:i]):
+            continue
+        rec = force = False
+        for opt in parts[i + 1:]:
+            if not opt.startswith("-"):
+                continue
+            if opt == "--recursive" or opt == "-R":
+                rec = True
+            elif opt == "--force":
+                force = True
+            elif not opt.startswith("--"):
+                rec = rec or "r" in opt or "R" in opt
+                force = force or "f" in opt
+        if rec and force:
+            hit = "yes"
+if hit:
+    sys.stdout.write(hit)
+' 2>/dev/null)
+        if [ -n "$_gl_rmrf" ]; then
+          deny "BLOCKED: \`rm\` with recursive+force, while a MANDATE is live.
+
+This is not a judgement about the delete. It is that an interactive approval is the one hazard in
+an unattended run that fails SILENT — no timeout, no log line, and the watchdog cannot answer it,
+because a run blocked on a prompt is not idle. Your mandate says nobody is watching. If this
+escalates, the run stops here until somebody notices, which may be hours.
+
+There is essentially always a non-prompting way:
+
+    a throwaway directory   don't delete it. \`mktemp -d\` and leave it — the OS reaps /tmp.
+    a git worktree          git worktree remove <path>
+    one known file          rm <path>            (no -r, no -f)
+    a directory you own     rmdir <path>         (refuses if non-empty, which is the point)
+
+If the delete genuinely has to happen this way, say so on the record:
+    ${GAMELOOP_DIR}/bin/game_loop authorize --path rm-rf --reason \"<the human's exact words>\"
+
+WHAT THIS CANNOT SEE (INV6): a delete inside a script, a python3 -c shutil.rmtree, or any MCP tool.
+It reads the Bash command string only. This covers an observed failure, never the class — the full
+prompt surface is not knowable from inside a hook."
+        fi
+      fi
+    fi
+
     # 0. A commit is when a change becomes real. Refuse one whose owed checks (.game_loop/verify.yaml)
     #    have not run SINCE the change. No-op when verify.yaml is empty, so it costs nothing until you
     #    opt in. --no-verify skips it, out loud and on the record. Gates `git commit` only, not every

@@ -149,6 +149,13 @@ THIN_AT = 3
 
 UNPROTECTED, THIN, OK = "UNPROTECTED", "THIN", "ok"
 
+# NOT MEASURED IS A THIRD OUTCOME, not a low score (showrunner, this week). A mutant whose suite
+# CRASHED, timed out, or was never applied has no measurement at all — and every one of those
+# produced a NUMBER here, which is the substitution this project exists to refuse, in its own
+# instrument. It is reported separately and it FAILS the run: a producer nobody could score is a
+# hole in the denominator, which is this file's oldest lesson.
+NOT_MEASURED = "NOT MEASURED"
+
 
 def verdict(killed):
     """How a producer's kill count should be read. Pure, so the suite can check this line itself."""
@@ -629,6 +636,12 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    "test/mutation_sweep.py::run": "the sweep's own suite-runner. Its None arm is the DEADLINE — a "
+            "mutant that hangs measures nothing and waiting for it measures nothing — and it is "
+            "asserted directly in-suite against a command that sleeps past its bound and one that "
+            "returns normally. Mutating it would measure whether the sweep can sweep its own "
+            "subprocess call, which is not a question about this repo's gates.",
+
     ".game_loop/bin/game_loop::_ledger_last": "reads the last timestamp out of the ledger (#78). "
             "Neutered to None it declares every project un-baselined, which the FIRST-ENCOUNTER "
             "assertion catches directly and loudly; neutered to a constant it breaks the counting "
@@ -1049,9 +1062,18 @@ def neuter(src, fn, body):
     return src, False
 
 
-def run(tree):
-    r = subprocess.run([sys.executable, "test/run.py"], cwd=tree,
-                       capture_output=True, text=True, timeout=1800)
+def run(tree, timeout=1800):
+    """The suite's stdout, or None if it did not finish in time.
+
+    A DEADLINE, because a mutant that hangs measures nothing and waiting for it measures nothing
+    either (showrunner). Before this, a timeout raised out of the worker and took the whole sweep
+    with it — so one unscoreable producer cost every other producer's measurement too.
+    """
+    try:
+        r = subprocess.run([sys.executable, "test/run.py"], cwd=tree,
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
     return r.stdout
 
 
@@ -1080,6 +1102,12 @@ def main():
           "only ZERO fails)\n")
     # The unmutated run, so a kill is a named assertion that FLIPPED rather than a count that moved.
     baseline_out = run(base)
+    if baseline_out is None:
+        print("BASELINE TIMED OUT — nothing can be measured against a suite that did not finish, "
+              "and every floor taken now would be a floor against a shorter run. Refusing to "
+              "report.")
+        shutil.rmtree(base, ignore_errors=True)
+        return 1
     baseline = set(passing(baseline_out))
     # A FLOOR MEASURED AGAINST AN UNFINISHED SUITE IS NOT A FLOOR. Every kill count this file has
     # ever printed was measured against a baseline of 788 instead of 966, because the suite CRASHED
@@ -1131,14 +1159,19 @@ def main():
             with open(os.path.join(base, rel)) as f:
                 original = f.read()
         except OSError:
-            return ((key, None, UNPROTECTED, floor),
-                    f"  !! {key}: {rel} is not in the tree under test. Nothing was swept.\n")
+            return ((key, None, NOT_MEASURED, floor),
+                    f"  !! {key}: {rel} is not in the tree under test. NOT MEASURED — this is not "
+                    f"a coverage finding.\n")
         mutated, hit = neuter(original, fn, body)
         if not hit:
             # Not a skip. A producer named here that no longer exists is zero evidence about
             # zero code, and a sweep that shrugs at that is a check that cannot fail.
-            return ((key, None, UNPROTECTED, floor),
-                    f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. Nothing was swept.\n")
+            # NOT FOUND is NOT UNPROTECTED. Reporting the fatal verdict here is a confident
+            # claim about code that was never mutated — and the caveat on this line was being
+            # discarded by the summary, which is where anyone actually believes a number.
+            return ((key, None, NOT_MEASURED, floor),
+                    f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. NOT MEASURED: nothing was "
+                    f"mutated, so this says nothing about coverage either way.\n")
         t = tempfile.mkdtemp(prefix="sweep-")
         try:
             shutil.copytree(base, t, dirs_exist_ok=True)
@@ -1146,12 +1179,26 @@ def main():
                 f.write(mutated)
             os.chmod(os.path.join(t, rel), 0o755)
             out = run(t)
+            if out is None:
+                return ((key, None, NOT_MEASURED, floor),
+                        f"{label}\n  NOT MEASURED — the suite TIMED OUT under this mutant. A run\n"
+                        f"  that hung produced no verdict, and waiting longer produces none either.\n")
         finally:
             shutil.rmtree(t, ignore_errors=True)
         still = set(passing(out))
+        tail = out.strip().split("\n")[-1]
+        # DID THE MUTATED SUITE FINISH? If it died early, its unrun assertions never printed `ok`,
+        # so the set difference counts them all as KILLED and the producer reports strong coverage
+        # measured on a run that stopped. The baseline already had to prove it finished; the mutants
+        # never did, which is the same lesson one level in.
+        if not re.search(r"^\d+ passed, \d+ failed", out, re.M):
+            return ((key, None, NOT_MEASURED, floor),
+                    f"{label}\n  suite: {tail}\n"
+                    f"  NOT MEASURED — the suite did not finish under this mutant, so its unrun\n"
+                    f"  assertions never printed and would have counted as KILLED. That is an\n"
+                    f"  inflated number about a run that stopped, not a coverage reading.\n")
         killed = len(baseline - still)
         v = verdict(killed)
-        tail = out.strip().split("\n")[-1]
         drift = "  ↓ BELOW FLOOR" if killed < floor else ""
         lines = [f"{label}", f"  suite: {tail}",
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
@@ -1206,12 +1253,14 @@ def main():
 
     thin = [f"{fn} ({k})" for fn, k, v, _ in verdicts if v == THIN]
     bad = [fn for fn, _, v, _ in verdicts if v == UNPROTECTED]
+    # UNSCOREABLE, kept apart from every other list here on purpose.
+    unscored = [fn for fn, _, v, _ in verdicts if v == NOT_MEASURED]
     # A recorded floor that is not checked is prose. THIN is a standing acceptable state, so it
     # reports; DRIFT is never that — it means coverage that existed has been lost, which is the
     # exact regression this tool exists to catch, so it fails. The remedy is not to edit the number
     # quietly: re-record it WITH the reason, the way ruled_out's thinness carries its own.
     drifted = [f"{fn} ({k} < {fl})" for fn, k, v, fl in verdicts
-               if k is not None and k < fl]
+               if k is not None and v != NOT_MEASURED and k < fl]
     # KNOWN GAPS are declared, not silent. NOT_SWEPT holds two kinds of entry — a genuine exclusion
     # and a DEBT — and printing only the first kind turns the debt into a denylist with extra steps:
     # decided once, then never read again. The run says how much is owed, every time.
@@ -1237,7 +1286,17 @@ def main():
     if bad:
         print("UNPROTECTED — neutering these killed NOTHING: " + " · ".join(bad))
         print("Nothing in the suite notices when they stop working. That is the failure.")
-    if bad or drifted:
+    # UNSCOREABLE IS NOT THIN, AND IT IS NOT CLEAN EITHER. Its own group, because the whole defect
+    # was a per-item caveat being flattened into an aggregate with no room for it.
+    if unscored:
+        print("NOT MEASURED — no reading was produced for these: " + " · ".join(unscored))
+        print("This is NOT a coverage finding in either direction. A mutant that was never applied,")
+        print("or whose suite crashed or hung, says nothing about whether anything notices it. The")
+        print("numbers such runs used to produce were INFLATED, because an assertion that never ran")
+        print("never printed `ok` and so counted as killed.")
+        print("Fix the anchor or the crash and re-measure. Until then these sit outside the")
+        print("denominator, which is the failure this file exists for.")
+    if bad or drifted or unscored:
         return 1
     print("no producer is unprotected, and none is below its recorded floor.")
     return 0

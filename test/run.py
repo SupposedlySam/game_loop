@@ -9631,6 +9631,59 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_f3, ignore_errors=True)
 
+    # ---- UNSCOREABLE IS NOT THIN: the sweep needed a third outcome (showrunner) ----
+    # Two ways it produced a confident number about code it never measured. A mutant whose suite
+    # DIED EARLY: killed is a set difference, so every assertion that never RAN counted as killed
+    # and the producer reported strong coverage. And an anchor that MATCHED NOTHING returned
+    # UNPROTECTED — the fatal verdict — about code that was never mutated. The per-item line said
+    # "nothing was swept" both times; the SUMMARY is where a number gets believed, and it had no
+    # room for the caveat.
+    check("the sweep has a NOT MEASURED verdict distinct from UNPROTECTED and THIN — a run that "
+          "crashed, hung or never applied produces the same number as one that found nothing, so "
+          "a measuring tool needs it beside pass and fail",
+          sweep.NOT_MEASURED not in (sweep.UNPROTECTED, sweep.THIN, sweep.OK))
+    check("...and a zero kill count is still UNPROTECTED, so the new state did not soften the one "
+          "verdict this sweep exists to produce",
+          sweep.verdict(0) == sweep.UNPROTECTED)
+
+    _src_sw = inspect.getsource(sweep)
+    check("an anchor that matches NOTHING reports NOT MEASURED, not UNPROTECTED — a producer that "
+          "was renamed is zero evidence about zero code, and calling that 'nothing notices it' is "
+          "a confident finding about a mutation that never happened",
+          "NOT FOUND in {rel}" in _src_sw
+          and _src_sw.split("NOT FOUND in {rel}")[0].rstrip().endswith(
+              "return ((key, None, NOT_MEASURED, floor),".rstrip()[-40:])
+          or "NOT_MEASURED, floor),\n                    f\"  !! {key}: NOT FOUND" in _src_sw)
+    check("a mutated run that did not FINISH reports NOT MEASURED — its unrun assertions never "
+          "printed and would have counted as killed, which inflates a number about a run that "
+          "stopped. The baseline already had to prove it finished; the mutants never did",
+          "the suite did not finish under this mutant" in _src_sw)
+    check("...and the summary reports the unscoreable ones as their own group and FAILS the run, "
+          "because a per-item caveat the aggregate discards is a caveat nobody has",
+          "NOT MEASURED — no reading was produced" in _src_sw
+          and "bad or drifted or unscored" in _src_sw)
+    check("...and a NOT MEASURED producer is never also reported as BELOW FLOOR, which would be a "
+          "second confident claim from the same absent measurement",
+          "v != NOT_MEASURED and k < fl" in _src_sw)
+
+    # THE DEADLINE, exercised rather than read: a mutant that hangs measures nothing, and before
+    # this a timeout raised out of the worker and took every other producer's measurement with it.
+    _to = tempfile.mkdtemp(prefix="gl_sweep_timeout_")
+    try:
+        os.makedirs(os.path.join(_to, "test"))
+        with open(os.path.join(_to, "test", "run.py"), "w") as f:
+            f.write("import time\ntime.sleep(30)\n")
+        check("run() returns None when the suite outruns its deadline, rather than raising and "
+              "taking the whole sweep down with one unscoreable producer",
+              sweep.run(_to, timeout=2) is None)
+        with open(os.path.join(_to, "test", "run.py"), "w") as f:
+            f.write("print('1 passed, 0 failed')\n")
+        check("...and returns the output when it finishes, so the None above is a verdict rather "
+              "than a function that can only fail",
+              "1 passed, 0 failed" in (sweep.run(_to, timeout=30) or ""))
+    finally:
+        shutil.rmtree(_to, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

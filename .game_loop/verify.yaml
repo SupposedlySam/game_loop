@@ -144,3 +144,8 @@
   - ".game_loop/*.md"
   - ".game_loop/config.json"
   - ".game_loop/notify.json"
+  # saggar's own project manifest, written by `saggar init` and by the app. It is that tool's file,
+  # not this repo's: nothing here reads it, and no command exists that fails when its contents are
+  # wrong. `successor` detects saggar from SAGGAR_SESSION in the environment and never opens this,
+  # so the coverage report should say "excluded on purpose" rather than "nobody checked it".
+  - ".saggar/**"

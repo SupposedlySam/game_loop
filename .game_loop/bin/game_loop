@@ -6079,12 +6079,42 @@ def in_warp():
     return os.environ.get("TERM_PROGRAM") == WARP_TERM_PROGRAM
 
 
-SUCCESSOR_MODES = ("auto", "print", "warp-tab")
+# saggar's own identification of itself to child processes. Read off a live environment rather than
+# guessed: TERM_PROGRAM=saggar, beside SAGGAR=1 and SAGGAR_SESSION=<uuid naming THIS terminal>.
+SAGGAR_TERM_PROGRAM = "saggar"
+
+
+def in_saggar():
+    """Whether THIS process is running inside a saggar terminal.
+
+    It reads SAGGAR_SESSION rather than TERM_PROGRAM, and the difference is the entire reason this
+    detection is worth more than in_warp()'s. TERM_PROGRAM is unset in a hook's environment — the
+    blind spot in_warp() documents and cannot close, and the reason `warp-tab` has to exist as a
+    forced override at all. SAGGAR_SESSION reaches hooks: saggar's own Claude Code presence hook
+    (~/.saggar/claude-presence-hook.sh) exits 0 immediately on an empty SAGGAR_SESSION and names its
+    output file after the variable, and ~/.saggar/presence/<SAGGAR_SESSION>.json exists carrying this
+    repo's live claude session id. That file could not have been written if the variable were absent
+    where hooks run. So a hook-invoked `successor` resolves saggar correctly where it cannot resolve
+    Warp, and `saggar-agent` needs no counterpart to the `warp-tab` override.
+
+    WHAT IT MISSES, stated because a mode that resolves is not a mode that works: SAGGAR_SESSION
+    names a TERMINAL, never a running app. A shell that outlived the app that spawned it, or an
+    environment inherited by something detached, still carries the variable at a moment nothing is
+    listening — and saggar answers that with exit 3. This resolves a mode; whether the mode acts is
+    observed afterwards, which is why failure falls back to the printed command instead of dying.
+
+    Nor does it distinguish saggar from something else exporting the same variable; like every
+    terminal check here it is a self-report by the host, which is all any terminal offers.
+    """
+    return bool(os.environ.get("SAGGAR_SESSION"))
+
+
+SUCCESSOR_MODES = ("auto", "print", "warp-tab", "saggar-agent")
 
 
 def successor_cfg():
-    """How `successor` starts the next session: AUTO by default — open a Warp tab when this is
-    running under Warp, and print the command everywhere else.
+    """How `successor` starts the next session: AUTO by default — open a Warp tab under Warp, ask
+    saggar for a new agent terminal under saggar, and print the command everywhere else.
 
     `print` is the portable floor: every host can run a printed command, and only some have Warp.
     But a printed command is also a step a tired human has to perform, at exactly the moment the
@@ -6099,6 +6129,13 @@ def successor_cfg():
     ~/.warp/), and auto makes that the default under Warp rather than a choice each install records.
     What keeps it honest is that the write is named in the output every time, and the opt-out is
     printed beside it — a default nobody can inherit silently.
+
+    saggar-agent does NOT pay that cost: `saggar agent` is a call to a running app, so it writes
+    nothing anywhere. It pays a different one, and the difference is worth knowing before choosing a
+    terminal. `saggar agent` takes a provider and a TASK, not argv, so it builds its own claude
+    invocation: the successor's session id cannot be handed to it, and saggar names the terminal
+    from the task, so --task/--title do not reach it either. The printed command still carries both,
+    which is why it is printed in every mode rather than only when nothing was opened.
     """
     lc = (config().get("limits") or {})
     c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
@@ -6106,10 +6143,23 @@ def successor_cfg():
     if configured not in SUCCESSOR_MODES:
         configured = "auto"
     detected = in_warp()
-    mode = ("warp-tab" if detected else "print") if configured == "auto" else configured
-    return {"mode": mode, "configured": configured, "detected": detected,
+    host = "warp" if detected else ("saggar" if in_saggar() else "")
+    auto = {"warp": "warp-tab", "saggar": "saggar-agent"}.get(host, "print")
+    mode = auto if configured == "auto" else configured
+    return {"mode": mode, "configured": configured, "detected": detected, "host": host,
             "term_program": os.environ.get("TERM_PROGRAM") or "",
             "name": str(c.get("name") or "game-loop-successor")}
+
+
+def successor_why(sc):
+    """The one line explaining WHY a mode resolved — always naming the evidence, never the verdict
+    alone, so a surprising mode can be argued with rather than merely read."""
+    if sc["host"] == "warp":
+        return "Warp detected (TERM_PROGRAM=" + WARP_TERM_PROGRAM + ")"
+    if sc["host"] == "saggar":
+        return "saggar detected (SAGGAR_SESSION set)"
+    return ("no Warp and no saggar detected (TERM_PROGRAM="
+            + (sc["term_program"] or "unset") + ", SAGGAR_SESSION unset)")
 
 
 # A tab is NARROW. Prose guidance did not hold this in the sibling launcher — a real handoff shipped
@@ -6169,6 +6219,39 @@ def _warp_tab(name, cwd, cmd, title):
     return conf
 
 
+def _saggar_agent(cwd, prompt):
+    """Ask saggar for a new agent terminal beside this one; returns (started, detail).
+
+    The mechanism, read off the CLI saggar ships rather than guessed: `saggar agent claude <task>`
+    starts an independent claude session in a new terminal in the CALLING terminal's project, and
+    the skill in the app bundle describes that terminal as one "the user can inspect, redirect, or
+    take over" — which is the successor's job description. That is why this does not reach for
+    `saggar quick`, whose window folds itself away on a clean exit, or `saggar monitor`, which docks
+    a card meant to be watched rather than typed into.
+
+    IT RETURNS A VERDICT INSTEAD OF RAISING, because every way this fails is a way the run still has
+    a road: the shim may not be installed (it is a one-time toggle in Saggar's settings, not
+    something a repo can do for a user), the app may not be running (exit 3), or the call may be
+    refused (exit 1). None of those are worth ending a handoff over when the portable command is
+    already printed directly above the failure.
+    """
+    exe = shutil.which("saggar")
+    if not exe:
+        return False, ("no `saggar` on PATH. The CLI shim is a one-time toggle in Saggar ▸ Settings "
+                       "▸ General, which installs it to ~/.local/bin/saggar")
+    try:
+        r = subprocess.run([exe, "agent", "claude", prompt],
+                           capture_output=True, text=True, cwd=cwd, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"`saggar agent` could not run: {e}"
+    if r.returncode == 0:
+        return True, " ".join((r.stdout or "").split())
+    hint = {1: "saggar understood and refused", 2: "saggar could not parse the call",
+            3: "saggar is not running, or this is not a saggar terminal"}.get(r.returncode, "")
+    msg = " ".join(((r.stderr or "") + " " + (r.stdout or "")).split()) or "no message"
+    return False, f"`saggar agent` exited {r.returncode}" + (f" ({hint})" if hint else "") + f": {msg}"
+
+
 def cmd_successor(s, a):
     """Start the session that takes over from this one — the capability the handoff never had.
 
@@ -6203,10 +6286,10 @@ def cmd_successor(s, a):
     cmd = " ".join(shlex.quote(x) for x in ["claude", "--session-id", sid, prompt])
     sc = successor_cfg()
     title = successor_title(a.task, a.title, cwd)
-    why = ("Warp detected (TERM_PROGRAM=" + WARP_TERM_PROGRAM + ")" if sc["detected"]
-           else "no Warp detected (TERM_PROGRAM="
-                + (sc["term_program"] or "unset") + ")")
-    lines = [f"successor session id : {sid}",
+    why = successor_why(sc)
+    sid_note = (f"{sid}  (the printed command's — `saggar agent` mints its own)"
+                if sc["mode"] == "saggar-agent" else sid)
+    lines = [f"successor session id : {sid_note}",
              f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
              f"working directory   : {cwd}",
              f"tab title           : {title}",
@@ -6214,6 +6297,30 @@ def cmd_successor(s, a):
     if a.dry_run:
         lines.append(f"mode                : {sc['mode']} — {why}, configured "
                      f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
+    elif sc["mode"] == "saggar-agent":
+        started, detail = _saggar_agent(cwd, prompt)
+        if started:
+            lines += [f"mode                : saggar-agent — {why}. Opened a new agent terminal"
+                      + (f" ({detail})" if detail else "") + ".",
+                      "                      Nothing outside this repo was written — this is a call "
+                      "to a running app, not a",
+                      "                      config file, so it costs none of what warp-tab costs.",
+                      "                      WHAT DID NOT REACH IT: the session id above, and "
+                      "--task/--title — `saggar agent`",
+                      "                      takes a task, not argv, and names the terminal from "
+                      "that task itself. It also",
+                      "                      starts in the CALLING terminal's directory, which is "
+                      f"{cwd} only if you",
+                      "                      have not cd'd away. Set limits.successor.mode to "
+                      "\"print\" in",
+                      "                      .game_loop/config.json to keep all three and run the "
+                      "command yourself."]
+        else:
+            lines += [f"mode                : saggar-agent — {why}, but NOTHING STARTED: {detail}",
+                      "                      RUN THE COMMAND ABOVE to start the successor by hand — "
+                      "it is the portable",
+                      "                      floor, and it carries the session id this mode could "
+                      "not pass on."]
     elif sc["mode"] == "warp-tab":
         conf = _warp_tab(sc["name"], cwd, cmd, title)
         lines += [f"mode                : warp-tab — {why}. Wrote {conf} and opened it.",
@@ -6223,16 +6330,19 @@ def cmd_successor(s, a):
     else:
         lines.append("mode                : print — RUN THE COMMAND ABOVE to start the successor.")
         if sc["configured"] == "print":
-            lines.append("                      (pinned by limits.successor.mode; \"auto\" opens "
-                         "the tab itself under Warp.)")
+            lines.append("                      (pinned by limits.successor.mode; \"auto\" starts "
+                         "it under Warp or saggar.)")
         else:
-            lines += [f"                      ({why}. Under Warp this opens the tab itself — and "
-                      "detection is",
-                      "                       blind in a hook, where TERM_PROGRAM is unset, so set "
-                      "limits.successor.mode",
-                      "                       to \"warp-tab\" in .game_loop/config.json to force "
-                      "it. That writes a config",
-                      "                       under ~/.warp/, outside this repo.)"]
+            lines += [f"                      ({why}. Under Warp \"auto\" opens a tab; under saggar "
+                      "it asks for an agent",
+                      "                       terminal. Warp detection is blind in a hook, where "
+                      "TERM_PROGRAM is unset, so",
+                      "                       set limits.successor.mode to \"warp-tab\" in "
+                      ".game_loop/config.json to force it —",
+                      "                       that writes a config under ~/.warp/, outside this "
+                      "repo. saggar needs no such",
+                      "                       override: SAGGAR_SESSION reaches hooks, so "
+                      "\"auto\" resolves it there too.)"]
     if auto:
         lines += ["",
                   "⚠ THIS IS THE GENERATED HANDOFF, not your own account of the run. It says what "
@@ -6241,7 +6351,8 @@ def cmd_successor(s, a):
                   "turn before",
                   "  the successor starts, because it is the only part nothing can reconstruct."]
     logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
-             "configured_mode": sc["configured"], "warp_detected": sc["detected"], "title": title,
+             "configured_mode": sc["configured"], "warp_detected": sc["detected"],
+             "host": sc["host"], "title": title,
              "dry_run": bool(a.dry_run), "auto_handoff": auto})
     out("\n".join(lines))
 

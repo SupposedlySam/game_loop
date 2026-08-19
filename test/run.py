@@ -81,6 +81,14 @@ def _env(proj=None, sid=None, **extra):
     # portable floor silently exercised the warp-tab path instead — writing ~/.warp/tab_configs and
     # opening real tabs on the developer's screen, from a test asserting nothing was opened.
     env.pop("TERM_PROGRAM", None)
+    # And saggar, for the same reason one layer deeper (#79). `successor` resolves saggar by reading
+    # SAGGAR_SESSION, which — unlike TERM_PROGRAM — reaches a hook's environment and therefore
+    # reaches everything this runner spawns. Letting it through would mean every test of the
+    # portable floor silently exercised the saggar-agent path instead, and that path does not merely
+    # write a file: it asks a RUNNING APP to open real claude terminals, from a suite asserting that
+    # nothing was started. SAGGAR goes too, so nothing here can grow a second way to detect it.
+    env.pop("SAGGAR_SESSION", None)
+    env.pop("SAGGAR", None)
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -897,9 +905,10 @@ def main():
         check("handing over the GENERATED handoff is allowed, and announced as such",
               r.returncode == 0 and "GENERATED handoff" in r.stdout)
         r = gl(proj, "successor", sid="sess-succ")
-        check("off a non-Warp terminal the default resolves to print — it opens nothing itself",
+        check("off a Warp-less, saggar-less terminal the default resolves to print — it opens "
+              "nothing itself",
               r.returncode == 0 and "mode                : print" in r.stdout
-              and "no Warp detected" in r.stdout)
+              and "no Warp and no saggar detected" in r.stdout)
 
         # The terminal is READ, not configured (#78). These four cases are the whole switch: the two
         # things detection decides, and the two overrides that exist because detection is blind in a
@@ -913,8 +922,29 @@ def main():
         check("under Warp the default resolves to warp-tab with no config at all",
               "mode                : warp-tab — Warp detected"
               in succ_mode(TERM_PROGRAM="WarpTerminal"))
-        check("a terminal that is not Warp resolves to print", "mode                : print"
+        check("a terminal that is neither resolves to print", "mode                : print"
               in succ_mode(TERM_PROGRAM="Apple_Terminal"))
+
+        # saggar is the second host (#79). Every saggar-detected case here is --dry-run for a
+        # sharper reason than Warp's: warp-tab writes a file, but saggar-agent asks a RUNNING APP to
+        # open real claude terminals. A test that let it run would spawn agents on the developer's
+        # screen — and bill them — from a suite asserting nothing was started.
+        check("under saggar the default resolves to saggar-agent, on SAGGAR_SESSION not TERM_PROGRAM",
+              "mode                : saggar-agent — saggar detected (SAGGAR_SESSION set)"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
+        check("saggar detection survives where Warp's is blind — a hook has no TERM_PROGRAM at all",
+              "mode                : saggar-agent"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E", TERM_PROGRAM=""))
+        check("an EMPTY SAGGAR_SESSION is not a saggar terminal — it is the variable's absent shape",
+              "mode                : print" in succ_mode(SAGGAR_SESSION=""))
+        check("Warp wins when both are somehow set, so one terminal never resolves to two modes",
+              "mode                : warp-tab"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E", TERM_PROGRAM="WarpTerminal"))
+        check("saggar-agent still prints the portable command, and says the id did not reach it",
+              "successor session id" in succ_mode(SAGGAR_SESSION="F1AC5B4E")
+              and "`saggar agent` mints its own" in succ_mode(SAGGAR_SESSION="F1AC5B4E")
+              and "command             : claude --session-id"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
 
         def succ_cfg(mode):
             c = json.load(open(ctx_cf))
@@ -926,9 +956,31 @@ def main():
         succ_cfg("print")
         check("mode \"print\" pins the portable floor even under Warp — the opt-out opts out",
               "mode                : print" in succ_mode(TERM_PROGRAM="WarpTerminal"))
+        check("mode \"print\" pins the portable floor under saggar too — one opt-out, both hosts",
+              "mode                : print" in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
         succ_cfg("warp-tab")
         check("mode \"warp-tab\" forces the tab where detection is blind (a hook: no TERM_PROGRAM)",
               "mode                : warp-tab" in succ_mode())
+        succ_cfg("saggar-agent")
+        check("mode \"saggar-agent\" is a real configured mode, not silently dropped to auto",
+              "mode                : saggar-agent" in succ_mode())
+
+        # The one seam --dry-run cannot reach: the branch that actually CALLS out. It is exercised
+        # here in the shape where calling out is guaranteed to fail — a PATH with no `saggar` on it —
+        # because that is the only shape a test may run for real. A success would open a live claude
+        # terminal on the developer's screen; this proves the wiring, the refusal and the fallback
+        # without opening anything. Every other way this fails (app not running, call refused) comes
+        # back through the same return-a-verdict path as this one.
+        r = gl(proj, "successor", sid="sess-succ", PATH="/usr/bin:/bin")
+        check("saggar-agent that cannot call out says NOTHING STARTED rather than reporting success",
+              r.returncode == 0 and "NOTHING STARTED" in r.stdout)
+        check("...and it names the remedy — the shim is a toggle in saggar's settings, not a repo fix",
+              "Saggar ▸ Settings ▸ General" in r.stdout)
+        check("...and it sends the run to the printed command, which still carries the session id",
+              "RUN THE COMMAND ABOVE" in r.stdout
+              and "command             : claude --session-id" in r.stdout)
+        check("...and a failed spawn is NOT a failed handoff — the verb still exits 0",
+              r.returncode == 0)
         succ_cfg("nonsense")
         check("an unreadable mode falls back to auto, never to a silent no-op",
               "mode                : warp-tab — Warp detected"

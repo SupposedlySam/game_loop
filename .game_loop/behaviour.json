@@ -221,7 +221,7 @@
     },
     {
       "seq": 21,
-      "sha": "pending",
+      "sha": "207a378",
       "notice": true,
       "verb": "mandate --set",
       "change": "a NEW refusal. Replacing a LIVE mandate with DIFFERENT words is refused; the refusal shows both mandates, names GAME_LOOP_SESSION as the subagent remedy, and points at `mandate --clear` for a deliberate replacement. Re-setting the SAME words still succeeds. The setter's pid, ppid and session ids are now recorded on the mandate.",

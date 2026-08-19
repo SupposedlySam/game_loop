@@ -394,25 +394,45 @@ the auto-generated handoff, this accepts it and says so — the gate is asking t
 account, while this is the last act of a run that may be out of road, and the generated floor beats
 starting the successor blind.
 
-**Which one it does is READ, not configured.** `limits.successor.mode` defaults to `auto`: under Warp
-(`TERM_PROGRAM=WarpTerminal`) it writes a tab config to `~/.warp/tab_configs/<name>.toml` and opens it
-with `warp://tab_config/<name>`, starting a new tab **in the current window** that runs the command
-itself; everywhere else it prints the command, which every host can run. A mode string you had to know
-existed made "open the tab" one more thing a session had to remember, at the exact moment the run has
-no road left.
+**Which one it does is READ, not configured.** `limits.successor.mode` defaults to `auto`, and there are
+two hosts it knows how to start a session in:
 
-Two overrides remain, because each covers something detection cannot do:
+- **Warp** (`TERM_PROGRAM=WarpTerminal`) — writes a tab config to `~/.warp/tab_configs/<name>.toml` and
+  opens it with `warp://tab_config/<name>`, starting a new tab **in the current window** running the command.
+- **saggar** (`SAGGAR_SESSION` set) — calls `saggar agent claude <prompt>`, which starts an independent
+  claude session in a new terminal in the calling terminal's project, one the user can inspect, redirect,
+  or take over.
+
+Everywhere else it prints the command, which every host can run. A mode string you had to know existed
+made "open the tab" one more thing a session had to remember, at the exact moment the run has no road left.
 
 | `limits.successor.mode` | what it is for |
 |---|---|
 | `auto` (default) | read the terminal |
-| `print` | pin the portable floor even under Warp — nothing outside this repo is written |
+| `print` | pin the portable floor under either host — nothing outside this repo is written |
 | `warp-tab` | force the tab where detection is **blind**: `TERM_PROGRAM` is unset in a hook's environment, so a hook-invoked `successor` reads "not Warp" whether or not Warp is on screen |
+| `saggar-agent` | force the saggar path where the app is present but the variable is not |
 
 That blindness fails toward `print` — a command a human can run anywhere — so it costs a keystroke,
 never a lost handoff. The INV3 cost is real and stated rather than hidden: `warp-tab` **writes outside
 this repo**, and `auto` makes that a default under Warp. What keeps it honest is that the path written
 is named in the output every time, with the opt-out printed beside it.
+
+**The two hosts are not detected equally well, and the difference is the interesting part.** `TERM_PROGRAM`
+is set by the terminal for its shell's children, so it never reaches a hook — which is the whole reason
+`warp-tab` has to exist as a forced override. `SAGGAR_SESSION` *does* reach hooks: saggar's own Claude Code
+presence hook exits early on an empty `SAGGAR_SESSION` and names its output file after it, and
+`~/.saggar/presence/<SAGGAR_SESSION>.json` exists carrying this repo's live claude session id — a file that
+could not have been written if the variable were absent where hooks run. So `auto` resolves saggar in a hook,
+and `saggar-agent` is an override for completeness rather than one anybody should need.
+
+**What the saggar path cannot carry**, stated because the Warp path carries it: `saggar agent` takes a
+provider and a *task*, not argv, so it builds its own claude invocation. The successor's session id does not
+reach it, and saggar names the terminal from the task, so `--task`/`--title` do not reach it either — the
+terminal ends up named after the prompt. It also starts in the calling terminal's directory rather than
+`--cwd`. All three are named in the output every time, and the portable command is printed in **every** mode
+precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is a
+call to a running app, so unlike `warp-tab` it writes nothing anywhere.
 
 The tab is titled `<R> | <task>` — the repo's initial so a row of tabs stays readable, plus what that
 session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than

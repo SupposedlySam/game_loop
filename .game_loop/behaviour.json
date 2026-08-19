@@ -212,7 +212,7 @@
     },
     {
       "seq": 20,
-      "sha": "pending",
+      "sha": "e3ef64d",
       "notice": true,
       "verb": "the write guard, on a write into the agent-memory directory",
       "change": "a new NON-BLOCKING note. Writing a memory file under ~/.claude/projects/<slug>/memory/ now prints the harden ladder, names the write as rung 6, and asks whether this is a FACT ABOUT THE HUMAN (where a memory is right) or a LEARNING ABOUT WORK (where a rung above 6 nearly always exists). The write is recorded as kind memory_write, and once several stack up with no harden between them the note carries the count. MEMORY.md, ordinary repo files and scratchpad writes are silent.",

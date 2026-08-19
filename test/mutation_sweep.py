@@ -697,6 +697,19 @@ NOT_SWEPT = {
     ".game_loop/bin/game_loop::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
             "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
 
+    ".game_loop/bin/game_loop::_saggar_agent": "asks saggar to open the successor's terminal (#79), "
+            "reporting through a (started, detail) pair. Its DECLINE arm is asserted directly "
+            "in-suite: `successor` is run for real with saggar absent from PATH, and the run must "
+            "say NOTHING STARTED, name the shim remedy, send the reader to the printed command and "
+            "still exit 0. A mutant that returns started=True is killed by that assertion. "
+            "ITS SUCCESS ARM CANNOT BE ASSERTED HERE AT ALL, and that is the whole reason this is "
+            "an entry rather than a MUTANTS line: the only way to observe it is to let it open real "
+            "claude terminals on the machine running the tests, which is the one thing a suite "
+            "asserting nothing was started must never do. It was proved once by hand instead — "
+            "called live, `saggar list` went 4 terminals to 5 — and that proof is point-in-time, "
+            "not a check that runs again. So this is a STATED GAP over one half of one function, "
+            "not a claim that the function is covered.",
+
     # --- EXCLUDED: the "nothing" is the LOUD direction. These resolvers refuse by returning None,
     # and the refusal is a die() in the caller that the suite asserts many times over. Neutering
     # them makes every claim refuse — noisy, not silent. The silent failure here is the INVERSE

@@ -218,6 +218,15 @@
       "change": "a new NON-BLOCKING note. Writing a memory file under ~/.claude/projects/<slug>/memory/ now prints the harden ladder, names the write as rung 6, and asks whether this is a FACT ABOUT THE HUMAN (where a memory is right) or a LEARNING ABOUT WORK (where a rung above 6 nearly always exists). The write is recorded as kind memory_write, and once several stack up with no harden between them the note carries the count. MEMORY.md, ordinary repo files and scratchpad writes are silent.",
       "consequence": "if you write agent memories, you will see one extra block of context at that moment. Nothing is blocked and no write is refused. A new log kind (memory_write) appears in log.jsonl.",
       "why_it_qualifies": "a consumer who changed nothing sees output they did not see before, and a new record kind in their log. Raised by a human about their own agent: rung 6 is what this project's ladder calls the last resort, and a memory is enforcement-by-remembering \u2014 which INV1's own test refuses, since a memory is nothing but an instruction to a future self, surfaced at session start rather than at the moment it is needed."
+    },
+    {
+      "seq": 21,
+      "sha": "pending",
+      "notice": true,
+      "verb": "mandate --set",
+      "change": "a NEW refusal. Replacing a LIVE mandate with DIFFERENT words is refused; the refusal shows both mandates, names GAME_LOOP_SESSION as the subagent remedy, and points at `mandate --clear` for a deliberate replacement. Re-setting the SAME words still succeeds. The setter's pid, ppid and session ids are now recorded on the mandate.",
+      "consequence": "if you re-bind a mandate with new wording without clearing first, that stops and asks you to say which you mean. A retry or a re-bind after compaction with identical wording is unaffected.",
+      "why_it_qualifies": "a consumer who changed nothing is refused a command that previously succeeded. Reported by a project lead whose dispatched in-process subagent inherited CLAUDE_CODE_SESSION_ID: the worker's `mandate --set` landed in the lead's state file, replaced the lead's mandate silently, and the watchdog then spent several turns instructing the lead to perform the worker's task \u2014 every gate working correctly, enforcing the wrong agent's goal."
     }
   ],
   "schema": 1

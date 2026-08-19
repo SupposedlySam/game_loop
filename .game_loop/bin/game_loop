@@ -2004,8 +2004,39 @@ def cmd_mandate(s, a):
             "  --park --reason \"<their words>\"   a human called a break (stays OPEN)\n"
             "  --resume                          they're back\n"
             "  --clear [--notes ..]              the work is actually done")
+    # A LIVE MANDATE IS NOT SILENTLY REPLACEABLE (#88). A dispatched subagent inherits
+    # CLAUDE_CODE_SESSION_ID, so its `--set` lands in the PARENT's state file and overwrites the
+    # parent's mandate — after which the Stop gate and the watchdog enforce the WORKER's goal
+    # against the LEAD, for several turns, with every gate working correctly.
+    #
+    # Keyed on the WORDS rather than on identity, deliberately. The two callers are
+    # indistinguishable by construction — same session id, and pid differs on every CLI invocation
+    # including legitimate ones — so an identity check could not separate the cases it exists for.
+    # "A live mandate is being replaced with different words" needs no identity, catches their case,
+    # and also catches two sibling sessions colliding in one state file, which an id check misses.
+    if m.get("active") and (m.get("text") or "").strip() and (m.get("text") or "").strip() != \
+            (a.set or "").strip():
+        die("REFUSED — a mandate is already bound here, and this would replace it.\n\n"
+            f"  BOUND  : {m.get('text')}\n"
+            f"      set : {m.get('since')}"
+            + (f"   by pid {m['setter'].get('pid')}" if isinstance(m.get("setter"), dict) else "")
+            + f"\n  YOURS  : {a.set}\n\n"
+            "IF YOU ARE A DISPATCHED SUBAGENT, this is not your state file. An in-process subagent\n"
+            "inherits CLAUDE_CODE_SESSION_ID, so your mandate would land in your PARENT's session\n"
+            "and the watchdog would spend the next several turns telling THEM to do YOUR task.\n"
+            "Give yourself your own state:\n\n"
+            "    GAME_LOOP_SESSION=<something unique to you> game_loop mandate --set \"..\"\n\n"
+            "IF YOU MEAN TO REPLACE IT, say so in one line first — that verb already exists:\n\n"
+            "    game_loop mandate --clear --notes \"superseded by: ..\"\n\n"
+            "Re-setting the SAME words is allowed, so a retry or a re-bind after compaction costs\n"
+            "nothing. What is refused is losing a live mandate without a decision.")
     m.pop("parked", None)   # a re-bind supersedes any break; the new words are the mandate now
-    m.update({"active": True, "text": a.set, "since": now()})
+    m.update({"active": True, "text": a.set, "since": now(),
+              # Recorded even though it decides nothing here: their second suggestion is that a
+              # COLLISION be visible, and it is worth having for a mandate that was allowed through.
+              "setter": {"pid": os.getpid(), "ppid": os.getppid(),
+                         "claude_session": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+                         "gl_session": os.environ.get("GAME_LOOP_SESSION", "")}})
     s["stop_blocks"] = 0
     # A new mandate re-arms the watchdog, so it does not inherit an exhausted ring budget from an
     # earlier session and silently never enforce.

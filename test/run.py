@@ -10089,6 +10089,73 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_lk, ignore_errors=True)
 
+    # ---- #88: a subagent's mandate silently replaced its parent's ----
+    # An in-process subagent inherits CLAUDE_CODE_SESSION_ID, so its `--set` lands in the PARENT's
+    # state file. The lead's mandate was replaced with no warning, and the watchdog then spent
+    # several turns instructing the LEAD to do the WORKER's task — every gate working correctly,
+    # enforcing the wrong agent's goal.
+    _md = tempfile.mkdtemp(prefix="gl_mandate88_")
+    try:
+        _mdh = os.path.join(_md, ".game_loop")
+        os.makedirs(_mdh)
+        for _f in ("config.json", "verify.yaml", "INVARIANTS.md"):
+            shutil.copy(os.path.join(REPO, ".game_loop", _f), os.path.join(_mdh, _f))
+        shutil.copytree(os.path.join(REPO, ".game_loop", "bin"), os.path.join(_mdh, "bin"))
+
+        def _mand(*args):
+            return subprocess.run([os.path.join(_mdh, "bin", "game_loop"), "mandate", *args],
+                                  capture_output=True, text=True, cwd=_md,
+                                  env=dict(os.environ, GAME_LOOP_HOME=_mdh))
+
+        _r1 = _mand("--set", "LEAD: keep the queue moving")
+        check("#88: the first mandate binds normally, so nothing below is a gate that refuses "
+              "everything",
+              _r1.returncode == 0 and "MANDATE bound" in _r1.stdout)
+
+        _r2 = _mand("--set", "DROP-4115 regression: restore the inset")
+        _t2 = _r2.stdout + _r2.stderr
+        check("#88: THE REPORTED CASE — replacing a LIVE mandate with different words is REFUSED. "
+              "It was silent, and the watchdog then enforced the worker's goal against the lead",
+              _r2.returncode != 0 and "would replace it" in _t2)
+        check("#88: ...and the refusal shows BOTH mandates, so the collision is legible rather "
+              "than a name for a thing that happened",
+              "LEAD: keep the queue moving" in _t2 and "DROP-4115" in _t2)
+        check("#88: ...and it names the subagent remedy, which is the actual cause: an in-process "
+              "subagent inherits the session id, so GAME_LOOP_SESSION is what gives it its own "
+              "state",
+              "GAME_LOOP_SESSION" in _t2 and "PARENT" in _t2)
+        check("#88: ...and the deliberate-replacement escape, which is one line and an existing verb",
+              "mandate --clear" in _t2)
+
+        _r3 = _mand("--set", "LEAD: keep the queue moving")
+        check("#88: RE-SETTING THE SAME WORDS IS ALLOWED — a retry, or a re-bind after compaction, "
+              "must not be priced. The check is on losing a mandate, not on calling --set",
+              _r3.returncode == 0 and "MANDATE bound" in _r3.stdout)
+
+        _mand("--clear", "--notes", "done")
+        _r4 = _mand("--set", "DROP-4115 regression: restore the inset")
+        check("#88: ...and after --clear the new mandate binds, so the refusal is a fork in the "
+              "road rather than a wall",
+              _r4.returncode == 0 and "MANDATE bound" in _r4.stdout)
+
+        # STATE IS SESSION-SCOPED, so it is under sessions/<id>/ whenever a session id is in the
+        # environment — assuming the legacy path is how this test first failed.
+        _cands = [os.path.join(_mdh, "state.json")] + [
+            os.path.join(_mdh, "sessions", _d, "state.json")
+            for _d in (os.listdir(os.path.join(_mdh, "sessions"))
+                       if os.path.isdir(os.path.join(_mdh, "sessions")) else [])]
+        _sf = next((c for c in _cands if os.path.exists(c)), None)
+        with open(_sf) as _f:
+            _st = json.load(_f)
+        check("#88: ...and the setter is RECORDED — pid, ppid and both session ids. It decides "
+              "nothing here (the two callers are indistinguishable by construction, which is the "
+              "bug) but a collision that IS allowed through should still be visible",
+              isinstance((_st.get("mandate") or {}).get("setter"), dict)
+              and "pid" in _st["mandate"]["setter"]
+              and "claude_session" in _st["mandate"]["setter"])
+    finally:
+        shutil.rmtree(_md, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

@@ -644,6 +644,14 @@ Your project's own rules live in three files the installer seeds once and never 
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and
 `.game_loop/config.json`.
 
+**Testing a `stop` trigger before you trust it to block a turn:** a trigger that matches a `kind`
+nothing ever writes, or reads a payload that never arrives, fails open silently and looks exactly
+like one that is merely satisfied — `game_loop kinds` and `status`'s dead-kind check catch the
+schema half of that. `templates/triggers.d-examples/` and `test/trigger_fixtures.py` cover the
+other half: two worked example gates and the fixture shapes to run one in both directions (a
+synthetic log, a throwaway git repo, an external command stubbed onto `PATH`) before it ever gets
+the chance to block a real turn on a condition it silently never checks.
+
 ## Flair 🎮 (fun, opt-out)
 
 `game_loop` narrates the run like the game master of a dungeon crawl — your AI is the **Crawler**. When

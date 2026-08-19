@@ -9987,6 +9987,56 @@ def main():
         shutil.rmtree(os.path.join(os.path.expanduser("~"), ".claude", "projects", _slug),
                       ignore_errors=True)
 
+    # ---- the pin warned on a different COMMIT and was silent on a different FILE ----
+    # `pinned_report` already said the right sentence — edits here are inert until you re-pin — and
+    # said it only when the pinned copy was a different COMMIT. So the one state it could not see is
+    # the state you are in while FIXING a guard: pinned at HEAD, edits uncommitted, every one inert.
+    # That cost real time: three probes read ALLOW where DENY was expected and the approach looked
+    # wrong, when the hooks were simply running the pinned copy.
+    _pd = tempfile.mkdtemp(prefix="gl_pindrift_")
+    try:
+        _pdh = os.path.join(_pd, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _pdh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md", ".game_loop_self"))
+        _pdl = importlib.machinery.SourceFileLoader("gl_pd", os.path.join(_pdh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _pdh
+        _gpd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_pd", _pdl))
+        _pdl.exec_module(_gpd)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        check("not pinned at all → no drift and no complaint, so this stays silent on the common "
+              "path",
+              _gpd.pin_file_drift() == ([], None))
+
+        _code = os.path.join(_pd, "pinned")
+        os.makedirs(os.path.join(_code, "bin"))
+        for _n in ("game_loop", "guard-writes-impl.sh"):
+            shutil.copy(os.path.join(_pdh, "bin", _n), os.path.join(_code, "bin", _n))
+        _gpd.CODE_ROOT = _code
+        check("...pinned to a byte-identical tree is also silent — the check is about what RUNS, "
+              "not about being pinned",
+              _gpd.pin_file_drift() == ([], None))
+
+        with open(os.path.join(_code, "bin", "guard-writes-impl.sh"), "a") as f:
+            f.write("\n# the pinned copy is older\n")
+        _dr, _why = _gpd.pin_file_drift()
+        check("THE STATE THE COMMIT CHECK CANNOT SEE — same commit, different bytes — is reported, "
+              "and the differing file is NAMED. This is the state you are in while fixing a guard, "
+              "and its silence reads as 'the pin is current'",
+              _dr == ["guard-writes-impl.sh"] and _why is None)
+
+        shutil.rmtree(os.path.join(_code, "bin"))
+        _dr2, _why2 = _gpd.pin_file_drift()
+        check("...and two trees that cannot be COMPARED say so — an unanswerable comparison is not "
+              "agreement between them",
+              _dr2 == [] and _why2 and "nothing was compared" in _why2)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_pd, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

@@ -7445,6 +7445,37 @@ def cmd_owned(s, a):
         "  hardcoded copy goes wrong silently the moment game_loop adds a file.")
 
 
+def pin_file_drift():
+    """bin/ files whose bytes differ between the pinned copy and this repo — [] when identical.
+
+    COMMIT EQUALITY IS NOT FILE EQUALITY, and the gap between them is the state you are in whenever
+    you are FIXING a guard: pinned at HEAD, edits uncommitted, every one of them inert. The commit
+    check above cannot see it, and its silence reads as "the pin is current".
+
+    ([], None) vs ([], "why") is kept apart: if the two trees cannot be compared, that is not
+    agreement between them.
+    """
+    if CODE_ROOT == ROOT:
+        return [], None
+    drift, checked = [], 0
+    for name in ("game_loop", "guard-writes-impl.sh", "guard-mcp-impl.sh", "watchdog", "notify.py",
+                 "verify", "flair.py"):
+        a_, b_ = os.path.join(CODE_ROOT, "bin", name), os.path.join(ROOT, "bin", name)
+        try:
+            with open(a_, "rb") as f:
+                ab = f.read()
+            with open(b_, "rb") as f:
+                bb = f.read()
+        except OSError:
+            continue                     # absent on either side is not drift; it is a different tree
+        checked += 1
+        if ab != bb:
+            drift.append(name)
+    if not checked:
+        return [], "no bin/ file could be read from both trees, so nothing was compared"
+    return drift, None
+
+
 def pinned_report():
     """Where the running CODE is, when that is not where the HOME is. Empty on the common path.
 
@@ -7465,6 +7496,18 @@ def pinned_report():
                      ".game_loop/bin/")
         lines.append("    here are inert until you re-pin. That is the point, and it is also how a "
                      "fix sits unused.")
+    _drift, _drift_why = pin_file_drift()
+    if _drift:
+        lines.append("  ⚠ THESE FILES DIFFER BETWEEN THE TWO TREES RIGHT NOW: " + " ".join(_drift))
+        lines.append("    Same commit is not same bytes. Uncommitted edits to those live here and "
+                     "are INERT —")
+        lines.append("    the hooks run the pinned copy. This is the state you are in while FIXING "
+                     "a guard, and")
+        lines.append("    it is the one the commit check above cannot see. → game_loop self --pin "
+                     "HEAD")
+    elif _drift_why:
+        lines.append(f"  ⚠ COULD NOT COMPARE the two trees ({_drift_why}) — which is not the same "
+                     "as agreement.")
     lines += ["  rules, state, log, pins and verified.json are read from and written to the HOME, "
               "never the",
               "  pinned copy — a check run against the copy would gate nothing, and state written "

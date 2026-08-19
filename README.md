@@ -378,6 +378,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `fix --prove` / `effector --prove` | Prove a fix or an action by what it **produces** — a before/after pair the tool compares, not a sentence. |
 | `stepback` | The retro. `--nothing-to-harden` is the honest escape when a chapter really yielded no rule, and it requires a `--reason`. |
 | `successor` | Mint the next session's id, point it at your handoff, and hand over. `--handoff <path>`, `--task ".."`, `--title ".."`, `--cwd <dir>`, `--session-id <id>`, `--dry-run`. |
+| `kinds` | Print the log record schema — every `kind` this code can write and the fields recorded beside it, **extracted from the source** so it cannot drift. Read it before writing a trigger that matches on `kind`. |
 | `contribute --reviewed --filed ".." --note ".."` | Record that you asked, of each learning hardened since your last review, whether it named a **tool's** behaviour or **this repo's**. "All project-specific" is a complete answer — recording the review is what clears the nudge. |
 | `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 

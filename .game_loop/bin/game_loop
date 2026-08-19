@@ -824,6 +824,16 @@ def triggers_report():
         elif st.get("consecutive"):
             lines.append(f"      BLOCKING turn-end — {st.get('consecutive')} consecutive of "
                          f"{STOP_TRIGGER_BLOCK_LIMIT} before it stands down.")
+    # A DEAD CONDITION, which is the same failure as a dead moment one level in (#87). The block
+    # above catches a trigger wired to a moment that does not exist; this catches one wired to the
+    # right moment and matching a RECORD KIND nothing here ever writes. Reported by an author who
+    # made that mistake twice in two triggers — nothing corrected the first — and then wrote a test
+    # suite from the same wrong mental model, so the suite passed while both guards were dead.
+    for fname, kind in trigger_dead_kinds():
+        lines.append(f"  ✗ {fname} matches kind {kind!r}, WHICH NOTHING HERE EVER WRITES.")
+        lines.append("      It cannot fire, and exit 0 is also what a satisfied guard does — so "
+                     "broken and quiet")
+        lines.append("      are the same observable from outside. → game_loop kinds")
     unused = [e for e in TRIGGER_EVENTS if not triggers_for(e)]
     if unused:
         lines.append("  → moments with nothing attached: " + ", ".join(sorted(unused)))
@@ -2389,6 +2399,97 @@ def release_distance_warning():
         "  The number that would actually move you is 'N consumers are bound to the older one', and",
         "  that lives in a package manager's registry rather than in git — so this reports the",
         "  distance and declines to guess at the audience."])
+
+
+_SHIPPED_SCRIPTS = ("game_loop", "watchdog", "notify.py", "verify", "flair.py")
+
+
+def log_kinds(code_dir=None):
+    """{kind: sorted[field]} for every record this code can WRITE, read out of the source.
+
+    EXTRACTED, NEVER TRANSCRIBED (#87). A hand-written schema table is a document describing code,
+    which drifts from it — and a stale schema reference is worse than none, because it looks
+    authoritative while being wrong. This walks the AST for dict literals carrying a constant
+    "kind" and reports the sibling keys, so it is a view of the code rather than a copy of it.
+
+    A trigger author was guessing at this and had nothing to check the guess against: they matched
+    on `kind == "mandate"`, which this project has never emitted, and the guard exited 0 forever.
+    """
+    out = {}
+    base = code_dir or os.path.join(CODE_ROOT, "bin")
+    for name in _SHIPPED_SCRIPTS:
+        try:
+            with open(os.path.join(base, name)) as f:
+                tree = ast.parse(f.read())
+        except (OSError, SyntaxError):
+            continue
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Dict):
+                continue
+            kind = None
+            for k, v in zip(n.keys, n.values):
+                if isinstance(k, ast.Constant) and k.value == "kind" and isinstance(v, ast.Constant):
+                    kind = v.value
+            if not isinstance(kind, str):
+                continue
+            fields = out.setdefault(kind, set())
+            for k in n.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str) and k.value != "kind":
+                    fields.add(k.value)
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def trigger_dead_kinds():
+    """[(trigger file, kind it matches that NOTHING emits)] — their suggestion 3, and the gate.
+
+    A reference nobody thinks to consult is rung 6. This is the rung above: a trigger whose source
+    names a kind string this code never writes CANNOT FIRE, and that is decidable without running
+    it. Checked against the extracted schema, so it cannot go stale either.
+    """
+    known = set(log_kinds())
+    if not known:
+        return []
+    hits, d = [], os.path.join(ROOT, "triggers.d")
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    for name in names:
+        p = os.path.join(d, name)
+        try:
+            with open(p) as f:
+                src = f.read()
+        except OSError:
+            continue
+        # Only strings compared against a `kind` field — not every quoted word in the file.
+        for m in re.finditer(r"""kind["']?\s*(?:\)|\])?\s*==\s*["']([a-z_]+)["']""", src):
+            k = m.group(1)
+            if k not in known:
+                hits.append((name, k))
+        for m in re.finditer(r"""["']kind["']\s*:\s*["']([a-z_]+)["']""", src):
+            k = m.group(1)
+            if k not in known:
+                hits.append((name, k))
+    return sorted(set(hits))
+
+
+def cmd_kinds(s, a):
+    """Print the log schema this code writes, so a trigger author is not guessing (#87)."""
+    ks = log_kinds()
+    if not ks:
+        die("could not read the shipped scripts to extract a schema — this is a COULD NOT ANSWER, "
+            "not an empty schema.")
+    out(f"{len(ks)} record kind(s) this code can write, extracted from the source:", "")
+    for k, fields in ks.items():
+        out(f"  {k}", *([f"      {' '.join(fields)}"] if fields else ["      (no other fields)"]))
+    out("",
+        "Read this rather than guessing: a trigger matching a kind that is never written exits 0",
+        "forever, and exit 0 is also what a SATISFIED guard does — broken and quiet look identical",
+        "from outside. `status` names a trigger that matches a kind nothing here emits.",
+        "",
+        "WHAT THIS DOES NOT COVER (INV6): a kind built by concatenation rather than written as a",
+        "literal, records written by YOUR triggers, and every other way a trigger can be dead —",
+        "a heredoc that eats its own stdin looks exactly like this one does.")
 
 
 def cmd_checkpoint(s, a):
@@ -8376,6 +8477,8 @@ def main():
     hd.add_argument("--general", help="the TRANSFERABLE form — what another agent could use without "
                                       "knowing this codebase (fed to any `harden` trigger)")
 
+    sub.add_parser("kinds")
+
     cb = sub.add_parser("contribute")
     cb.add_argument("--reviewed", action="store_true",
                     help="record that you asked, of each learning hardened since the last review, "
@@ -8588,7 +8691,8 @@ def main():
      "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model,
-     "successor": cmd_successor, "contribute": cmd_contribute}[a.cmd](s, a)
+     "successor": cmd_successor, "contribute": cmd_contribute,
+     "kinds": cmd_kinds}[a.cmd](s, a)
 
 
 if __name__ == "__main__":

@@ -10037,6 +10037,58 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_pd, ignore_errors=True)
 
+    # ---- #87: a trigger author guessing at a log schema, with nothing to check the guess ----
+    _lk = tempfile.mkdtemp(prefix="gl_kinds87_")
+    try:
+        _lkh = os.path.join(_lk, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _lkh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md", ".game_loop_self"))
+        os.makedirs(os.path.join(_lkh, "triggers.d"), exist_ok=True)
+        _lkl = importlib.machinery.SourceFileLoader("gl_lk", os.path.join(_lkh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _lkh
+        _glk = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lk", _lkl))
+        _lkl.exec_module(_glk)
+        os.environ.pop("GAME_LOOP_HOME", None)
+
+        _kinds = _glk.log_kinds()
+        check("#87: the schema is EXTRACTED from the source, so it cannot drift from the code the "
+              "way a hand-written table does — and a stale schema reference is worse than none, "
+              "because it looks authoritative",
+              len(_kinds) > 40 and "harden" in _kinds and "stepback" in _kinds)
+        check("#87: THE REPORTED CASE — there is no bare `mandate` kind, and the five real ones are "
+              "all present. A trigger matching 'mandate' matched zero rows of their entire log",
+              "mandate" not in _kinds
+              and {"mandate_set", "mandate_clear", "mandate_park", "mandate_park_stop",
+                   "mandate_resume"} <= set(_kinds))
+        check("#87: ...and each kind carries the FIELDS recorded beside it, which is what an author "
+              "needs to read a record rather than only to match one",
+              "text" in _kinds["mandate_set"] and "learning" in _kinds["harden"])
+
+        # THE GATE, which is their suggestion 3. A reference nobody thinks to consult is rung 6;
+        # naming the dead condition is the rung above it.
+        _td = os.path.join(_lkh, "triggers.d")
+        with open(os.path.join(_td, "dead.sh"), "w") as f:
+            f.write("#!/usr/bin/env bash\npython3 -c \"\nd={}\n"
+                    "if d.get('kind') == 'mandate': print(1)\n\"\n")
+        check("#87: a trigger matching a kind NOTHING emits is named — it cannot fire, and exit 0 "
+              "is also what a satisfied guard does, so broken and quiet are one observable",
+              _glk.trigger_dead_kinds() == [("dead.sh", "mandate")])
+        with open(os.path.join(_td, "dead.sh"), "w") as f:
+            f.write("#!/usr/bin/env bash\npython3 -c \"\nd={}\n"
+                    "if d.get('kind') == 'harden': print(1)\n\"\n")
+        check("#87: ...and a trigger matching a REAL kind is silent, so the finding above is a "
+              "verdict rather than a check that fires on every quoted word",
+              _glk.trigger_dead_kinds() == [])
+        os.remove(os.path.join(_td, "dead.sh"))
+        check("#87: ...and no triggers at all is silent too",
+              _glk.trigger_dead_kinds() == [])
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_lk, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

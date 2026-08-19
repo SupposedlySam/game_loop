@@ -322,6 +322,12 @@ mutate --prove ".." --test <command> --file <path> --replace ".." --with ".."
 #   each reported exactly that, and three stayed GREEN with the bug reintroduced.
 #   --replace must appear EXACTLY once. --timeout <sec> per run (default 900).
 #   A green mutated run is decisive; a red one is one specific claim, not a good test.
+kinds
+#   every log record kind this code can write, with its fields, extracted from the SOURCE.
+#   READ THIS BEFORE MATCHING ON `kind` IN A TRIGGER. A consumer matched `kind == "mandate"`,
+#   which is never written (it is mandate_set / _clear / _park / _park_stop / _resume), so the
+#   guard exited 0 forever — and exit 0 is also what a SATISFIED guard does, which makes broken
+#   and quiet the same observable. `status` names a trigger matching a kind nothing emits.
 contribute --reviewed --filed "<urls, or none>" --note ".."
 #   record that you asked, of each learning hardened since the last review: does this name a
 #   TOOL's behaviour, or THIS REPO's? `stepback` nudges once enough have accumulated and LISTS

@@ -327,6 +327,29 @@ note() {
   exit 0
 }
 
+MEM_NOTE=$(cat <<'MEMEOF'
+📝 THIS IS RUNG 6 — the last resort on the game_loop ladder.
+
+    1 IMPOSSIBLE  2 LOUD  3 CHECKED  4 AUTOMATED  5 VISIBLE  6 doc/memory
+
+A memory is enforcement by REMEMBERING, which is the thing INV1 refuses. Its own test is: if the
+agent ignored every instruction, would this still hold? A memory is nothing but an instruction to a
+future self, and it surfaces at session start rather than at the moment it is needed.
+
+WHICH KIND IS THIS?
+
+  A FACT ABOUT THE HUMAN   who they are, what they prefer, a URL. A memory is RIGHT here, and
+                           there is no rung 1-5 for a fact about a person.
+
+  A LEARNING ABOUT WORK    a mistake you made, a check that would have caught it. There is nearly
+                           always a rung above 6:
+      game_loop harden --learning ".." --artifact <path> --mechanism ".." --rung <1..6>
+
+Nothing is blocked and this write is going through. What is priced is DEFAULTING to 6 without
+asking whether 1-5 was available.
+MEMEOF
+)
+
 # Record a path this Crawler wrote, so the commit gate can compare the session's actual work against
 # a commit's blast radius (issue #21). Append-only, one repo-relative path per line. This runs at
 # PreToolUse, i.e. BEFORE the write lands, so a denied or failed write still records — the set errs
@@ -528,6 +551,67 @@ PY
 )
     if [ "$verdict" = "yes" ]; then
       record_edit "$fp"                        # an in-repo write IS this session's work (issue #21)
+      # A MEMORY IS RUNG 6, AND RUNG 6 IS THE LAST RESORT ON THIS PROJECT'S OWN LADDER. `harden`
+      # exists to turn a learning into something ENFORCED instead of remembered; a memory is exactly
+      # enforcement-by-remembering, surfaced at session start rather than when it is needed. Raised
+      # by the human, about me, on a day spent shipping gates.
+      #
+      # A NOTE, NEVER A BLOCK. Some memories are correct and have no higher rung: who the human is,
+      # what they prefer, a pointer. There is no rung 1-5 for a fact about a person. What this does
+      # is force the distinction while the file is being written, and RECORD it so that
+      # memories-written-since-the-last-harden is countable rather than an impression.
+      mem_hit=$(FP="$fp" python3 -c '
+import os, sys
+real = os.path.realpath(os.environ["FP"])
+parts = real.split(os.sep)
+if "memory" in parts and ".claude" in parts and real.endswith(".md") \
+        and os.path.basename(real) != "MEMORY.md":
+    sys.stdout.write("yes")
+' 2>/dev/null)
+      if [ -n "$mem_hit" ]; then
+        # RECORD IT, so "memories written since the last harden" is a number rather than an
+        # impression. That ratio is the whole argument: if it climbs while hardens do not, the
+        # ladder is being skipped, and a habit nobody counts is a habit nobody has. The note below
+        # carries the count, because a record nobody reads at the moment of the choice is rung 6
+        # about rung 6.
+        mem_tally=$(GL_DIR="$GAMELOOP_DIR" FP="$fp" python3 <<'PYMEM' 2>/dev/null
+import datetime, json, os
+d = os.environ["GL_DIR"]
+log = os.path.join(d, "log.jsonl")
+try:
+    with open(log, "a") as f:
+        f.write(json.dumps({"t": datetime.datetime.now().isoformat(timespec="seconds"),
+                            "kind": "memory_write",
+                            "file": os.path.basename(os.environ["FP"])}) + "\n")
+except OSError:
+    pass
+n = 0
+try:
+    with open(log) as f:
+        recs = [l for l in f if '"kind"' in l]
+    for line in reversed(recs):
+        try:
+            k = json.loads(line).get("kind")
+        except ValueError:
+            continue
+        if k == "harden":
+            break
+        if k == "memory_write":
+            n += 1
+except OSError:
+    n = 0
+print(n)
+PYMEM
+)
+        if [ -n "$mem_tally" ] && [ "$mem_tally" -gt 1 ] 2>/dev/null; then
+          note "$MEM_NOTE
+
+  $mem_tally memories have been written since the last harden in this repo. If a learning about
+  HOW TO WORK is among them, one of them wanted a rung above 6."
+        else
+          note "$MEM_NOTE"
+        fi
+      fi
       exit 0
     fi
     if [ -n "$verdict" ]; then

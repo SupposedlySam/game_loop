@@ -9908,6 +9908,85 @@ def main():
           "selection",
           _gsel.selected_tests("0 passing\n  3 failing")[0] == 3)
 
+    # ---- a memory is RUNG 6, and this project's ladder calls rung 6 the last resort ----
+    # Raised by the human, about me: I wrote a memory to record a standing authorization on a day
+    # spent shipping gates. `harden` exists to turn a learning into something ENFORCED rather than
+    # remembered, and a memory is exactly enforcement-by-remembering — INV1's own test is "if the
+    # agent ignored every instruction, would this still hold?", and a memory is nothing but an
+    # instruction to a future self, surfaced at session start rather than when it is needed.
+    _mm = tempfile.mkdtemp(prefix="gl_memrung_")
+    try:
+        _mmh = os.path.join(_mm, ".game_loop")
+        shutil.copytree(os.path.join(REPO, ".game_loop"), _mmh,
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "upstream.json", "config.local.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "UPSTREAM_LEDGER.md"))
+        subprocess.run(["git", "init", "-q", _mm], check=True)
+        # THE SLUG IS THE FULL PATH WITH NON-ALNUM REPLACED — the same transform the guard uses, so
+        # the fixture sits where a real memory directory sits. Using the basename put it outside the
+        # allow roots, where the write was denied before the note could fire: a test that measured
+        # the outside-repo rule while claiming to measure this one.
+        _slug = re.sub(r"[^a-zA-Z0-9]", "-", os.path.realpath(_mm))
+        _memdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", _slug, "memory")
+        os.makedirs(_memdir, exist_ok=True)
+
+        def _guard_note(fp):
+            r = subprocess.run(["bash", os.path.join(_mmh, "bin", "guard-writes-impl.sh")],
+                               input=json.dumps({"tool_name": "Write",
+                                                 "tool_input": {"file_path": fp, "content": "x"},
+                                                 "session_id": "s1"}),
+                               capture_output=True, text=True, cwd=_mm,
+                               env=dict(os.environ, CLAUDE_PROJECT_DIR=_mm))
+            try:
+                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+            except ValueError:
+                return "", ""
+            return h.get("permissionDecision", ""), h.get("additionalContext", "")
+
+        _dec, _ctx = _guard_note(os.path.join(_memdir, "a-learning.md"))
+        check("writing a memory NOTES that it is rung 6 — the last resort on this project's own "
+              "ladder, and enforcement by remembering is what INV1 refuses",
+              "RUNG 6" in _ctx and "1 IMPOSSIBLE" in _ctx)
+        check("...and it is a NOTE, never a block: some memories are correct and have no higher "
+              "rung, because there is no rung 1-5 for a fact about a person",
+              _dec != "deny" and "Nothing is blocked" in _ctx)
+        check("...and it forces the DISTINCTION rather than nagging — a fact about the human is "
+              "right to remember, a learning about work nearly always has a rung above 6",
+              "A FACT ABOUT THE HUMAN" in _ctx and "A LEARNING ABOUT WORK" in _ctx
+              and "game_loop harden" in _ctx)
+
+        _d2, _c2 = _guard_note(os.path.join(_memdir, "MEMORY.md"))
+        check("...while the MEMORY.md INDEX is silent — it is a pointer file, written every time a "
+              "memory is, and noting it would double every nudge into noise",
+              _c2 == "")
+        _d3, _c3 = _guard_note(os.path.join(_mm, "README.md"))
+        check("...and an ordinary repo write is silent, so the note above is about the memory "
+              "directory rather than about writing files",
+              _c3 == "")
+
+        # THE COUNT IS THE ARGUMENT. A habit nobody counts is a habit nobody has.
+        _log = os.path.join(_mmh, "log.jsonl")
+        check("a memory write is RECORDED, so 'memories since the last harden' is a number rather "
+              "than an impression",
+              os.path.exists(_log) and '"memory_write"' in open(_log).read())
+        for _i in range(3):
+            _guard_note(os.path.join(_memdir, f"m{_i}.md"))
+        _d4, _c4 = _guard_note(os.path.join(_memdir, "m-last.md"))
+        check("...and once several stack up with no harden between them, the note SAYS the count — "
+              "if that climbs while hardens do not, the ladder is being skipped",
+              "since the last harden" in _c4)
+        with open(_log, "a") as f:
+            f.write(json.dumps({"t": "2030-01-01T00:00:00", "kind": "harden"}) + "\n")
+        _d5, _c5 = _guard_note(os.path.join(_memdir, "after-harden.md"))
+        check("...and a harden RESETS it, so the number means 'since you last took a real rung' "
+              "rather than 'ever'",
+              "since the last harden" not in _c5)
+    finally:
+        shutil.rmtree(_mm, ignore_errors=True)
+        shutil.rmtree(os.path.join(os.path.expanduser("~"), ".claude", "projects", _slug),
+                      ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

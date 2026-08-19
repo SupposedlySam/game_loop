@@ -209,6 +209,15 @@
       "change": "two new COULD NOT PROVE outcomes. A test command that reports ZERO selected tests is refused in both directions. And a mutated run that PASSES while printing no recognisable test count AND whose anchor could not be liveness-probed is refused rather than reported as NOT PROVED.",
       "consequence": "a proof whose test filter matches nothing now stops instead of reporting NOT PROVED, and the refusal prints the tree the test ran in beside the file it mutated. A mutated run that goes RED is unaffected \u2014 redness is self-evidencing, since a command that selected nothing cannot fail.",
       "why_it_qualifies": "a consumer who changed nothing gets a refusal where they previously got a verdict. Reported from a linked git worktree: --file resolved against their cwd while the test ran in another root, mocha's --grep matched nothing, zero tests were selected, and exit 0 was reported as NOT PROVED for a mutation that demonstrably fails the test."
+    },
+    {
+      "seq": 20,
+      "sha": "pending",
+      "notice": true,
+      "verb": "the write guard, on a write into the agent-memory directory",
+      "change": "a new NON-BLOCKING note. Writing a memory file under ~/.claude/projects/<slug>/memory/ now prints the harden ladder, names the write as rung 6, and asks whether this is a FACT ABOUT THE HUMAN (where a memory is right) or a LEARNING ABOUT WORK (where a rung above 6 nearly always exists). The write is recorded as kind memory_write, and once several stack up with no harden between them the note carries the count. MEMORY.md, ordinary repo files and scratchpad writes are silent.",
+      "consequence": "if you write agent memories, you will see one extra block of context at that moment. Nothing is blocked and no write is refused. A new log kind (memory_write) appears in log.jsonl.",
+      "why_it_qualifies": "a consumer who changed nothing sees output they did not see before, and a new record kind in their log. Raised by a human about their own agent: rung 6 is what this project's ladder calls the last resort, and a memory is enforcement-by-remembering \u2014 which INV1's own test refuses, since a memory is nothing but an instruction to a future self, surfaced at session start rather than at the moment it is needed."
     }
   ],
   "schema": 1

@@ -230,7 +230,7 @@
     },
     {
       "seq": 22,
-      "sha": "pending",
+      "sha": "16bb10e",
       "notice": true,
       "verb": "every refusal, from every verb",
       "change": "a refusal now exits 3 instead of 2, and prints its reason to BOTH stdout and stderr instead of stderr alone. Exit 2 remains what argparse usage errors and unhandled exceptions produce. The Stop gate and watchdog are UNAFFECTED \u2014 they exit 2 directly because that is Claude Code's hook protocol for blocking a turn-end, not a game_loop choice.",

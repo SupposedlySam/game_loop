@@ -8791,11 +8791,27 @@ def main():
                                                       "triggers.d", "triggers.json"))
         shutil.copytree(os.path.join(REPO, "test"), os.path.join(_ex, "test"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        check("...and a tree with NO .git enumerates the same source set by walking, so the "
-              "denominator cannot shrink to one file wherever git happens to be absent",
+        # A SUPERSET, NOT AN EQUALITY, and the difference is a real defect this test had. Exact
+        # equality holds only in a checkout with no UNTRACKED Python file under the copied dirs —
+        # `copytree` copies untracked files, `git ls-files` does not list them — so the assertion
+        # went red for anyone who ran the suite while writing a new test file. That is exactly what
+        # happened: a consumer running this before committing their own new test reported it as a
+        # "pre-existing, unrelated failure on this machine" and moved on, which is how an
+        # environment-dependent assertion teaches people to dismiss a red suite.
+        #
+        # The claim worth making is the one the comment above states: the denominator must not
+        # COLLAPSE where git is absent. A walk finding MORE than git tracks is not that failure.
+        _walk = set(sweep.source_files(_ex))
+        _tracked_here = {f for f in _srcs if os.path.exists(os.path.join(_ex, f))}
+        check("...and a tree with NO .git enumerates by walking and finds every tracked source, so "
+              "the denominator cannot shrink to one file wherever git happens to be absent",
               not os.path.exists(os.path.join(_ex, ".git"))
-              and sorted(sweep.source_files(_ex)) == sorted(
-                  f for f in _srcs if os.path.exists(os.path.join(_ex, f))))
+              and _walk >= _tracked_here and len(_walk) > 1)
+        check("...and anything the walk finds BEYOND the tracked set is untracked-in-this-checkout, "
+              "never a file git knows about — so the superset above cannot hide a miss",
+              all(subprocess.run(["git", "-C", REPO, "ls-files", "--error-unmatch", f],
+                                 capture_output=True).returncode != 0
+                  for f in sorted(_walk - _tracked_here)))
     finally:
         shutil.rmtree(_ex, ignore_errors=True)
     check("...including the EXTENSIONLESS scripts, which a *.py glob would have missed entirely — "

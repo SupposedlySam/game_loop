@@ -239,7 +239,7 @@
     },
     {
       "seq": 23,
-      "sha": "pending",
+      "sha": "94c49c3",
       "notice": true,
       "verb": "checkpoint",
       "change": "a NEW refusal. The handback refuses when commits are finished, PUSHED, and ahead of the newest confidence mark \u2014 a clean tree plus HEAD on the remote. Mid-work (any uncommitted change) is silent, unpushed is silent (that has its own gate), and HEAD already marked is silent. `--release-deferred \"<why>\"` lets it through and records the reason as kind release_deferred.",

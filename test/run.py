@@ -10385,6 +10385,73 @@ def main():
               subprocess.run([os.path.join(REPO, ".game_loop", "bin", "game_loop"), "kinds"],
                              capture_output=True, text=True, cwd=REPO)))
 
+    # ---- the documented SURFACE, checked in the ordinary suite rather than a trigger ----
+    # This existed only as `.game_loop/triggers.d/undocumented-surface.sh`, which .gitignore
+    # excludes — so it protected this repo and reached NO consumer. A check nobody receives is a
+    # check nobody has (#86, one layer along). Ported here on showrunner's argument that the
+    # mechanical half belongs in the suite, where it fails a normal run.
+    _SURFACE_SKIP_OPTS = {
+        "--help": "argparse's own",
+        "--file": "the generic --<option>-file form is documented as a form, not per option",
+        "--exit-code": "accepted only so passing it produces a REFUSAL naming the reason rather "
+                       "than an argparse error naming nothing; documenting it would advertise a "
+                       "capability that does not exist",
+    }
+    _SURFACE_SKIP_KEYS = {
+        "kind": "a log record field, not config", "name": "a log/trigger field, not config",
+        "command": "a trigger field, documented as part of the trigger shape",
+        "detail": "a log field", "text": "a log/state field", "reason": "a log field",
+        "notes": "a log field", "t": "a log timestamp", "sid": "a session id in state",
+        "uses_left": "authorization state", "session_id": "harness payload field",
+        "tool_name": "harness payload field", "tool_input": "harness payload field",
+        "resets_at": "a usage-window reading", "used_percentage": "a usage-window reading",
+    }
+
+    def _code_surface():
+        """(options, config keys) the CODE defines — derived, never a hand list.
+
+        A hand-maintained list goes stale toward a FALSE PASS exactly when somebody adds a surface,
+        which is the moment this check exists for.
+        """
+        opts, keys = set(), set()
+        for _rel in (".game_loop/bin/game_loop", ".game_loop/bin/watchdog",
+                     ".game_loop/bin/notify.py", "install.sh"):
+            _src = read_or_empty(os.path.join(REPO, _rel))
+            opts |= set(re.findall(r'add_argument\(\s*"(--[a-z][a-z0-9-]*)"', _src))
+            keys |= set(re.findall(
+                r'(?:_c|cfg|c|config\(\))\.get\(\s*"([a-z_]{4,})"', _src))
+        return opts - set(_SURFACE_SKIP_OPTS), keys - set(_SURFACE_SKIP_KEYS)
+
+    _opts, _keys = _code_surface()
+    _front = "\n".join(read_or_empty(os.path.join(REPO, f)) for f in ("README.md", "llms.txt"))
+    check("the surface list is DERIVED FROM THE CODE and is not empty — a hand-maintained list "
+          "goes stale toward a false pass exactly when somebody adds a surface",
+          len(_opts) > 40 and len(_keys) > 10)
+    _missing_o = sorted(o for o in _opts if o not in _front)
+    _missing_k = sorted(k for k in _keys if k not in _front)
+    check("every CLI option the code defines is NAMED in README.md or llms.txt — the two files a "
+          "human and an agent start from"
+          + (" · MISSING: " + " ".join(_missing_o) if _missing_o else ""),
+          not _missing_o)
+    check("...and every config key the code reads is NAMED there too"
+          + (" · MISSING: " + " ".join(_missing_k) if _missing_k else ""),
+          not _missing_k)
+    check("...and the check can FAIL: a surface the docs do not mention is reported as missing, so "
+          "the two clean answers above are verdicts rather than an empty comprehension",
+          [x for x in ["--a-flag-nobody-documented"] if x not in _front]
+          == ["--a-flag-nobody-documented"])
+    # ITS OWN LIMITS, printed as an assertion so they cannot be dropped quietly. NAMED is not
+    # EXPLAINED, and a check that silently covers less than a reader assumes is worse than none.
+    check("WHAT THIS DOES NOT CHECK, stated rather than assumed: that the prose is correct, that "
+          "it explains anything, or that it still describes what the code does. NAMED is the "
+          "floor, not the goal — and the 'did anyone read this end to end' half is not mechanical "
+          "at all",
+          True)
+    check("...and every exclusion carries a REASON, because an exclusion is a claim — a bare name "
+          "on a list is an excuse that suppresses the finding forever, silently",
+          all(v.strip() for v in _SURFACE_SKIP_OPTS.values())
+          and all(v.strip() for v in _SURFACE_SKIP_KEYS.values()))
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

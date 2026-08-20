@@ -543,7 +543,19 @@ MUTANTS = [
 # described a tree nobody would ever have. That is this file's own rule about comparability, paid
 # rather than quoted.
 #
-# THOSE THREE WERE NEVER MEASURED, and this comment used to explain their numbers.
+# TWO OF THE THREE ARE MEASURED NOW, and the correction is seventy-fold.
+#
+# ci_commands and ci_gap came back at 222 kills each. I explained that with "blast radius" and set
+# floors below it. Re-measured after fixing the crash: THREE each. There was no blast radius; there
+# was an IndexError in test/run.py — `_out.split("NO GATE RUNS")[1]` raises the moment a neutered
+# producer removes that marker, which ended the run, and every assertion that never printed `ok`
+# was counted as killed. Floors 2, one below the reading.
+#
+# _scan_transcript and five others still crash on a different shape — an unguarded READ rather than
+# an unguarded split — and stay NOT MEASURED with floor 0. read_or_empty/json_or_none convert the
+# sites; the next sweep says whether that was all of them.
+#
+# THE ORIGINAL COMMENT, kept because the lesson is the comment rather than the numbers:
 #
 # ci_commands 222, ci_gap 222, _scan_transcript 171. I saw three readings far outside every other
 # producer's range, invented "blast radius" to explain them, and then set floors BELOW readings I had
@@ -602,10 +614,10 @@ MUTANTS += [
      ["transcript", "denial", "oversized"], None, 0),
     ("ci_commands -> CI's commands are never read",
      ".game_loop/bin/verify::ci_commands", "    return [], \"neutered\"\n",
-     ["CI", "workflow"], None, 0),
+     ["CI", "workflow"], None, 2),
     ("ci_gap -> no CI command is ever reported as ungated",
      ".game_loop/bin/verify::ci_gap", "    return [], \"\"\n",
-     ["CI", "workflow", "gap"], None, 0),
+     ["CI", "workflow", "gap"], None, 2),
     ("milestones -> flair never marks a milestone",
      ".game_loop/bin/flair.py::milestones", "    return [], []\n",
      ["flair", "milestone"], None, 4),

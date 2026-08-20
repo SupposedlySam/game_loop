@@ -764,6 +764,66 @@ def fire_triggers(s, event, payload):
     return lines
 
 
+def guards_report():
+    """Registered project guards, each ACTIVE / INERT / UNKNOWN — never silently healthy (#90).
+
+    A guard can be structurally disabled by the state it reads: `grep -qi '^lead' .game_loop/seat
+    || exit 0` is inert the moment that file says anything else, and an exit 0 from a satisfied
+    guard is byte-identical to an exit 0 from a disabled one. Sixteen hours of a run in that state
+    looked exactly like sixteen hours of compliance.
+
+    ABSENT PROBE => UNKNOWN, NEVER ACTIVE. A guard nobody can interrogate must not render as
+    healthy; promoting "could not ask" to "fine" is the failure this exists to refuse, rebuilt.
+    """
+    guards = config().get("guards") or []
+    if not isinstance(guards, list) or not guards:
+        return []
+    lines = ["GUARDS — this project's own PreToolUse gates, and whether they can fire at all:"]
+    n_inert = n_unknown = 0
+    for g in guards:
+        if not isinstance(g, dict):
+            continue
+        name = str(g.get("name") or g.get("script") or "(unnamed)")
+        script = g.get("script")
+        if script and not os.path.exists(os.path.join(REPO_ROOT, str(script))):
+            n_inert += 1
+            lines.append(f"  ✗ {name} — INERT: its script is not in this tree ({script})")
+            continue
+        probe = g.get("probe")
+        if not probe:
+            n_unknown += 1
+            lines.append(f"  ? {name} — UNKNOWN: no probe declared, so whether it can fire at all "
+                         "was never asked.")
+            lines.append("      A guard nobody can interrogate is not a guard reported healthy. "
+                         "Give it a `probe`:")
+            lines.append('      config.json -> guards: [{"name": .., "script": .., "probe": '
+                         '"<command; exit 0 = it would evaluate>"}]')
+            continue
+        try:
+            r = subprocess.run(["bash", "-c", str(probe)], cwd=REPO_ROOT, capture_output=True,
+                               text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            n_unknown += 1
+            lines.append(f"  ? {name} — UNKNOWN: its probe did not answer "
+                         f"({type(exc).__name__}). NOT the same as active.")
+            continue
+        if r.returncode == 0:
+            lines.append(f"  ✓ {name} — ACTIVE: its probe says it would evaluate.")
+        else:
+            n_inert += 1
+            detail = ((r.stdout or "") + (r.stderr or "")).strip().split("\n")[0][:100]
+            lines.append(f"  ✗ {name} — INERT: the state it reads disables it"
+                         + (f" — {detail}" if detail else f" (probe exit {r.returncode})"))
+            lines.append("      It is registered and it runs and it returns 0, which is what a "
+                         "SATISFIED guard returns.")
+    if n_inert or n_unknown:
+        lines.append(f"  → {n_inert} INERT · {n_unknown} UNKNOWN. An enabling condition the agent "
+                     "can WRITE is an off")
+        lines.append("    switch, and it gets flipped at the moment the agent is most stuck. "
+                     "Derive it instead.")
+    return lines
+
+
 def triggers_report():
     """Silent when a project has attached nothing — most installs want no part of this.
 
@@ -8242,6 +8302,9 @@ def cmd_status(s, a):
                 ".game_loop/log.jsonl")
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     out(*triggers_report())  # attached ≠ working: one that never fired looks just like one that does
+    # AND A GUARD DISABLED BY THE STATE IT READS (#90) — the same equivalence one process boundary
+    # out. Registered, running, returning the code that means allowed, for sixteen hours.
+    out(*guards_report())
     out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for
     out(*waiting_report())       # what this run is blocked on — the first question a resume asks
     snap = load_limits()

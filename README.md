@@ -392,6 +392,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `read_roots` | Extra directories a `claim --read` may cite, beyond this repo. |
 | `allow_write_roots` | Extra roots the write guard permits. **An absolute home path here ships a write permission to everyone who clones you.** |
 | `deploy_verbs` | Extra deploy/publish commands to block outright. This rail is a *denylist* — a verb nobody listed is not blocked. |
+| `guards` | Project-local PreToolUse gates you want `status` to vouch for: `{name, script, probe}`. The **probe** is a command whose exit 0 means the guard would evaluate at all. **No probe → reported UNKNOWN, never ACTIVE** — a guard nobody can interrogate must not render as healthy. |
 | `upstream_repos` | Repos to watch for movement on issues that **involve you** (replies, closes, new ones) and for new releases, reported at `checkpoint`. Empty = off. Scope it tightly: an unscoped watcher surfaces unrelated side projects and gets switched off inside a day. |
 | `mcp_writes` | `"gated"` (default: a mutating MCP call is refused, and you may open it once with `authorize`) or `"disabled"` (refused outright, no hatch offered). |
 | `mcp_trusted_servers` | Whole servers your project OWNS. Every call to them is allowed, destructive included — the widest door here. See below. |

@@ -10224,6 +10224,90 @@ def main():
     finally:
         shutil.rmtree(_md, ignore_errors=True)
 
+    # ---- #90: a guard disabled by the state it reads, with nothing able to say so ----
+    # Two PreToolUse guards opening `grep -qi '^lead' .game_loop/seat || exit 0`. The seat said
+    # "worker". Both exited 0 on every call for sixteen hours, the run did what they existed to
+    # prevent, and reported success. Registered, running, returning the code that means allowed —
+    # the same equivalence #87 refuses one process boundary in.
+    _gd = tempfile.mkdtemp(prefix="gl_guards90_")
+    try:
+        _gdh = os.path.join(_gd, ".game_loop")
+        os.makedirs(_gdh)
+        for _f in ("verify.yaml", "INVARIANTS.md"):
+            shutil.copy(os.path.join(REPO, ".game_loop", _f), os.path.join(_gdh, _f))
+        shutil.copytree(os.path.join(REPO, ".game_loop", "bin"), os.path.join(_gdh, "bin"))
+        with open(os.path.join(_gdh, "guard-lead-seat.sh"), "w") as f:
+            f.write("#!/usr/bin/env bash\ngrep -qi '^lead' .game_loop/seat || exit 0\n")
+
+        def _seat(word):
+            with open(os.path.join(_gdh, "seat"), "w") as f:
+                f.write(word + "\n")
+
+        def _cfg(guards):
+            with open(os.path.join(_gdh, "config.json"), "w") as f:
+                json.dump({"project_name": "probe", "guards": guards}, f)
+
+        _probe = ("grep -qi '^lead' .game_loop/seat || { echo '.game_loop/seat is \"'"
+                  "$(cat .game_loop/seat)'\", guard requires ^lead'; exit 1; }")
+
+        def _status():
+            r = subprocess.run([os.path.join(_gdh, "bin", "game_loop"), "status"],
+                               capture_output=True, text=True, cwd=_gd,
+                               env=dict(os.environ, GAME_LOOP_HOME=_gdh))
+            return r.stdout + r.stderr
+
+        _cfg([{"name": "guard-lead-seat.sh", "script": ".game_loop/guard-lead-seat.sh",
+               "probe": _probe}])
+        _seat("worker")
+        _out = _status()
+        check("#90: THE REPORTED CASE — a guard the state it reads has disabled is reported INERT, "
+              "with the state that disabled it named. It was registered, it ran, and it returned "
+              "the code a SATISFIED guard returns",
+              "INERT" in _out and "guard-lead-seat.sh" in _out
+              and 'seat is "worker"' in _out and "requires ^lead" in _out)
+        check("#90: ...and it says WHY that was invisible — exit 0 from a disabled guard and exit "
+              "0 from a satisfied one are the same observable",
+              "what a SATISFIED guard returns" in _out)
+
+        _seat("lead")
+
+        def _guard_block(text):
+            """Just the GUARDS section — `status` says 'gate inert' elsewhere about the stop gate,
+            and scanning the whole block for the word measured a neighbouring subject."""
+            if "GUARDS —" not in text:
+                return ""
+            return text.split("GUARDS —", 1)[1].split("\n\n", 1)[0]
+
+        _out2 = _guard_block(_status())
+        check("#90: ...and with the enabling state present it reports ACTIVE, so the finding above "
+              "is a verdict rather than a report that can only say INERT",
+              "ACTIVE" in _out2 and "INERT" not in _out2)
+
+        # THE RULE THAT CARRIES IT, and it is the reporter's: a guard nobody can interrogate must
+        # not render as healthy. Promoting "could not ask" to "fine" rebuilds the bug.
+        _cfg([{"name": "no-probe.sh"}])
+        _out3 = _status()
+        _blk3 = _guard_block(_out3)
+        check("#90: A GUARD WITH NO PROBE IS UNKNOWN, NEVER ACTIVE — a guard nobody can "
+              "interrogate must not render as healthy, which is the whole failure being fixed",
+              "UNKNOWN" in _blk3 and "ACTIVE" not in _blk3
+              and "never asked" in _blk3)
+        _cfg([{"name": "gone.sh", "script": ".game_loop/not-here.sh", "probe": "true"}])
+        check("#90: ...and a guard whose SCRIPT is missing is INERT rather than probed — a probe "
+              "answering about a script that is not there would be a fact about nothing",
+              "INERT" in _status())
+        _cfg([{"name": "hangs.sh", "probe": "sleep 30"}])
+        check("#90: ...and a probe that does not ANSWER is UNKNOWN too, bounded rather than "
+              "hanging the status block",
+              "UNKNOWN" in _status())
+
+        _cfg([])
+        check("#90: ...and a project with no guards block says nothing at all — most installs have "
+              "none, and a section that is always there is one people stop reading",
+              "GUARDS —" not in _status())
+    finally:
+        shutil.rmtree(_gd, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

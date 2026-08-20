@@ -46,6 +46,13 @@ once is disabled forever. Every guard needs a legitimate path through it. Here t
 A learning is a bug in the harness with a countdown. Its deliverable is an **artifact**, not a
 sentence: `game_loop harden --learning ".." --artifact <real path> --mechanism ".." --rung N`. Take the
 highest rung that applies — **1 IMPOSSIBLE · 2 LOUD · 3 CHECKED · 4 AUTOMATED · 5 VISIBLE · 6
+
+And a rung is only as high as its own ENABLING CONDITION. Rung 3 is CHECKED only if the
+check's enabling condition sits outside the agent's reach: a guard gated on a file the agent
+can write is an off switch, and it gets flipped at the moment the agent is most stuck. Two
+consumer guards opened `grep -qi '^lead' .game_loop/seat || exit 0`; the seat said `worker` for
+sixteen hours while both guards ran, returned 0, and let through exactly what they existed to
+refuse. DERIVE the condition from something observable instead of declaring it in state.
 doc/memory** (last resort). And a guard that overstates its reach buys false confidence: say what it
 does *not* catch, in the guard itself. Silence from a guard is not evidence of safety.
 

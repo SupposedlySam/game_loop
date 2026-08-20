@@ -257,7 +257,7 @@
     },
     {
       "seq": 25,
-      "sha": "pending",
+      "sha": "bbc4b88",
       "notice": true,
       "verb": "install.sh, run from a clone with GAME_LOOP_CHANNEL or GAME_LOOP_REF set",
       "change": "a NEW refusal, exit 3. Naming a ref while installing from a clone is refused instead of ignored. Nothing is written to the target, and both ways forward are printed: unset the variable to install the clone you are standing in, or run the fetched installer, which honours the ref. An ordinary clone install with no ref named is unaffected.",

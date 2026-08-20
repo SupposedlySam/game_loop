@@ -3009,6 +3009,115 @@ def cmd_mutate(s, a):
         *_proved)
 
 
+# ── the hatch used as a config substitute ────────────────────────────────────────────────────────
+#
+# THE FAILURE THIS EXISTS FOR (this checkout's own log, read 2026-08-20): one task produced 22
+# `authorize` grants carrying a single identical reason, one per repo — against 4 `authorized_write`
+# entries in the whole log. A single-use human hatch had quietly become the way this machine did
+# routine cross-repo work, which is the one thing `authorize` promises the log will NOT contain:
+# every entry there is supposed to be a one-off somebody actually decided on. Spend it 22 times and
+# the record still reads as 22 human decisions — the value of "single-use and logged" is that the
+# log means something later, and this is precisely how it stops meaning anything.
+#
+# A RECURRING cross-repo write is a CONFIG question. `allow_write_roots` (or `mcp_standing_writes`
+# for a tool) is a decision on the record, made once and reviewable; the hatch is for the one-off.
+# Nothing said so at the moment it mattered. The ranking does exist — gl-refused puts config at step
+# 3 and the hatch at step 4 — but a skill is rung 6, an instruction to a future self that surfaces at
+# session start rather than at the 22nd grant.
+#
+# RUNG 2 (LOUD), NOT 3 (CHECKED), and the distinction is load-bearing: this must never REFUSE. A
+# human may legitimately re-authorize one path (a retry, a second call inside one job, the
+# write-then-delete pair that wants `--uses 2`), and INV5 forbids a guard that blocks its own fix —
+# the fix for a wrong allow root is very often a write this hatch is the only way to make. So it
+# shouts, names the count, and prints the line to add. It fires on the SECOND distinct path rather
+# than the twenty-second, which is the entire point of putting it here.
+
+
+def _tilde(p):
+    """A home path written the way a config should carry it. An absolute /Users/... in a COMMITTED
+    config.json ships a write permission to everyone who clones the repo (README, Configure)."""
+    home = os.path.expanduser("~")
+    return "~" + p[len(home):] if p == home or p.startswith(home + os.sep) else p
+
+
+def authorize_recurrence(reason):
+    """Paths of prior `authorize` grants in this checkout's log carrying the SAME reason, in order
+    and WITH duplicates, so the caller can tell one path re-granted from many paths sharing a reason.
+
+    The whole log is scanned rather than its tail: the grant that reveals the pattern is the one that
+    scrolled out of the window months ago. Cheap because the JSON parse is gated on a substring, the
+    same shape `shared_pins` uses.
+
+    WHAT IT MATCHES is a reason REPEATED, never a reason reworded — normalized for case and
+    whitespace and no further. This is prose, so it decides what gets SAID and never what gets
+    refused (INV1), and any rephrasing walks straight past it exactly as `category_tell` does.
+    """
+    want = " ".join(str(reason).lower().split())
+    seen = []
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                if '"authorize"' not in ln:
+                    continue
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("kind") != "authorize":
+                    continue
+                if " ".join(str(r.get("reason", "")).lower().split()) != want:
+                    continue
+                if r.get("path"):
+                    seen.append(r["path"])
+    except OSError:
+        return []
+    return seen
+
+
+def recurrence_lines(reason, real, raw_path):
+    """The LOUD block when this reason has bought a hatch before, or [] when it has not."""
+    prior = authorize_recurrence(reason)
+    if not prior:
+        return []
+    distinct = []
+    for p in prior:
+        if p not in distinct:
+            distinct.append(p)
+    others = [p for p in distinct if p != real]
+    # One path re-granted ONCE is an ordinary retry and says nothing. Two or more distinct paths
+    # under one reason is the config smell, and so is the same path bought a third time.
+    if not others and prior.count(real) < 2:
+        return []
+    is_mcp = str(raw_path).startswith("mcp__")
+    shown = distinct[:5]
+    more = len(distinct) - len(shown)
+    lines = ["",
+             f"⚠ THIS REASON HAS BOUGHT A HATCH BEFORE — {len(prior)} prior grant(s) carry these "
+             f"same words,",
+             f"  across {len(distinct)} path(s). Already granted:"]
+    lines += [f"    {_tilde(p)}" for p in shown]
+    if more:
+        lines.append(f"    … and {more} more")
+    lines.append("  A single-use hatch spent again and again is not a one-off — it is this machine's")
+    lines.append("  routine work, written into the log as if somebody decided on each one separately.")
+    if is_mcp:
+        lines += ["  If this tool is genuinely a standing, reviewed grant, that belongs in config:",
+                  '    ~/.game_loop/config.json → "mcp_standing_writes": '
+                  f'["{raw_path}"]']
+    else:
+        lines += ["  A RECURRING write outside the repo is a CONFIG question, not a hatch:",
+                  '    ~/.game_loop/config.json → "allow_write_roots": '
+                  f'["{_tilde(real)}"]   (machine-wide, committed by nothing)',
+                  '    .game_loop/config.json   → same key — but that file IS COMMITTED, so write',
+                  "                               paths as ~/… or every clone inherits a write root",
+                  "                               only you have."]
+    lines += ["  NOTHING IS BLOCKED: this authorization stands and spends as normal. INV5 — the fix",
+              "  for a wrong allow root is often a write only this hatch can make.",
+              "  WHAT THIS MISSES: a reason REWORDED. Vary the wording and this line never appears;",
+              "  the config entry is the remedy, this is only the prompt to go add one."]
+    return lines
+
+
 def cmd_authorize(s, a):
     """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
 
@@ -3053,6 +3162,8 @@ def cmd_authorize(s, a):
             "    is the one that must ask. Report the refusal upward; do not spend the hatch for it.\n\n"
             "The guard you hit will still be there. That is the point of it.")
     real = os.path.realpath(os.path.expanduser(a.path))
+    # BEFORE the append and the logline below, or this grant counts itself as its own precedent.
+    recur = recurrence_lines(a.reason, real, a.path)
     # PROVENANCE THE AGENT DID NOT TYPE. `arm` is the T3 mechanism and it writes state; an
     # authorization raised while one was armed can be read later against the answer that came back.
     # Not a gate — an interactive human speaks directly and arms nothing — but the difference between
@@ -3073,7 +3184,8 @@ def cmd_authorize(s, a):
          if auth["asked_via_arm"] else
          "  asked : NO armed question in this session — the record says so, because a hatch spent "
          "with\n          nobody asked and one spent after asking must not read the same later"),
-        "→ the guard will consume this and log the use. It is permanent in log.jsonl.")
+        "→ the guard will consume this and log the use. It is permanent in log.jsonl.",
+        *recur)
 
 
 # ── merge attribution ────────────────────────────────────────────────────────────────────────────

@@ -418,6 +418,53 @@ def main():
         check("a Write spend is logged as authorized_write",
               '"authorized_write"' in log and "authztest-write" in log)
 
+        # THE HATCH USED AS A CONFIG SUBSTITUTE. Observed in this repo's own log: 22 grants under
+        # ONE identical reason, one per repo, against 4 spends in the whole file. LOUD, never a
+        # refusal — a human may legitimately re-authorize a path, and INV5 forbids a guard that
+        # blocks its own fix, which here would be the write that repairs a wrong allow root.
+        print("authorize recurrence (LOUD, never blocking):")
+        r1 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-a"),
+                "--reason", "morgan said do the sweep")
+        check("a first grant says nothing about recurrence", "BOUGHT A HATCH BEFORE" not in r1.stdout)
+        r2 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-b"),
+                "--reason", "morgan said do the sweep")
+        check("a SECOND distinct path under one reason is called out",
+              "BOUGHT A HATCH BEFORE" in r2.stdout)
+        check("the callout names the config key that replaces the hatch",
+              "allow_write_roots" in r2.stdout)
+        check("the callout offers the machine-wide file, not the committed one, first",
+              r2.stdout.index("~/.game_loop/config.json") < r2.stdout.index(".game_loop/config.json →"))
+        check("the callout writes home paths as ~/ (a committed config must not carry /Users/…)",
+              '"~/recur-b"' in r2.stdout)
+        check("it is LOUD, not a refusal — the grant still stands (INV5)",
+              r2.returncode == 0 and "✓ AUTHORIZED" in r2.stdout)
+        check("the recurrent grant is still spendable",
+              allowed(proj, {"tool_name": "Bash", "tool_input": {"command": "touch ~/recur-b/x"}}))
+        check("the callout states what it misses", "REWORDED" in r2.stdout)
+        # Reason matching is normalized for case and whitespace, and no further.
+        r3 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-c"),
+                "--reason", "MORGAN   said Do The   Sweep")
+        check("reason matching is case- and whitespace-normalized",
+              "BOUGHT A HATCH BEFORE" in r3.stdout)
+        r4 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+                "--reason", "a different sentence entirely")
+        check("an unrelated reason does not trip it", "BOUGHT A HATCH BEFORE" not in r4.stdout)
+        # ONE path re-granted once is an ordinary retry and must stay silent; the third says config.
+        r5 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+                "--reason", "a different sentence entirely")
+        check("re-granting ONE path once is a retry, not a pattern",
+              "BOUGHT A HATCH BEFORE" not in r5.stdout)
+        r6 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+                "--reason", "a different sentence entirely")
+        check("the same path bought a third time IS a pattern",
+              "BOUGHT A HATCH BEFORE" in r6.stdout)
+        # An MCP grant has a different remedy, and pointing at allow_write_roots would be wrong.
+        gl(proj, "authorize", "--path", "mcp__mail__archive", "--reason", "morgan okayed the mail run")
+        r7 = gl(proj, "authorize", "--path", "mcp__mail__label",
+                "--reason", "morgan okayed the mail run")
+        check("a recurring MCP grant points at mcp_standing_writes, not allow_write_roots",
+              "mcp_standing_writes" in r7.stdout and "allow_write_roots" not in r7.stdout)
+
         print("deploy verbs:")
         cf = os.path.join(proj, ".game_loop", "config.json")
         c = json_or_none(cf); c["deploy_verbs"] = ["firebase deploy"]

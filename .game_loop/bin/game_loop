@@ -410,8 +410,30 @@ def logline(rec):
         f.write(json.dumps({**stamp, **rec}) + "\n")
 
 
-def die(msg, code=2):
-    print("GAMELOOP ✗ " + msg, file=sys.stderr)
+REFUSED_EXIT = 3   # a GATE said no. 2 stays what argparse and unhandled errors produce (#91)
+
+
+def die(msg, code=REFUSED_EXIT):
+    """A refusal: exit 3, reason on STDOUT, one line on stderr saying where it went.
+
+    Both halves are a consumer's report. Three refuted claims in one evening went unrecorded
+    because a refusal read as success: it exited 2 exactly like a typo does, and its reason was on
+    the one stream a quiet hook discards. They wrote a 36-line wrapper to recover the distinction,
+    which is every consumer paying for something this can decide once.
+
+    NOT DUPLICATED ONTO BOTH STREAMS. A twenty-line refusal printed twice is one people skim, and
+    skimming a refusal is how it becomes a success. stderr keeps a single line so a watcher of that
+    stream still learns something was refused; stdout carries the reason so `2>/dev/null` cannot
+    swallow it.
+    """
+    text = "GAMELOOP ✗ " + msg
+    # BOTH STREAMS, which is what the reporter asked for and I first talked myself out of on
+    # aesthetics. `2>/dev/null` is what anyone writes to keep a hook quiet, so a reason that lives
+    # only on stderr is a reason a quiet hook discards — and a refusal nobody sees reads as success.
+    # Only on stdout would have broken every consumer already reading stderr. Duplication on a
+    # terminal is the price, and it is smaller than either failure.
+    print(text)
+    print(text, file=sys.stderr)
     sys.exit(code)
 
 

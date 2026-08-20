@@ -227,6 +227,15 @@
       "change": "a NEW refusal. Replacing a LIVE mandate with DIFFERENT words is refused; the refusal shows both mandates, names GAME_LOOP_SESSION as the subagent remedy, and points at `mandate --clear` for a deliberate replacement. Re-setting the SAME words still succeeds. The setter's pid, ppid and session ids are now recorded on the mandate.",
       "consequence": "if you re-bind a mandate with new wording without clearing first, that stops and asks you to say which you mean. A retry or a re-bind after compaction with identical wording is unaffected.",
       "why_it_qualifies": "a consumer who changed nothing is refused a command that previously succeeded. Reported by a project lead whose dispatched in-process subagent inherited CLAUDE_CODE_SESSION_ID: the worker's `mandate --set` landed in the lead's state file, replaced the lead's mandate silently, and the watchdog then spent several turns instructing the lead to perform the worker's task \u2014 every gate working correctly, enforcing the wrong agent's goal."
+    },
+    {
+      "seq": 22,
+      "sha": "pending",
+      "notice": true,
+      "verb": "every refusal, from every verb",
+      "change": "a refusal now exits 3 instead of 2, and prints its reason to BOTH stdout and stderr instead of stderr alone. Exit 2 remains what argparse usage errors and unhandled exceptions produce. The Stop gate and watchdog are UNAFFECTED \u2014 they exit 2 directly because that is Claude Code's hook protocol for blocking a turn-end, not a game_loop choice.",
+      "consequence": "if you branch on `exit == 2` to detect a refusal, that check now misses; branch on 3, or on non-zero as before. If you parse refusal text off stderr, that still works. If you run with `2>/dev/null` you will now SEE the reason on stdout, where previously you saw nothing at all.",
+      "why_it_qualifies": "a consumer who changed nothing gets a different exit code and output on a stream that was previously empty. Reported after three refuted claims in one evening went unrecorded because a refusal read as success: it exited 2 exactly as a typo does, and its reason lived on the one stream a quiet hook discards. They had written a 36-line wrapper per repo to recover the distinction."
     }
   ],
   "schema": 1

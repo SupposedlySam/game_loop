@@ -186,6 +186,36 @@ def allowed(proj, payload, sid=None):
     return _probe_count(f) > before and not denied(res)
 
 
+def read_or_empty(path):
+    """A file's text, or "" when it does not exist.
+
+    A BARE `read_or_empty(p)` IN AN ASSERTION KILLS THE SUITE when a neutered producer never wrote
+    the file — FileNotFoundError, and every assertion after it never runs. The sweep reads that as
+    coverage, because an assertion that never printed `ok` looks exactly like one that flipped.
+    Absent must fail the assertion that cares, not end the run.
+    """
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def json_or_none(path):
+    """A file's parsed JSON, or None when it is absent or unparseable.
+
+    Same failure as read_or_empty one shape along: `json_or_none(p)` in an assertion raises when
+    a neutered producer never wrote the file, and the raise ends the run rather than the assertion.
+    None is also the honest answer for a file that exists and is corrupt — a test asserting on its
+    contents should FAIL there, not crash.
+    """
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def after_marker(text, marker, until=None):
     """The slice of `text` after `marker` (and before `until`), or "" when the marker is ABSENT.
 
@@ -373,7 +403,7 @@ def main():
 
         print("deploy verbs:")
         cf = os.path.join(proj, ".game_loop", "config.json")
-        c = json.load(open(cf)); c["deploy_verbs"] = ["firebase deploy"]
+        c = json_or_none(cf); c["deploy_verbs"] = ["firebase deploy"]
         json.dump(c, open(cf, "w"))
         check("blocks a configured deploy verb",
               denied(guard(proj, {"tool_name": "Bash",
@@ -719,17 +749,17 @@ def main():
                                                     "resets_at": now_epoch + 86400}}}
         limits_f = os.path.join(proj, ".game_loop", "limits.json")
         r = gl(proj, "statusline", stdin=json.dumps(sl_payload))
-        snap = json.load(open(limits_f))
+        snap = json_or_none(limits_f)
         check("statusline snapshots rate_limits to limits.json and renders a row",
               r.returncode == 0 and "5h" in r.stdout
               and snap["windows"]["five_hour"]["used_percentage"] == 23.5)
         r = gl(proj, "statusline", stdin='{"model":{"display_name":"X"}}')
         check("statusline stays calm with no rate_limits (API-key auth)",
-              r.returncode == 0 and json.load(open(limits_f))["windows"] == {})
+              r.returncode == 0 and json_or_none(limits_f)["windows"] == {})
         FakeSlack.posts.clear()
         sl_payload["rate_limits"]["five_hour"]["used_percentage"] = 98.5
         gl(proj, "statusline", stdin=json.dumps(sl_payload))
-        snap = json.load(open(limits_f))
+        snap = json_or_none(limits_f)
         check("crossing the threshold stamps crossed_at and pages ONCE",
               snap["windows"]["five_hour"]["crossed_at"]
               and any("usage window" in json.dumps(b) for _, b in FakeSlack.posts))
@@ -797,7 +827,7 @@ def main():
         ctx_cf = os.path.join(proj, ".game_loop", "config.json")
 
         def ctx_enable(on, threshold=300000):
-            c = json.load(open(ctx_cf))
+            c = json_or_none(ctx_cf)
             c["limits"] = {"context": {"enabled": on, "threshold_tokens": threshold}}
             json.dump(c, open(ctx_cf, "w"))
 
@@ -965,7 +995,7 @@ def main():
               in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
 
         def succ_cfg(mode):
-            c = json.load(open(ctx_cf))
+            c = json_or_none(ctx_cf)
             lim = c.get("limits") or {}
             lim["successor"] = {"mode": mode}
             c["limits"] = lim
@@ -1057,14 +1087,14 @@ def main():
             gl(proj, "claim", "--assert", "x", "--read", real)
 
         def fired(p):
-            return json.load(open(os.path.join(p, ".game_loop", "state.json"))).get("flair_fired", [])
+            return json_or_none(os.path.join(p, ".game_loop", "state.json")).get("flair_fired", [])
         check("10-claim milestone fires exactly once", fired(proj).count("claim:10") == 1)
         gl(proj, "status"); gl(proj, "status")
         check("a fired milestone does not repeat", fired(proj).count("claim:10") == 1)
         # sponsor CTAs rotate — bind a mandate backdated far enough to cross many uptime milestones
         import datetime as _dt
         gl(proj, "mandate", "--set", "long run")
-        st = json.load(open(os.path.join(proj, ".game_loop", "state.json")))
+        st = json_or_none(os.path.join(proj, ".game_loop", "state.json"))
         st["mandate"]["since"] = (_dt.datetime.now() - _dt.timedelta(hours=200)).isoformat(timespec="seconds")
         json.dump(st, open(os.path.join(proj, ".game_loop", "state.json"), "w"))
         r = gl(proj, "status")
@@ -1072,10 +1102,10 @@ def main():
         check("many uptime milestones fire with a sponsor CTA", len(ctas) >= 5)
         check("the sponsor CTA wording varies (not all identical)", len(set(ctas)) >= 2)
         # flair.enabled=false silences it
-        c = json.load(open(cf)); c["flair"] = {"enabled": False}; json.dump(c, open(cf, "w"))
+        c = json_or_none(cf); c["flair"] = {"enabled": False}; json.dump(c, open(cf, "w"))
         r = gl(proj, "claim", "--assert", "x", "--read", real)
         check("flair.enabled=false silences flair", "🎮" not in r.stdout)
-        c = json.load(open(cf)); c.pop("flair", None); json.dump(c, open(cf, "w"))
+        c = json_or_none(cf); c.pop("flair", None); json.dump(c, open(cf, "w"))
 
         # Update check: status compares .game_loop/VERSION (installed sha) against the latest sha on the
         # source repo's main, served here by a fake GitHub. Network is real (urllib), workspace is not.
@@ -1123,7 +1153,7 @@ def main():
         ghbase = f"http://127.0.0.1:{ghsrv.server_address[1]}"
         ver_f = os.path.join(proj, ".game_loop", "VERSION")
         cache_f = os.path.join(proj, ".game_loop", ".update_cache.json")
-        cf_orig = open(cf).read()
+        cf_orig = read_or_empty(cf)
 
         def set_cfg(**extra):
             base = {"project_name": "t", "update_repo": "me/gl", "update_api_base": ghbase}
@@ -2092,7 +2122,7 @@ def main():
                                   "tool_input": {"file_path": os.path.expanduser("~/xtalk.txt")}})))
 
         print("MCP guard (teaching it, without opening a bypass):")
-        c = json.load(open(cf)); c["mcp_read_only_tools"] = ["mcp__vendor__"]
+        c = json_or_none(cf); c["mcp_read_only_tools"] = ["mcp__vendor__"]
         json.dump(c, open(cf, "w"))
         check("a configured read-only server resolves the ambiguous case",
               not denied(mcpguard({"tool_name": "mcp__vendor__frobnicate",
@@ -3814,7 +3844,7 @@ def main():
         _turn_end()
         check("...and a hand-written handoff is never overwritten by the next turn-end",
               os.path.isfile(_hp)
-              and open(_hp).read().strip() == "where I got to, in my own words")
+              and read_or_empty(_hp).strip() == "where I got to, in my own words")
 
         # THE EVIDENCE HALF. Recorded, gating nothing — INV4 applied to ourselves, since a threshold
         # invented today would be a number standing for nothing.
@@ -4713,7 +4743,7 @@ def main():
         cc_ask(cc_s, "n\n\n", home=cc_home2)                # bare return
         check("a bare return is a no, and the no is remembered like any other answer",
               cc_limits(cc_s) is None
-              and json.load(open(cc_answers2))["context_cap"]["answer"] == "no")
+              and json_or_none(cc_answers2)["context_cap"]["answer"] == "no")
     finally:
         shutil.rmtree(ctxcap, ignore_errors=True)
 
@@ -5399,7 +5429,7 @@ def main():
               and os.path.isfile(os.path.join(ow, ".game_loop", "bin", "game_loop")))
         check("...so the installer ships the agent brief; an installed project used to contain "
               "NOTHING written for the agent to read",
-              os.path.isfile(_brief) and "game_loop" in open(_brief).read())
+              os.path.isfile(_brief) and "game_loop" in read_or_empty(_brief))
 
         # BOUNDED BY SESSION, NOT BY REFUSAL. Each session hits its first refusal exactly once, so
         # the ceiling is one line per session lifetime rather than one per event — which is what
@@ -7050,7 +7080,7 @@ def main():
           "every bypass it prompts is invisible where a reviewer would grep for the pattern",
           _after > _before
           and any(json.loads(l).get("kind") == "commit_gate_unharnessed_tree"
-                  for l in open(_log).read().splitlines() if l.strip()))
+                  for l in read_or_empty(_log).splitlines() if l.strip()))
 
     print("a revert-proof the TOOL performs, because a reported one reads the same either way (#71):")
     # "Reverted the fix, watched it fail, restored" is ONE SENTENCE whether or not it happened. A
@@ -7107,7 +7137,7 @@ def main():
               and "nothing establishes it RAN" in (_silent.stdout + _silent.stderr))
         check("...and the tree is RESTORED either way — a verb that mutates somebody's source and "
               "leaves it mutated is worse than the self-report it replaces",
-              open(_prod).read().strip().endswith("return a + b"))
+              read_or_empty(_prod).strip().endswith("return a + b"))
         # A SAME-SIZE MUTATION IS INVISIBLE to any cache keyed on (mtime, size). This verb reported
         # NOT PROVED for a test that demonstrably goes red, because `a + b` -> `a - b` is the same
         # length and both writes landed in one mtime tick, so Python reused its .pyc. The verb built
@@ -7686,7 +7716,7 @@ def main():
         _vf = os.path.join(mw, ".game_loop", "sessions", "sess-model", "model.json")
         check("...and it is written to disk where a parent can read it WITHOUT the session "
               "cooperating or even knowing",
-              os.path.isfile(_vf) and json.load(open(_vf))["changed"] is True)
+              os.path.isfile(_vf) and json_or_none(_vf)["changed"] is True)
 
         # ADVISORY, NEVER A GATE: a model mismatch is a COST failure, not a correctness one. The
         # output is fine, which is exactly why nothing notices and why it can run for a week.
@@ -8676,11 +8706,11 @@ def main():
 
     # And the mutating function itself is PURE — it returns the new source, it does not write one.
     _wd_path = os.path.join(SRC_GAME_LOOP, "bin", "watchdog")
-    _wd_before = open(_wd_path).read()
+    _wd_before = read_or_empty(_wd_path)
     _neutered, _found = sweep.neuter(_wd_before, "superseded", "    return False\n")
     check("neuter() hands back a mutated STRING and writes nothing — the caller chooses where it "
           "lands, and here that is only ever a copy",
-          _found and "return False" in _neutered and open(_wd_path).read() == _wd_before)
+          _found and "return False" in _neutered and read_or_empty(_wd_path) == _wd_before)
 
     print("mutation sweep coverage (default-deny over the producers it can find):")
     synth = ("def decides(x):\n"
@@ -8997,7 +9027,7 @@ def main():
 
         # COULD NOT LOOK is not QUIET. This is the whole three-outcome contract.
         _feed.pop("o/a")
-        _before = open(_u.UPSTREAM_F).read()
+        _before = read_or_empty(_u.UPSTREAM_F)
         _l, _st = _u.upstream_check()
         _txt = "\n".join(_l)
         check("#76: every repo failing is COULD NOT CHECK, a distinct state from 'no movement'",
@@ -9008,7 +9038,7 @@ def main():
               "in the meantime — outage, not hole",
               "NOT 'no movement'" in _txt and "UNCHANGED" in _txt)
         check("#76: ...and the stored baseline is in fact untouched by a failed check",
-              open(_u.UPSTREAM_F).read() == _before)
+              read_or_empty(_u.UPSTREAM_F) == _before)
 
         # PARTIAL, and the property that makes an outage temporary instead of permanent.
         _cfg(["o/a", "o/b"])
@@ -9016,7 +9046,7 @@ def main():
         _wipe()
         _feed["o/b"] = ({"7": {"updatedAt": "B1", "title": "b-one"}}, "v1", None)
         _u.upstream_check()                     # baseline both
-        _b_before = json.load(open(_u.UPSTREAM_F))["repos"]["o/b"]
+        _b_before = json_or_none(_u.UPSTREAM_F)["repos"]["o/b"]
         _feed.pop("o/b")                        # now o/b cannot be reached
         _feed["o/a"] = ({"1": {"updatedAt": "TZ", "title": "one"}}, "v2", None)
         _l, _st = _u.upstream_check()
@@ -9024,13 +9054,13 @@ def main():
         check("#76: one repo up and one down is PARTIAL — reported as a subset, not as a result",
               _st == "partial" and "COULD NOT BE CHECKED" in _txt
               and "A PARTIAL RESULT IS NOT A RESULT" in _txt)
-        _b_after = json.load(open(_u.UPSTREAM_F))["repos"]["o/b"]
+        _b_after = json_or_none(_u.UPSTREAM_F)["repos"]["o/b"]
         check("#76: THE LOAD-BEARING ONE — an unchecked repo's baseline does NOT advance, so one "
               "outage cannot become a permanent blind spot the next run reports as calm",
               _b_after == _b_before)
         check("#76: ...while the repo that DID answer still advances, so a partial run is not a "
               "wasted one",
-              json.load(open(_u.UPSTREAM_F))["repos"]["o/a"]["issues"]["1"]["updatedAt"] == "TZ")
+              json_or_none(_u.UPSTREAM_F)["repos"]["o/a"]["issues"]["1"]["updatedAt"] == "TZ")
 
         # The wording rules, checked as text because that is what they are.
         for _name, _c in (("movement", _u._UP_MOVEMENT_CAVEAT), ("quiet", _u._UP_QUIET_CAVEAT),
@@ -9080,7 +9110,7 @@ def main():
               and "triggers · proved" in _r.stdout)
         check("...and the file it mutated is restored, so the moment does not fire over a tree "
               "left broken",
-              open(_tgt).read() == "VALUE = 1\n")
+              read_or_empty(_tgt) == "VALUE = 1\n")
 
         # THE CONTROL. "The trigger fired" and "the verb prints that string anyway" produce the
         # same stdout, so the same command with nothing wired has to come back silent.
@@ -9370,7 +9400,7 @@ def main():
               and "liveness probe: live" in _r3.stdout)
         check("#80: ...and the tree is restored after every one of those paths, including the two "
               "that refuse",
-              open(_sub).read().endswith("    x = 1\n    return x\n"))
+              read_or_empty(_sub).endswith("    x = 1\n    return x\n"))
 
         _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
         _t4 = _r4.stderr + _r4.stdout
@@ -9536,13 +9566,13 @@ def main():
         # its second, and hardens seeded "just after the baseline" are then also just after the
         # REVIEW — so the clearing assertion fails on the clock rather than on the code. Found by
         # this exact failure.
-        _led = open(_gc.LEDGER_F).read().replace(_gc._ledger_last(), "2026-01-01T00:00:00")
+        _led = read_or_empty(_gc.LEDGER_F).replace(_gc._ledger_last(), "2026-01-01T00:00:00")
         with open(_gc.LEDGER_F, "w") as f:
             f.write(_led)
         _base = _gc._ledger_last()
         check("#78: ...and the baseline is a real timestamped ledger line, so the next review has "
               "something to count from rather than a flag nobody can read",
-              bool(_base) and "baseline" in open(_gc.LEDGER_F).read())
+              bool(_base) and "baseline" in read_or_empty(_gc.LEDGER_F))
 
         _seed(5, _base)
         check("#78: five learnings is under the threshold and stays quiet — the boundary is "
@@ -9571,10 +9601,10 @@ def main():
         check("#78: recording a review with NOTHING filed clears the nudge — the review is what "
               "clears it, so the gate cannot manufacture noise issues to satisfy itself",
               _gc.upstream_review_nudge({}) is None
-              and "filed: none" in open(_gc.LEDGER_F).read())
+              and "filed: none" in read_or_empty(_gc.LEDGER_F))
         check("#78: ...and the ledger keeps the human-readable line, since a human reads this file "
               "to see whether the question is being asked honestly",
-              "all of them were about this repo" in open(_gc.LEDGER_F).read())
+              "all of them were about this repo" in read_or_empty(_gc.LEDGER_F))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_ct, ignore_errors=True)
@@ -9821,7 +9851,7 @@ def main():
               not _ignored(_old, ".game_loop/config.local.json"))
 
         _sh = os.path.join(REPO, "install.sh")
-        _src_i = open(_sh).read()
+        _src_i = read_or_empty(_sh)
         check("install.sh now MIGRATES an existing ignore list, the way every other entry in it "
               "does — an ignore list only protects the installs that receive it",
               "grep -q '^config.local.json$' \"$GI\"" in _src_i)
@@ -10328,6 +10358,32 @@ def main():
               "GUARDS —" not in _status())
     finally:
         shutil.rmtree(_gd, ignore_errors=True)
+
+    # ---- #91.3: a refusal and a usage error shared exit 2, and the reason lived only on stderr ----
+    # Three refuted claims in one evening went unrecorded because a refusal read as success. The
+    # reporter wrapped the binary in 36 lines to recover the distinction — every consumer paying,
+    # in every repo, for something this can decide once.
+    _rf = subprocess.run([os.path.join(REPO, ".game_loop", "bin", "game_loop"), "claim",
+                          "--assert", "x"], capture_output=True, text=True, cwd=REPO)
+    check("#91: a REFUSAL exits 3 — distinct from 2, which is what argparse and unhandled errors "
+          "produce, so a gate saying no is tellable from a typo without matching prose",
+          _rf.returncode == 3)
+    _ue = subprocess.run([os.path.join(REPO, ".game_loop", "bin", "game_loop"), "nosuchverb"],
+                         capture_output=True, text=True, cwd=REPO)
+    check("#91: ...and a USAGE error still exits 2, so the new code means something rather than "
+          "being the new code for everything",
+          _ue.returncode == 2)
+    check("#91: ...and the reason is on STDOUT, so `2>/dev/null` — which is what anyone writes to "
+          "keep a hook quiet — cannot swallow it",
+          "GAMELOOP" in _rf.stdout and len(_rf.stdout) > 80)
+    check("#91: ...and on STDERR too, because moving it would have broken every consumer already "
+          "reading that stream. Both, which is what the report asked for",
+          "GAMELOOP" in _rf.stderr and _rf.stdout.strip() == _rf.stderr.strip())
+    check("#91: ...and a SUCCESS is still exit 0 with nothing on stderr, so the refusal above is a "
+          "verdict rather than a binary that always complains",
+          (lambda r: r.returncode == 0 and r.stderr.strip() == "")(
+              subprocess.run([os.path.join(REPO, ".game_loop", "bin", "game_loop"), "kinds"],
+                             capture_output=True, text=True, cwd=REPO)))
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

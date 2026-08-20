@@ -661,6 +661,9 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    "test/run.py::json_or_none": "the same shape for parsed JSON, inside the suite, and its None "
+            "arm is also the honest answer for a file that exists and is corrupt. Asserted through "
+            "the cases that read producer-written state rather than by mutation.",
     "test/mutation_sweep.py::run": "the sweep's own suite-runner. Its None arm is the DEADLINE — a "
             "mutant that hangs measures nothing and waiting for it measures nothing — and it is "
             "asserted directly in-suite against a command that sleeps past its bound and one that "

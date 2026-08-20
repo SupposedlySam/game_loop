@@ -186,6 +186,24 @@ def allowed(proj, payload, sid=None):
     return _probe_count(f) > before and not denied(res)
 
 
+def after_marker(text, marker, until=None):
+    """The slice of `text` after `marker` (and before `until`), or "" when the marker is ABSENT.
+
+    A BARE `.split(marker)[1]` IN AN ASSERTION KILLS THE SUITE. It raises IndexError the moment the
+    marker is missing, which is exactly what a neutered producer causes — so a mutation that should
+    have flipped ONE assertion instead ended the run, and every assertion after it never printed.
+    The mutation sweep then read that as coverage: an assertion that never ran never prints `ok`,
+    so the set difference counted it as KILLED.
+
+    That is how eight producers came back NOT MEASURED. The crash was never in the producers; it was
+    here, in the shape of the assertions that read their output.
+    """
+    if marker not in text:
+        return ""
+    part = text.split(marker, 1)[1]
+    return part.split(until, 1)[0] if until and until in part else part
+
+
 def main():
     proj = make_sandbox()
     try:
@@ -3682,7 +3700,8 @@ def main():
         # CONFIG-AUTHORED ONLY. A wait the agent can declare for itself is the off switch.
         _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
         check("no verb can set the probe — it is config-authored only, never runtime-settable",
-              "waiting_probe" not in _bin_src.split("def main(")[-1])
+              "waiting_probe" not in after_marker(_bin_src, "def main(")
+              and "def main(" in _bin_src)
         _probe("echo held; exit 0")
         _at_cap()
         _run()
@@ -3823,7 +3842,8 @@ def main():
         check("...and nothing compares it against a threshold: no gate without a logged, observed "
               "failure, and there is not one yet",
               "usage_window" in _gsrc
-              and "output_tokens" not in _gsrc.split("def _limitgate_verdict")[1][:3000])
+              and "output_tokens" not in after_marker(_gsrc, "def _limitgate_verdict")[:3000]
+              and "def _limitgate_verdict" in _gsrc)
     finally:
         shutil.rmtree(hf, ignore_errors=True)
 
@@ -6985,7 +7005,8 @@ def main():
           "dart analyze --fatal-infos" in _out and "NO GATE RUNS" in _out)
     check("...while a CI command a gate DOES run is not reported — it discriminates rather than "
           "listing every line of the workflow, which is the noise ratio that gets a check deleted",
-          "python3 test/run.py" not in _out.split("NO GATE RUNS")[1].split("Paste CI")[0])
+          "python3 test/run.py" not in after_marker(_out, "NO GATE RUNS", "Paste CI")
+          and "NO GATE RUNS" in _out)
     check("...and it says it compares TEXT and not behaviour, so two spellings of one check read as "
           "a difference and the report stays a difference for a human to judge, never a verdict",
           "COMPARES COMMAND TEXT, NOT BEHAVIOUR" in _out)
@@ -9806,8 +9827,8 @@ def main():
               "grep -q '^config.local.json$' \"$GI\"" in _src_i)
         check("...and the fresh-install block still carries it, so the migration did not replace "
               "the thing it backstops",
-              _src_i.split("cat > \"$GI\"")[1].split("EOF")[1].count("config.local.json") >= 0
-              and "\nconfig.local.json\n" in _src_i)
+              "\nconfig.local.json\n" in _src_i
+              and after_marker(_src_i, "cat > \"$GI\"") != "")
 
         # DRIVE IT: run the installer's migration against that old tree and re-ask git.
         _mig = "\n".join([

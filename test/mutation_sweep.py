@@ -748,9 +748,24 @@ NOT_SWEPT = {
                           "those refusals and would re-measure the dominance gate, which already "
                           "has its own MUTANTS entry",
 
+    ".game_loop/bin/game_loop::authorize_recurrence": "a pure reader over log.jsonl — [] means no "
+                          "prior grant carries these words, never a finding withheld. Swept "
+                          "through its only caller, recurrence_lines, which asserts both arms "
+                          "beside each other: a first grant silent, a second distinct path loud",
+
     # --- KNOWN GAPS. Real producers. Should be swept. Are not, and the reason is cost, not merit:
     # each MUTANTS entry is one full suite run (~1 min), and this change spent its budget on the
     # four report producers that were actually found weak. These are the queue, in this order.
+    ".game_loop/bin/game_loop::recurrence_lines": "KNOWN GAP, and a fresh one. The producer behind "
+                          "the LOUD block when one reason has bought the authorize hatch before — "
+                          "empty list on the common path, which is exactly the silence-on-pass "
+                          "shape. Ten assertions cover both arms (first grant silent, second "
+                          "distinct path loud, retry silent, third grant loud, MCP remedy vs write "
+                          "remedy). NOT swept because this sweep measures against `git archive "
+                          "HEAD` and the producer is not in HEAD yet, so any floor written now "
+                          "would be a number from a different tree — the exact target-making this "
+                          "file refuses. Owed a MUTANTS entry with a measured floor on the first "
+                          "sweep after it lands.",
     ".game_loop/bin/game_loop::legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
                               "warning producer of unpushed_warning's shape, MEASURED at 0 kills "
                               "against this HEAD — the legacy-mandate warning can stop firing and "

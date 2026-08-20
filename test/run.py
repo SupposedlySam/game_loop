@@ -10452,6 +10452,75 @@ def main():
           all(v.strip() for v in _SURFACE_SKIP_OPTS.values())
           and all(v.strip() for v in _SURFACE_SKIP_KEYS.values()))
 
+    # ---- finished work that nobody can install does not pass the handback ----
+    # The rung-5 WARNING printed correctly at this exact moment, twice in one day, and was read
+    # past both times — after which the human had to ASK, twice, whether the work was published.
+    # Informing is a thing a reader can decline; that is what rung 5 means. So it became CHECKED.
+    _rg = tempfile.mkdtemp(prefix="gl_relgate_")
+    try:
+        _bare = os.path.join(_rg, "origin.git")
+        _w = os.path.join(_rg, "w")
+        subprocess.run(["git", "init", "-q", "--bare", _bare], check=True)
+        subprocess.run(["git", "init", "-q", _w], check=True)
+        _G = ["git", "-C", _w]
+        subprocess.run(_G + ["config", "user.email", "t@t"], check=True)
+        subprocess.run(_G + ["config", "user.name", "t"], check=True)
+
+        def _rcommit(msg):
+            with open(os.path.join(_w, "f"), "a") as f:
+                f.write(msg + "\n")
+            subprocess.run(_G + ["add", "-A"], check=True)
+            subprocess.run(_G + ["commit", "-q", "-m", msg], check=True)
+
+        _rcommit("one")
+        subprocess.run(_G + ["tag", "stable-aaa"], check=True)
+        subprocess.run(_G + ["remote", "add", "origin", _bare], check=True)
+        _rgh = os.path.join(_w, ".game_loop")
+        os.makedirs(_rgh)
+        shutil.copytree(os.path.join(REPO, ".game_loop", "bin"), os.path.join(_rgh, "bin"))
+        for _f in ("config.json", "verify.yaml", "INVARIANTS.md"):
+            shutil.copy(os.path.join(REPO, ".game_loop", _f), os.path.join(_rgh, _f))
+        _rgl = importlib.machinery.SourceFileLoader("gl_rg", os.path.join(_rgh, "bin", "game_loop"))
+        os.environ["GAME_LOOP_HOME"] = _rgh
+        _grg = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rg", _rgl))
+        _rgl.exec_module(_grg)
+        os.environ.pop("GAME_LOOP_HOME", None)
+        _grg.REPO_ROOT = _w
+
+        _rcommit("two")
+        check("finished-and-unreleased is SILENT while the commit is unpushed — that is a different "
+              "gate with a different remedy, and two gates firing on one state is how both get "
+              "routed around",
+              _grg.release_owed() is None)
+        subprocess.run(_G + ["push", "-q", "origin", "HEAD"], check=True)
+        _owed = _grg.release_owed()
+        check("THE CASE THE HUMAN HAD TO ASK ABOUT TWICE — clean tree, pushed, ahead of the newest "
+              "mark — is now owed at the handback rather than merely mentioned",
+              _owed is not None and _owed[0] == 1)
+        with open(os.path.join(_w, "dirty.txt"), "w") as f:
+            f.write("x")
+        check("...and MID-WORK is silent: edits in the tree mean this is not finished work, and a "
+              "gate that fires there is one routed around within a day",
+              _grg.release_owed() is None)
+        os.remove(os.path.join(_w, "dirty.txt"))
+        subprocess.run(_G + ["tag", "stable-bbb"], check=True)
+        check("...and once HEAD itself is marked, nothing is owed — so the firing case above is a "
+              "verdict rather than a gate that always fires",
+              _grg.release_owed() is None)
+
+        # THE ESCAPE IS ONE FLAG AND IT IS RECORDED, which is the whole difference between this and
+        # the warning it replaces: deferring becomes a decision somebody can find.
+        _src_cp = inspect.getsource(_grg.cmd_checkpoint)
+        check("the refusal is skipped by --release-deferred, so a deliberate wait is possible "
+              "without disabling the gate (INV5)",
+              "release_deferred" in _src_cp and "release_owed()" in _src_cp)
+        check("...and the deferral is LOGGED, so 'I chose not to publish' is a decision on the "
+              "record rather than an omission indistinguishable from forgetting",
+              '"kind": "release_deferred"' in _src_cp)
+    finally:
+        os.environ.pop("GAME_LOOP_HOME", None)
+        shutil.rmtree(_rg, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

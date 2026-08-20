@@ -2508,14 +2508,18 @@ def release_owed():
     head = _git("rev-parse", "HEAD") or ""
     if not head:
         return None
-    on_remote = remote_has_ref(head[:12])
-    if on_remote is None:
-        try:
-            r = subprocess.run(["git", "branch", "-r", "--contains", head],
-                               cwd=REPO_ROOT, capture_output=True, text=True, timeout=15)
-            on_remote = r.returncode == 0 and bool((r.stdout or "").strip())
-        except (OSError, subprocess.TimeoutExpired):
-            return None                  # could not ask: never refuse on an unanswerable question
+    # NOT remote_has_ref() — that asks `ls-remote --tags`, so it answers "is this TAG on the
+    # remote", and a pushed COMMIT is not a tag. Using it here reported every pushed commit as
+    # unpushed and the gate never fired: a function answering the neighbouring question, which is
+    # the single most common way a check here goes quiet.
+    try:
+        r = subprocess.run(["git", "branch", "-r", "--contains", head],
+                           cwd=REPO_ROOT, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None                      # could not ask: never refuse on an unanswerable question
+    if r.returncode != 0:
+        return None
+    on_remote = bool((r.stdout or "").strip())
     if not on_remote:
         return None                      # unpushed — a different gate, with a different remedy
     return n, sha, lvl
@@ -2645,11 +2649,34 @@ def cmd_checkpoint(s, a):
     """
     if not a.notes:
         die("checkpoint needs --notes: one line on what you did and what happens next.")
+    # FINISHED WORK THAT NOBODY CAN INSTALL DOES NOT PASS THE HANDBACK (rung 3, replacing a rung-5
+    # warning that failed twice in one day). That warning printed correctly at this exact moment,
+    # both times, and was read past; the human then had to ASK, twice, whether the work was marked
+    # and published. It was not. Informing is a thing a reader can decline, which is what rung 5
+    # means — so the mechanism moves up rather than the wording getting louder.
+    if not getattr(a, "release_deferred", None):
+        _owed = release_owed()
+        if _owed:
+            _n, _sha, _lvl = _owed
+            die(f"REFUSED — {_n} commit(s) are finished, pushed, and RELEASED TO NOBODY.\n\n"
+                f"  newest mark : {_lvl} {_sha[:8]}\n"
+                f"  HEAD        : {(_git('rev-parse', '--short', 'HEAD') or '?')}\n\n"
+                "The tree is clean and HEAD is on the remote, so this is FINISHED work, not work in\n"
+                "progress. Committed and pushed is NOT released: a consumer who upgrades right now\n"
+                "gets the mark, not this tree. That has already stranded one, who diagnosed it\n"
+                "themselves after upgrading and not finding the fix.\n\n"
+                "  game_loop confidence --mark stable --notes \"..\"   then push the two refs it prints\n\n"
+                "OR SAY WHY NOT, and it goes on the record instead of being forgotten:\n"
+                "  game_loop checkpoint --notes \"..\" --release-deferred \"<why this waits>\"\n\n"
+                "Deferring is a decision. Not noticing is not.")
     s["stop_ok"] = True
     s["stop_ok_notes"] = a.notes
     save(s)
     if notify:
         notify.send("checkpoint", f"📍 checkpoint — {a.notes}")  # default-off event; opt in to page
+    if getattr(a, "release_deferred", None):
+        logline({"kind": "release_deferred", "reason": a.release_deferred,
+                 "head": _git("rev-parse", "--short", "HEAD")})
     _rit = ritual_checkpoints()
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
@@ -8783,6 +8810,8 @@ def main():
 
     cp = sub.add_parser("checkpoint")  # report + hand back, without asking anything
     cp.add_argument("--notes", help="what you did and what happens next")
+    cp.add_argument("--release-deferred", dest="release_deferred",
+                    help="why finished work is not being published yet — recorded in the log")
 
     pn = sub.add_parser("pin")  # carry a load-bearing environment fact (+ its reason) in resume state
     pn.add_argument("--fact", help="the environment fact the build depends on")

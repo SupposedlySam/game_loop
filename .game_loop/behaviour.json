@@ -236,6 +236,15 @@
       "change": "a refusal now exits 3 instead of 2, and prints its reason to BOTH stdout and stderr instead of stderr alone. Exit 2 remains what argparse usage errors and unhandled exceptions produce. The Stop gate and watchdog are UNAFFECTED \u2014 they exit 2 directly because that is Claude Code's hook protocol for blocking a turn-end, not a game_loop choice.",
       "consequence": "if you branch on `exit == 2` to detect a refusal, that check now misses; branch on 3, or on non-zero as before. If you parse refusal text off stderr, that still works. If you run with `2>/dev/null` you will now SEE the reason on stdout, where previously you saw nothing at all.",
       "why_it_qualifies": "a consumer who changed nothing gets a different exit code and output on a stream that was previously empty. Reported after three refuted claims in one evening went unrecorded because a refusal read as success: it exited 2 exactly as a typo does, and its reason lived on the one stream a quiet hook discards. They had written a 36-line wrapper per repo to recover the distinction."
+    },
+    {
+      "seq": 23,
+      "sha": "pending",
+      "notice": true,
+      "verb": "checkpoint",
+      "change": "a NEW refusal. The handback refuses when commits are finished, PUSHED, and ahead of the newest confidence mark \u2014 a clean tree plus HEAD on the remote. Mid-work (any uncommitted change) is silent, unpushed is silent (that has its own gate), and HEAD already marked is silent. `--release-deferred \"<why>\"` lets it through and records the reason as kind release_deferred.",
+      "consequence": "if you finish work, push it, and hand back without marking a confidence level, the checkpoint now stops. Publishing or one flag clears it. Nothing about work-in-progress handbacks changes.",
+      "why_it_qualifies": "a consumer who changed nothing is refused a checkpoint that previously succeeded. This replaces a VISIBLE-rung warning that printed correctly at the same moment and was read past twice in one day, after which the human had to ask twice whether the work was published \u2014 it was not, both times. A consumer had already been stranded by exactly this: they upgraded, did not find the fix, and diagnosed committed-but-not-released themselves."
     }
   ],
   "schema": 1

@@ -2492,6 +2492,35 @@ def release_distance():
     return best_n, best_sha, best_lvl
 
 
+def release_owed():
+    """(n, sha, level) when finished work is unreleased and the handback must not pass — else None.
+
+    NARROW ON PURPOSE. A gate that fires while you are still working is one that gets routed around,
+    and then it is gone for the cases it was built for. Three conditions, all required: something is
+    past the newest mark, the tree is CLEAN (so this is a finished state), and HEAD is on the remote
+    (so this is not the unpushed case, which already has its own gate).
+    """
+    n, sha, lvl = release_distance()
+    if not n or not sha:
+        return None
+    if (_git("status", "--porcelain") or "").strip():
+        return None                      # mid-work: edits in the tree, nothing to release yet
+    head = _git("rev-parse", "HEAD") or ""
+    if not head:
+        return None
+    on_remote = remote_has_ref(head[:12])
+    if on_remote is None:
+        try:
+            r = subprocess.run(["git", "branch", "-r", "--contains", head],
+                               cwd=REPO_ROOT, capture_output=True, text=True, timeout=15)
+            on_remote = r.returncode == 0 and bool((r.stdout or "").strip())
+        except (OSError, subprocess.TimeoutExpired):
+            return None                  # could not ask: never refuse on an unanswerable question
+    if not on_remote:
+        return None                      # unpushed — a different gate, with a different remedy
+    return n, sha, lvl
+
+
 def release_distance_warning():
     """Say it at the handback, where the human forms their picture of what exists (#: showrunner)."""
     n, sha, lvl = release_distance()

@@ -328,6 +328,11 @@ kinds
 #   which is never written (it is mandate_set / _clear / _park / _park_stop / _resume), so the
 #   guard exited 0 forever — and exit 0 is also what a SATISFIED guard does, which makes broken
 #   and quiet the same observable. `status` names a trigger matching a kind nothing emits.
+# IF YOU DISPATCH IN-PROCESS SUBAGENTS: they inherit CLAUDE_CODE_SESSION_ID, so their state
+#   writes land in YOUR session. `mandate --set` is refused when it would replace your live
+#   mandate (#88). `checkpoint` BUYS YOU A TURN-END and `arm` PRIMES A T3 ON YOU — both silent,
+#   both permissive. Give each worker `GAME_LOOP_SESSION=<unique>`; it is inherited by that
+#   worker's own children, so a worker that dispatches must set a fresh one at every level.
 contribute --reviewed --filed "<urls, or none>" --note ".."
 #   record that you asked, of each learning hardened since the last review: does this name a
 #   TOOL's behaviour, or THIS REPO's? `stepback` nudges once enough have accumulated and LISTS

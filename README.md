@@ -463,6 +463,27 @@ resolve its own dependencies explicitly: a hook's `PATH` is not your shell's, an
 bare name is the usual way one of these silently stops running.
 
 The probe is told **which session it speaks for**, which matters as soon as one checkout holds more
+**IF YOU DISPATCH SUBAGENTS, READ THIS FIRST.** An in-process subagent (Claude Code's `Agent` tool)
+inherits `CLAUDE_CODE_SESSION_ID`, so **its state writes land in YOUR session file**, not its own.
+That is not a bug in the subagent; it is what sharing an id means. Three verbs are worth knowing
+about:
+
+| verb | what a subagent's call does to YOU |
+|---|---|
+| `mandate --set` | **refused** if it would replace your live mandate with different words (#88) — the loud case |
+| `checkpoint` | **buys you a turn-end.** Your next Stop gate passes on a permission you did not purchase |
+| `arm` | **primes a T3 on your session** — the most expensive rung, holding a question you did not frame |
+
+The last two fail in the PERMISSIVE direction and say nothing. Give each dispatched worker its own
+state and none of this arises:
+
+```sh
+GAME_LOOP_SESSION=<something unique per worker> game_loop ...
+```
+
+It is an environment variable, so it is inherited by that worker's own children — a worker that
+dispatches must set a fresh one for each of ITS workers, at every level.
+
 than one session: `GAME_LOOP_SESSION`, `GAME_LOOP_SESSION_DIR`, and `GAME_LOOP_TRANSCRIPT`. Without
 them a probe can only look across *every* session sharing the checkout, so it answers "waiting"
 because somebody else's work is live — a **false waiting**, which is the one direction that fails

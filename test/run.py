@@ -10615,6 +10615,32 @@ def main():
     finally:
         shutil.rmtree(_in, ignore_errors=True)
 
+    # ---- #94: the state sharing was documented only inside a refusal you had to trip ----
+    # An in-process subagent inherits CLAUDE_CODE_SESSION_ID, so its writes land in the PARENT's
+    # session. #88 guarded `mandate --set`. `checkpoint` and `arm` write PERMISSIONS on that same
+    # state — a turn-end and a primed T3 — and both fail PERMISSIVE and silent. No guard is shipped
+    # for those, deliberately: in-process means the same process and the same session id, and pid
+    # differs on every CLI call including legitimate ones, so there is no discriminator. Building a
+    # check that cannot separate the two cases is what #88 refused to do, and it would be worse
+    # here because these fail open.
+    _front94 = read_or_empty(os.path.join(REPO, "README.md")) + read_or_empty(
+        os.path.join(REPO, "llms.txt"))
+    check("#94: the front-door docs SAY that an in-process subagent inherits the session id and "
+          "therefore shares state — previously the only place this appeared was inside the one "
+          "guarded verb's refusal, so you learned it by tripping it",
+          "CLAUDE_CODE_SESSION_ID" in _front94
+          and "in-process subagent" in _front94.lower())
+    check("#94: ...and they name the two PERMISSIVE verbs by name, which is the part that fails "
+          "silently: a subagent's checkpoint buys the parent a turn-end, and its arm primes a T3 "
+          "on the parent",
+          "buys you a turn-end" in _front94.lower()
+          and "primes a t3" in _front94.lower())
+    check("#94: ...and they name the remedy AND its inheritance trap — GAME_LOOP_SESSION is an "
+          "environment variable, so a worker that dispatches must set a fresh one for its own "
+          "children at every level",
+          "GAME_LOOP_SESSION" in _front94
+          and "every level" in _front94.lower())
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

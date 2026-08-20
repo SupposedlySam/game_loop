@@ -10573,6 +10573,48 @@ def main():
     finally:
         shutil.rmtree(_o92, ignore_errors=True)
 
+    # ---- #92b: a named ref that cannot be honoured is REFUSED, never silently dropped ----
+    # REF is set from GAME_LOOP_CHANNEL and read only inside the FETCH block, which is skipped when
+    # the installer runs from a clone. So `GAME_LOOP_CHANNEL=stable ./install.sh <target>` installed
+    # the clone's working tree, stamped ALPHA, and said nothing. Reproduced here before fixing:
+    # asked for stable, got the clone's own HEAD.
+    _in = tempfile.mkdtemp(prefix="gl_chan92_")
+    try:
+        def _install(env_extra, target_name):
+            _t = os.path.join(_in, target_name)
+            os.makedirs(_t)
+            subprocess.run(["git", "init", "-q", _t], check=True)
+            _r = subprocess.run(["bash", os.path.join(REPO, "install.sh"), _t],
+                                capture_output=True, text=True, cwd=REPO,
+                                env=dict(os.environ, **env_extra))
+            return _r, _t
+
+        _r1, _t1 = _install({"GAME_LOOP_CHANNEL": "stable"}, "chan")
+        check("#92b: GAME_LOOP_CHANNEL from a CLONE is refused rather than silently dropped — the "
+              "ref is only honoured on the fetch path, so continuing would install different bytes "
+              "than were asked for and say nothing",
+              _r1.returncode == 3 and "REFUSED" in _r1.stderr
+              and "running from a CLONE" in _r1.stderr)
+        check("#92b: ...and NOTHING is installed into the refused target, so a caller cannot end up "
+              "with the wrong payload plus an error they scrolled past",
+              not os.path.exists(os.path.join(_t1, ".game_loop")))
+        check("#92b: ...and it names BOTH ways forward, because a refusal that leaves you stuck is "
+              "one people route around",
+              "unset GAME_LOOP_CHANNEL" in _r1.stderr and "curl" in _r1.stderr)
+
+        _r2, _ = _install({"GAME_LOOP_REF": "main"}, "ref")
+        check("#92b: ...and GAME_LOOP_REF is refused the same way — it is the same promise about "
+              "which bytes land",
+              _r2.returncode == 3 and "REFUSED" in _r2.stderr)
+
+        _r3, _t3 = _install({}, "plain")
+        check("#92b: ...while an ordinary clone install with NO ref named still succeeds, so the "
+              "refusal is about an unkeepable promise rather than about installing from a clone",
+              _r3.returncode == 0
+              and os.path.isfile(os.path.join(_t3, ".game_loop", "bin", "game_loop")))
+    finally:
+        shutil.rmtree(_in, ignore_errors=True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

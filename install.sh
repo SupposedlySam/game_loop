@@ -81,6 +81,33 @@ if [ -n "$SELF" ] && [ -f "$SELF" ]; then
 else
   SRC=""   # piped: no local payload exists, and inferring one from the cwd is the bug above
 fi
+# A NAMED REF THAT CANNOT BE HONOURED IS REFUSED, NEVER DROPPED (#92). REF is read only inside the
+# fetch below, so installing from a clone silently ignored it: asking for `stable` installed the
+# clone's working tree instead, stamped ALPHA, with nothing said. A caller who names a ref has told
+# you which bytes they want.
+#
+# Checking the ref out inside their clone would mutate a tree they did not offer, and fetching
+# anyway would ignore the local payload they explicitly pointed at — so this refuses and names both
+# ways forward instead of choosing one for them.
+if [ -n "${SRC:-}" ] && [ -f "$SRC/.game_loop/bin/game_loop" ] \
+   && { [ -n "${GAME_LOOP_CHANNEL:-}" ] || [ -n "${GAME_LOOP_REF:-}" ]; }; then
+  _gl_named="${GAME_LOOP_CHANNEL:-$GAME_LOOP_REF}"
+  echo "REFUSED — you asked for '$_gl_named', and this installer is running from a CLONE." >&2
+  echo "" >&2
+  echo "    payload here : $SRC/.game_loop/" >&2
+  echo "    you asked for: $_gl_named" >&2
+  echo "" >&2
+  echo "Running from a clone installs THIS WORKING TREE. The ref you named is only honoured on the" >&2
+  echo "fetch path, so continuing would install different bytes than you asked for and say nothing" >&2
+  echo "— which is the failure this project exists to refuse. Choose which you meant:" >&2
+  echo "" >&2
+  echo "    install the clone you are standing in:" >&2
+  echo "        unset GAME_LOOP_CHANNEL GAME_LOOP_REF && $SELF <target>" >&2
+  echo "" >&2
+  echo "    install the ref you named (fetches it):" >&2
+  echo "        GAME_LOOP_CHANNEL=$_gl_named sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh)\" -- <target>" >&2
+  exit 3
+fi
 if [ -z "${SRC:-}" ] || [ ! -f "$SRC/.game_loop/bin/game_loop" ]; then
   command -v curl >/dev/null 2>&1 || { echo "curl is required to fetch game_loop." >&2; exit 1; }
   command -v tar  >/dev/null 2>&1 || { echo "tar is required to unpack game_loop." >&2; exit 1; }

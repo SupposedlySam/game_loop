@@ -254,6 +254,15 @@
       "change": "the pasteable remedy is now VERIFIED before it is printed. It is offered only when the installed project's root actually holds game_loop's own install.sh (checked by existence AND a marker in the file). Otherwise the refusal says plainly that it cannot name an installer from here, and gives the two remedies that always work.",
       "consequence": "if you hit this refusal on an ordinary consumer install, you no longer get a paste-ready command \u2014 because the one printed before did not exist there. Nothing that worked stops working: the game_loop clone still gets its paste.",
       "why_it_qualifies": "a consumer who changed nothing gets different refusal text, and one that previously contained a broken command. Reported against #74's fix: REPO_REAL is the INSTALLED PROJECT and install.sh only ever copies the .game_loop/ payload, so the path resolved in exactly one place on any machine. Reproduced here on a live consumer (no such file), and worse on two others that ship their OWN install.sh \u2014 where the printed command resolved to a DIFFERENT project's installer."
+    },
+    {
+      "seq": 25,
+      "sha": "pending",
+      "notice": true,
+      "verb": "install.sh, run from a clone with GAME_LOOP_CHANNEL or GAME_LOOP_REF set",
+      "change": "a NEW refusal, exit 3. Naming a ref while installing from a clone is refused instead of ignored. Nothing is written to the target, and both ways forward are printed: unset the variable to install the clone you are standing in, or run the fetched installer, which honours the ref. An ordinary clone install with no ref named is unaffected.",
+      "consequence": "if you scripted `GAME_LOOP_CHANNEL=stable /path/to/clone/install.sh <target>`, that stops instead of installing the clone's working tree. It never did what the variable said \u2014 it silently installed different bytes \u2014 so the script was already not doing what it looked like.",
+      "why_it_qualifies": "a consumer who changed nothing is refused a command that previously exited 0. Reported and reproduced here: asking for `stable` installed the clone's own HEAD, stamped ALPHA, with nothing said. REF is set from the channel but read only inside the fetch block, which is skipped when a local payload exists."
     }
   ],
   "schema": 1

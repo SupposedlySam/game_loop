@@ -965,6 +965,31 @@ except OSError:
     pass
 PYLOG
           fi
+          # NEVER PRINT A REMEDY YOU HAVE NOT CHECKED (#92). The old line assumed install.sh sits
+          # at the installed project's root; it never does — install.sh copies only the .game_loop/
+          # payload. On a project with no installer the paste fails, and on one that ships its OWN
+          # install.sh it resolves to THAT, so the remedy would run a different project's installer
+          # against somebody's worktree. Verified: it is game_loop's installer, or it is not offered.
+          _gl_cand="${REPO_REAL}/install.sh"
+          if [ -f "$_gl_cand" ] && grep -q 'game_loop payload' "$_gl_cand" 2>/dev/null; then
+            _gl_install_hint="THE FIX, ready to paste — it provisions that tree with THIS tree's rules, once:
+
+    ${_gl_cand} ${_gl_unharnessed}
+
+(A worktree provisioned this way adopts the parent's verify.yaml rather than a blank one, which
+would be a gate that owes nothing and reports success.)
+"
+          else
+            _gl_install_hint="NO PASTEABLE FIX IS OFFERED HERE, and that is deliberate. game_loop's install.sh is not in
+this tree — the installer only ever copies the .game_loop/ payload, so an installed project does
+not receive it. It lives in the clone this was installed from, and this gate cannot know where that
+is. A printed command that does not exist, or that runs a DIFFERENT project's installer, is worse
+than none.
+
+    to provision that worktree:  run game_loop's own install.sh, from the clone you installed
+                                 from, with ${_gl_unharnessed} as its argument
+"
+          fi
           deny "BLOCKED: this commit lands in a tree that carries no game_loop, so its owed checks cannot be read.
 
     the commit's tree:  ${_gl_unharnessed}
@@ -974,16 +999,9 @@ PYLOG
 DIFFERENT tree's record would answer a question about files this commit does not contain — and report
 confidence either way. That is the false green this gate exists to prevent, so it refuses instead (INV6).
 
-THE FIX, ready to paste — it provisions that tree with THIS tree's rules, once:
-
-    ${REPO_REAL}/.game_loop/bin/../../install.sh ${_gl_unharnessed}
-
-(If game_loop was installed here from elsewhere, use that clone's install.sh. A worktree provisioned
-this way adopts the parent's verify.yaml rather than a blank one, which would be a gate that owes
-nothing and reports success.)
-
+${_gl_install_hint}
 Or commit from the tree the checks describe, or use --no-verify to skip the gate out loud. This
-refusal is now recorded in the PARENT's log either way, so how often it fires is answerable."
+refusal is recorded in the PARENT's log either way, so how often it fires is answerable."
           ;;
       esac
       GAMELOOP_TARGET="${commit_root#root:}"

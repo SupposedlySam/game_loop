@@ -676,6 +676,12 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    "test/run.py::dig": "walks a nested structure and returns None at the first missing key, "
+            "inside the suite. It exists so a guarded read whose result is SUBSCRIPTED fails one "
+            "assertion instead of ending the run — the crash that kept six producers outside this "
+            "denominator even after the read guards landed. Neutering it to a constant None makes "
+            "every assertion that reads producer-written state fail at once, which those "
+            "assertions catch directly.",
     "test/run.py::json_or_none": "the same shape for parsed JSON, inside the suite, and its None "
             "arm is also the honest answer for a file that exists and is corrupt. Asserted through "
             "the cases that read producer-written state rather than by mutation.",

@@ -216,6 +216,23 @@ def json_or_none(path):
         return None
 
 
+def dig(obj, *keys):
+    """obj[k1][k2]... or None at the first key that is not there — never an exception.
+
+    A guarded READ is not enough if its result is immediately subscripted: `dig(json_or_none(p), "x")`
+    turns "file absent" from FileNotFoundError into TypeError and still ends the run. Six sites did
+    exactly that, which is why six producers stayed NOT MEASURED after the read guards landed.
+    """
+    for k in keys:
+        if obj is None:
+            return None
+        try:
+            obj = obj[k]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return obj
+
+
 def after_marker(text, marker, until=None):
     """The slice of `text` after `marker` (and before `until`), or "" when the marker is ABSENT.
 
@@ -755,7 +772,7 @@ def main():
               and snap["windows"]["five_hour"]["used_percentage"] == 23.5)
         r = gl(proj, "statusline", stdin='{"model":{"display_name":"X"}}')
         check("statusline stays calm with no rate_limits (API-key auth)",
-              r.returncode == 0 and json_or_none(limits_f)["windows"] == {})
+              r.returncode == 0 and dig(json_or_none(limits_f), "windows") == {})
         FakeSlack.posts.clear()
         sl_payload["rate_limits"]["five_hour"]["used_percentage"] = 98.5
         gl(proj, "statusline", stdin=json.dumps(sl_payload))
@@ -4743,7 +4760,7 @@ def main():
         cc_ask(cc_s, "n\n\n", home=cc_home2)                # bare return
         check("a bare return is a no, and the no is remembered like any other answer",
               cc_limits(cc_s) is None
-              and json_or_none(cc_answers2)["context_cap"]["answer"] == "no")
+              and dig(json_or_none(cc_answers2), "context_cap", "answer") == "no")
     finally:
         shutil.rmtree(ctxcap, ignore_errors=True)
 
@@ -7716,7 +7733,7 @@ def main():
         _vf = os.path.join(mw, ".game_loop", "sessions", "sess-model", "model.json")
         check("...and it is written to disk where a parent can read it WITHOUT the session "
               "cooperating or even knowing",
-              os.path.isfile(_vf) and json_or_none(_vf)["changed"] is True)
+              os.path.isfile(_vf) and dig(json_or_none(_vf), "changed") is True)
 
         # ADVISORY, NEVER A GATE: a model mismatch is a COST failure, not a correctness one. The
         # output is fine, which is exactly why nothing notices and why it can run for a week.
@@ -9046,7 +9063,7 @@ def main():
         _wipe()
         _feed["o/b"] = ({"7": {"updatedAt": "B1", "title": "b-one"}}, "v1", None)
         _u.upstream_check()                     # baseline both
-        _b_before = json_or_none(_u.UPSTREAM_F)["repos"]["o/b"]
+        _b_before = dig(json_or_none(_u.UPSTREAM_F), "repos", "o/b")
         _feed.pop("o/b")                        # now o/b cannot be reached
         _feed["o/a"] = ({"1": {"updatedAt": "TZ", "title": "one"}}, "v2", None)
         _l, _st = _u.upstream_check()
@@ -9054,13 +9071,13 @@ def main():
         check("#76: one repo up and one down is PARTIAL — reported as a subset, not as a result",
               _st == "partial" and "COULD NOT BE CHECKED" in _txt
               and "A PARTIAL RESULT IS NOT A RESULT" in _txt)
-        _b_after = json_or_none(_u.UPSTREAM_F)["repos"]["o/b"]
+        _b_after = dig(json_or_none(_u.UPSTREAM_F), "repos", "o/b")
         check("#76: THE LOAD-BEARING ONE — an unchecked repo's baseline does NOT advance, so one "
               "outage cannot become a permanent blind spot the next run reports as calm",
               _b_after == _b_before)
         check("#76: ...while the repo that DID answer still advances, so a partial run is not a "
               "wasted one",
-              json_or_none(_u.UPSTREAM_F)["repos"]["o/a"]["issues"]["1"]["updatedAt"] == "TZ")
+              dig(json_or_none(_u.UPSTREAM_F), "repos", "o/a", "issues", "1", "updatedAt") == "TZ")
 
         # The wording rules, checked as text because that is what they are.
         for _name, _c in (("movement", _u._UP_MOVEMENT_CAVEAT), ("quiet", _u._UP_QUIET_CAVEAT),
@@ -10520,6 +10537,41 @@ def main():
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rg, ignore_errors=True)
+
+    # ---- #92: the pasteable remedy named an install.sh no consumer install has ----
+    # #74 asked for a pasteable fix so the honest option cost the same as --no-verify. The one I
+    # shipped resolves in exactly ONE place on any machine: the game_loop clone. REPO_REAL is the
+    # INSTALLED PROJECT, and install.sh only ever copies the .game_loop/ payload — an installed
+    # project never receives it.
+    _g92 = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "guard-writes-impl.sh"))
+    check("#92: the unverified remedy is GONE — it walked to the installed project's root, where "
+          "the installer has never been",
+          "/.game_loop/bin/../../install.sh" not in _g92)
+    check("#92: ...and the candidate is now CHECKED before it is printed: it must exist AND be "
+          "game_loop's own installer, because a printed command that does not exist — or that runs "
+          "a DIFFERENT project's installer — is worse than none",
+          '_gl_cand="${REPO_REAL}/install.sh"' in _g92
+          and '[ -f "$_gl_cand" ]' in _g92 and "game_loop payload" in _g92)
+    check("#92: ...and when it cannot name one, the refusal SAYS SO rather than going quiet — the "
+          "two remedies that always work are still there",
+          "NO PASTEABLE FIX IS OFFERED" in _g92)
+
+    # THE DISCRIMINATOR, exercised against real files rather than asserted: game_loop's installer
+    # carries a marker another project's does not.
+    _real_inst = read_or_empty(os.path.join(REPO, "install.sh"))
+    check("#92: game_loop's own install.sh carries the marker the guard greps for, so the paste is "
+          "offered where it genuinely works",
+          "game_loop payload" in _real_inst)
+    _o92 = tempfile.mkdtemp(prefix="gl_inst92_")
+    try:
+        with open(os.path.join(_o92, "install.sh"), "w") as f:
+            f.write("#!/usr/bin/env bash\n# a different project's installer\necho hi\n")
+        check("#92: ...and ANOTHER project's install.sh does not, which is the case that would have "
+              "run the wrong installer against somebody's worktree — two live consumers on this "
+              "machine ship one",
+              "game_loop payload" not in read_or_empty(os.path.join(_o92, "install.sh")))
+    finally:
+        shutil.rmtree(_o92, ignore_errors=True)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

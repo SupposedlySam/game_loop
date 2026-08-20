@@ -245,6 +245,15 @@
       "change": "a NEW refusal. The handback refuses when commits are finished, PUSHED, and ahead of the newest confidence mark \u2014 a clean tree plus HEAD on the remote. Mid-work (any uncommitted change) is silent, unpushed is silent (that has its own gate), and HEAD already marked is silent. `--release-deferred \"<why>\"` lets it through and records the reason as kind release_deferred.",
       "consequence": "if you finish work, push it, and hand back without marking a confidence level, the checkpoint now stops. Publishing or one flag clears it. Nothing about work-in-progress handbacks changes.",
       "why_it_qualifies": "a consumer who changed nothing is refused a checkpoint that previously succeeded. This replaces a VISIBLE-rung warning that printed correctly at the same moment and was read past twice in one day, after which the human had to ask twice whether the work was published \u2014 it was not, both times. A consumer had already been stranded by exactly this: they upgraded, did not find the fix, and diagnosed committed-but-not-released themselves."
+    },
+    {
+      "seq": 24,
+      "sha": "pending",
+      "notice": true,
+      "verb": "the commit gate, refusing a commit from a tree that carries no game_loop",
+      "change": "the pasteable remedy is now VERIFIED before it is printed. It is offered only when the installed project's root actually holds game_loop's own install.sh (checked by existence AND a marker in the file). Otherwise the refusal says plainly that it cannot name an installer from here, and gives the two remedies that always work.",
+      "consequence": "if you hit this refusal on an ordinary consumer install, you no longer get a paste-ready command \u2014 because the one printed before did not exist there. Nothing that worked stops working: the game_loop clone still gets its paste.",
+      "why_it_qualifies": "a consumer who changed nothing gets different refusal text, and one that previously contained a broken command. Reported against #74's fix: REPO_REAL is the INSTALLED PROJECT and install.sh only ever copies the .game_loop/ payload, so the path resolved in exactly one place on any machine. Reproduced here on a live consumer (no such file), and worse on two others that ship their OWN install.sh \u2014 where the printed command resolved to a DIFFERENT project's installer."
     }
   ],
   "schema": 1

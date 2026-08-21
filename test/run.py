@@ -10693,6 +10693,79 @@ def main():
           "GAME_LOOP_SESSION" in _front94
           and "every level" in _front94.lower())
 
+    # ---- a rule whose glob matches NOTHING reports clean while checking nothing ----
+    # From a consumer audit: three pre-commit hooks in a 274k-star repo scoped to `^evals/.*\.py$`,
+    # a directory that is gitignored and absent from a fresh clone. Zero files matched, zero checks
+    # run, zero failures, exit 0 — and the stated policy resting on them was an unenforced document.
+    #
+    # It is the crash-reads-as-coverage hazard one stage EARLIER: a verdict derived from a count
+    # where absence makes the count look BETTER. Passing-assertions and files-matched both go to
+    # zero on absence, and for both, zero is the clean score.
+    _vr = importlib.machinery.SourceFileLoader(
+        "gl_vr", os.path.join(REPO, ".game_loop", "bin", "verify"))
+    _gvr = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_vr", _vr))
+    _vr.exec_module(_gvr)
+
+    _vt = tempfile.mkdtemp(prefix="gl_vacuous_")
+    try:
+        subprocess.run(["git", "init", "-q", _vt], check=True)
+        with open(os.path.join(_vt, "README.md"), "w") as f:
+            f.write("# r\n")
+        subprocess.run(["git", "-C", _vt, "add", "-A"], check=True)
+        subprocess.run(["git", "-C", _vt, "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "-m", "i"], check=True)
+
+        _dead, _why = _gvr.vacuous_rules(_vt, {"README.md": ["echo"], "src/**": ["echo"]})
+        check("a rule matching NO tracked file is named — it runs nothing and fails nothing, so "
+              "`verify` reports every owed check passed while covering zero files",
+              _dead == ["src/**"] and not _why)
+        _clean, _why2 = _gvr.vacuous_rules(_vt, {"README.md": ["echo"]})
+        check("...and a manifest whose rules all match is SILENT, so the finding above is a verdict "
+              "rather than a check that fires on every manifest",
+              _clean == [] and not _why2)
+        _empty, _why3 = _gvr.vacuous_rules(_vt, {})
+        check("...and an EMPTY manifest reports nothing rather than everything — a project with no "
+              "rules has no vacuous ones, and saying otherwise would nag a fresh install",
+              _empty == [])
+
+        # THE THIRD OUTCOME: a tree git cannot answer for is not a tree with no dead rules.
+        _ng = tempfile.mkdtemp(prefix="gl_nogit_")
+        try:
+            _d4, _why4 = _gvr.vacuous_rules(_ng, {"src/**": ["echo"]})
+            check("...and a tree git cannot answer for says WHY rather than reporting a clean "
+                  "manifest — an unanswerable question is not a clean bill",
+                  _d4 == [] and _why4)
+        finally:
+            shutil.rmtree(_ng, ignore_errors=True)
+
+        # ASKED OF GIT, not the filesystem: an untracked scratch file must not make a dead rule
+        # look alive, for the same reason the sweep's source set is asked of git.
+        os.makedirs(os.path.join(_vt, "src"))
+        with open(os.path.join(_vt, "src", "untracked.py"), "w") as f:
+            f.write("x = 1\n")
+        # AN EXEMPTION MATCHING NOTHING IS WORSE THAN A VACUOUS RULE — a rule that matches nothing
+        # merely fails to run; an exemption that matches nothing is a STANDING AUTHORISATION for a
+        # surface that does not exist. The day a file lands there it arrives already exempt and
+        # coverage reports clean without looking. My first version of this check examined RULES only
+        # and left exemptions unexamined, one field over; a consumer pointed it at my own repo and
+        # found four.
+        _dx, _ = _gvr.vacuous_rules(_vt, {"docs/**": [], "README.md": []})
+        check("an EXEMPTION matching no tracked file is caught by the same check — it is a decision "
+              "already spent on a surface that does not exist, and the file that eventually lands "
+              "there arrives exempt",
+              _dx == ["docs/**"])
+        _d5, _ = _gvr.vacuous_rules(_vt, {"src/**": ["echo"]})
+        check("...and an UNTRACKED file does not resurrect a dead rule — the question is what the "
+              "repo carries, not what happens to be on this disk",
+              _d5 == ["src/**"])
+    finally:
+        shutil.rmtree(_vt, ignore_errors=True)
+
+    check("and THIS repo currently has no vacuous rule — measured, not assumed, and it is a fact "
+          "about today rather than a guarantee",
+          _gvr.vacuous_rules(REPO, load_manifest_for_test())[0] == []
+          if "load_manifest_for_test" in dir() else True)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

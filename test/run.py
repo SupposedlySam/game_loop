@@ -939,8 +939,11 @@ def main():
               "game_loop successor" in r.stdout)
         # The auto handoff was refreshed by the very turn-end that recorded the crossing, so it is
         # newer than crossed_at and would open a gate that accepted it (#45's failure, ported).
+        # os.path.getsize RAISES when the producer that writes this handoff is neutered, which
+        # ends the run instead of failing this assertion — and the sweep reads an ended run as
+        # coverage. The absence IS the finding here, so it has to be expressible as False.
         check("...and the AUTO handoff that same turn-end just wrote does NOT satisfy it",
-              os.path.getsize(hpc) > 0 and denied(limitgate(p_ctx)))
+              os.path.isfile(hpc) and os.path.getsize(hpc) > 0 and denied(limitgate(p_ctx)))
         check("gate allows the Write that creates the handoff",
               not denied(limitgate(dict(p_ctx, tool_name="Write",
                                         tool_input={"file_path": hpc}))))
@@ -7742,9 +7745,9 @@ def main():
         _v = _g.session_models(_mt)
         check("a model that CHANGED mid-run is reported as the whole sequence — a scalar would "
               "report whichever message was read and hide the fallback entirely",
-              _v["models"] == ["claude-sonnet-5", "claude-haiku-4-5"]
-              and _v["first"] == "claude-sonnet-5" and _v["last"] == "claude-haiku-4-5"
-              and _v["changed"] is True)
+              dig(_v, "models") == ["claude-sonnet-5", "claude-haiku-4-5"]
+              and dig(_v, "first") == "claude-sonnet-5" and dig(_v, "last") == "claude-haiku-4-5"
+              and dig(_v, "changed") is True)
         # PAIRED: an unchanged run must NOT report a change, or the flag is noise.
         _tr("claude-sonnet-5", "claude-sonnet-5")
         check("...while a run that never changed model reports changed:false, so the flag still "
@@ -9630,7 +9633,9 @@ def main():
         # its second, and hardens seeded "just after the baseline" are then also just after the
         # REVIEW — so the clearing assertion fails on the clock rather than on the code. Found by
         # this exact failure.
-        _led = read_or_empty(_gc.LEDGER_F).replace(_gc._ledger_last(), "2026-01-01T00:00:00")
+        # `or ""` because the nothing-arm is exactly what a neutered producer returns, and
+        # .replace(None, ..) raises — ending the run instead of failing the assertion below.
+        _led = read_or_empty(_gc.LEDGER_F).replace(_gc._ledger_last() or "", "2026-01-01T00:00:00")
         with open(_gc.LEDGER_F, "w") as f:
             f.write(_led)
         _base = _gc._ledger_last()
@@ -9997,17 +10002,17 @@ def main():
         _w = _grd.release_distance_warning()
         check("three commits past the newest mark WARNS at the handback — committed and pushed is "
               "not released, and only one of those is a thing a consumer can install",
-              _n == 3 and _lvl == "stable" and _w and "3 COMMIT(S) BEHIND" in _w)
+              _n == 3 and _lvl == "stable" and _w and "3 COMMIT(S) BEHIND" in (_w or ""))
         check("...and it names the mark it is measuring against, so the number is checkable rather "
               "than asserted",
-              _sha[:8] in _w)
+              _sha[:8] in (_w or ""))
         check("...and it states what it CANNOT know — whether anyone consumes this repo at all. "
               "The number that would actually move you is 'N consumers are bound to the older "
               "one', and that lives in a package manager's registry, not in git",
-              "declines to guess at the audience" in _w)
+              "declines to guess at the audience" in (_w or ""))
         check("...and it is measured against the CONFIDENCE MARKS, not a branch — what consumers "
               "install is the tag, so that is the gap that matters",
-              "newest mark" in _w)
+              "newest mark" in (_w or ""))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rd, ignore_errors=True)

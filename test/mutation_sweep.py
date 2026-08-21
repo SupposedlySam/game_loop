@@ -570,6 +570,28 @@ MUTANTS = [
 # The lesson is not about these three. It is that an explanation which fits a number is not evidence
 # the number exists.
 #
+# THE CRASH CLASS, and why five producers are still outside this denominator.
+#
+# An assertion whose CONDITION raises ends the run, and every assertion after it never prints `ok` —
+# which a set difference over passing NAMES counts as KILLED. A crash therefore scored as maximum
+# coverage. Three shapes, each found by neutering one producer and reading the traceback:
+#
+#   1. an unguarded split/index on output the producer shapes      -> after_marker
+#   2. an unguarded read of a file the producer writes             -> read_or_empty / json_or_none
+#   3. the producer's NOTHING-ARM flowing into something that cannot take None
+#      (.replace(None), `x in None`, None[..], getsize of an absent file)  -> dig / `or ""`
+#
+# ci_commands and ci_gap went 222 -> 3 when shape 1 was fixed; upstream_check went NOT MEASURED ->
+# 12 when 2 and 3 were fixed at its sites.
+#
+# FIVE REMAIN, and they are not one site each: fixing the first site in refresh_handoff and in
+# _scan_transcript revealed a second behind it. There is NO systemic fix — `check(name, cond)`
+# evaluates its condition at the CALL SITE, so nothing inside check() can catch the raise without
+# making all 1369 conditions lazy.
+#
+# THE METHOD, ~9 minutes per site: archive HEAD, neuter with neuter(), run test/run.py, read the
+# traceback, guard that site, repeat until the run prints a summary line.
+#
 # PAID at 87b40d2, the sweep AFTER the one that found them UNPROTECTED: pin_status 2,
 # running_host_version 3, _upstream_fetch 1. Thin, and honestly thin — few arms by nature.
 #

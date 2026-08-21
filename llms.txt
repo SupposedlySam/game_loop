@@ -51,6 +51,14 @@ relative to the repo or a configured `read_root`. The keystone is that the file 
 it, not that it lives in this repo: cite the sibling repo you actually opened. A research subagent's
 citation is not a source: it *found* the file, you must *read* it.
 
+**WHAT THE KEYSTONE DOES NOT PROVE, and it is worth knowing before you trust a green claim:** that
+the file you cited is the DECIDING one. It proves you named *a* real file, which is the half prose
+cannot fake — not that it answers the question you asserted about. A consumer put it exactly: asked
+whether a path was gitignored, they could have cited `.gitignore` and been recorded as correct while
+`git check-ignore` — the command that actually decides it — said the opposite. Where an interrogating
+command exists, a document describing the same thing is the weaker citation, and this gate cannot
+tell them apart.
+
 ## Working unattended (this is the whole point)
 
 When a human binds a mandate (`game_loop mandate --set "..."`), two hooks keep you moving:

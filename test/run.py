@@ -7564,6 +7564,35 @@ def main():
     check("...and at twice the threshold the nudge becomes a GATE, because `status` printing 'due' "
           "is advice and this project's first invariant is that advice is followed only sometimes",
           _over.returncode == 2 and "overdue" in _over.stderr)
+    # THE REFUSAL CARRIES THE NUMBERS, which is the half a dead producer cannot fake. Exit 2 plus
+    # the word "overdue" is satisfied by any gate that closes for any reason; an agent deciding
+    # whether this is real needs to see the count it was measured on and the line it crossed.
+    check("...and the refusal NAMES the count and the threshold it crossed, so the agent can tell "
+          "an overdue retro from any other closed gate without guessing which one fired",
+          has(_over.stderr, "16 pieces of evidence work") and has(_over.stderr, "closes at 16"))
+    check("...and the block is COUNTED, or a gate that closes forever is indistinguishable from "
+          "one that closed once — the breaker downstream needs the number",
+          (json_text(read_or_empty(_sf)) or {}).get("stop_gate_blocks_total", 0) >= 1)
+
+    # THE OTHER ARM. Only the work counter was ever driven, so a producer that had lost the
+    # transitions branch entirely would have passed everything above.
+    def _trans(n):
+        d = json_text(read_or_empty(_sf)) or {}
+        d["work_since_stepback"], d["trans_since_stepback"] = 0, n
+        with open(_sf, "w") as f:
+            json.dump(d, f)
+
+    _trans(12)
+    check("...and TRANSITIONS have their own nudge threshold that does not gate — the two counters "
+          "are separate debts and only one of them was ever driven here",
+          _gate("sess-r2").returncode == 0)
+    _trans(24)
+    _tover = _gate("sess-r2")
+    check("...while twice the transition threshold closes the gate on its own, naming ITS count "
+          "rather than the evidence-work one — same gate, different debt, and a refusal that named "
+          "the wrong counter would send the agent to fix something that is not owed",
+          _tover.returncode == 2 and has(_tover.stderr, "24 transitions")
+          and not has(_tover.stderr, "pieces of evidence work"))
 
     print("the one tracked file whose contents EXECUTE in somebody else's checkout:")
     # .claude/settings.json is the only tracked thing here that RUNS in a cloner's machine, and it
@@ -9569,6 +9598,35 @@ def main():
         check("...a `gh` that runs and FAILS is also a None, with its own reason — could-not-look "
               "never collapses into looked-and-found-nothing",
               _i5 is None and _why5)
+        # AND THE TWO REASONS MUST DIFFER, which is the assertion that makes the two above worth
+        # anything. Both arms are satisfied by a producer that returns one canned string for every
+        # failure — and that is precisely what the neutered form does, which is why this producer
+        # measured THIN at 1 with three assertions on it. Non-empty and INFORMATIVE are different
+        # claims: a reason identical across causes names the function rather than the finding, and
+        # the human reading it after an outage learns nothing about which outage they had.
+        check("...and the two failure reasons are DIFFERENT and each names its own cause — a "
+              "reason that reads the same for 'no gh on PATH' and 'gh ran and failed' identifies "
+              "the code that produced it rather than the thing that went wrong",
+              _why4 != _why5
+              and has(_why4, "did not return") and has(_why4, "FileNotFoundError")
+              and has(_why5, "search failed"))
+        # THE THIRD FAILURE MODE, and the one most easily mistaken for success: `gh` runs, exits 0,
+        # and prints something that is not JSON. A tolerant parser would read that as "no issues"
+        # and advance the baseline over it — the same outage-as-quiet collapse, arriving through
+        # the one path where the process itself reported no error at all.
+        with open(os.path.join(_fake, "gh"), "w") as f:
+            f.write("#!/bin/sh\necho 'not json at all'\n")
+        os.chmod(os.path.join(_fake, "gh"), 0o755)
+        try:
+            os.environ["PATH"] = _fake
+            _i7, _r7, _why7 = _g3._upstream_fetch("o/a", timeout=10)
+        finally:
+            os.environ["PATH"] = _env0
+        check("...and a `gh` that SUCCEEDS while printing non-JSON is a None with its own third "
+              "reason — exit 0 with unreadable output is the failure most easily read as 'nothing "
+              "to report', and all three reasons stay distinguishable from each other",
+              _i7 is None and has(_why7, "not JSON")
+              and len({_why4, _why5, _why7}) == 3)
         with open(os.path.join(_fake, "gh"), "w") as f:
             f.write('#!/bin/sh\ncase "$*" in *"release list"*) echo \'[{"tagName":"v9"}]\';; '
                     '*) echo \'[{"number":5,"title":"t","updatedAt":"T1"}]\';; esac\n')

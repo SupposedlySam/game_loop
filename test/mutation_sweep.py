@@ -272,7 +272,14 @@ MUTANTS = [
     # construction, so the only way to pay "floor owed on the next sweep" was to stop excluding them.
     ("retro_overdue -> the nudge never escalates",
      ".game_loop/bin/game_loop::retro_overdue", "    return None\n",
-     ["retro", "overdue", "threshold"], None, 1),   # THIN, and honest: see the note above
+     # THIN AT 1 -> 4. Two assertions drove it and one of them asserted exit 0 at the NUDGE
+     # threshold, which a dead gate also produces. The refusal now has to carry the COUNT and the
+     # THRESHOLD it crossed (exit 2 plus the word "overdue" is satisfied by any gate closing for
+     # any reason), the block has to be COUNTED, and the TRANSITIONS arm is driven at all — only
+     # the evidence-work counter was ever exercised, so a producer that had lost the transitions
+     # branch entirely passed everything. The refusal must name ITS OWN counter: one that named the
+     # wrong debt would send the agent to fix something that is not owed.
+     ["retro", "overdue", "threshold"], None, 4),
     ("retro_debt_open -> the retro never owes its encoding",
      ".game_loop/bin/game_loop::retro_debt_open", "    return None\n",
      ["retro", "encoded", "harden"], None, 2),
@@ -781,7 +788,14 @@ MUTANTS += [
      ["remote", "ref", "ONLY LOCAL", "push"], None, 0),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
      ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
-     ["#76", "upstream"], None, 1),
+     # THIN AT 1 -> 3. Three assertions called it and two asserted `issues is None and why` — which
+     # the neutered form, returning one canned "neutered" for everything, satisfies exactly. That is
+     # showrunner's point in this repo's own file: NON-EMPTY AND INFORMATIVE ARE DIFFERENT CLAIMS,
+     # and a reason identical across causes names the function rather than the finding. The three
+     # real failures now have to stay DISTINGUISHABLE FROM EACH OTHER: no gh on PATH, gh ran and
+     # failed, and gh exited 0 while printing non-JSON — the last being the one most easily read as
+     # "nothing to report", since the process itself reported no error at all.
+     ["#76", "upstream"], None, 3),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
      ["notify", "probe", "read"], None, 3),

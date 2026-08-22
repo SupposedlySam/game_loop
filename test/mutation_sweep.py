@@ -538,7 +538,13 @@ MUTANTS = [
      # correctly survive a producer neutered to permanent silence. Only the presence arm and its
      # content checks die. Adding more assertions against the same string would raise the number
      # without protecting a single extra behaviour, which is the farming this file warns about.
-     "one message, and its companions are absence arms that survive silence by design", 2),
+     # 2 -> 3, and the third arm was ALREADY WRITTEN — it just could not flip. It asserted the
+     # caveat "tracks the PROBE's lifetime, not the hook's", and the Stop-probe warning (#43)
+     # carries a near-identical sentence; both fire in that fixture, so the substring was satisfied
+     # with this producer dead. Two producers sharing a sentence make an assertion on that sentence
+     # unable to say which one spoke. Scoped to the text AFTER "NO SESSION START RECORDED" and
+     # pinned to the wording only this one uses, it flips.
+     "one message plus a caveat scoped to its own block; the rest are absence arms", 3),
     ("refresh_handoff -> no handoff is ever maintained", ".game_loop/bin/game_loop::refresh_handoff",
      "    return False\n", ["handoff", "turn-end", "cliff", "limit"],
      # THIN at 2, and the first measurement said 164 — which was a CRASH CASCADE, not coverage. The
@@ -576,7 +582,13 @@ MUTANTS = [
      # status, and its companions assert the OTHER arm -- that a project-level config stops citing
      # the user file -- which survives a producer neutered to silence, by design. Reporting-only:
      # it decides nothing, which is why there is little to kill.
-     "one status line; its companion asserts absence and survives silence by design", 1),
+     # 1 -> 4. The status line was the only consumer and its other cases are ABSENCES — project
+     # file wins so no citation is printed, neither file so none either — which a dead producer
+     # passes. Now the line must name the actual PATH (not just the phrase "user-level"; somewhere
+     # user-level still leaves you opening files to find the one that pages), and the producer is
+     # asked directly which file it WOULD use in both arms, so the citation is a fact rather than a
+     # fixed sentence.
+     "the actual path in the status line, and the producer asked directly in both arms", 4),
     ("config_local_keys -> a local config override is never announced",
      ".game_loop/bin/game_loop::config_local_keys", "    return []\n",
      ["config.local", "override", "site wiring"],

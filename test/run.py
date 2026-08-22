@@ -4498,9 +4498,16 @@ def main():
         check("...and names the remedy, since hooks are read at session start and a warning you "
               "cannot act on is just noise",
               "reload the window" in _warn.lower() and "install.sh" in _warn)
+        # SCOPED TO ITS OWN BLOCK, because the phrase is not unique. The Stop-probe warning (#43)
+        # carries a near-identical caveat — "tracks the PROBE's lifetime, not the hook's" — and in
+        # this fixture BOTH fire, so a bare substring test passed with session_start_warning dead.
+        # Measured: the producer neutered, this assertion still green while its two neighbours
+        # flipped. Two producers sharing a sentence make an assertion on that sentence unable to
+        # say which one spoke, which is the differing-details rule one level out.
+        _ss_block = after_marker(_warn, "NO SESSION START RECORDED")
         check("...and states the limit it keeps (INV6): this tracks the PROBE's lifetime, not the "
               "hook's — registered, fired and firing now stay three different claims",
-              "PROBE's lifetime" in _warn)
+              has(_ss_block, "PROBE's lifetime") and has(_ss_block, "until its next start"))
         _start()
         check("...and once one is recorded it goes quiet — the pair that makes the warning mean "
               "something rather than being a permanent banner",
@@ -5399,6 +5406,31 @@ def main():
         check("...and status names WHICH file, since a user-level config pages for every project on "
               "the machine and 'where is this going' must be answerable",
               "user-level, shared by every project here" in _u)
+        check("...and it names the actual PATH, not just the phrase — 'somewhere user-level' still "
+              "leaves you opening files to find the one that is paging",
+              has(_u, _uf))
+        # DIRECTLY, BOTH ARMS. The status line above is the only consumer, and its other cases are
+        # absences — project-wins prints no citation, neither-file prints none — so a dead producer
+        # passes them. Asking the producer itself which file it WOULD use makes both arms speak.
+        _nload = importlib.machinery.SourceFileLoader(
+            "notify_cs", os.path.join(nf, ".game_loop", "bin", "notify.py"))
+        os.environ["GAME_LOOP_HOME"] = os.path.join(nf, ".game_loop")
+        os.environ["XDG_CONFIG_HOME"] = _xdg
+        try:
+            _ncs = importlib.util.module_from_spec(
+                importlib.util.spec_from_loader("notify_cs", _nload))
+            _nload.exec_module(_ncs)
+            check("...and the producer behind that line names the USER file when only it exists",
+                  _ncs.cfg_source() == _uf)
+            with open(os.path.join(nf, ".game_loop", "notify.json"), "w") as f:
+                json.dump({"slack": {"webhook_url": "https://example.invalid/p0"}}, f)
+            check("...and the PROJECT file once it exists — the same question answered differently, "
+                  "which is what makes the citation above a fact rather than a fixed sentence",
+                  _ncs.cfg_source() == os.path.join(nf, ".game_loop", "notify.json"))
+            os.remove(os.path.join(nf, ".game_loop", "notify.json"))
+        finally:
+            os.environ.pop("GAME_LOOP_HOME", None)
+            os.environ.pop("XDG_CONFIG_HOME", None)
 
         # THE PROJECT STILL WINS, WHOLE. Not merged key-by-key: a half-inherited credential is the
         # worst outcome here — a project pointing at its own channel would silently borrow the

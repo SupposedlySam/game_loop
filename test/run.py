@@ -251,6 +251,21 @@ def after_marker(text, marker, until=None):
     return part.split(until, 1)[0] if until and until in part else part
 
 
+def has(hay, needle):
+    """`needle in hay`, but FALSE when hay is None — never an exception.
+
+    A neutered producer returns None, and `"x" in None` RAISES. A raising condition ends the run,
+    so every assertion behind it never prints, and the sweep cannot count what never ran.
+
+    THE AD-HOC GUARD IS THE TRAP, not the missing one. The #78 block already wrote `_n and "a" in _n`
+    on the FIRST line that crashed — and left the next three bare, because only the first one had
+    ever been seen to fail. Two independent runs then stopped at the same later line. A guard that
+    has to be remembered per site gets applied exactly where a crash was already observed, which is
+    the one place it is no longer needed.
+    """
+    return bool(hay) and needle in hay
+
+
 def main():
     proj = make_sandbox()
     try:
@@ -9620,7 +9635,11 @@ def main():
         os.environ.pop("GAME_LOOP_HOME", None)
 
         def _seed(n, after):
-            t = datetime.datetime.fromisoformat(after)
+            # THE TOLERANCE LIVES HERE, which is what the comment below already claimed and my
+            # first fix did not do: I guarded ONE call site and left the other passing None, so a
+            # second crash sat directly behind the first. A guard described in prose and applied
+            # somewhere else is the docstring-argues-the-rule trap, in the fix for a crash class.
+            t = datetime.datetime.fromisoformat(after or "2026-01-01T00:00:00")
             with open(_gc.LOG_F, "w") as f:
                 for i in range(n):
                     t += datetime.timedelta(seconds=1)
@@ -9654,7 +9673,7 @@ def main():
         # leaves _base as None and fromisoformat(None) ends the run. The guard must NOT go on _base
         # itself — the assertion above tests that a baseline WAS written, and defaulting _base would
         # make it pass while the producer is dead. So _seed tolerates the nothing-arm instead.
-        _seed(5, _base or "2026-01-01T00:00:00")
+        _seed(5, _base)
         check("#78: five learnings is under the threshold and stays quiet — the boundary is "
               "asserted, not the middle",
               _gc.upstream_review_nudge({}) is None)
@@ -9663,15 +9682,15 @@ def main():
         _n = _gc.upstream_review_nudge({})
         check("#78: at the threshold it fires and LISTS THE LEARNING TEXT — the judgement 'tool or "
               "repo' is unmakeable from a count, and seeing them side by side is the mechanism",
-              _n and "7 learning(s)" in _n and "spawn's base comes from HEAD" in _n)
+              has(_n, "7 learning(s)") and has(_n, "spawn's base comes from HEAD"))
         check("#78: ...and it asks the actual question rather than instructing a contribution",
-              "TOOL's behaviour, or THIS REPO's" in _n)
+              has(_n, "TOOL's behaviour, or THIS REPO's"))
         check("#78: ...and it names raising the threshold as the cheap way out, out loud, because "
               "that is the first thing anyone reaches for",
-              "cheapest way to silence this" in _n)
+              has(_n, "cheapest way to silence this"))
         check("#78: ...and states what it cannot see — whether a learning generalises, whether a "
               "filed issue is any good, anything that never went through `harden`",
-              "CANNOT SEE" in _n and "never went through" in _n)
+              has(_n, "CANNOT SEE") and has(_n, "never went through"))
 
         # "ALL PROJECT-SPECIFIC" IS A COMPLETE ANSWER. A gate that only cleared on a filed issue
         # would manufacture noise issues, which is worse than the silence it replaced.

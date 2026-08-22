@@ -98,6 +98,20 @@ Find them by **mutation**: neuter the producer — make the guard permit everyth
 nothing, the validator have no opinions — and see what still passes. It manufactures the absence you
 cannot otherwise observe, and what survives is what was never being checked.
 
+**A mutant that CRASHES the suite is protected, not unprotected — read the verdict carefully.** The
+run exits non-zero and goes red, so the defence worked; what failed is the *measurement*, because a
+crash ends the run and every assertion behind it never printed. Those two findings look identical in
+a summary and are worth opposite amounts: recovering a crashed producer buys you a **number**, not
+safety, and reporting it as a closed hole overstates the work. Fix the crash to learn how strongly
+the thing was already defended — then say which of the two you found.
+
+The crash itself has a shape worth naming, because fixing it once does not fix it. **A crash exposes
+only the FIRST site of its kind.** Every identically-shaped site behind it was never reached, so it
+never earned a guard — which means patching the site that crashed leaves its neighbours in exactly
+the state that produced the crash, and the next run stops a few lines later. A guard you have to
+remember per site therefore lands where the danger is already spent and never where it is live. Do
+not guard the site; supply a helper the dangerous shape cannot be written without.
+
 The failure, three times in one session: a syntax error made the write guard allow everything with no
 output at all, so "outside this repo is read-only" stopped being enforced and nothing said so.
 Sixteen permissive assertions passed against a guard mutated to check nothing. Four producers that

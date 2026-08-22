@@ -367,7 +367,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | Command | What it's for |
 |---|---|
 | `status` | Rehydrate after compaction. The agent runs this first, every session. |
-| `mandate --set` / `--clear` / `--park` | Bind, release, or pause a job it cannot abandon. `--park` is you calling a break. |
+| `mandate --set` / `--clear` / `--park` | Bind, release, or pause a job it cannot abandon. `--park` is you calling a break.  `--wake-path "<how a signal reaches this session>"` records that something OUTSIDE can reach the run; `status` says so when nothing is recorded, because every other gate fires from inside the session. |
 | `checkpoint --notes ".."` | Report progress and hand back without asking anything.  If finished work is committed, pushed and **unreleased**, the handback refuses until you `confidence --mark` it or say why not with `--release-deferred "<reason>"` — which is recorded. |
 | `arm --question .. --read .. --predict ..` | Spend one interruption of you, backed by a file it already read. |
 | `claim --assert ".." --read <path>` | Assert something about the outside world, with the receipt. |

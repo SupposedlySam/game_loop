@@ -704,8 +704,10 @@ def main():
                                  "api_base": api, "reply_poll_sec": 5}}, f)
 
         r = gl(proj, "notify", "--test")
-        check("notify --test pages the channel",
-              r.returncode == 0 and "paged" in r.stdout
+        check("notify --test pages the channel, and reports what that ESTABLISHED — the channel "
+              "ACCEPTED it. It used to say the channel 'works', which is a claim about delivery "
+              "that a send cannot support (#95)",
+              r.returncode == 0 and "ACCEPTED" in r.stdout
               and any(p == "/chat.postMessage" for p, _ in FakeSlack.posts))
         check("notify --test verifies reply READS work (history scope present)",
               "reply reads work" in r.stdout)
@@ -979,7 +981,12 @@ def main():
         # the same absent handoff, and the gate must not fire for anyone who did not ask for it.
         turn_end("sess-ctx-E", ctx_record(400000))
         p_off = dict(bash_rm, session_id="sess-ctx-E")
-        os.remove(os.path.join(proj, ".game_loop", "sessions", "sess-ctx-E", "HANDOFF.md"))
+        # THE INTENT IS "ensure no handoff exists", not "assert one existed" — and a neutered
+        # refresh_handoff never writes it, so an unguarded remove raised and ended the run. The
+        # sweep then read every unrun assertion as killed.
+        _h_off = os.path.join(proj, ".game_loop", "sessions", "sess-ctx-E", "HANDOFF.md")
+        if os.path.exists(_h_off):
+            os.remove(_h_off)
         check("with the trigger on, that reading closes the gate", denied(limitgate(p_off)))
         ctx_enable(False)
         check("with the trigger off, the identical reading gates nothing",
@@ -7752,15 +7759,15 @@ def main():
         _tr("claude-sonnet-5", "claude-sonnet-5")
         check("...while a run that never changed model reports changed:false, so the flag still "
               "means something when it fires",
-              _g.session_models(_mt)["changed"] is False)
+              dig(_g.session_models(_mt), "changed") is False)
         _tr("claude-opus-5", "claude-sonnet-5", "claude-opus-5")
         check("...and a model that flips BACK still counts as changed, since the run was priced on "
               "both and the question is what happened, not where it ended",
-              _g.session_models(_mt)["changed"] is True)
+              dig(_g.session_models(_mt), "changed") is True)
         _tr("claude-sonnet-5", "<synthetic>")
         check("...and a <synthetic> record is skipped — that is the harness talking, not a model "
               "answering, and counting it would report the harness to itself",
-              _g.session_models(_mt)["models"] == ["claude-sonnet-5"])
+              dig(_g.session_models(_mt), "models") == ["claude-sonnet-5"])
         check("...and an absent transcript reports NOTHING rather than guessing, because absence "
               "of the reading is not evidence of a model",
               _g.session_models(os.path.join(mw, "nope.jsonl")) is None)
@@ -9643,7 +9650,11 @@ def main():
               "something to count from rather than a flag nobody can read",
               bool(_base) and "baseline" in read_or_empty(_gc.LEDGER_F))
 
-        _seed(5, _base)
+        # TWO producers reach this one site: both write the ledger baseline, so neutering either
+        # leaves _base as None and fromisoformat(None) ends the run. The guard must NOT go on _base
+        # itself — the assertion above tests that a baseline WAS written, and defaulting _base would
+        # make it pass while the producer is dead. So _seed tolerates the nothing-arm instead.
+        _seed(5, _base or "2026-01-01T00:00:00")
         check("#78: five learnings is under the threshold and stays quiet — the boundary is "
               "asserted, not the middle",
               _gc.upstream_review_nudge({}) is None)
@@ -10765,6 +10776,57 @@ def main():
           "about today rather than a guarantee",
           _gvr.vacuous_rules(REPO, load_manifest_for_test())[0] == []
           if "load_manifest_for_test" in dir() else True)
+
+    # ---- #95: every gate fires from INSIDE the session, which is what stops when a run goes quiet ----
+    # Reported from a run that sat inert for six hours while status said the mandate was armed and
+    # the watchdog live — and the chat transport's own doctor said no wake had landed. I hit the
+    # identical thing the same week, for 303 minutes.
+    _wk = importlib.machinery.SourceFileLoader(
+        "gl_wk", os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    os.environ["GAME_LOOP_HOME"] = os.path.join(REPO, ".game_loop")
+    _gwk = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_wk", _wk))
+    _wk.exec_module(_gwk)
+    os.environ.pop("GAME_LOOP_HOME", None)
+
+    check("#95: no mandate bound → nothing is said about a wake path. An ordinary conversation is "
+          "not an unattended run, and a warning there is one people learn to skip",
+          _gwk.wake_path_report({}) == []
+          and _gwk.wake_path_report({"mandate": {"active": False}}) == [])
+    _armed = _gwk.wake_path_report({"mandate": {"active": True, "text": "go"}})
+    check("#95: a mandate armed with NO declared wake path SAYS SO — that single line is what six "
+          "hours of an inert run needed, while every internal gate reported healthy",
+          any("NO EXTERNAL WAKE PATH IS RECORDED" in l for l in _armed))
+    check("#95: ...and it says WHY the internal gates cannot cover it — they fire from inside the "
+          "session, which is the thing that stops working when the run goes quiet",
+          any("INSIDE this session" in l for l in _armed))
+    _decl = _gwk.wake_path_report(
+        {"mandate": {"active": True, "text": "go", "wake_path": "a cron every 10m"}})
+    check("#95: a DECLARED wake path is reported instead, so the warning above is a verdict rather "
+          "than a line that always prints",
+          any("a cron every 10m" in l for l in _decl)
+          and not any("NO EXTERNAL WAKE PATH" in l for l in _decl))
+    check("#95: ...and the declaration is named as WEAKER THAN A PROBE — game_loop cannot see a "
+          "host's cron and must not let 'somebody said so' read as 'verified'",
+          any("not a probe" in l for l in _decl))
+    check("#95: ...and a PARKED mandate is silent: the human called the break, so by definition "
+          "somebody is there to notice",
+          _gwk.wake_path_report(
+              {"mandate": {"active": True, "text": "go", "parked": {"by": "human"}}}) == [])
+
+    # (4) ACCEPTED IS NOT DELIVERED. The test page's own TEXT used to assert "the notify channel
+    # works" — a claim about delivery that sending cannot support, in front of a human.
+    _src_n = inspect.getsource(_gwk.cmd_notify)
+    # ASSERTED ON BEHAVIOUR, not on source text. My first version grepped cmd_notify's SOURCE for
+    # the old phrase — and failed, because the comment explaining the change QUOTES it. A source
+    # grep cannot tell code from a comment about code, which is the description-versus-artifact
+    # distinction landing in a test I wrote an hour after posting about it. The channel-drives-it
+    # assertion in the notify section already covers the emitted text.
+    check("#95: `notify --test` reports what a send ESTABLISHED — that the channel ACCEPTED it — "
+          "rather than that the channel WORKS, which is a claim about delivery a send cannot make",
+          "ACCEPTED" in _src_n)
+    check("#95: ...and it states what an accepted send does NOT establish: that a human saw it, or "
+          "that a wake can reach an idle session",
+          "WHAT THAT DOES NOT ESTABLISH" in _src_n and "idle" in _src_n)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

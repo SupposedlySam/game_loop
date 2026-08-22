@@ -263,6 +263,15 @@
       "change": "a NEW refusal, exit 3. Naming a ref while installing from a clone is refused instead of ignored. Nothing is written to the target, and both ways forward are printed: unset the variable to install the clone you are standing in, or run the fetched installer, which honours the ref. An ordinary clone install with no ref named is unaffected.",
       "consequence": "if you scripted `GAME_LOOP_CHANNEL=stable /path/to/clone/install.sh <target>`, that stops instead of installing the clone's working tree. It never did what the variable said \u2014 it silently installed different bytes \u2014 so the script was already not doing what it looked like.",
       "why_it_qualifies": "a consumer who changed nothing is refused a command that previously exited 0. Reported and reproduced here: asking for `stable` installed the clone's own HEAD, stamped ALPHA, with nothing said. REF is set from the channel but read only inside the fetch block, which is skipped when a local payload exists."
+    },
+    {
+      "seq": 26,
+      "sha": "pending",
+      "notice": true,
+      "verb": "status, and notify --test",
+      "change": "status now prints a WARNING when a mandate is armed and no external wake path is recorded, and `mandate --set` accepts `--wake-path \"<how a signal reaches this session>\"` to record one. A parked mandate is silent. Separately, `notify --test` no longer says the channel 'works' \u2014 it reports that the channel ACCEPTED the page, and states that this establishes neither that a human saw it nor that a wake can reach an idle session.",
+      "consequence": "an armed mandate with nothing declared gains one warning block in status until you record a wake path or park. The notify test page's own text changed, and its output now names what an accepted send does not prove. Nothing is refused either way.",
+      "why_it_qualifies": "a consumer who changed nothing sees a new warning and different notify output. Reported from a run that sat inert for six hours while status said the mandate was armed and the watchdog live, because every gate here fires from INSIDE the session \u2014 which is the thing that stops working when a run goes quiet. The reporter's transport doctor knew; game_loop could not. The declaration is explicitly weaker than a probe and says so."
     }
   ],
   "schema": 1

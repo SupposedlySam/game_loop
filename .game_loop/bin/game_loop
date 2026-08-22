@@ -786,6 +786,34 @@ def fire_triggers(s, event, payload):
     return lines
 
 
+def wake_path_report(s):
+    """Say when a mandate is armed and NOBODY HAS SAID how an external signal reaches this run (#95).
+
+    Every gate here fires from INSIDE the session — the Stop gate, the watchdog, the limit gate —
+    which is precisely what stops working when a run goes quiet. A consumer's run sat inert for six
+    hours with all three reporting healthy while its chat transport's own doctor said no wake had
+    landed. I hit the same thing the same week, for 303 minutes.
+
+    A DECLARATION, NOT A PROBE, and the difference is stated where it is printed: game_loop cannot
+    see a host's cron and does not pretend to. What it can do is refuse to let "nobody has said"
+    look like "there is one".
+    """
+    m = s.get("mandate") or {}
+    if not m.get("active") or m.get("parked"):
+        return []
+    if m.get("wake_path"):
+        return ["", f"wake path (declared): {m['wake_path']}",
+                "  A DECLARATION, not a probe — nothing here has verified a signal actually lands."]
+    return ["", "⚠ MANDATE ARMED, AND NO EXTERNAL WAKE PATH IS RECORDED.",
+            "  Every gate here fires from INSIDE this session — which is the thing that stops",
+            "  working when the run goes quiet. If nothing outside can reach you, an inert run and",
+            "  a healthy one look identical from in here, and they did for six hours in the report",
+            "  that prompted this.",
+            "    game_loop mandate --set \"..\" --wake-path \"<how a signal reaches this session>\"",
+            "  A cron that pokes the session, a Stop-hook waker, a human who checks. Recording it is",
+            "  a declaration and is worth less than a probe; not recording it is worth nothing."]
+
+
 def guards_report():
     """Registered project guards, each ACTIVE / INERT / UNKNOWN — never silently healthy (#90).
 
@@ -1564,13 +1592,24 @@ def cmd_notify(s, a):
             "  or send-only: {\"slack\": {\"webhook_url\": \"https://hooks.slack.com/...\"}}",
             "  Full schema + scopes: .game_loop/bin/notify.py docstring.")
         return
-    text = a.text or "test page — the notify channel works. (game_loop notify --test)"
+    text = a.text or ("test page from game_loop. If you are reading this, the channel ACCEPTED and "
+                      "DELIVERED it — which is the half sending cannot prove on its own.")
     res = notify.send("manual", text)
     if res is None:
         out("✗ page FAILED — see the last notify_error line in .game_loop/log.jsonl.")
         return
     logline({"kind": "notify_manual", "text": text})
-    out("✓ paged the channel." + ("" if res is True else f" (thread ts {res})"))
+    out("✓ the channel ACCEPTED the page." + ("" if res is True else f" (thread ts {res})"))
+    if a.test:
+        # ACCEPTED IS NOT DELIVERED, and this verb used to say "the notify channel works" — in the
+        # page's own text, in front of a human (#95). Sending establishes that the API took it.
+        # Whether a human sees it, and whether any WAKE lands, are two further claims this cannot
+        # make. A run went inert for six hours behind exactly that conflation, with every internal
+        # gate reporting healthy.
+        out("  WHAT THAT DOES NOT ESTABLISH: that a human saw it, or that a WAKE can reach this",
+            "  session while it is idle. Those are the failure this verb gets trusted to rule out,",
+            "  and an accepted send rules out neither. Ask your transport's own doctor whether a",
+            "  wake has LANDED — accepted, delivered and woke-me are three different facts.")
     if a.test:
         # Sending proves chat:write; it does NOT prove the bot can READ replies back. Probe that too,
         # so a wrong history scope (the classic: channels:history on a PRIVATE channel) is named here
@@ -2112,6 +2151,8 @@ def cmd_mandate(s, a):
             "    game_loop mandate --clear --notes \"superseded by: ..\"\n\n"
             "Re-setting the SAME words is allowed, so a retry or a re-bind after compaction costs\n"
             "nothing. What is refused is losing a live mandate without a decision.")
+    if getattr(a, "wake_path", None):
+        m["wake_path"] = a.wake_path
     m.pop("parked", None)   # a re-bind supersedes any break; the new words are the mandate now
     m.update({"active": True, "text": a.set, "since": now(),
               # Recorded even though it decides nothing here: their second suggestion is that a
@@ -8495,6 +8536,7 @@ def cmd_status(s, a):
     # AND A GUARD DISABLED BY THE STATE IT READS (#90) — the same equivalence one process boundary
     # out. Registered, running, returning the code that means allowed, for sixteen hours.
     out(*guards_report())
+    out(*wake_path_report(s))
     out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for
     out(*waiting_report())       # what this run is blocked on — the first question a resume asks
     snap = load_limits()
@@ -8906,6 +8948,9 @@ def main():
     at.add_argument("--reason", help="why this commit carries work another session produced")
 
     md = sub.add_parser("mandate")  # bind an autonomy mandate; while bound, the Stop gate is live
+    md.add_argument("--wake-path", dest="wake_path",
+                    help="how an external signal reaches this session while it is idle — a cron, a "
+                         "waker, a human. Recorded, not probed")
     md.add_argument("--set", help="the mandate, in the human's words")
     md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
     md.add_argument("--notes", help="why it's satisfied")

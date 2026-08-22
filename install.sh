@@ -775,6 +775,54 @@ main_checkout_of() {
   printf '%s\n' "$path"
 }
 
+# THE LINKED WORKTREES THIS INSTALL IS ABOUT TO DRIFT (#98). The commit gate resolves per tree and
+# compares a worktree's harness against the MAIN CHECKOUT's, so installing here silently changes
+# what every other live tree is measured against. Nothing used to fire at upgrade time: the install
+# succeeds, `status` looks healthy here, and the worktrees look fine because nothing has asked them
+# anything yet. It surfaces later as a REFUSED COMMIT on finished work — the most expensive moment
+# to find out, and it lands on whoever holds that work rather than on whoever caused the drift.
+#
+# Reported by a consumer who hit it on six worktrees at once and only noticed because they ran a
+# reconcile for an unrelated reason. They were then DECLINING a beneficial upgrade, because the
+# blast radius of installing was invisible at the moment of choosing.
+#
+# This warns, it does not refuse: the upgrade is usually right, and a gate that blocks it would be
+# routed around. What it must not do is stay quiet, which is what it did before. Printed BEFORE
+# anything is written, so it is a thing you can still act on rather than a report of what happened.
+linked_worktrees_of() {
+  local tree="$1" listing
+  command -v git >/dev/null 2>&1 || return 0
+  listing="$(git -C "$tree" worktree list --porcelain 2>/dev/null)" || return 0
+  # every `worktree ` line after the first block — the main checkout is printed first, always
+  printf '%s\n' "$listing" | sed -n 's/^worktree //p' | tail -n +2
+}
+
+warn_worktrees_about_to_drift() {
+  local target="$1" others n
+  # Only when installing INTO the main checkout. A worktree adopting its parent is the ordinary
+  # path and drifts nobody.
+  main_checkout_of "$target" >/dev/null 2>&1 && return 0
+  others="$(linked_worktrees_of "$target")"
+  [ -n "$others" ] || return 0
+  n="$(printf '%s\n' "$others" | grep -c .)"
+  echo ""
+  echo "⚠ $n LINKED WORKTREE(S) WILL DRIFT FROM THIS INSTALL."
+  echo "  The commit gate compares each tree's harness against THIS checkout's, so writing here"
+  echo "  changes what they are measured against. They will not notice now — it surfaces later as"
+  echo "  a refused commit on finished work, for whoever is holding that work."
+  printf '%s\n' "$others" | sed 's/^/    /'
+  echo ""
+  echo "  Re-provision each one AFTER this finishes, from this directory:"
+  printf '%s\n' "$others" | sed "s|^|    $0 |"
+  echo ""
+  echo "  WHAT THIS CANNOT SEE: whether they actually drifted. It counts the trees git knows about"
+  echo "  and nothing more — a tree may already match, or may carry its own harness on purpose."
+  echo "  \`game_loop worktree --porcelain\` in each one answers that after the fact."
+  echo ""
+}
+
+warn_worktrees_about_to_drift "$TARGET"
+
 # Resolve the adoption source BEFORE anything is copied: a refusal that has already written half a
 # harness into the tree is not a refusal.
 ADOPT_FROM=""

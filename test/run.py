@@ -3287,7 +3287,38 @@ def main():
                   os.path.isdir(os.path.join(wt, ".git")) is False
                   and not os.path.exists(os.path.join(wt, ".game_loop")))
 
+            # #98: BEFORE that, the OTHER direction — installing into the MAIN checkout silently
+            # changes what every linked tree's commit gate is measured against. Nothing fired: the
+            # install succeeded, status looked healthy here, and the worktrees looked fine because
+            # nothing had asked them anything yet. It surfaced later as a REFUSED COMMIT on finished
+            # work, landing on whoever held the work rather than whoever caused the drift. Reported
+            # by a consumer who hit six at once, and who was then DECLINING a beneficial upgrade
+            # because the blast radius was invisible at the moment of choosing.
+            # REALPATH, because git prints resolved paths and macOS puts the temp dir behind a
+            # symlink: git says /private/var/... where Python's mkdtemp said /var/... . The first
+            # assertion below passed anyway on the unresolved form, purely because
+            # "/private/var/x" CONTAINS "/var/x" as a substring — a path test that agreed by
+            # accident, in the same block where the paired assertion using the same value failed.
+            _wt_real = os.path.realpath(wt)
+            _mainr = install(mainco)
+            check("#98: installing into the MAIN checkout COUNTS the linked worktrees it is about "
+                  "to drift and names every one — the gate compares each tree against this "
+                  "checkout, so writing here changes what they are measured against",
+                  _mainr.returncode == 0 and has(_mainr.stdout, "1 LINKED WORKTREE(S) WILL DRIFT")
+                  and has(_mainr.stdout, _wt_real))
+            check("#98: ...and names the re-provision command for each, since the remedy is "
+                  "mechanical and the reason it does not get run is that nobody knows it is owed",
+                  has(_mainr.stdout, os.path.join(REPO, "install.sh") + " " + _wt_real))
+            check("#98: ...and states what it CANNOT see (INV6) — it counts trees git knows about, "
+                  "not trees that actually drifted, since one may already match or carry its own "
+                  "harness on purpose",
+                  has(_mainr.stdout, "WHAT THIS CANNOT SEE")
+                  and has(_mainr.stdout, "worktree --porcelain"))
+
             r = install(wt)
+            check("#98: ...while installing INTO a linked worktree warns nobody — adopting a parent "
+                  "drifts no one, and a warning on the ordinary path is one people learn to skip",
+                  not has(r.stdout, "WILL DRIFT"))
             check("installing into a linked worktree adopts the project's verify.yaml, not the "
                   "blank template",
                   r.returncode == 0 and "adopted .game_loop/verify.yaml" in r.stdout

@@ -290,6 +290,15 @@
       "change": "`mutate` now names the mutation it APPLIED on the success path \u2014 a new `applied:` line in the \u2713 PROVED block, matching what both refusal paths already printed. `--replace` and `--with` also gain `--replace-file` / `--with-file` siblings.",
       "consequence": "one extra line in PROVED output; nothing is refused that was not refused before. The file siblings are the point: a shell rewrites `..` and $(..) BEFORE the tool sees the value, so a mangled fragment arrives carrying no metacharacter at all and cannot be detected \u2014 only avoided. Use the file form for any fragment containing shell metacharacters.",
       "why_it_qualifies": "the strongest verdict this verb issues was the one path that did not echo its input, so a fragment a shell had rewritten produced \u2713 PROVED for a mutation nobody typed. Measured, not reasoned: --with \"x  # `echo P`\" arrives as 'x  # P'. `--replace` was already covered by the must-appear-exactly-once check, which fails loud; only --with was exposed."
+    },
+    {
+      "seq": 29,
+      "sha": "pending",
+      "notice": true,
+      "verb": "install.sh",
+      "change": "install.sh now COUNTS the linked worktrees an install into a main checkout is about to drift, names each one, and prints the re-provision command for it. Warning only \u2014 nothing is refused, and installing INTO a linked worktree is silent.",
+      "consequence": "a few extra lines before anything is written, when and only when the target is a main checkout with linked worktrees. No behaviour changes; nothing new is refused. Act on it by re-provisioning the listed trees after the install.",
+      "why_it_qualifies": "the commit gate compares each worktree's harness against the MAIN checkout's, so installing there silently changed what every other live tree was measured against \u2014 surfacing later as a refused commit on finished work, for whoever held that work rather than whoever caused it. Reported by a consumer who hit six trees at once and was DECLINING a beneficial upgrade because the blast radius was invisible at the moment of choosing."
     }
   ],
   "schema": 1

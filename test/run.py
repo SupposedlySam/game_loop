@@ -216,6 +216,21 @@ def json_or_none(path):
         return None
 
 
+def json_text(text):
+    """Parse a JSON STRING, or None when it is empty or not JSON — never an exception.
+
+    json_or_none() takes a PATH and has existed for a while; this is the same guard for the other
+    door. A neutered producer makes a hook print nothing, `json.loads("")` raises, and the run ends
+    — 21 sites in this file parse a captured stdout, and the two that were reached by an unswept
+    producer both died here. Guarding the parse is only half: pair it with dig(), or the missing key
+    behind it turns JSONDecodeError into TypeError and ends the run just the same.
+    """
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def dig(obj, *keys):
     """obj[k1][k2]... or None at the first key that is not there — never an exception.
 
@@ -447,8 +462,13 @@ def main():
               "BOUGHT A HATCH BEFORE" in r2.stdout)
         check("the callout names the config key that replaces the hatch",
               "allow_write_roots" in r2.stdout)
+        # .index() RAISES when the needle is absent, which is what a dead producer produces. find()
+        # alone is not the fix: -1 < 3 is True, so an ABSENT first needle would read as "correctly
+        # ordered". Both must be present AND ordered, which is two claims and needs saying as two.
+        _i_home = r2.stdout.find("~/.game_loop/config.json")
+        _i_repo = r2.stdout.find(".game_loop/config.json →")
         check("the callout offers the machine-wide file, not the committed one, first",
-              r2.stdout.index("~/.game_loop/config.json") < r2.stdout.index(".game_loop/config.json →"))
+              _i_home >= 0 and _i_repo >= 0 and _i_home < _i_repo)
         check("the callout writes home paths as ~/ (a committed config must not carry /Users/…)",
               '"~/recur-b"' in r2.stdout)
         check("it is LOUD, not a refusal — the grant still stands (INV5)",
@@ -2122,7 +2142,7 @@ def main():
         def why(res):
             """The deny reason as text — assertions are on the MESSAGE, not merely on non-zero."""
             try:
-                return json.loads(res.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+                return dig(json_text(res.stdout), "hookSpecificOutput", "permissionDecisionReason")
             except (ValueError, KeyError, TypeError):
                 return ""
 
@@ -2627,7 +2647,7 @@ def main():
             check("generated output is excluded without anyone listing it",
                   "lib/new_package.py" in r.stdout and "pubspec.lock" not in r.stdout)
             try:
-                cov = json.loads(vfy("--coverage", "--porcelain").stdout)
+                cov = json_text(vfy("--coverage", "--porcelain").stdout)
             except ValueError:
                 cov = {}          # no machine-readable answer is a FAILED check, not a crash
             check("the three buckets are counted, not just the unchecked one",
@@ -3200,7 +3220,7 @@ def main():
                   os.path.isfile(_carried) and os.access(_carried, os.X_OK))
             check("...and the adopted tree therefore reports CLEAN rather than undetermined, which "
                   "is the difference between an orchestrator dispatching and refusing forever",
-                  json.loads(gl(_wt2, "worktree", "--porcelain").stdout)["status"] == "clean")
+                  dig(json_text(gl(_wt2, "worktree", "--porcelain").stdout), "status") == "clean")
             check("...while game_loop's OWN shipped binary is still the payload's, so adopting a "
                   "parent can never install its older harness over this newer one",
                   read(_wt2, ".game_loop", "bin", "game_loop")
@@ -3223,12 +3243,13 @@ def main():
                   "no rules in .game_loop/verify.yaml" not in rv.stdout)
 
             r = gl(wt, "worktree", "--porcelain")
-            d = json.loads(r.stdout)
+            d = json_text(r.stdout)
             check("an adopted worktree reports clean — and clean is the ONLY verdict that exits 0",
-                  r.returncode == 0 and d["status"] == "clean" and not d["rules"]["drifted"]
-                  and d["rules"]["matched"] == ["config.json", "INVARIANTS.md", "verify.yaml"]
-                  and d["owned_files"]["matched"] == ["config.json", "INVARIANTS.md",
-                                                      "verify.yaml", "LEDGER.md"])
+                  r.returncode == 0 and dig(d, "status") == "clean"
+                  and not dig(d, "rules", "drifted")
+                  and dig(d, "rules", "matched") == ["config.json", "INVARIANTS.md", "verify.yaml"]
+                  and dig(d, "owned_files", "matched") == ["config.json", "INVARIANTS.md",
+                                                           "verify.yaml", "LEDGER.md"])
             # #38 — `harness` used to be computed over OWNED_FILES only, and bin/ is not in that
             # set. So `harness.drifted == []` meant "the same RULES" while the field name promised
             # something strictly larger; a downstream orchestrator told its users a spawn was
@@ -3254,7 +3275,7 @@ def main():
             _script = os.path.join(wt, ".game_loop", "bin", "flair.py")
             with open(_script, "a") as f:
                 f.write("\n# drifted\n")
-            _cd = json.loads(gl(wt, "worktree", "--porcelain").stdout)
+            _cd = json_text(gl(wt, "worktree", "--porcelain").stdout)
             check("a drifted harness SCRIPT is caught and named, with a status of its own — two "
                   "trees can match on every owned file and still not enforce them the same way",
                   _cd["status"] == "code-drifted" and "flair.py" in _cd["code"]["drifted"]
@@ -3271,10 +3292,10 @@ def main():
             with open(os.path.join(wt, ".game_loop", "LEDGER.md"), "a") as f:
                 f.write("\n- VERIFIED: something this tree alone looked into\n")
             r = gl(wt, "worktree", "--porcelain")
-            d = json.loads(r.stdout)
+            d = json_text(r.stdout)
             check("a differing LEDGER.md is notes-drifted, NOT drifted — the rules still match",
-                  d["status"] == "notes-drifted" and d["rules"]["drifted"] == []
-                  and d["harness"]["drifted"] == ["LEDGER.md"])
+                  dig(d, "status") == "notes-drifted" and dig(d, "rules", "drifted") == []
+                  and dig(d, "harness", "drifted") == ["LEDGER.md"])
             check("...and it gets its own exit code, so a spawn can warn where it would not block",
                   r.returncode == 3)
             r = gl(wt, "status")
@@ -3291,12 +3312,13 @@ def main():
                   and ".game_loop/verify.yaml" in r.stdout
                   and str(mainco) in r.stdout)
             r = gl(wt, "worktree", "--porcelain")
-            d = json.loads(r.stdout)
+            d = json_text(r.stdout)
             check("worktree --porcelain names WHICH files drifted, not merely that something did",
-                  d["status"] == "drifted" and d["rules"]["drifted"] == ["verify.yaml"]
-                  and d["rules"]["matched"] == ["config.json", "INVARIANTS.md"])
+                  dig(d, "status") == "drifted"
+                  and dig(d, "rules", "drifted") == ["verify.yaml"]
+                  and dig(d, "rules", "matched") == ["config.json", "INVARIANTS.md"])
             check("...and a rule drift outranks the notes drift it is reported alongside",
-                  sorted(d["harness"]["drifted"]) == ["LEDGER.md", "verify.yaml"])
+                  sorted(dig(d, "harness", "drifted") or []) == ["LEDGER.md", "verify.yaml"])
             check("...and a drifted tree exits 1 — distinguishable from clean without parsing prose",
                   r.returncode == 1)
 
@@ -3305,7 +3327,7 @@ def main():
             # so none of them is allowed to share an exit code with a tree that was actually compared.
             r = gl(mainco, "worktree", "--porcelain")
             check("a main checkout reports not-a-worktree at exit 2, never a clean 0",
-                  r.returncode == 2 and json.loads(r.stdout)["status"] == "not-a-worktree")
+                  r.returncode == 2 and dig(json_text(r.stdout), "status") == "not-a-worktree")
 
             r = install(wt)
             check("re-installing a drifted worktree keeps its files and says DRIFT out loud",
@@ -3331,7 +3353,7 @@ def main():
                   r.returncode == 0 and "seeded  .game_loop/verify.yaml" in r.stdout)
             r = gl(wtb, "worktree", "--porcelain")
             check("a worktree whose main checkout has no harness says so at exit 2, not clean",
-                  r.returncode == 2 and json.loads(r.stdout)["status"] == "no-parent-harness")
+                  r.returncode == 2 and dig(json_text(r.stdout), "status") == "no-parent-harness")
 
             # An ordinary project. This is the common path and it was already correct: these two
             # PASS IN BOTH STATES by construction, and that is the entire claim being made.
@@ -3346,7 +3368,7 @@ def main():
                       json.load(f).get("project_name") == "plain")
             r = gl(plain, "worktree", "--porcelain")
             check("a tree that is no git repo at all degrades to a verdict, never a traceback",
-                  r.returncode == 2 and json.loads(r.stdout)["status"] == "not-a-worktree"
+                  r.returncode == 2 and dig(json_text(r.stdout), "status") == "not-a-worktree"
                   and "Traceback" not in r.stderr)
 
             # --same-as: the same behaviour, stated by hand, for the trees git cannot connect.
@@ -3370,8 +3392,8 @@ def main():
             # The owned-file set has ONE home. An external tool that keeps its own copy goes wrong
             # silently the moment game_loop adds a file, so the set is published rather than guessed.
             r = gl(wt, "owned", "--porcelain")
-            pub = json.loads(r.stdout)
-            owned = pub["owned"]
+            pub = json_text(r.stdout)
+            owned = dig(pub, "owned") or []
             check("the owned-file set is readable from outside the process, so nothing hardcodes it",
                   r.returncode == 0
                   and [o["path"] for o in owned] == ["config.json", "INVARIANTS.md",
@@ -3387,7 +3409,7 @@ def main():
             check("...install.sh seeds exactly that set — one list, not two that drift apart",
                   len(owned) == 4
                   and all(f"  seeded  .game_loop/{o['path']}" in fresh.stdout for o in owned))
-            wd = json.loads(gl(wt, "worktree", "--porcelain").stdout)
+            wd = json_text(gl(wt, "worktree", "--porcelain").stdout)
             check("...and the drift verdict carries both sets too, so one call answers both questions",
                   len(owned) == 4 and wd["owned"] == owned
                   and wd["rule_files"] == pub["rule_files"]
@@ -4346,16 +4368,16 @@ def main():
                                   capture_output=True, text=True, env=_env(ss, sid=sid))
 
         r = _start()
-        _out = json.loads(r.stdout)["hookSpecificOutput"]
+        _out = dig(json_text(r.stdout), "hookSpecificOutput")
         check("it returns STATUS as injected context, not a banner telling the agent to run it",
-              _out["hookEventName"] == "SessionStart"
-              and "INV:" in _out["additionalContext"]
-              and "COST LADDER" in _out["additionalContext"])
+              dig(_out, "hookEventName") == "SessionStart"
+              and has(dig(_out, "additionalContext"), "INV:")
+              and has(dig(_out, "additionalContext"), "COST LADDER"))
         check("...and it never blocks: a first impression that bricks a session gets no second one",
               r.returncode == 0)
         check("...and PostCompact is served by the same verb, because compaction is exactly when a "
               "run loses the mandate, the pins and the invariants",
-              json.loads(_start(event="PostCompact").stdout)["hookSpecificOutput"]["hookEventName"]
+              dig(json_text(_start(event="PostCompact").stdout), "hookSpecificOutput", "hookEventName")
               == "PostCompact")
         check("...and the firing is RECORDED, or this is the statusline tap again — a check whose "
               "silence cannot be told from never having run",
@@ -4414,7 +4436,7 @@ def main():
         def _ssctx(r):
             """The additionalContext a session start injected, or '' if it said nothing at all."""
             try:
-                return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+                return dig(json_text(r.stdout), "hookSpecificOutput", "additionalContext")
             except (ValueError, KeyError):
                 return ""
 
@@ -4870,7 +4892,7 @@ def main():
                                capture_output=True, text=True,
                                env=_env(gw, sid="sess-gh", HOME=home or gh))
             try:
-                d = json.loads(r.stdout)["hookSpecificOutput"]
+                d = dig(json_text(r.stdout), "hookSpecificOutput")
                 return d["permissionDecision"], d.get("permissionDecisionReason", "")
             except Exception:  # noqa: BLE001 — no JSON means it allowed
                 return "allow", ""
@@ -4971,7 +4993,7 @@ def main():
                                                  "tool_input": ti or {"id": 1}}),
                                capture_output=True, text=True, env=_env(sw, sid="sess-sw"))
             try:
-                d = json.loads(r.stdout)["hookSpecificOutput"]
+                d = dig(json_text(r.stdout), "hookSpecificOutput")
                 return d["permissionDecision"], d["permissionDecisionReason"]
             except Exception:  # noqa: BLE001 — no JSON means it allowed
                 return "allow", ""
@@ -5188,7 +5210,7 @@ def main():
                                                  "tool_input": ti or {"id": 1}}),
                                capture_output=True, text=True, env=_env(mp, sid="sess-mcp"))
             try:
-                d = json.loads(r.stdout)["hookSpecificOutput"]
+                d = dig(json_text(r.stdout), "hookSpecificOutput")
                 return d["permissionDecision"], d["permissionDecisionReason"]
             except Exception:  # noqa: BLE001 — no JSON at all means it allowed
                 return "allow", ""
@@ -5710,7 +5732,7 @@ def main():
                                input=json.dumps({"tool_name": "Write", "session_id": sid,
                                                  "tool_input": {"file_path": "/etc/nope"}}),
                                capture_output=True, text=True, env=_env(ow, sid=sid))
-            d = json.loads(r.stdout)["hookSpecificOutput"]
+            d = dig(json_text(r.stdout), "hookSpecificOutput")
             return d["permissionDecisionReason"]
 
         # THE REFUSAL IS THE ONBOARDING SURFACE, because work here starts as user-level slash
@@ -5776,7 +5798,7 @@ def main():
 
         def _reason(res):
             try:
-                return json.loads(res.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+                return dig(json_text(res.stdout), "hookSpecificOutput", "permissionDecisionReason")
             except Exception:  # noqa: BLE001
                 return res.stdout
 
@@ -7239,9 +7261,22 @@ def main():
           all(f'game_loop::{n}"' in _mut_src for n in ("retro_overdue", "retro_debt_open"))
           and not [k for k in _ns
                    if k.endswith("::retro_overdue") or k.endswith("::retro_debt_open")])
-    check("...and the KNOWN GAP category is not empty, or the check above would pass by there being "
-          "nothing to classify",
-          any((w or "").strip().startswith("KNOWN GAP") for w in _ns.values()))
+    # THE CATEGORY IS NOW EMPTY, AND THAT IS THE OUTCOME THE QUEUE EXISTS FOR. This used to assert
+    # `any(reason startswith "KNOWN GAP")` so the exclusion above could not pass by there being
+    # nothing to classify. The guard was right and its SUBJECT was wrong: it built a vacuity check
+    # out of LIVE DATA, so closing every declared gap — the one thing that list is meant to drive
+    # toward — turned the suite red for succeeding. A vacuity guard belongs on the CLASSIFIER,
+    # against a case it constructs, where it fires whether or not the repo currently owes anything.
+    def _gaps(ns):
+        return sorted(k for k, w in ns.items() if (w or "").strip().startswith("KNOWN GAP"))
+    check("...and the KNOWN-GAP classifier still fires on a constructed case, so an EMPTY live "
+          "category reads as 'nothing is owed' rather than as a check with nothing to look at",
+          _gaps({"a::b": "KNOWN GAP. owed a floor", "c::d": "a loader; None is the ordinary answer"})
+          == ["a::b"])
+    check("...and THIS repo declares no KNOWN GAP today — seven were closed by measuring them, and "
+          "the next one anybody adds shows up here. Measured, and a fact about today rather than a "
+          "guarantee: " + (", ".join(_gaps(_ns)) or "none"),
+          _gaps(_ns) == [])
 
     print("a tree's FIRST retro counts its chapter, rather than reporting nothing (#77):")
     # "No previous retro" returned "this is the first" and counted NOTHING, so everything encoded
@@ -7552,7 +7587,7 @@ def main():
     # session state; nothing read them out, so a consumer had to parse my internals -- the coupling
     # every --porcelain here exists to end. Same shape as #67, one moment over.
     sw = make_sandbox()
-    _clean = json.loads(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout)
+    _clean = json_text(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout)
     check("a session that has never been blocked reports blocked:false — the paired arm, or a seam "
           "that always says blocked would be as useless as one that never does",
           _clean["stop_gate"]["blocked"] is False)
@@ -7571,7 +7606,7 @@ def main():
                                                     "at": "2026-08-14T11:35:36"}}
     with open(_st, "w") as f:
         json.dump(_d, f)
-    _blocked = json.loads(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout)["stop_gate"]
+    _blocked = dig(json_text(gl(sw, "watchdog", "--porcelain", sid="sess-sg").stdout), "stop_gate")
     check("...and the state a real blocked Crawler carried reports BLOCKED, naming the attachment "
           "and when — which is what a consumer needs to stop calling it legitimately waiting",
           _blocked["blocked"] is True
@@ -7606,14 +7641,14 @@ def main():
     check("...and it states there is NO setter and why, so the next reader does not file the same "
           "request — a verb that cannot identify its caller must assume the worst one",
           "no verb that sets it" in _bare.stdout and "off switch" in _bare.stdout)
-    _bj = json.loads(gl(wdp, "watchdog", "--porcelain").stdout)
+    _bj = json_text(gl(wdp, "watchdog", "--porcelain").stdout)
     check("...and the porcelain says configured:false with a last verdict of None — 'never ran' is "
           "not the same as a verdict of 'not waiting', which is the distinction this seam is for",
           _bj["configured"] is False and _bj["last"] is None and _bj["armed_in"] is None)
     # ARMED FROM THE FILE THE ISSUE SHOULD HAVE USED, which is the whole answer to its write half.
     with open(os.path.join(wdp, ".game_loop", 'config.local.json'), "w") as f:
         json.dump({"watchdog": {"waiting_probe": "exit 1"}}, f)
-    _armed = json.loads(gl(wdp, "watchdog", "--porcelain").stdout)
+    _armed = json_text(gl(wdp, "watchdog", "--porcelain").stdout)
     check("...and arming it in the LOCAL config is seen, and reported as the file that carries it, "
           "so a layer above can set this without touching a rule file at all",
           _armed["configured"] is True and _armed["armed_in"] == 'config.local.json'
@@ -7734,16 +7769,16 @@ def main():
         _clean = gl(u_wt, "worktree", "--porcelain")
         check("the paired arm FIRST: an untouched worktree is clean at exit 0, so the refusal below "
               "is a discrimination rather than a verb that always refuses",
-              json.loads(_clean.stdout)["status"] == "clean" and _clean.returncode == 0)
+              dig(json_text(_clean.stdout), "status") == "clean" and _clean.returncode == 0)
         _ps = os.path.join(u_main, '.game_loop/bin', "check-project-thing")
         with open(_ps, "w") as f:
             f.write("#!/usr/bin/env bash\nexit 0\n")
         r = gl(u_wt, "worktree", "--porcelain")
-        d = json.loads(r.stdout)
+        d = json_text(r.stdout)
         check("...and a harness script present in the main checkout and ABSENT here is UNDETERMINED "
               "— a script this verb never opened cannot be reported as identical",
-              d["status"] == "unreadable"
-              and "check-project-thing" in d["code"]["unreadable"])
+              dig(d, "status") == "unreadable"
+              and has(dig(d, "code", "unreadable"), "check-project-thing"))
         check("...and it exits 2, so 'could not tell' stops sharing an exit code with 'nothing to "
               "report' — the property that makes asking better than guessing",
               r.returncode == 2)
@@ -8013,7 +8048,7 @@ def main():
         _mj = gl(mw, "model", "--json", sid="sess-model")
         check("the verdict is machine-readable and keyed by SESSION, because the party that can "
               "act on a mismatch is the parent that dispatched it, not the session reading a line",
-              _mj.returncode == 0 and json.loads(_mj.stdout)["session"] == "sess-model")
+              _mj.returncode == 0 and dig(json_text(_mj.stdout), "session") == "sess-model")
         _vf = os.path.join(mw, ".game_loop", "sessions", "sess-model", "model.json")
         check("...and it is written to disk where a parent can read it WITHOUT the session "
               "cooperating or even knowing",
@@ -9736,7 +9771,7 @@ def main():
                 capture_output=True, text=True, cwd=_pp,
                 env=dict(os.environ, CLAUDE_PROJECT_DIR=_pp))
             try:
-                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+                h = (dig(json_text(r.stdout), "hookSpecificOutput") or {})
             except ValueError:
                 return ""
             return h.get("permissionDecisionReason", "") if h.get(
@@ -10278,7 +10313,7 @@ def main():
                                capture_output=True, text=True, cwd=_pg,
                                env=dict(os.environ, CLAUDE_PROJECT_DIR=_pg))
             try:
-                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+                h = (dig(json_text(r.stdout), "hookSpecificOutput") or {})
             except ValueError:
                 return ""
             return h.get("permissionDecisionReason", "") if h.get(
@@ -10369,7 +10404,7 @@ def main():
                                capture_output=True, text=True, cwd=_mm,
                                env=dict(os.environ, CLAUDE_PROJECT_DIR=_mm))
             try:
-                h = json.loads(r.stdout).get("hookSpecificOutput", {})
+                h = (dig(json_text(r.stdout), "hookSpecificOutput") or {})
             except ValueError:
                 return "", ""
             return h.get("permissionDecision", ""), h.get("additionalContext", "")

@@ -188,6 +188,35 @@ MUTANTS = [
     # The note was right and my subtraction was the only thing standing between "0 kills, still
     # unprotected" and a floor of 2 recorded against an assertion about bookkeeping. Anyone else
     # promoting a gap from that list has the same trap waiting: measure it, then subtract the two.
+    # ── AND THE REMAINING FIVE, so the KNOWN GAPS queue is now EMPTY. ────────────────────────────
+    # All measured against ONE instrument — the same archived HEAD with the same assertions — after
+    # the guards below, because two of them could not be measured at all until then. Floors are the
+    # genuine counts: raw minus the 2 accounting kills every NOT_SWEPT member scores for free.
+    #
+    #   pinned_report     150    parse_events 21    recurrence_lines 8    metric_movement 3
+    #   _asked_the_user     3
+    #
+    # SWEEPING THESE FOUND TWO NEW CRASH SITES, which is the argument for sweeping them. Neutering
+    # pinned_report and recurrence_lines ended the run instead of failing an assertion — an
+    # unguarded `json.loads(stdout)` and a bare `.index()`. The 81-producer sweep an hour earlier
+    # reported ZERO crashes and was right about its own denominator: the crash class was gone from
+    # the SWEPT set, not from the file. A gap is not only uncounted coverage, it is uncounted
+    # exposure to the class the counting depends on.
+    ("pinned_report -> the PINNED CODE block is never reported",
+     ".game_loop/bin/game_loop::pinned_report", "    return None\n",
+     ["pinned", "self"], None, 150),
+    ("parse_events -> no per-event distribution is ever seen",
+     ".game_loop/bin/game_loop::parse_events", "    return []\n",
+     ["events", "dominance"], None, 21),
+    ("recurrence_lines -> a reason that bought the hatch before is never called out",
+     ".game_loop/bin/game_loop::recurrence_lines", "    return []\n",
+     ["authorize", "recurrence"], None, 8),
+    ("metric_movement -> the metric never appears to have moved",
+     ".game_loop/bin/game_loop::metric_movement", "    return None\n",
+     ["metric", "instrument"], None, 3),
+    ("_asked_the_user -> no turn is ever seen to have asked",
+     ".game_loop/bin/game_loop::_asked_the_user", "    return False\n",
+     ["ask", "checkpoint"], None, 3),
     ("binding_windows -> no usage window ever binds",
      ".game_loop/bin/game_loop::binding_windows", "    return []\n",
      ["limit", "handoff", "gate"], None, 5),
@@ -745,6 +774,12 @@ NOT_SWEPT = {
             "denominator even after the read guards landed. Neutering it to a constant None makes "
             "every assertion that reads producer-written state fail at once, which those "
             "assertions catch directly.",
+    "test/run.py::json_text": "the same guard as json_or_none for the other door — a JSON STRING "
+                              "rather than a path. Its None arm is the honest answer for a hook "
+                              "that printed nothing, which is what a neutered producer makes them "
+                              "do; two crash sites were reached that way. Inside the suite, and "
+                              "mutating the instrument voids the reading rather than measuring it",
+
     "test/run.py::json_or_none": "the same shape for parsed JSON, inside the suite, and its None "
             "arm is also the honest answer for a file that exists and is corrupt. Asserted through "
             "the cases that read producer-written state rather than by mutation.",
@@ -846,32 +881,9 @@ NOT_SWEPT = {
     # --- KNOWN GAPS. Real producers. Should be swept. Are not, and the reason is cost, not merit:
     # each MUTANTS entry is one full suite run (~1 min), and this change spent its budget on the
     # four report producers that were actually found weak. These are the queue, in this order.
-    ".game_loop/bin/game_loop::recurrence_lines": "KNOWN GAP, and a fresh one. The producer behind "
-                          "the LOUD block when one reason has bought the authorize hatch before — "
-                          "empty list on the common path, which is exactly the silence-on-pass "
-                          "shape. Ten assertions cover both arms (first grant silent, second "
-                          "distinct path loud, retry silent, third grant loud, MCP remedy vs write "
-                          "remedy). NOT swept because this sweep measures against `git archive "
-                          "HEAD` and the producer is not in HEAD yet, so any floor written now "
-                          "would be a number from a different tree — the exact target-making this "
-                          "file refuses. Owed a MUTANTS entry with a measured floor on the first "
-                          "sweep after it lands.",
-    ".game_loop/bin/game_loop::pinned_report": "KNOWN GAP. A real report producer (the PINNED CODE block) whose empty list "
-                     "is the common path, which is precisely the silence-on-pass shape. Left out "
-                     "for run time; it should be swept",
-    ".game_loop/bin/game_loop::metric_movement": "KNOWN GAP. A real detector — 'has this metric moved, and by how much' — "
-                       "and its None is a non-event that several commands print around. Left out "
-                       "for run time; it should be swept",
     # --- FOUND ONLY BY THE SECOND SIGNATURE. Both were invisible while the discriminator looked
     # for a literal empty return, which is why the accounting read "0 unaccounted" over a short
     # denominator. Neither is excluded on merit; both are queued.
-    ".game_loop/bin/game_loop::parse_events": "KNOWN GAP. Parses the per-event distribution behind the dominance refusal "
-                    "(INV7). An always-empty return means no distribution is ever seen, so the "
-                    "one-event-dominates check cannot fire. `dominance` IS swept and would catch "
-                    "some of this, but not a parse that silently yields nothing",
-    ".game_loop/bin/game_loop::_asked_the_user": "KNOWN GAP. A real detector whose False is a non-event ('this turn did not "
-                       "ask the user'), which is the shape this file exists to distrust. Left out "
-                       "for run time; it should be swept",
 
     # ── THE MEASURING INSTRUMENT ITSELF ─────────────────────────────────────────────────────────
     # Now that the denominator is every source file (#44), the suite and this sweep are inside it.

@@ -1,0 +1,8 @@
+CORRECTION: the final line reads '1392 passed, 0 failed'. The verify run for this
+commit reported 1398 passed, 0 failed. I typed the count instead of reading it
+off the log — in a commit whose whole subject is a floor set above its own
+measurement, which is the same error one level out.
+
+Corrected by note rather than by amending: the refs were already published, and
+rewriting them to fix a number teaches that published state is editable, which
+costs more than the number did.

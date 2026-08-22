@@ -272,6 +272,15 @@
       "change": "status now prints a WARNING when a mandate is armed and no external wake path is recorded, and `mandate --set` accepts `--wake-path \"<how a signal reaches this session>\"` to record one. A parked mandate is silent. Separately, `notify --test` no longer says the channel 'works' \u2014 it reports that the channel ACCEPTED the page, and states that this establishes neither that a human saw it nor that a wake can reach an idle session.",
       "consequence": "an armed mandate with nothing declared gains one warning block in status until you record a wake path or park. The notify test page's own text changed, and its output now names what an accepted send does not prove. Nothing is refused either way.",
       "why_it_qualifies": "a consumer who changed nothing sees a new warning and different notify output. Reported from a run that sat inert for six hours while status said the mandate was armed and the watchdog live, because every gate here fires from INSIDE the session \u2014 which is the thing that stops working when a run goes quiet. The reporter's transport doctor knew; game_loop could not. The declaration is explicitly weaker than a probe and says so."
+    },
+    {
+      "seq": 27,
+      "sha": "pending",
+      "notice": true,
+      "verb": "contribute",
+      "change": "`contribute --note` is now a bounded prose option: over 400 chars it is REFUSED, and it gains a `--note-file PATH` sibling like every other prose field. It was the only prose-carrying option with neither, and the only subcommand with no -file option at all.",
+      "consequence": "a long --note passed inline now fails instead of being recorded. Pass it as `--note-file <path>`; no shell touches the text that way. Measured on this repo's own upstream ledger, two of four real entries were over the bound (855 and 1152 chars) and had been reaching the tool through `--note \"$(cat ..)\"` \u2014 command substitution straight into an argument, which is the shape the bound exists to remove.",
+      "why_it_qualifies": "a command line that worked yesterday now exits non-zero. Nothing was corrupted in this repo's ledger \u2014 checked, not assumed \u2014 so this is a latent hole rather than a demonstrated failure, but the refusal is visible to anyone scripting `contribute`, and a consumer reads this file to find out which release started refusing it."
     }
   ],
   "schema": 1

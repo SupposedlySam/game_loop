@@ -5469,6 +5469,88 @@ def main():
             _h = gl(pw, _verb, "--help", sid="sess-prose").stdout
             check(f"...and `{_verb} {_opt}` — a sentence somebody composed — can come from a file",
                   _opt + "-file" in _h)
+        # AND THE UNIVERSE IS DERIVED, so the floor above is a regression list rather than the
+        # completeness argument it used to be asked to make. #96 found `contribute --note` — the one
+        # prose field with neither the bound nor a file twin, and the one whose real content ran
+        # 2-3x PROSE_MAX. A hand-kept list cannot report that it is short; only the full option set
+        # can, so here the set comes from the parser and every member must be CLASSIFIED.
+        #
+        # lamp-owner's tell, applied to this check before shipping it: ask what the derivation READS
+        # and whether the violation you fear changes that input. A derivation keyed on the presence
+        # of correct behaviour is blind exactly where the defect is. This one reads the DECLARATION
+        # of an option, and the feared defect — adding a prose option and forgetting to classify it
+        # — cannot remove its own declaration; it can only add an unclassified name, which fails
+        # below. The input grows with the violation instead of shrinking, which is the safe
+        # direction. The one way out is declaring an option from a variable rather than a literal,
+        # so that is refused too, or the universe would silently stop being the universe.
+        _NOT_PROSE = (
+            # booleans — no text at all can reach them
+            "--clear", "--dry-run", "--force", "--interval-only", "--json", "--list", "--merge",
+            "--nothing-to-harden", "--park", "--porcelain", "--probe", "--resume", "--reviewed",
+            "--test",
+            # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
+            # silently — the opposite of prose, where the corruption is indistinguishable
+            "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--handoff", "--observed",
+            "--path", "--produces", "--read",
+            # names, enums, refs, counts and durations — a backtick in one cannot mean anything
+            "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
+            "--exclude", "--exit-code", "--filed", "--instrument", "--mark", "--metric",
+            "--milestone", "--null", "--outcome", "--pin", "--positive", "--prove", "--ref",
+            "--register", "--release", "--release-deferred", "--rung", "--scale", "--scope",
+            "--session-id", "--task", "--tier", "--timeout", "--uses", "--wake-path",
+            # the tab title IS composed text, and is capped by its own refusal because a tab is
+            # narrow. Bounding it at PROSE_MAX as well would refuse titles that render fine
+            "--title",
+            # STATED, NOT FIXED (INV6): --replace/--with carry code fragments, which are MORE
+            # exposed to a shell than prose is, not less. They stay out because the entry test is
+            # "a sentence somebody composed" and widening it here would be a scope decision made
+            # quietly in a test. The exposure is real and unaddressed, and saying so is the point
+            "--replace", "--with",
+        )
+        _tree = ast.parse(_src)
+        _fn_of = {}
+        for _f in ast.walk(_tree):
+            if isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for _c in ast.walk(_f):
+                    _fn_of.setdefault(id(_c), _f.name)
+        _decls, _nonliteral = set(), set()
+        for _n in ast.walk(_tree):
+            if not (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+                    and _n.func.attr == "add_argument" and _n.args):
+                continue
+            _a0 = _n.args[0]
+            if isinstance(_a0, ast.Constant) and isinstance(_a0.value, str):
+                if _a0.value.startswith("--"):
+                    _decls.add(_a0.value)
+            else:
+                _nonliteral.add(_fn_of.get(id(_n), "<module>"))
+        # The ONE legitimate computed declaration is the generator that gives every prose option its
+        # -file twin: its whole purpose is to not be a list. Anywhere else, a computed name drops out
+        # of the universe below, and a completeness check with a hole in its universe reports clean
+        # for precisely the reason the hole exists.
+        check("the only option built from a variable rather than a literal is the -file generator "
+              "itself — every other declaration is nameable, so the set below is the whole surface "
+              "rather than the part that happened to be written plainly: "
+              + (", ".join(sorted(_nonliteral)) or "none"),
+              _nonliteral <= {"add_prose_file_options"})
+        _unclassified = sorted(o for o in _decls
+                               if o not in _opts and o not in _NOT_PROSE and not o.endswith("-file"))
+        check("#96: every option the tool declares is classified prose or explicitly not-prose — the "
+              "set comes from the parser, so an option added tomorrow lands in neither list and "
+              "FAILS here, which is the only way a list can report that it is short: "
+              + (", ".join(_unclassified) or "none"),
+              not _unclassified)
+        _stale = sorted(o for o in _NOT_PROSE if o not in _decls)
+        check("...and no not-prose entry names an option that no longer exists — a decision spent "
+              "on a surface that is gone, and the file that eventually takes that name arrives "
+              "pre-exempted: " + (", ".join(_stale) or "none"),
+              not _stale)
+        check("#96: ...and `contribute --note` in particular is prose now — its help says 'one line' "
+              "while the gate it serves asks a question whose honest answer enumerates, and two of "
+              "four real ledger entries ran past the bound at 855 and 1152 chars",
+              "--note" in _opts and "--note-file" in gl(pw, "contribute", "--help",
+                                                        sid="sess-prose").stdout)
+
         # PAIRED: a field that is a PATH, a NAME or an ENUM must NOT be bounded, or the rule starts
         # refusing legitimate values to no purpose. None of these can carry a backtick that means
         # anything, so none of them belongs in PROSE_OPTS.

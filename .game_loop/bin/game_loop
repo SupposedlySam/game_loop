@@ -8805,9 +8805,15 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
               "--set", "--question", "--predict", "--next",
               # the evidence family's descriptive halves — what a thing MEANS, not where it lives
               "--known-state", "--measures", "--connects", "--recheck",
+              # `contribute --note`. Its help says "one line of judgement" and its real content ran
+              # 855 and 1152 chars across four ledger entries — the gate it serves asks which of N
+              # hardened learnings name a tool's behaviour, and an honest answer enumerates. So the
+              # one prose field carrying 2-3x the bound was the one field with no file variant, and
+              # it was reached by `--note "$(cat ..)"`: command substitution straight into an
+              # argument, which is the exact shape this list exists to remove.
               # a pin's expectation and its restore command: a command carrying $ or a backtick is
               # precisely what a shell rewrites on the way past
-              "--expect", "--restore")
+              "--expect", "--restore", "--note")
 
 # MEASURED, not chosen for roundness. Over the 130 prose values in this repo's log: p50 157, p75
 # 285, p95 632, max 1011. Both corrupted values were over 700. 400 sits above the p95 of every field

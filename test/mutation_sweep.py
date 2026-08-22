@@ -731,9 +731,20 @@ MUTANTS += [
     ("pin_file_drift -> the pinned copy never differs from this tree",
      ".game_loop/bin/game_loop::pin_file_drift", "    return [], None\n",
      ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 0),
+    # THIN AT 1, NOW 4, and the reason it was thin is the reason THIN is worth reporting. Four
+    # assertions called this producer and THREE asserted it returns None — mid-work is silent, an
+    # unpushed commit is silent, an already-marked HEAD is silent. All three are worth having (a
+    # gate that fires always is the one that gets routed around) and none of them is coverage: a
+    # dead producer returns None too, so they hold either way. Only the one positive arm flipped.
+    #
+    # What was added is what a dead producer cannot fake: the TUPLE is read rather than its
+    # truthiness — the sha and level of the mark it is behind, and a count that goes to 2 on a
+    # second stranded commit — and the CONSEQUENCE is driven end to end, a real handback refused
+    # with the mark and HEAD named. Two of the arms here used to grep cmd_checkpoint's SOURCE for
+    # "release_deferred", which reads identically whether or not the verb does it.
     ("release_owed -> finished unreleased work is never owed at the handback",
      ".game_loop/bin/game_loop::release_owed", "    return None\n",
-     ["release", "RELEASED TO NOBODY", "unreleased", "deferred"], None, 0),
+     ["release", "RELEASED TO NOBODY", "unreleased", "deferred"], None, 4),
     ("release_distance_warning -> the handback never says the release is behind",
      ".game_loop/bin/game_loop::release_distance_warning", "    return None\n",
      ["release", "COMMIT(S) BEHIND", "newest mark", "not released"], None, 0),

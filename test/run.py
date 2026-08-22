@@ -10854,15 +10854,47 @@ def main():
               "verdict rather than a gate that always fires",
               _grg.release_owed() is None)
 
-        # THE ESCAPE IS ONE FLAG AND IT IS RECORDED, which is the whole difference between this and
-        # the warning it replaces: deferring becomes a decision somebody can find.
-        _src_cp = inspect.getsource(_grg.cmd_checkpoint)
-        check("the refusal is skipped by --release-deferred, so a deliberate wait is possible "
-              "without disabling the gate (INV5)",
-              "release_deferred" in _src_cp and "release_owed()" in _src_cp)
-        check("...and the deferral is LOGGED, so 'I chose not to publish' is a decision on the "
-              "record rather than an omission indistinguishable from forgetting",
-              '"kind": "release_deferred"' in _src_cp)
+        # THE TUPLE IS READ, NOT JUST ITS TRUTHINESS. Three of the four assertions above assert an
+        # ABSENCE, which a dead producer also produces — so neutering this one to `return None`
+        # flipped exactly ONE of them, and the sweep reported it THIN at 1. An absence arm is worth
+        # having (without it the gate could fire always) and it is not coverage of the producer.
+        subprocess.run(_G + ["tag", "-d", "stable-bbb"], check=True, capture_output=True)
+        _owed2 = _grg.release_owed()
+        _aaa = subprocess.run(_G + ["rev-parse", "stable-aaa^{commit}"],
+                              capture_output=True, text=True).stdout.strip()
+        check("...and what is owed NAMES the mark it is behind, by sha and by level — the count "
+              "alone cannot tell you which release a consumer upgrading right now would land on",
+              _owed2 is not None and _owed2[1] == _aaa and _owed2[2] == "stable")
+        _rcommit("three")
+        subprocess.run(_G + ["push", "-q", "origin", "HEAD"], check=True)
+        _owed3 = _grg.release_owed()
+        check("...and the COUNT tracks the commits actually stranded, so a second unreleased commit "
+              "reads as two rather than as a boolean wearing a number",
+              _owed3 is not None and _owed3[0] == 2)
+
+        # AND THE CONSEQUENCE, END TO END. This block used to prove the escape hatch by grepping
+        # cmd_checkpoint's SOURCE for "release_deferred" — a description of the behaviour, which
+        # reads identically whether or not the verb does it. Drive the verb instead.
+        _cpr = subprocess.run([os.path.join(_rgh, "bin", "game_loop"), "checkpoint",
+                               "--notes", "handing back"],
+                              cwd=_w, capture_output=True, text=True,
+                              env=_env(sid="sess-rel", GAME_LOOP_HOME=_rgh))
+        check("a handback in the owed state is REFUSED, and the refusal names both the mark and "
+              "HEAD — committed and pushed is not released, and a consumer upgrading now gets the "
+              "mark rather than this tree",
+              _cpr.returncode != 0 and has(_cpr.stdout + _cpr.stderr, "RELEASED TO NOBODY")
+              and has(_cpr.stdout + _cpr.stderr, "newest mark"))
+        _cpd = subprocess.run([os.path.join(_rgh, "bin", "game_loop"), "checkpoint",
+                               "--notes", "handing back", "--release-deferred", "waiting on CI"],
+                              cwd=_w, capture_output=True, text=True,
+                              env=_env(sid="sess-rel", GAME_LOOP_HOME=_rgh))
+        check("...while --release-deferred lets it through, so a deliberate wait is possible "
+              "without disabling the gate (INV5) — driven, not read off the source",
+              _cpd.returncode == 0)
+        check("...and the deferral is LOGGED with the reason, so 'I chose not to publish' is a "
+              "decision somebody can find rather than an omission that looks like forgetting",
+              has(read_or_empty(os.path.join(_rgh, "log.jsonl")), "release_deferred")
+              and has(read_or_empty(os.path.join(_rgh, "log.jsonl")), "waiting on CI"))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_rg, ignore_errors=True)

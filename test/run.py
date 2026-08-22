@@ -281,6 +281,20 @@ def has(hay, needle):
     return bool(hay) and needle in hay
 
 
+def in_order(hay, first, second):
+    """True when BOTH needles are present and `first` comes before `second`. Never raises.
+
+    An ordering assertion written as `t.index(a) < t.index(b)` raises ValueError the moment either
+    needle is missing — which is exactly what a neutered producer causes — so the condition ends the
+    run instead of failing. find() alone is not the fix either: -1 < 3 is True, so an ABSENT first
+    needle reads as correctly-ordered. Order is two claims, presence and sequence, and both have to
+    be made. Written after doing it wrong once more, in a change about this class, hours after
+    fixing the same shape elsewhere in this file.
+    """
+    i, j = hay.find(first), hay.find(second)
+    return i >= 0 and j >= 0 and i < j
+
+
 def main():
     proj = make_sandbox()
     try:
@@ -1417,7 +1431,7 @@ def main():
               "shuffled — seq is the only ordering there is, so a reader following the list would "
               "otherwise be told what changed in an order that never happened",
               "2 BEHAVIOUR CHANGE(S)" in _ord
-              and _ord.index("v2: c2") < _ord.index("v3: c3"))
+              and in_order(_ord, "v2: c2", "v3: c3"))
 
         # TOLERANT IS NOT THE SAME AS BLIND. A truncated record must not take the good entries down
         # with the bad one, and must not let the bad one through as if it said something.
@@ -1699,6 +1713,55 @@ def main():
         check("status surfaces the standing RULED-OUT list",
               "RULED OUT" in r.stdout and "the cache is invalidated on write" in r.stdout)
         check("the ruled-out entry names the control that killed it", "control.log" in r.stdout)
+        # THE COUNT, THE ORDER AND THE CAP — three properties of the LIST that "RULED OUT appears"
+        # cannot see, and all three are what a resumed run actually depends on. The header count is
+        # how you know whether the five shown are the whole story.
+        for _i in range(6):
+            gl(proj, "claim", "--assert", f"dead path number {_i}", "--outcome", "refuted",
+               "--evidence", control)
+        _ro = gl(proj, "status").stdout
+        check("...and the list is COUNTED in its header, so five shown out of many is visibly a "
+              "sample rather than the whole standing list",
+              has(_ro, "RULED OUT (8)"))
+        # find(), NOT index(). I wrote `.index()` here first — the same bare call I replaced
+        # elsewhere in this file this morning — and the mutation run caught it within the hour: with
+        # the producer dead the list is empty, both needles are absent, and the CONDITION raises
+        # instead of the assertion failing. Knowing the class does not stop you writing it; the
+        # measurement is what stops you shipping it.
+        _i5, _i1 = _ro.find("dead path number 5"), _ro.find("dead path number 1")
+        check("...and it is NEWEST FIRST — a resumed run reads the top of this list, so the oldest "
+              "refutation surfacing there is the one case where the answer is stalest",
+              in_order(_ro, "dead path number 5", "dead path number 1"))
+        check("...and it is CAPPED at five with the remainder counted and pointed at, rather than "
+              "printing the whole history into every status forever",
+              has(_ro, "3 older") and has(_ro, "log.jsonl")
+              and not has(_ro, "dead path number 0"))
+        # THE PROPERTY THE PRODUCER EXISTS FOR, and the one its own sweep note asked for by name:
+        # "fixing it means asserting a later session INHERITS the list". The refutations are read
+        # from the SHARED log rather than per-session state precisely because the run that must not
+        # re-walk a dead path is usually a LATER session holding none of this one's state. Every
+        # assertion above ran under one session id, so a version that had quietly become
+        # per-session would have passed all of them.
+        _later = gl(proj, "status", sid="sess-a-completely-different-run").stdout
+        check("...and a DIFFERENT session inherits the whole standing list — a negative result is "
+              "knowledge about the CHECKOUT, and the run that must not re-walk a dead path is the "
+              "one holding none of the state that recorded it",
+              has(_later, "RULED OUT (8)") and has(_later, "dead path number 5")
+              and has(_later, "3 older"))
+        # NOT the oldest entry: with eight recorded and a cap of five it is correctly NOT shown, and
+        # asserting it here failed in the clean tree. Caught by measuring rather than by reading —
+        # the mutation run's BASELINE went from 7 failures to 8, which is the tell that a new
+        # assertion is wrong rather than the producer being weak.
+
+        # TOLERANT, because status must print everything else even when this cannot be read. A
+        # half-written line is what an interrupted append leaves, and it must not take status down.
+        with open(os.path.join(proj, ".game_loop", "log.jsonl"), "a") as f:
+            f.write('{"kind": "claim", "outcome": "refu\n')
+        _tor = gl(proj, "status")
+        check("...and a half-written log line is SKIPPED rather than fatal — an interrupted append "
+              "is the ordinary state of an append-only file, and status owes its other sections",
+              _tor.returncode == 0 and has(_tor.stdout, "RULED OUT")
+              and has(_tor.stdout, "dead path number 5"))
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
@@ -6331,7 +6394,7 @@ def main():
         _sb = _run("stepback", "--notes", "n", sid="sess-nudge").stdout
         check("a stepback trigger's output lands BEFORE the retro's own output, not after",
               "INCOMING-LEARNING" in _sb
-              and _sb.index("INCOMING-LEARNING") < _sb.index("STEP-BACK — invariants re-injected"))
+              and in_order(_sb, "INCOMING-LEARNING", "STEP-BACK — invariants re-injected"))
     finally:
         shutil.rmtree(tpp, ignore_errors=True)
 
@@ -7040,7 +7103,7 @@ def main():
     _ish0 = open(os.path.join(REPO, "install.sh")).read()
     check("the installer resolves the sha over the GIT protocol before it touches the REST API, "
           "because that budget is shared by everyone behind one address",
-          _ish0.index("git ls-remote") < _ish0.index("api.github.com/repos/$REPO/commits"))
+          in_order(_ish0, "git ls-remote", "api.github.com/repos/$REPO/commits"))
     check("...and it dereferences an ANNOTATED tag before falling back to the plain ref, so a "
           "marked release resolves to its commit rather than to the tag object",
           '"$REF^{}"' in _ish0)
@@ -8350,7 +8413,7 @@ def main():
         _wd_src = open(os.path.join(SRC_GAME_LOOP, "bin", "watchdog")).read()
         check("...and the watchdog refreshes the snapshot BEFORE deciding whether to park — parking "
               "on a stale reading is the same failure as not parking at all",
-              _wd_src.index("refresh_limits_if_due()") < _wd_src.index("park_until_limit_resets(state)  #"))
+              in_order(_wd_src, "refresh_limits_if_due()", "park_until_limit_resets(state)  #"))
         check("...and it asks for the interval rather than inventing one, and is OFF unless the "
               "project enabled it",
               "--interval-only" in _wd_src and 'pc.get("enabled")' in _wd_src)
@@ -10622,6 +10685,42 @@ def main():
         check("...and the report says COULD NOT COMPARE rather than going quiet, so the one state "
               "that must not read as agreement does not share an appearance with it",
               has("\n".join(_gpd.pinned_report()), "COULD NOT COMPARE"))
+
+        # THE OTHER HALF OF THE SAME REPORT, and it was measured at ZERO. `_git_sha(REPO_ROOT)` is
+        # what puts the repo's commit beside the pinned one, and it is the only thing that can
+        # notice they are DIFFERENT COMMITS — the state where every edit to .game_loop/bin/ here is
+        # inert until you re-pin. Its exclusion note said sweeping pinned_report would cover it;
+        # pinned_report is swept at 150 and this still killed nothing, so the note was not merely
+        # stale, it was false. An exclusion that is not true is the one thing that list forbids.
+        os.makedirs(os.path.join(_code, "bin"), exist_ok=True)
+        for _n in ("game_loop", "guard-writes-impl.sh"):
+            shutil.copy(os.path.join(_pdh, "bin", _n), os.path.join(_code, "bin", _n))
+        subprocess.run(["git", "init", "-q", _pd], check=True)
+        subprocess.run(["git", "-C", _pd, "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", _pd, "config", "user.name", "t"], check=True)
+        with open(os.path.join(_pd, "f"), "w") as f:
+            f.write("x\n")
+        subprocess.run(["git", "-C", _pd, "add", "-A"], check=True)
+        subprocess.run(["git", "-C", _pd, "commit", "-q", "-m", "one"], check=True)
+        _home_sha = subprocess.run(["git", "-C", _pd, "rev-parse", "HEAD"],
+                                   capture_output=True, text=True).stdout.strip()
+        _gpd.REPO_ROOT = _pd
+        with open(os.path.join(_code, "VERSION"), "w") as f:
+            f.write("0" * 40 + "\n")          # a pinned copy from a DIFFERENT commit
+        _rep2 = "\n".join(_gpd.pinned_report())
+        check("the report names the REPO's commit beside the pinned one — one sha alone cannot "
+              "show you that the code guarding this session came from somewhere else",
+              has(_rep2, "repo @ " + _home_sha[:8]))
+        check("...and when the two are DIFFERENT COMMITS it says so, and says edits to the harness "
+              "here are INERT until you re-pin — that is how a fix sits unused while its author "
+              "watches the guard not change",
+              has(_rep2, "DIFFERENT commit") and has(_rep2, "inert until you re-pin"))
+        # PAIRED: matching commits must not carry the warning, or it is boilerplate.
+        with open(os.path.join(_code, "VERSION"), "w") as f:
+            f.write(_home_sha + "\n")
+        check("...while a pinned copy at the SAME commit carries no such warning, so the line "
+              "above is a verdict about two shas rather than a banner every pinned session prints",
+              not has("\n".join(_gpd.pinned_report()), "DIFFERENT commit"))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_pd, ignore_errors=True)

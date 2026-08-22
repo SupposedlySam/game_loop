@@ -308,12 +308,16 @@ MUTANTS = [
      ["dominan", "distribution", "spread", "event"], None, 10),
     ("ruled_out -> finds no refutations", ".game_loop/bin/game_loop::ruled_out", "    return []\n",
      ["ruled", "refut"],
-     # KNOWN GAP, not a decision. Its survivors all belong to the WRITE side (`--outcome refuted`
-     # refusing prose evidence, the log entry) which is separately and well covered; ruled_out() is
-     # the READ side, and exactly one assertion — status reprinting the standing list — notices when
-     # it returns nothing. #42 scoped itself to the four nudge/warning producers and did not touch
-     # this. Fixing it means asserting a later session INHERITS the list, not deleting this note.
-     "the read side of the refutation path; #42 scoped itself elsewhere and left it unfixed", 1),
+     # 1 -> 7. This note ended "Fixing it means asserting a later session INHERITS the list, not
+     # deleting this note" — the remedy named exactly, and it is the FOURTH note in this file to
+     # have done that and waited. I nearly closed this one having raised the floor without doing
+     # the thing it asked for: count, order, cap and tolerance are all real properties, and none of
+     # them is inheritance. Every one of those assertions ran under a single session id, so a
+     # version that had quietly become per-session would have passed all of them — which is the
+     # whole reason this reads the SHARED log, since the run that must not re-walk a dead path is
+     # a LATER session holding none of the state that recorded it.
+     "count, newest-first order, the five-item cap, a half-written line skipped, and a DIFFERENT "
+     "session inheriting the standing list", 7),
     # The four the hand-written list had never been pointed at. Each was found weak by somebody who
     # was looking at something else, which is the denylist argument stated as history rather than as
     # a principle — they are here because the enumeration named them, not because anyone suspected
@@ -761,6 +765,22 @@ MUTANTS += [
     # had driven — so the finding could have stopped reaching the page with every assertion above
     # still green. The report must also say the state MEANS those edits are inert, and must say
     # COULD NOT COMPARE rather than going quiet on the unanswerable case.
+    # MOVED OUT OF NOT_SWEPT BECAUSE ITS EXCLUSION WAS FALSE, not merely stale. The reason read
+    # "sweeping pinned_report would sweep this, and it has not been done yet". pinned_report was
+    # swept today at floor 150 — and _git_sha still killed NOTHING, measured. So the sentence was
+    # wrong about coverage, not just out of date, and this file's own rule is that what is not
+    # allowed is an exclusion that is not true. Found by scanning every exclusion reason for
+    # remedy-shaped language rather than for the KNOWN GAP marker, which is showrunner's finding:
+    # the debt hides in the reasons that do NOT carry the marker.
+    #
+    # 0 -> 2, and THIN on purpose rather than padded. It feeds the PINNED CODE block's second sha,
+    # which is the only thing that can notice the pinned copy is a DIFFERENT COMMIT from the repo —
+    # the state where every edit to .game_loop/bin/ here is inert until you re-pin, which is how a
+    # fix sits unused while its author watches the guard not change. Nothing asserted it at all.
+    # The third arm written (same commit -> no warning) is an absence arm and does not flip.
+    ("_git_sha -> the repo's own commit is never resolved",
+     ".game_loop/bin/game_loop::_git_sha", "    return None\n",
+     ["PINNED CODE", "repo @", "DIFFERENT commit"], None, 2),
     ("pin_file_drift -> the pinned copy never differs from this tree",
      ".game_loop/bin/game_loop::pin_file_drift", "    return [], None\n",
      ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 6),
@@ -867,9 +887,6 @@ NOT_SWEPT = {
                 "mechanical outcome. Its callers are attribution_tree, merge_files and "
                 "cmd_attribute, which turn every one of those Nones into a STATED refusal that "
                 "`game_loop attribute` is asserted on; none of them can report by silence",
-    ".game_loop/bin/game_loop::_git_sha": "pure git helper — None is 'no HEAD here'. Its two callers are running_version and "
-                "pinned_report, and pinned_report's own entry below is the honest one to read: "
-                "sweeping THAT would sweep this, and it has not been done yet",
     ".game_loop/bin/game_loop::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
             "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
 

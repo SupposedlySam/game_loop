@@ -1244,6 +1244,18 @@ def main():
               "this denominator —")
         print("      they cannot flip, so no producer can be credited or blamed for them. Not a "
               "silent cap: printed every run.")
+        # AND NAMED, not just counted. The comment above has said "no .git, so the git-dependent
+        # arms cannot pass" since this note was written — in a comment, where it reaches nobody
+        # reading the output. A bare count cannot be told apart from seven REAL regressions, which
+        # is the same two-outcomes-one-observable this file exists to refuse. Naming them is what
+        # makes the reader able to judge; the count alone asks them to trust it.
+        for _line in re.findall(r"^ +FAIL (.+)$", baseline_out, re.M):
+            print(f"      · {_line[:110]}")
+        print("      Expected shape: this tree is a `git archive` extract, so it has NO .git and "
+              "every arm that")
+        print("      shells out to git fails honestly. A real clone passes them. If a name here "
+              "is NOT git-dependent,")
+        print("      that is a genuine regression wearing this note as camouflage.")
     print(f"baseline: {len(baseline)} named assertions pass unmutated\n", flush=True)
 
     verdicts = [None] * len(MUTANTS)

@@ -5490,8 +5490,8 @@ def main():
             "--test",
             # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
             # silently — the opposite of prose, where the corruption is indistinguishable
-            "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--handoff", "--observed",
-            "--path", "--produces", "--read",
+            "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file", "--handoff",
+            "--observed", "--path", "--produces", "--read",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
             "--exclude", "--exit-code", "--filed", "--instrument", "--mark", "--metric",
@@ -5533,8 +5533,14 @@ def main():
               "rather than the part that happened to be written plainly: "
               + (", ".join(sorted(_nonliteral)) or "none"),
               _nonliteral <= {"add_prose_file_options"})
+        # The exemption is for GENERATED siblings, so it names them precisely: `--x-file` is skipped
+        # only when `--x` is itself a prose option. A bare `endswith("-file")` shipped in the first
+        # version of this check and silently exempted `mutate --file`, a hand-declared path whose
+        # name merely ends the same way — an exemption written for one surface quietly covering
+        # another is the same defect one level up from the one this whole check exists to catch.
+        _generated = {o + "-file" for o in _opts}
         _unclassified = sorted(o for o in _decls
-                               if o not in _opts and o not in _NOT_PROSE and not o.endswith("-file"))
+                               if o not in _opts and o not in _NOT_PROSE and o not in _generated)
         check("#96: every option the tool declares is classified prose or explicitly not-prose — the "
               "set comes from the parser, so an option added tomorrow lands in neither list and "
               "FAILS here, which is the only way a list can report that it is short: "

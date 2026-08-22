@@ -266,7 +266,7 @@
     },
     {
       "seq": 26,
-      "sha": "pending",
+      "sha": "bdc7b8e",
       "notice": true,
       "verb": "status, and notify --test",
       "change": "status now prints a WARNING when a mandate is armed and no external wake path is recorded, and `mandate --set` accepts `--wake-path \"<how a signal reaches this session>\"` to record one. A parked mandate is silent. Separately, `notify --test` no longer says the channel 'works' \u2014 it reports that the channel ACCEPTED the page, and states that this establishes neither that a human saw it nor that a wake can reach an idle session.",

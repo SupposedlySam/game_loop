@@ -275,7 +275,7 @@
     },
     {
       "seq": 27,
-      "sha": "pending",
+      "sha": "761b9b1",
       "notice": true,
       "verb": "contribute",
       "change": "`contribute --note` is now a bounded prose option: over 400 chars it is REFUSED, and it gains a `--note-file PATH` sibling like every other prose field. It was the only prose-carrying option with neither, and the only subcommand with no -file option at all.",

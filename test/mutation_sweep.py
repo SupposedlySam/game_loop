@@ -461,11 +461,20 @@ MUTANTS = [
     ("behaviour_changes -> the update notice never has anything to report",
      ".game_loop/bin/game_loop::behaviour_changes", "    return []\n",
      ["behaviour", "update", "changed", "cost"],
-     # THIN at 2, and honestly so: the parser is exercised through the notice rather than directly,
-     # so its ORDERING and its tolerance of a malformed record rest on the same two assertions that
-     # cover the notice itself. A companion asserting seq order on a scrambled record is what is owed.
-     "exercised only through the notice; ordering and malformed-input tolerance share its assertions",
-     2),
+     # THIN at 2 -> 4. This note used to end "A companion asserting seq order on a scrambled record
+     # is what is owed" — the remedy, named exactly, sitting here across several sweeps until
+     # somebody wrote it. That is the third note in this file today that diagnosed its own producer
+     # and waited. A diagnosis in a comment is a thing to remember, and this repo's first invariant
+     # is that a rule the agent has to remember is followed only some of the time; the notes are not
+     # exempt from it just because they live next to the measurement.
+     #
+     # Written now, and the second one was not in the note: a record served SHUFFLED comes back in
+     # seq order (seq is the only ordering there is — shas have none — so a reader following the
+     # list would otherwise be told what changed in an order that never happened), and an entry with
+     # no usable seq is DROPPED while the valid ones still arrive. Tolerant is not blind: one
+     # malformed row is neither a reason to report nothing nor a change with no place in the order.
+     "seq order on a scrambled record, and one bad row dropped without taking the good ones",
+     4),
     ("_remote_behaviour -> the record on main can never be fetched",
      ".game_loop/bin/game_loop::_remote_behaviour", "    return None\n",
      ["behaviour", "update", "fetch", "unreachable"],
@@ -745,9 +754,16 @@ MUTANTS += [
     ("trigger_dead_kinds -> a trigger matching an impossible kind is never named",
      ".game_loop/bin/game_loop::trigger_dead_kinds", "    return []\n",
      ["#87", "NEVER WRITES", "dead", "kind"], None, 4),
+    # THIN AT 2 -> 6. Four assertions and two of them asserted `== ([], None)` — not pinned, and
+    # pinned to identical bytes — which the neutered form returns for everything. Added: TWO
+    # differing files BOTH named (being shown one of two reads as the whole finding, and the guard
+    # you were not shown stays inert after you re-pin), and pinned_report() DRIVEN, which nothing
+    # had driven — so the finding could have stopped reaching the page with every assertion above
+    # still green. The report must also say the state MEANS those edits are inert, and must say
+    # COULD NOT COMPARE rather than going quiet on the unanswerable case.
     ("pin_file_drift -> the pinned copy never differs from this tree",
      ".game_loop/bin/game_loop::pin_file_drift", "    return [], None\n",
-     ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 0),
+     ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 6),
     # THIN AT 1, NOW 4, and the reason it was thin is the reason THIN is worth reporting. Four
     # assertions called this producer and THREE asserted it returns None — mid-work is silent, an
     # unpushed commit is silent, an already-marked HEAD is silent. All three are worth having (a

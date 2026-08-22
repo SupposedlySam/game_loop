@@ -1403,6 +1403,35 @@ def main():
         check("an install from before the record existed is told about all of them",
               "v1: c1" in fresh_status() and "v2: c2" in fresh_status())
 
+        # THE COUNT AND THE ORDER, which "BEHAVIOUR CHANGE is in the output" cannot see. seq IS the
+        # ordering here — shas have none — so a record served out of order must come back sorted,
+        # or a reader following the list is told what changed in an order that never happened.
+        FakeGH.behaviour = json.dumps({"changes": [
+            {"seq": 3, "verb": "v3", "change": "c3"},
+            {"seq": 1, "verb": "v1", "change": "c1"},
+            {"seq": 2, "verb": "v2", "change": "c2"}]})
+        with open(_bhv_f, "w") as f:
+            f.write(_rec(1))
+        _ord = fresh_status()
+        check("...and the changes are COUNTED and listed in seq order even when the record arrives "
+              "shuffled — seq is the only ordering there is, so a reader following the list would "
+              "otherwise be told what changed in an order that never happened",
+              "2 BEHAVIOUR CHANGE(S)" in _ord
+              and _ord.index("v2: c2") < _ord.index("v3: c3"))
+
+        # TOLERANT IS NOT THE SAME AS BLIND. A truncated record must not take the good entries down
+        # with the bad one, and must not let the bad one through as if it said something.
+        FakeGH.behaviour = json.dumps({"changes": [
+            {"seq": 2, "verb": "v2", "change": "c2"},
+            {"verb": "noseq", "change": "dropped"},
+            {"seq": "x", "verb": "badseq", "change": "dropped"}]})
+        _mixed = fresh_status()
+        check("...and an entry with no usable seq is DROPPED while the valid ones still arrive — "
+              "one malformed row is not a reason to report nothing, nor to report it as a change "
+              "whose place in the order nobody knows",
+              "v2: c2" in _mixed and "noseq" not in _mixed and "badseq" not in _mixed
+              and "1 BEHAVIOUR CHANGE(S)" in _mixed)
+
         # COULD NOT FETCH must never read as NOTHING CHANGED. This is the silence family again:
         # an absent answer and a clean answer are different, and only one of them is reassuring.
         FakeGH.behaviour = None
@@ -10564,11 +10593,35 @@ def main():
               "and its silence reads as 'the pin is current'",
               _dr == ["guard-writes-impl.sh"] and _why is None)
 
+        # BOTH DIFFERING FILES, not one. A report that names a single file out of two sends you to
+        # re-pin thinking you have seen the damage, and the second inert guard stays inert.
+        with open(os.path.join(_code, "bin", "game_loop"), "a") as f:
+            f.write("\n# and so is this one\n")
+        _dr3, _why3 = _gpd.pin_file_drift()
+        check("...and TWO differing files are BOTH named — being shown one of two reads as the "
+              "whole finding, and the guard you were not shown stays inert after you re-pin",
+              sorted(_dr3) == ["game_loop", "guard-writes-impl.sh"] and _why3 is None)
+
+        # AND THE CONSEQUENCE. pinned_report() is what a human reads; nothing drove it, so the
+        # finding could have stopped reaching the page with every assertion above still green.
+        _rep = "\n".join(_gpd.pinned_report())
+        check("...and the REPORT names both files and says what the state MEANS — that edits here "
+              "are inert because the hooks run the pinned copy, which is the part that turns a "
+              "diff into an explanation of why your fix did nothing",
+              has(_rep, "DIFFER BETWEEN") and has(_rep, "guard-writes-impl.sh")
+              and has(_rep, "game_loop") and has(_rep, "INERT"))
+        check("...and it names the remedy, since a reader who understands the state and not the "
+              "command is still stuck",
+              has(_rep, "self --pin"))
+
         shutil.rmtree(os.path.join(_code, "bin"))
         _dr2, _why2 = _gpd.pin_file_drift()
         check("...and two trees that cannot be COMPARED say so — an unanswerable comparison is not "
               "agreement between them",
               _dr2 == [] and _why2 and "nothing was compared" in _why2)
+        check("...and the report says COULD NOT COMPARE rather than going quiet, so the one state "
+              "that must not read as agreement does not share an appearance with it",
+              has("\n".join(_gpd.pinned_report()), "COULD NOT COMPARE"))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_pd, ignore_errors=True)

@@ -3035,9 +3035,20 @@ def cmd_mutate(s, a):
                                           "artifact": [path],
                                           "project": config().get("project_name"),
                                           "session": SESSION})
+    # THE APPLIED MUTATION IS PRINTED ON THE SUCCESS PATH TOO, and this is the only defence that
+    # works here (#97). A shell rewrites `..` and $(..) BEFORE argparse sees the value, so by the
+    # time this process runs, a mangled fragment carries no metacharacter to detect and an intact
+    # one does — a content check would fire exactly when nothing went wrong and stay silent exactly
+    # when it did. Measured: `--with "x  # `id`"` arrives as `x  # uid=501(..)`, no backtick left.
+    # --replace is already covered, because a mangled one stops appearing exactly once in the file
+    # and is refused loudly. --with had nothing: it is inserted verbatim, and if the result happens
+    # to compile and redden the test, ✓ PROVED was reported for a mutation nobody typed. The
+    # refusal paths printed the applied text and the success path did not, so the strongest verdict
+    # was the one place you could not see what had actually been applied.
     out("✓ PROVED — the test goes RED when that line changes.",
         f"  pins   : {a.prove}",
         f"  file   : {a.file}",
+        f"  applied: {a.replace!r} -> {a.with_!r}",
         f"  test   : {a.test}",
         f"  before : exit {before} (green, unmutated)   after: exit {after} (red, mutated)",
         "  tree restored.",
@@ -8796,9 +8807,29 @@ def retro_debt_open(s):
 # the option did not exist. That is the same failure #57 removed from mcp_standing_writes, committed
 # here in the fix for it: a hand-kept list of names is complete on the day it is written.
 #
-# The entry test is CONTRACT, not length: does the field hold a sentence somebody composed? A path,
-# a name, an enum, a number and a ref all stay out — they cannot carry a backtick that means
-# anything, and bounding them would refuse legitimate values for no gain.
+# THE ENTRY TEST, restated after #97 found the old one defended by a false reason. It used to read
+# "does the field hold a sentence somebody composed", excluding paths, names, enums, numbers and
+# refs because "they cannot carry a backtick that means anything". True of those five. NOT true of
+# `mutate --with`, which was excluded on that reasoning and holds a code fragment where a backtick
+# is live — and whose mangled value becomes a ✓ PROVED verdict rather than an odd-looking sentence.
+#
+# The question that actually sorts these is: IF THIS VALUE WERE MANGLED, HOW WOULD ANYBODY FIND OUT?
+#
+#   --read <path>   does not resolve -> already REFUSED by the existence check. Loud, and by a
+#                   check that exists for another reason. Nothing owed here.
+#   --replace       stops appearing exactly once in the file -> already refused. Loud.
+#   --assert <prose>  recorded wrong; a reader may notice an odd sentence, or may not. Quiet.
+#   --with <code>   inserted verbatim; if it still compiles and still reddens, the tool reports
+#                   PROVED. Quiet AND it becomes evidence. The worst of the three.
+#
+# So membership is not "is this a sentence" but "is this field's mangling already caught somewhere
+# else". A field whose corruption fails loud owes nothing; a field whose corruption fails quiet
+# needs the file path, which is the only route a shell never touches.
+#
+# WHAT THE BOUND CANNOT DO, since it is the obvious next thought: refuse a value CONTAINING a
+# backtick. Measured — the shell rewrites `..` and $(..) before argparse is reached, so a mangled
+# value arrives with no metacharacter in it and an intact single-quoted one arrives with one. The
+# check would fire exactly when nothing went wrong and stay silent exactly when it did.
 PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", "--fact",
               "--notes", "--text", "--because", "--confidence", "--promises", "--doing",
               # the autonomy loop's own prose, and the most expensive to corrupt
@@ -8813,7 +8844,12 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
               # argument, which is the exact shape this list exists to remove.
               # a pin's expectation and its restore command: a command carrying $ or a backtick is
               # precisely what a shell rewrites on the way past
-              "--expect", "--restore", "--note")
+              "--expect", "--restore", "--note",
+              # #97, and they are here for the FILE TWIN rather than for the bound. A mutation
+              # fragment is short, so 400 chars never fires on it — but a shell rewrites `..` and
+              # $(..) before argparse sees anything, and the applied text is what a ✓ PROVED
+              # verdict then attests to. The file path is the only route that no shell touches.
+              "--replace", "--with")
 
 # MEASURED, not chosen for roundness. Over the 130 prose values in this repo's log: p50 157, p75
 # 285, p95 632, max 1011. Both corrupted values were over 700. 400 sits above the p95 of every field
@@ -8826,6 +8862,12 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
 # record is permanent; it does not remove the class. Nor does it reach `gh`, `git` or any other CLI
 # in the loop, which have the identical exposure and their own -F / --body-file answers.
 PROSE_MAX = 400
+
+# argparse cannot store `assert` or `with` under their own names, so these two carry a trailing
+# underscore. Kept as a map rather than a chain of conditionals because the failure mode is silent:
+# resolve_prose skips any option whose dest it cannot find, so a missing entry here means the
+# --<opt>-file twin is created, accepted on the command line, and then quietly does nothing.
+_PROSE_DEST = {"--assert": "assert_", "--with": "with_"}
 
 
 def add_prose_file_options(sub):
@@ -8848,7 +8890,11 @@ def add_prose_file_options(sub):
 def resolve_prose(p, a):
     """Fill each prose option from its file, and refuse an inline value past the measured bound."""
     for opt in PROSE_OPTS:
-        dest = "assert_" if opt == "--assert" else opt[2:].replace("-", "_")
+        # Two options are named after Python keywords and carry a trailing-underscore dest. The
+        # inline conditional held one of them; the second was added later and would have been
+        # skipped silently by the hasattr guard below — resolve_prose looking for `with` while
+        # argparse stored `with_`, so --with-file would have been accepted and then ignored.
+        dest = _PROSE_DEST.get(opt) or opt[2:].replace("-", "_")
         if not hasattr(a, dest):
             continue
         path, inline = getattr(a, dest + "_file", None), getattr(a, dest)

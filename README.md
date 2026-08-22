@@ -379,7 +379,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `stepback` | The retro. `--nothing-to-harden` is the honest escape when a chapter really yielded no rule, and it requires a `--reason`. |
 | `successor` | Mint the next session's id, point it at your handoff, and hand over. `--handoff <path>`, `--task ".."`, `--title ".."`, `--cwd <dir>`, `--session-id <id>`, `--dry-run`. |
 | `kinds` | Print the log record schema — every `kind` this code can write and the fields recorded beside it, **extracted from the source** so it cannot drift. Read it before writing a trigger that matches on `kind`. |
-| `contribute --reviewed --filed ".." --note ".."` | Record that you asked, of each learning hardened since your last review, whether it named a **tool's** behaviour or **this repo's**. "All project-specific" is a complete answer — recording the review is what clears the nudge. |
+| `contribute --reviewed --filed ".." --note-file <path>` | Record that you asked, of each learning hardened since your last review, whether it named a **tool's** behaviour or **this repo's**. "All project-specific" is a complete answer — recording the review is what clears the nudge. The **file** form is shown because an honest answer enumerates: real notes here run past the 400-char bound, at which point inline `--note ".."` is refused. |
 | `<any verb> --<option>-file <path>` | Read a prose option from a file. Required over 400 characters — a shell mangles prose that quotes code. |
 
 ## Configure

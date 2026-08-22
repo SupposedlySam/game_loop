@@ -281,6 +281,15 @@
       "change": "`contribute --note` is now a bounded prose option: over 400 chars it is REFUSED, and it gains a `--note-file PATH` sibling like every other prose field. It was the only prose-carrying option with neither, and the only subcommand with no -file option at all.",
       "consequence": "a long --note passed inline now fails instead of being recorded. Pass it as `--note-file <path>`; no shell touches the text that way. Measured on this repo's own upstream ledger, two of four real entries were over the bound (855 and 1152 chars) and had been reaching the tool through `--note \"$(cat ..)\"` \u2014 command substitution straight into an argument, which is the shape the bound exists to remove.",
       "why_it_qualifies": "a command line that worked yesterday now exits non-zero. Nothing was corrupted in this repo's ledger \u2014 checked, not assumed \u2014 so this is a latent hole rather than a demonstrated failure, but the refusal is visible to anyone scripting `contribute`, and a consumer reads this file to find out which release started refusing it."
+    },
+    {
+      "seq": 28,
+      "sha": "pending",
+      "notice": true,
+      "verb": "mutate",
+      "change": "`mutate` now names the mutation it APPLIED on the success path \u2014 a new `applied:` line in the \u2713 PROVED block, matching what both refusal paths already printed. `--replace` and `--with` also gain `--replace-file` / `--with-file` siblings.",
+      "consequence": "one extra line in PROVED output; nothing is refused that was not refused before. The file siblings are the point: a shell rewrites `..` and $(..) BEFORE the tool sees the value, so a mangled fragment arrives carrying no metacharacter at all and cannot be detected \u2014 only avoided. Use the file form for any fragment containing shell metacharacters.",
+      "why_it_qualifies": "the strongest verdict this verb issues was the one path that did not echo its input, so a fragment a shell had rewritten produced \u2713 PROVED for a mutation nobody typed. Measured, not reasoned: --with \"x  # `echo P`\" arrives as 'x  # P'. `--replace` was already covered by the must-appear-exactly-once check, which fails loud; only --with was exposed."
     }
   ],
   "schema": 1

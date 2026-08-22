@@ -346,7 +346,10 @@ kinds
 #   mandate (#88). `checkpoint` BUYS YOU A TURN-END and `arm` PRIMES A T3 ON YOU — both silent,
 #   both permissive. Give each worker `GAME_LOOP_SESSION=<unique>`; it is inherited by that
 #   worker's own children, so a worker that dispatches must set a fresh one at every level.
-contribute --reviewed --filed "<urls, or none>" --note ".."
+contribute --reviewed --filed "<urls, or none>" --note-file <path>
+#   the FILE form is the example on purpose: the honest answer here enumerates, so real notes
+#   run past the 400-char bound and `--note ".."` is then refused. Measured on this repo's own
+#   ledger, two of four entries were 855 and 1152 chars.
 #   record that you asked, of each learning hardened since the last review: does this name a
 #   TOOL's behaviour, or THIS REPO's? `stepback` nudges once enough have accumulated and LISTS
 #   them, because the judgement is unmakeable from a count. A learning phrased as a fact about

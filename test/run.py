@@ -5517,11 +5517,6 @@ def main():
             # the tab title IS composed text, and is capped by its own refusal because a tab is
             # narrow. Bounding it at PROSE_MAX as well would refuse titles that render fine
             "--title",
-            # STATED, NOT FIXED (INV6): --replace/--with carry code fragments, which are MORE
-            # exposed to a shell than prose is, not less. They stay out because the entry test is
-            # "a sentence somebody composed" and widening it here would be a scope decision made
-            # quietly in a test. The exposure is real and unaddressed, and saying so is the point
-            "--replace", "--with",
         )
         _fn_of = {}
         for _f in ast.walk(_tree):
@@ -5587,6 +5582,62 @@ def main():
               "four real ledger entries ran past the bound at 855 and 1152 chars",
               "--note" in _opts and "--note-file" in gl(pw, "contribute", "--help",
                                                         sid="sess-prose").stdout)
+
+        # #97: THE KEYWORD-NAMED DESTS ARE DERIVED, because the failure mode is silent. argparse
+        # cannot store `assert` or `with` under their own names, so both carry a trailing underscore
+        # — and resolve_prose SKIPS any option whose dest it cannot find. A missing entry therefore
+        # creates the --<opt>-file twin, accepts it on the command line, and ignores it: the safe
+        # path appears to exist and quietly does nothing, which is worse than not offering it.
+        _kw_dests = {}
+        for _n in ast.walk(ast.parse(_src)):
+            if not (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+                    and _n.func.attr == "add_argument" and _n.args):
+                continue
+            _a0 = _n.args[0]
+            _d = next((k.value.value for k in _n.keywords
+                       if k.arg == "dest" and isinstance(k.value, ast.Constant)), None)
+            if (isinstance(_a0, ast.Constant) and isinstance(_a0.value, str)
+                    and _d and _d.endswith("_")):
+                _kw_dests[_a0.value] = _d
+        _pd = {}
+        for _n in ast.walk(ast.parse(_src)):
+            if isinstance(_n, ast.Assign) and any(getattr(_t, "id", None) == "_PROSE_DEST"
+                                                  for _t in _n.targets):
+                _pd = {_k.value: _v.value for _k, _v in zip(_n.value.keys, _n.value.values)}
+        _missing = sorted(o for o, d in _kw_dests.items() if o in _opts and _pd.get(o) != d)
+        check("#97: every prose option whose argparse dest is keyword-mangled is mapped, and the "
+              "map is checked against the DECLARATIONS rather than kept by hand — an unmapped one "
+              "offers a -file twin that is accepted and then silently ignored: "
+              + (", ".join(_missing) or "none"),
+              not _missing)
+
+        # #97: AND THE FILE PATH ACTUALLY CARRIES THE BYTES, which is the claim the twin makes. A
+        # twin that parses but does not resolve is exactly the silent skip above, and it looks
+        # identical to success from the command line.
+        _mdir = os.path.join(pw, "mut97")
+        os.makedirs(_mdir, exist_ok=True)
+        with open(os.path.join(_mdir, "mylib.py"), "w") as f:
+            f.write("def g(x):\n    return 1\n")
+        with open(os.path.join(_mdir, "t.py"), "w") as f:
+            f.write(f"import sys; sys.path.insert(0, {_mdir!r})\n"
+                    "from mylib import g\nassert g(0)==1\nprint('1 passed, 0 failed')\n")
+        with open(os.path.join(_mdir, "rep.txt"), "w") as f:
+            f.write("return 1")
+        # the payload a shell would have eaten: a backtick and a $(..), both meant literally
+        with open(os.path.join(_mdir, "wth.txt"), "w") as f:
+            f.write("return 2  # `id` $(whoami)")
+        _mv = gl(pw, "mutate", "--prove", "g returns 1", "--test", "python3 " + os.path.join(_mdir, "t.py"),
+                 "--file", os.path.join(_mdir, "mylib.py"),
+                 "--replace-file", os.path.join(_mdir, "rep.txt"),
+                 "--with-file", os.path.join(_mdir, "wth.txt"), sid="sess-prose")
+        check("#97: --with-file carries a backtick and a $(..) through VERBATIM — the file path is "
+              "the only route no shell touches, and it is the whole reason these two options are "
+              "on the prose list at all (the 400-char bound never fires on a code fragment)",
+              "PROVED" in _mv.stdout and "`id` $(whoami)" in _mv.stdout)
+        check("#97: ...and a ✓ PROVED verdict NAMES THE MUTATION IT APPLIED. The refusal paths "
+              "printed it and the success path did not, so the strongest thing this verb can say "
+              "was the one place you could not see that a shell had rewritten the fragment",
+              "applied:" in _mv.stdout)
 
         # PAIRED: a field that is a PATH, a NAME or an ENUM must NOT be bounded, or the rule starts
         # refusing legitimate values to no purpose. None of these can carry a backtick that means

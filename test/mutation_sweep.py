@@ -561,9 +561,13 @@ MUTANTS = [
      ".game_loop/bin/game_loop::config_local_keys", "    return []\n",
      ["config.local", "override", "site wiring"],
      # Measured at 0 when first written -- I shipped config.local.json with no test at all, and this
-     # sweep is what said so. THIN at 1 now: the producer feeds one status line, and its companions
-     # assert the OTHER arm (no local file, nothing announced), which survives silence by design.
-     "one status line; the no-override companion asserts absence and survives silence", 1),
+     # sweep is what said so. Then THIN at 1, with this note already naming the reason: the
+     # companions assert the OTHER arm (no local file, nothing announced), which survives silence
+     # by design. The note was right and sat here unacted-on, which is what a diagnosis in a comment
+     # does. 3 now, by asserting what a dead producer cannot fake -- the COUNT of overridden keys
+     # and EVERY name in it, in a stable order, over three overrides instead of one. A single
+     # override cannot tell a report that lists them from one printing a fixed sentence.
+     "the count and every key, over three overrides; the no-override arm is a paired control", 3),
     # The neutered body is `return {}` and not `return []`, deliberately: this is an ACCUMULATOR
     # returning a dict, so an empty LIST makes every .get() on the result raise and the suite dies
     # instead of the behaviour being measured. Given the wrong empty form these read 243 and 609 --
@@ -725,9 +729,15 @@ MUTANTS += [
     ("guards_report -> a disabled project guard is never reported as inert",
      ".game_loop/bin/game_loop::guards_report", "    return []\n",
      ["#90", "INERT", "UNKNOWN", "guard"], None, 0),
+    # THIN AT 1 -> 4. Three assertions called it and TWO asserted `== []`, which a dead producer
+    # returns too. Added: TWO dead triggers both named (reporting one of two is the failure the
+    # reporter actually hit — they made the mistake twice and nothing corrected the first), and
+    # triggers_report() driven, which NOTHING had driven. Finding that out cost a wrong assumption
+    # worth recording: the dead-kind loop sits after an early `return []` for projects with nothing
+    # wired, so a stray script in triggers.d with no trigger configured is never reported at all.
     ("trigger_dead_kinds -> a trigger matching an impossible kind is never named",
      ".game_loop/bin/game_loop::trigger_dead_kinds", "    return []\n",
-     ["#87", "NEVER WRITES", "dead", "kind"], None, 0),
+     ["#87", "NEVER WRITES", "dead", "kind"], None, 4),
     ("pin_file_drift -> the pinned copy never differs from this tree",
      ".game_loop/bin/game_loop::pin_file_drift", "    return [], None\n",
      ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 0),

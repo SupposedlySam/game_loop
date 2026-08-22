@@ -4594,6 +4594,19 @@ def main():
         check("...and status NAMES the overridden keys — a config you cannot see is a divergence "
               "nobody can explain",
               "config.local.json" in _s1 and "mcp_writes" in _s1)
+        # THE COUNT AND EVERY KEY, not just that the line appeared. One override cannot tell a
+        # report that lists them apart from one that prints a fixed sentence, and a reader deciding
+        # whether their site wiring explains a divergence needs the whole set rather than a sample.
+        with open(_clj, "w") as f:
+            json.dump({"mcp_writes": "disabled", "threshold_pct": 91, "retro_every": 7}, f)
+        _s2 = gl(cl, "status", sid="sess-cl").stdout
+        check("...and it reports HOW MANY and lists every one of them — a divergence explained by "
+              "two of three overrides is not explained",
+              has(_s2, "3 key(s) overridden") and has(_s2, "mcp_writes")
+              and has(_s2, "threshold_pct") and has(_s2, "retro_every"))
+        check("...and the keys are listed in a stable order, so two runs of status are diffable "
+              "rather than differing by dict ordering",
+              has(_s2, "mcp_writes, retro_every, threshold_pct"))
         # Malformed must not take the harness down, and must not silently win either.
         with open(_clj, "w") as f:
             f.write("{not json")
@@ -10547,7 +10560,45 @@ def main():
         check("#87: ...and a trigger matching a REAL kind is silent, so the finding above is a "
               "verdict rather than a check that fires on every quoted word",
               _glk.trigger_dead_kinds() == [])
-        os.remove(os.path.join(_td, "dead.sh"))
+        # TWO DEAD TRIGGERS ARE BOTH NAMED. The author who reported this made the mistake twice and
+        # nothing corrected the first, so "one of them is listed" is the case that must not pass.
+        for _nm, _k in (("deadA.sh", "mandate"), ("deadB.sh", "retro")):
+            with open(os.path.join(_td, _nm), "w") as f:
+                f.write("#!/usr/bin/env bash\npython3 -c \"\nd={}\n"
+                        f"if d.get('kind') == '{_k}': print(1)\n\"\n")
+        check("#87: ...and TWO dead triggers are both named — the reporter made this mistake twice "
+              "and nothing corrected the first, so reporting one of two is the failure to avoid",
+              sorted(_glk.trigger_dead_kinds()) == [("deadA.sh", "mandate"), ("deadB.sh", "retro")])
+
+        # AND THE CONSEQUENCE, which nothing drove: triggers_report() is what a human actually
+        # reads, and neutering the producer left it silent with no assertion noticing. A finding
+        # that never reaches the report is the same as no finding.
+        #
+        # THE REPORT NEEDS SOMETHING ATTACHED, and finding that out is worth its own line: the
+        # dead-kind loop sits AFTER an early `return []` for projects with nothing wired. So a
+        # stray script in triggers.d with no trigger configured is never reported — defensible,
+        # since nothing there can fire for a plainer reason, but it means this producer's only
+        # consumer is silent in exactly the setup I first wrote the test in. The reported case had
+        # triggers wired AND matching the wrong kinds, which is what this builds.
+        with open(os.path.join(_lkh, "triggers.json"), "w") as f:
+            json.dump({"harden": [{"name": "live", "command": "cat >/dev/null"}]}, f)
+        _rep = "\n".join(_glk.triggers_report())
+        check("#87: ...and the REPORT names the file, the kind, and the remedy — a dead condition "
+              "nobody is shown is indistinguishable from no dead condition",
+              has(_rep, "deadA.sh") and has(_rep, "deadB.sh") and has(_rep, "'mandate'")
+              and has(_rep, "NOTHING HERE EVER WRITES") and has(_rep, "game_loop kinds"))
+        check("#87: ...and it says WHY it matters in the report itself, because exit 0 is also what "
+              "a satisfied guard does and the author cannot tell those apart from outside",
+              has(_rep, "broken and quiet"))
+        for _nm in ("deadA.sh", "deadB.sh"):
+            os.remove(os.path.join(_td, _nm))
+        check("#87: ...and with the dead triggers gone the report stops saying it, so the lines "
+              "above are a verdict rather than boilerplate every run prints",
+              not has("\n".join(_glk.triggers_report()), "NOTHING HERE EVER WRITES"))
+        check("#87: ...and the report still describes the LIVE trigger after they are gone, so the "
+              "line above means 'no dead kinds' rather than 'the report went empty'",
+              has("\n".join(_glk.triggers_report()), "live"))
+        os.remove(os.path.join(_lkh, "triggers.json"))
         check("#87: ...and no triggers at all is silent too",
               _glk.trigger_dead_kinds() == [])
     finally:

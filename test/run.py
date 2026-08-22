@@ -5446,11 +5446,27 @@ def main():
         # THE FILE OPTION IS DERIVED, NOT LISTED. The defect being fixed is a rule that depended on
         # somebody remembering, so the safe path must not depend on somebody remembering either.
         _src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
-        _pairs = re.search(r"^PROSE_OPTS = \((.*?)\)$", _src, re.S | re.M)
-        _opts = re.findall(r'"(--[a-z-]+)"', _pairs.group(1)) if _pairs else []
+        # READ THE TUPLE, NOT THE TEXT AROUND IT. The first version pulled these out with
+        # re.findall(r'"(--[a-z-]+)"') over the source between the parens — and a guard that matches
+        # a quoted word is satisfied by PROSE about the thing. The comments inside PROSE_OPTS
+        # explain which options are there and why; one of them quoting an option name would have
+        # invented a prose option that does not exist, and the fabricated entry would then make the
+        # partition below come out right by coincidence. The AST cannot see a comment at all.
+        _tree = ast.parse(_src)
+        _opts = []
+        for _n in ast.walk(_tree):
+            if (isinstance(_n, ast.Assign)
+                    and any(getattr(_t, "id", None) == "PROSE_OPTS" for _t in _n.targets)):
+                _opts = [_e.value for _e in getattr(_n.value, "elts", [])
+                         if isinstance(_e, ast.Constant) and isinstance(_e.value, str)]
         check("every prose option is declared in one place, and there are several — a list of one "
               "would make the sweep below prove nothing",
               len(_opts) >= 8)
+        check("...and PROSE_OPTS is read from the parsed TUPLE rather than matched out of the "
+              "source text, so a comment inside it that quotes an option name cannot invent a "
+              "member — the fabricated entry would make the partition below balance by coincidence",
+              all(o.startswith("--") for o in _opts)
+              and "--note" in _opts and "--assert" in _opts)
         _helps = gl(pw, "harden", "--help", sid="sess-prose").stdout
         check("...and each prose option a verb takes gets its file sibling by WALKING the parsers, "
               "so a verb that later reuses --notes is covered without anyone adding a pair",
@@ -5507,7 +5523,6 @@ def main():
             # quietly in a test. The exposure is real and unaddressed, and saying so is the point
             "--replace", "--with",
         )
-        _tree = ast.parse(_src)
         _fn_of = {}
         for _f in ast.walk(_tree):
             if isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -5546,6 +5561,22 @@ def main():
               "FAILS here, which is the only way a list can report that it is short: "
               + (", ".join(_unclassified) or "none"),
               not _unclassified)
+        # THE PARTITION IS ASSERTED AS ARITHMETIC, because that is what actually caught the bug
+        # above. "Nothing unclassified" and "nothing stale" were BOTH green while `--file` sat
+        # outside the classification entirely — an over-broad exemption removes a name from the
+        # question rather than answering it wrong, so every check phrased as "is each name
+        # answered?" stays quiet. Only the counts disagreed: 23 + 59 against 83 declared. A
+        # subset test cannot see a hole in the set it is a subset of; a total can.
+        _classified = set(_opts) | set(_NOT_PROSE)
+        check("prose and not-prose are DISJOINT — a name in both is a classification that was made "
+              "twice and can be read either way: "
+              + (", ".join(sorted(set(_opts) & set(_NOT_PROSE))) or "none"),
+              not (set(_opts) & set(_NOT_PROSE)))
+        check("...and the two lists plus the generated -file twins account for EVERY declared "
+              "option exactly — the parts must sum to the whole, which is the check that noticed "
+              f"an exemption had quietly removed one from the question: {len(_opts)} + "
+              f"{len(_NOT_PROSE)} + twins vs {len(_decls)} declared",
+              _classified | (_generated & _decls) == _decls)
         _stale = sorted(o for o in _NOT_PROSE if o not in _decls)
         check("...and no not-prose entry names an option that no longer exists — a decision spent "
               "on a surface that is gone, and the file that eventually takes that name arrives "

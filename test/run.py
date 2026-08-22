@@ -5327,6 +5327,48 @@ def main():
         finally:
             shutil.rmtree(_fd, ignore_errors=True)
 
+    print("a pre-per-session mandate left in the repo-global file is announced (KNOWN GAP, 0 kills):")
+    # THE SWEEP'S OWN NOT_SWEPT ENTRY SAID THIS ONE WAS MEASURED AT 0 KILLS, and re-measuring it
+    # today agreed — after subtracting an artefact that nearly fooled me. Neutering a producer that
+    # is IN NOT_SWEPT breaks two accounting assertions (`set(NOT_SWEPT) <= set(real_found)`), so a
+    # by-hand neuter of any declared-gap producer scores 2 free kills that vanish the moment it
+    # moves into MUTANTS. Raw count 2, artefact 2, genuine 0. The note was right and the arithmetic
+    # was flattering.
+    #
+    # What was unasserted: a mandate bound BEFORE state went per-session sits in the repo-global
+    # state.json gating nobody — the stop gate and watchdog simply go quiet for that session. This
+    # producer is the only thing that says so, and nothing checked that it says it.
+    _lm = make_sandbox()
+    try:
+        _lmf = os.path.join(_lm, ".game_loop", "state.json")
+        with open(_lmf, "w") as f:
+            json.dump({"mandate": {"active": True, "text": "the pre-upgrade goal", "at": "then"}}, f)
+        _lmo = gl(_lm, "status", sid="sess-legacy").stdout
+        check("a repo-global state.json still holding an ACTIVE mandate is announced in status — it "
+              "gates nobody now, and a mandate that silently stopped gating is the one failure this "
+              "tool never accepts",
+              "LEGACY MANDATE" in _lmo)
+        check("...and it names BOTH halves of the remedy, since re-binding without clearing the old "
+              "file leaves the warning up forever and looks like the fix did not work",
+              "mandate --set" in _lmo and "--clear" in _lmo
+              and "GAME_LOOP_SESSION=" in _lmo)
+        # PAIRED, or the assertion above is satisfied by a line that always prints.
+        with open(_lmf, "w") as f:
+            json.dump({"mandate": {"active": False, "text": "already migrated", "at": "then"}}, f)
+        check("...while an INACTIVE legacy mandate says nothing — the warning is a verdict about "
+              "state, not a banner every session learns to scroll past",
+              "LEGACY MANDATE" not in gl(_lm, "status", sid="sess-legacy").stdout)
+        # AND THE NO-SESSION ARM, which is the branch the producer returns None on first: a human in
+        # a plain terminal IS the repo-global session, so nothing has stopped gating them.
+        os.remove(_lmf)
+        with open(_lmf, "w") as f:
+            json.dump({"mandate": {"active": True, "text": "the pre-upgrade goal", "at": "then"}}, f)
+        check("...and a run with NO session id is silent too — without per-session state that "
+              "mandate is still the live one, so warning about it would be false",
+              "LEGACY MANDATE" not in gl(_lm, "status", sid="").stdout)
+    finally:
+        shutil.rmtree(_lm, ignore_errors=True)
+
     print("a superseded watchdog stands down (the sweep's own KNOWN GAP, measured at 0 kills):")
     # THE SWEEP NAMED THIS ONE AND SAID SO: `watchdog::superseded` neutered to `return False` killed
     # NOTHING out of a 534-assertion baseline. Every ring decision that branches on "has a newer

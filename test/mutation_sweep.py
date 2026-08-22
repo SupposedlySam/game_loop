@@ -170,6 +170,41 @@ def verdict(killed):
 #  the rounding-up this sweep exists to catch. The note must distinguish thin-and-correct from
 #  thin-and-unfixed; a known gap says so, and does not get to describe itself as a decision.)
 MUTANTS = [
+    # ── TWO KNOWN GAPS CLOSED, and the arithmetic that nearly let one through. ─────────────────
+    # Both sat in NOT_SWEPT as declared debt. Measured by hand against an archived HEAD before
+    # moving them here, and the raw numbers were FLATTERING: neutering a producer that is still IN
+    # NOT_SWEPT breaks two accounting assertions (`set(NOT_SWEPT) <= set(real_found)`), because the
+    # neutered shape stops being discovered as a candidate and the exclusion then names something
+    # the tree no longer has. So every declared-gap producer scores 2 free kills that DISAPPEAR the
+    # moment it moves into this list.
+    #
+    #   binding_windows          raw 7 · artefact 2 · genuine 5   (re-measured out of NOT_SWEPT: 5)
+    #   legacy_mandate_warning   raw 2 · artefact 2 · genuine 0   <- the NOT_SWEPT note said 0
+    #
+    # Both re-measured after the move with the new assertions in the tree: binding_windows 5, and
+    # legacy_mandate_warning 0 -> 2, the two arms of it that can flip. The subtraction predicted
+    # binding_windows exactly, which is the only reason to trust the subtraction at all.
+    #
+    # The note was right and my subtraction was the only thing standing between "0 kills, still
+    # unprotected" and a floor of 2 recorded against an assertion about bookkeeping. Anyone else
+    # promoting a gap from that list has the same trap waiting: measure it, then subtract the two.
+    ("binding_windows -> no usage window ever binds",
+     ".game_loop/bin/game_loop::binding_windows", "    return []\n",
+     ["limit", "handoff", "gate"], None, 5),
+    # legacy_mandate_warning had NOTHING exercising it — a mandate bound before state went
+    # per-session sits in the repo-global file gating nobody, the stop gate and watchdog go quiet,
+    # and this producer is the only thing that says so. Four arms written: the warning, both halves
+    # of its remedy, the inactive case, and the no-session case.
+    #
+    # THE FLOOR IS 2, AND I FIRST WROTE 3. Four assertions, but only two can FLIP — the inactive and
+    # no-session arms assert an ABSENCE, which a dead producer also produces, so they hold either
+    # way. They are worth having (without them the warning could be a line that always prints) and
+    # they are not coverage of this producer. Counting assertions written instead of assertions that
+    # can flip is how a floor gets set above its own measurement, which this file exists to refuse,
+    # and I did it in the same change that quotes the rule. Measured 2, THIN, recorded THIN.
+    ("legacy_mandate_warning -> a mandate that gates nobody is never announced",
+     ".game_loop/bin/game_loop::legacy_mandate_warning", "    return None\n",
+     ["legacy", "mandate"], None, 2),
     # ALL THREE MEASURED IN ONE RUN, WITH THE TESTS HELD STILL. The floors recorded for the first
     # two an hour earlier were not wrong about the code — they were measured against an assertion
     # set I then rewrote, so the next sweep read them as coverage disappearing. A floor is only
@@ -821,10 +856,6 @@ NOT_SWEPT = {
                           "would be a number from a different tree — the exact target-making this "
                           "file refuses. Owed a MUTANTS entry with a measured floor on the first "
                           "sweep after it lands.",
-    ".game_loop/bin/game_loop::legacy_mandate_warning": "KNOWN GAP, same as retro_nudge and found the same way. A real "
-                              "warning producer of unpushed_warning's shape, MEASURED at 0 kills "
-                              "against this HEAD — the legacy-mandate warning can stop firing and "
-                              "this suite says nothing. Owed an assertion, then a MUTANTS entry",
     ".game_loop/bin/game_loop::pinned_report": "KNOWN GAP. A real report producer (the PINNED CODE block) whose empty list "
                      "is the common path, which is precisely the silence-on-pass shape. Left out "
                      "for run time; it should be swept",
@@ -834,12 +865,6 @@ NOT_SWEPT = {
     # --- FOUND ONLY BY THE SECOND SIGNATURE. Both were invisible while the discriminator looked
     # for a literal empty return, which is why the accounting read "0 unaccounted" over a short
     # denominator. Neither is excluded on merit; both are queued.
-    ".game_loop/bin/game_loop::binding_windows": "KNOWN GAP, and the sharpest one here. It decides which usage windows are "
-                       "BINDING, and an always-empty return means no window ever binds — the "
-                       "limitgate stops firing and a run sails into an exhausted limit with no "
-                       "handoff written, silently. Exactly the shape this file distrusts, and it "
-                       "was invisible to the first signature. Owed an assertion, then a MUTANTS "
-                       "entry, ahead of the other gaps",
     ".game_loop/bin/game_loop::parse_events": "KNOWN GAP. Parses the per-event distribution behind the dominance refusal "
                     "(INV7). An always-empty return means no distribution is ever seen, so the "
                     "one-event-dominates check cannot fire. `dominance` IS swept and would catch "

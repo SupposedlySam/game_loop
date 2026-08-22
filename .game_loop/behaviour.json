@@ -293,7 +293,7 @@
     },
     {
       "seq": 29,
-      "sha": "pending",
+      "sha": "4e7f559",
       "notice": true,
       "verb": "install.sh",
       "change": "install.sh now COUNTS the linked worktrees an install into a main checkout is about to drift, names each one, and prints the re-provision command for it. Warning only \u2014 nothing is refused, and installing INTO a linked worktree is silent.",

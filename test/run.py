@@ -9760,6 +9760,37 @@ def main():
           and sweep.verdict(sweep.THIN_AT) == sweep.OK)
     check("THIN and UNPROTECTED are distinct verdicts — thin argues, only zero blocks",
           sweep.THIN != sweep.UNPROTECTED and sweep.OK not in (sweep.THIN, sweep.UNPROTECTED))
+    # UNPROTECTED WAS TWO FINDINGS IN ONE WORD (lamp-owner, 2026-08-23, from their own catalogues
+    # before I looked for it here). A value mutation that kills nothing means either "the producer
+    # runs and nothing asserts it" or "nothing runs it" — same green, opposite repairs, and writing
+    # an assertion for the second is a confident wrong fix this file would have recommended.
+    # Driven with an injected runner, the way the mutate probe's seven outcomes are: the real thing
+    # costs a full suite per question, and none of these five needs one.
+    _psrc = "def f():\n    return 1\n"
+    _pl = lambda out: sweep.producer_liveness(_psrc, "f", lambda _s: out)
+    _lv, _lw = _pl("boom " + sweep._PROBE_MARK + "\n1 passed, 1 failed")
+    _in, _iw = _pl("1493 passed, 0 failed")
+    _rn, _rw = _pl("something unrelated exploded\n1 passed, 1 failed")
+    _to, _tw = sweep.producer_liveness(_psrc, "f", lambda _s: None)
+    _ns, _nw = sweep.producer_liveness(_psrc, "no_such_function", lambda _s: "1 passed, 0 failed")
+    check("a producer that killed nothing is PROBED with a raise, and the suite reacting to it is "
+          "LIVE — one kill would already have proved that, which is why this is asked only at zero",
+          (_lv, _in, _rn, _to, _ns) == ("live", "inert", "unknown", "unknown", "unknown"))
+    check("...and INERT is not UNPROTECTED — a green suite with a `raise` in the body means "
+          "nothing calls it or nothing that does can see it fail, and an assertion written there "
+          "would pass forever without executing the code it names",
+          sweep.INERT != sweep.UNPROTECTED and has(_iw, "nothing calls it"))
+    check("...and the three UNKNOWN reasons are DISTINCT — an agent handed 'unknown' has to know "
+          "whether to fix the anchor, wait longer, or go find what else broke the suite",
+          len({_rw, _tw, _nw}) == 3)
+    check("...and a suite that went red WITHOUT the marker is UNKNOWN rather than live: something "
+          "other than the probe broke it, which is the exact misread that once turned a dead "
+          "anchor into a finding",
+          _rn == "unknown" and has(_rw, "WITHOUT the probe marker"))
+    check("...and INERT FAILS the sweep rather than being reported and passed over, since a "
+          "producer nothing reacts to is a hole in the denominator this file exists to defend",
+          "if bad or drifted or unscored or inert:\n        return 1"
+          in read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py")))
     # A producer renamed out from under the sweep is the quiet failure it could most easily have:
     # neuter() would not find it, the entry would report nothing, and the count would look fine.
     with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:

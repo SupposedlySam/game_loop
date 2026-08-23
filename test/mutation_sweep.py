@@ -149,6 +149,21 @@ THIN_AT = 3
 
 UNPROTECTED, THIN, OK = "UNPROTECTED", "THIN", "ok"
 
+# A FIFTH VERDICT, from lamp-owner (2026-08-23), who found it in their own catalogues and sent it
+# before I looked for it here. UNPROTECTED is TWO findings wearing one word: the producer runs and
+# nothing asserts it, or nothing runs it at all. A VALUE mutation cannot separate them — both go
+# green — and the remedies are opposite: the first wants an assertion, the second wants a test that
+# reaches the code. Writing an assertion for a producer nothing calls is the wrong repair, made
+# confidently, and this file would have recommended it.
+#
+# The probe is a `raise` in the body rather than a neutered return, which is the same instrument
+# `mutate --prove` uses one level up. Its verdict names BOTH remaining causes rather than choosing:
+# a suite that stays green with a producer CRASHING may never call it, or may call it somewhere no
+# assertion can see — a subprocess whose stderr nobody reads. Those are still different bugs, and
+# this cannot tell them apart, so it does not pretend to.
+INERT = "INERT (nothing reacts to it CRASHING)"
+_PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
+
 # NOT MEASURED IS A THIRD OUTCOME, not a low score (showrunner, this week). A mutant whose suite
 # CRASHED, timed out, or was never applied has no measurement at all — and every one of those
 # produced a NUMBER here, which is the substitution this project exists to refuse, in its own
@@ -1371,6 +1386,34 @@ def coverage_gate(found=None, out=print):
     return 1
 
 
+def producer_liveness(original, fn, run_mutant):
+    """Does the suite REACT to this producer crashing? ("live"|"inert"|"unknown", why).
+
+    Only asked when a producer killed NOTHING, because that is the only verdict where the two
+    causes are confusable — one kill already proves the code executes. `run_mutant(src)` returns
+    the suite's output for a tree carrying `src`, or None when it did not finish.
+
+    UNKNOWN IS A REAL ANSWER HERE and it has three distinct causes, kept apart on purpose: the
+    probe could not be substituted, the run did not finish, or the suite went red WITHOUT the
+    marker — which means something other than the probe broke it, and a verdict either way would
+    rest on that unrelated breakage. `mutate --prove`'s probe was reported as a finding once for
+    exactly the third case, before it demanded the marker.
+    """
+    poisoned, hit = neuter(original, fn, f'    raise SystemExit("{_PROBE_MARK}")\n')
+    if not hit:
+        return "unknown", "the probe body could not be substituted into this producer"
+    out = run_mutant(poisoned)
+    if out is None:
+        return "unknown", "the probe run did not finish, so nothing was established either way"
+    if _PROBE_MARK in out:
+        return "live", "the suite surfaced the probe's raise, so this producer executes"
+    if re.search(r"^\d+ passed, 0 failed", out, re.M):
+        return "inert", ("the suite passed with a `raise` in this body — nothing calls it, or "
+                         "nothing that does can see it fail")
+    return "unknown", ("the suite went red WITHOUT the probe marker, so something other than the "
+                       "probe broke it")
+
+
 def neuter(src, fn, body):
     """Replace fn's body with `body`, keeping its signature and dropping its docstring."""
     lines = src.split("\n")
@@ -1551,9 +1594,38 @@ def main():
                     f"  inflated number about a run that stopped, not a coverage reading.\n")
         killed = len(baseline - still)
         v = verdict(killed)
+        # ASKED ONLY AT ZERO, because one kill already proves the producer executes — and a probe
+        # run costs another full suite. At zero the number cannot distinguish "nothing asserts it"
+        # from "nothing runs it", and those take opposite repairs.
+        # WHAT THIS HAS NOT DONE (INV6): the probe's VERDICTS are unit-controlled in test/run.py
+        # across all five outcomes, but this WIRING has never fired on a real producer, because no
+        # producer in this repo currently kills zero — which is the same sweep result that makes
+        # the branch unreachable today. So the first real INERT reading will also be the first
+        # exercise of the code that produces it. Read it as a lead, confirm it by hand with
+        # `mutate --prove` on the same function, and do not act on it before you have.
+        live_why = ""
+        if killed == 0:
+            def _probe(src):
+                pt = tempfile.mkdtemp(prefix="sweep-probe-")
+                try:
+                    shutil.copytree(base, pt, dirs_exist_ok=True)
+                    with open(os.path.join(pt, rel), "w") as f:
+                        f.write(src)
+                    os.chmod(os.path.join(pt, rel), 0o755)
+                    return run(pt)
+                finally:
+                    shutil.rmtree(pt, ignore_errors=True)
+
+            state, live_why = producer_liveness(original, fn, _probe)
+            if state == "inert":
+                v = INERT
+            elif state == "unknown":
+                live_why = "liveness UNESTABLISHED — " + live_why
         drift = "  ↓ BELOW FLOOR" if killed < floor else ""
         lines = [f"{label}", f"  suite: {tail}",
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
+        if live_why:
+            lines.append(f"  probe : {live_why}")
         if thin_note:
             lines.append(f"  why it is thin: {thin_note}")
         lines += [f"    SURVIVED: {c[:96]}"
@@ -1605,6 +1677,10 @@ def main():
 
     thin = [f"{fn} ({k})" for fn, k, v, _ in verdicts if v == THIN]
     bad = [fn for fn, _, v, _ in verdicts if v == UNPROTECTED]
+    # INERT IS ITS OWN GROUP, never folded into UNPROTECTED — the whole point of measuring it is
+    # that the repair differs. Fatal either way, but "write an assertion" is the wrong instruction
+    # for a producer nothing calls, and a fatal line that names the wrong fix gets one applied.
+    inert = [fn for fn, _, v, _ in verdicts if v == INERT]
     # UNSCOREABLE, kept apart from every other list here on purpose.
     unscored = [fn for fn, _, v, _ in verdicts if v == NOT_MEASURED]
     # A recorded floor that is not checked is prose. THIN is a standing acceptable state, so it
@@ -1638,6 +1714,14 @@ def main():
     if bad:
         print("UNPROTECTED — neutering these killed NOTHING: " + " · ".join(bad))
         print("Nothing in the suite notices when they stop working. That is the failure.")
+        print("Each was PROBED and found live, so the code does run: what is missing is an")
+        print("assertion, not a test that reaches it.")
+    if inert:
+        print("INERT — a `raise` in these bodies did not redden the suite: " + " · ".join(inert))
+        print("Do NOT write an assertion for these yet. Either nothing calls them, or the only")
+        print("callers are somewhere no assertion can see fail — a subprocess whose stderr nobody")
+        print("reads. Both are different bugs from 'unasserted', and both are worse: an assertion")
+        print("added here would pass forever without ever executing the code it names.")
     # UNSCOREABLE IS NOT THIN, AND IT IS NOT CLEAN EITHER. Its own group, because the whole defect
     # was a per-item caveat being flattened into an aggregate with no room for it.
     if unscored:
@@ -1648,7 +1732,7 @@ def main():
         print("never printed `ok` and so counted as killed.")
         print("Fix the anchor or the crash and re-measure. Until then these sit outside the")
         print("denominator, which is the failure this file exists for.")
-    if bad or drifted or unscored:
+    if bad or drifted or unscored or inert:
         return 1
     print("no producer is unprotected, and none is below its recorded floor.")
     return 0

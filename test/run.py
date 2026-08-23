@@ -7896,6 +7896,60 @@ def main():
           _tover.returncode == 2 and has(_tover.stderr, "24 transitions")
           and not has(_tover.stderr, "pieces of evidence work"))
 
+    print("a guard nothing calls enforces nothing, whatever its coverage says:")
+    # A FUNCTION REACHED ONLY FROM THE SUITE HAS COVERAGE AND NO EFFECT. It is the purest form of
+    # INV1's failure — enforcement that lives somewhere nothing runs — and it is invisible to every
+    # other check here: the mutation sweep would happily report a healthy kill count for it, because
+    # the assertions DO notice when it changes. They are the only thing that would.
+    #
+    # Cheap enough to be a test rather than an audit: pure AST over the shipped modules plus a text
+    # scan of the shell guards, no suite run, no judgement. That last part is why this one is a
+    # standing check and the exclusion-reason audit is not — there is nothing here to decide.
+    _SHIPPED_PY = [os.path.join(SRC_GAME_LOOP, "bin", f) for f in
+                   ("game_loop", "watchdog", "notify.py", "verify", "flair.py")]
+    _SHIPPED_SH = [os.path.join(SRC_GAME_LOOP, "bin", f) for f in
+                   ("guard-writes-impl.sh", "guard-mcp-impl.sh", "guard-writes.sh",
+                    "guard-mcp.sh")] + [os.path.join(REPO, "install.sh")]
+
+    def _orphans(extra_def=None, extra_ref=None):
+        _defs, _refs = {}, set()
+        for _p in _SHIPPED_PY:
+            _src = read_or_empty(_p)
+            if extra_def and _p.endswith("game_loop"):
+                _src += f"\n\ndef {extra_def}():\n    return None\n"
+            _t = ast.parse(_src)
+            for _f in ast.walk(_t):
+                if isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    _defs.setdefault(_f.name, _p)
+            for _n in ast.walk(_t):
+                if isinstance(_n, ast.Name):
+                    _refs.add(_n.id)
+                elif isinstance(_n, ast.Attribute):
+                    _refs.add(_n.attr)
+        for _p in _SHIPPED_SH:
+            _refs |= set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", read_or_empty(_p)))
+        _tn = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*",
+                             read_or_empty(os.path.join(REPO, "test", "run.py"))
+                             + read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))))
+        if extra_ref:
+            _tn.add(extra_ref)
+        return sorted(n for n in _defs
+                      if n not in _refs and n in _tn and not n.startswith("__"))
+
+    _orph = _orphans()
+    check("no shipped function is reachable ONLY from the suite — a guard nothing in the product "
+          "calls enforces nothing, and its mutation coverage would look healthy because the tests "
+          "are the only thing that would notice it change: " + (", ".join(_orph) or "none"),
+          not _orph)
+    check("...and the check FINDS one when there is one, so the clean answer above is a verdict "
+          "rather than a scan that matches nothing",
+          _orphans(extra_def="orphan_guard_probe",
+                   extra_ref="orphan_guard_probe") == ["orphan_guard_probe"])
+    # WHAT THIS CANNOT SEE (INV6): a function reached through a COMPUTED name — getattr, a dispatch
+    # dict built from strings, a hook wired by name in JSON — reads as an orphan here. There are
+    # none today. If one appears, the fix is to name it somewhere the scan can see rather than to
+    # widen the scan, because a scan that resolves computed names would have to run the code.
+
     print("the one tracked file whose contents EXECUTE in somebody else's checkout:")
     # .claude/settings.json is the only tracked thing here that RUNS in a cloner's machine, and it
     # is in verify.yaml's unchecked-ok list -- "prose, no command exists that fails when they are

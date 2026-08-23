@@ -8073,6 +8073,49 @@ def main():
         check("...and status still WORKS throughout: a state file nobody can parse must not take "
               "the entry point down, which is why load() swallowed this in the first place",
               gl(_cs, "status", sid=_csid).returncode == 0)
+        # AND THE WATCHDOG IS A SEPARATE PROGRAM READING THE SAME FILE. Fixing game_loop's load()
+        # did not fix its loader, which had the identical `except (OSError, ValueError): return {}`
+        # — and a watchdog that sees no mandate STANDS DOWN, so the run stops being watched in
+        # exactly the situation where nobody is looking. This is "a setting only some components
+        # honour" one level over, and the reason status reports the FILE rather than an in-process
+        # flag: a corruption the watchdog noticed while no game_loop was running still has to reach
+        # whoever reads status later.
+        _wgs = os.path.join(_cs, ".game_loop", "state.json")       # the repo-global one it reads
+        with open(_wgs, "w") as f:
+            json.dump({"mandate": {"active": True, "text": "the repo-global order"}}, f)
+        _wgood = read_or_empty(_wgs)
+        with open(_wgs, "w") as f:
+            f.write(_wgood[:-3])                                    # a truncated tail
+        _wcode = (
+            "import importlib.util,os\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            f"os.environ['GAME_LOOP_HOME']={os.path.join(_cs, '.game_loop')!r}\n"
+            f"l=SourceFileLoader('wd',{os.path.join(_cs, '.game_loop', 'bin', 'watchdog')!r})\n"
+            "s=importlib.util.spec_from_loader('wd',l); m=importlib.util.module_from_spec(s)\n"
+            "try: l.exec_module(m)\n"
+            "except SystemExit: pass\n"
+            "print(m.load_state())")
+        _wenv = _env(_cs)
+        _wenv.pop("GAME_LOOP_SESSION", None)
+        subprocess.run(["python3", "-c", _wcode], capture_output=True, text=True, env=_wenv)
+        check("the WATCHDOG sets the bytes aside too — it is a separate program with its own "
+              "loader on the same file, so fixing game_loop's did not fix it, and a watchdog that "
+              "reads no mandate stands down while nobody is looking",
+              read_or_empty(_wgs + ".unreadable") == _wgood[:-3])
+        # SCOPED TO THE READER THAT SHARES THE FILE. A session-scoped status reads its OWN
+        # per-session state.json, not the repo-global one, so a corruption of the global file is
+        # not a fact about that session and must not be reported there — my first version of this
+        # asserted it would be, which would have made every session shout about a file it does not
+        # read. Status WITHOUT a session reads the global file, and that is the one that must see
+        # what the watchdog set aside.
+        check("...and a status reading THAT file reports what the WATCHDOG found, because the "
+              "evidence is the FILE rather than a flag in whichever process noticed first",
+              has(gl(_cs, "status", sid="").stdout, "WOULD NOT PARSE"))
+        check("...while a session that reads a DIFFERENT state file says nothing about it — one "
+              "tree can hold a corrupt global state and healthy per-session ones, and a warning "
+              "that fires everywhere is one that gets scrolled past",
+              not has(gl(_cs, "status", sid="sess-unaffected").stdout, "WOULD NOT PARSE"))
+
         # PAIRED: an ABSENT file is a fresh session and must stay silent, or the warning fires on
         # every first run and becomes the thing people scroll past.
         _fresh = gl(_cs, "status", sid="sess-never-existed").stdout

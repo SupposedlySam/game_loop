@@ -8550,14 +8550,20 @@ def cmd_status(s, a):
     # one means you are free, the other means an unattended run has quietly stopped being governed
     # — and they printed the same line. The bytes are set aside by load(); this is what points at
     # them, because a preserved copy nobody is told about is the same as no copy.
-    if STATE_UNREADABLE:
+    # THE FILE IS THE EVIDENCE, not this process's flag. The WATCHDOG reads the same state.json
+    # with its own loader and sets aside the same copy, so a corruption it noticed while this
+    # process was not running still has to reach the human reading status afterwards.
+    _kept_copy = STATE_UNREADABLE or (STATE_F + ".unreadable"
+                                      if os.path.exists(STATE_F + ".unreadable") else None)
+    if _kept_copy:
         mandate_line += ("\n  ⚠ AND THAT MAY BE WRONG: .game_loop/…/state.json EXISTS AND WOULD "
                          "NOT PARSE, so this session\n"
                          "    read as brand new — no mandate, gate counters at zero, retro debt "
                          "cleared. The original\n"
-                         f"    bytes are kept at {STATE_UNREADABLE}\n"
+                         f"    bytes are kept at {_kept_copy}\n"
                          "    Recover the mandate from there and re-bind it, or clear it on the "
-                         "record if it is done.")
+                         "record if it is done —\n"
+                         "    then delete that copy, which is what stops this warning.")
     session_line = (f"session: {SESSION[:8]} (state: .game_loop/sessions/…)" if SESSION
                     else "session: none detected — repo-global state (.game_loop/state.json)")
     others, active = _sibling_sessions()

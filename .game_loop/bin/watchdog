@@ -201,10 +201,31 @@ def handoff_path():
 
 
 def load_state():
+    """{} for a fresh session — but a state file that EXISTS and will not parse is set aside first.
+
+    The same collapse game_loop's load() had, in a SEPARATE PROGRAM reading the SAME file, which is
+    why fixing it there did not fix it here. Corrupt state read as {} means the watchdog sees no
+    mandate and stands down: the run stops being watched, silently, in exactly the situation where
+    nobody is looking. Then save_state writes over the bytes.
+
+    The copy is what `status` reports — a file rather than an in-process flag, so a corruption first
+    noticed by the WATCHDOG still surfaces to the human reading status later.
+    """
     try:
         with open(STATE_F) as f:
-            return json.load(f)
-    except (OSError, ValueError):
+            raw = f.read()
+    except OSError:
+        return {}
+    try:
+        return json.loads(raw)
+    except ValueError:
+        try:
+            kept = STATE_F + ".unreadable"
+            if not os.path.exists(kept):
+                with open(kept, "w") as f:
+                    f.write(raw)
+        except OSError:
+            pass
         return {}
 
 

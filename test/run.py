@@ -4821,6 +4821,53 @@ def main():
             "print(m._cfg().get('ring_cap'))")], capture_output=True, text=True, env=_env(cl))
         check("...and the WATCHDOG honours it — the component whose blindness to it was the bug",
               _wd.stdout.strip() == "7")
+
+        # THE MERGE IS SHALLOW ON PURPOSE, and the two implementations have to agree about that or
+        # the war story in _merged_config's own docstring repeats one level down. `config()` says
+        # it outright — "nested keys are replaced whole rather than merged, so 'watchdog' here
+        # means THIS watchdog block and not a half of one" — and the watchdog reimplements the
+        # merge separately. If one deep-merged and the other did not, the same config.local.json
+        # would mean different things in two components, which is the failure this pairing exists
+        # to prevent and is invisible until a setting is honoured in one place and not the other.
+        with open(os.path.join(cl, ".game_loop", "config.json")) as f:
+            _basec = json.load(f)
+        _basec["watchdog"] = {"idle_sec": 11, "settle_sec": 2, "ring_cap": 5}
+        with open(os.path.join(cl, ".game_loop", "config.json"), "w") as f:
+            json.dump(_basec, f)
+        with open(_clj, "w") as f:
+            json.dump({"watchdog": {"ring_cap": 7}}, f)          # ONE key of the nested block
+        _both = subprocess.run(["python3", "-c", (
+            "import importlib.util,os,json\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            f"os.environ['GAME_LOOP_HOME']={os.path.join(cl, '.game_loop')!r}\n"
+            f"l=SourceFileLoader('wd',{os.path.join(cl, '.game_loop', 'bin', 'watchdog')!r})\n"
+            "s=importlib.util.spec_from_loader('wd',l); m=importlib.util.module_from_spec(s)\n"
+            "try: l.exec_module(m)\n"
+            "except SystemExit: pass\n"
+            "print(json.dumps(m._merged_config(m.CONFIG_F).get('watchdog')))")],
+            capture_output=True, text=True, env=_env(cl))
+        check("the watchdog's merge REPLACES a nested block whole rather than merging into it — a "
+              "local `watchdog` key means THIS watchdog block, so the base file's siblings are "
+              "gone and its own defaults apply. Surprising, deliberate, and now pinned",
+              json_text(_both.stdout.strip()) == {"ring_cap": 7})
+        _mainc = subprocess.run([os.path.join(cl, ".game_loop", "bin", "game_loop"), "status",
+                                 "--porcelain"], capture_output=True, text=True,
+                                env=_env(cl, sid="sess-cl"))
+        check("...and `game_loop`'s own config() agrees with it on the same two files — two "
+              "implementations of one merge that disagreed would make a local override mean "
+              "different things in different components, which is the bug that put this pairing "
+              "here in the first place",
+              json_text(_both.stdout.strip())
+              == json.loads(subprocess.run(["python3", "-c", (
+                  "import importlib.util,os,json\n"
+                  "from importlib.machinery import SourceFileLoader\n"
+                  f"os.environ['GAME_LOOP_HOME']={os.path.join(cl, '.game_loop')!r}\n"
+                  f"l=SourceFileLoader('gl',{os.path.join(cl, '.game_loop', 'bin', 'game_loop')!r})\n"
+                  "s=importlib.util.spec_from_loader('gl',l); m=importlib.util.module_from_spec(s)\n"
+                  "try: l.exec_module(m)\n"
+                  "except SystemExit: pass\n"
+                  "print(json.dumps(m.config().get('watchdog')))")],
+                  capture_output=True, text=True, env=_env(cl)).stdout.strip()))
         with open(_clj, "w") as f:
             json.dump({"mcp_writes": "disabled"}, f)
         _mg = subprocess.run([os.path.join(cl, ".game_loop", "bin", "guard-mcp.sh")],
@@ -5502,6 +5549,37 @@ def main():
                   "which is what makes the citation above a fact rather than a fixed sentence",
                   _ncs.cfg_source() == os.path.join(nf, ".game_loop", "notify.json"))
             os.remove(os.path.join(nf, ".game_loop", "notify.json"))
+
+            # THE THIRD COMPONENT'S OWN MERGE. notify.py reimplements config.json +
+            # config.local.json for one purpose: the project label on every page it sends. That
+            # label is how a human reading a Slack channel knows WHICH repo woke them, and site
+            # wiring is exactly the kind of thing set locally. The structural check above proves
+            # notify.py MENTIONS config.local.json; nothing proved it HONOURS it, which is the war
+            # story in this function's own docstring — a setting only some components honour works
+            # where you test it and not where it matters.
+            _ncfg = os.path.join(nf, ".game_loop", "config.json")
+            _nlocal = os.path.join(nf, ".game_loop", "config.local.json")
+            with open(_ncfg) as f:
+                _nbase = json.load(f)
+            _nbase["project_name"] = "from-tracked"
+            with open(_ncfg, "w") as f:
+                json.dump(_nbase, f)
+            check("notify names the project from the TRACKED config — the label on a page is how a "
+                  "human reading one channel knows which repo woke them",
+                  _ncs._project() == "from-tracked")
+            with open(_nlocal, "w") as f:
+                json.dump({"project_name": "from-local"}, f)
+            check("...and config.local.json OVERRIDES it here too, in the third component that "
+                  "merges config — the docstring on this very function is the story of a setting "
+                  "one component honoured and another did not",
+                  _ncs._project() == "from-local")
+            os.remove(_nlocal)
+            _nbase.pop("project_name", None)
+            with open(_ncfg, "w") as f:
+                json.dump(_nbase, f)
+            check("...and with neither file naming one it falls back to the checkout's directory "
+                  "rather than sending an unlabelled page, so the two arms above are verdicts",
+                  _ncs._project() == os.path.basename(nf))
         finally:
             os.environ.pop("GAME_LOOP_HOME", None)
             os.environ.pop("XDG_CONFIG_HOME", None)

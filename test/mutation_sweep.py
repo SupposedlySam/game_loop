@@ -629,15 +629,33 @@ MUTANTS = [
     # returning a dict, so an empty LIST makes every .get() on the result raise and the suite dies
     # instead of the behaviour being measured. Given the wrong empty form these read 243 and 609 --
     # crash cascades, not coverage. A mutation has to be the producer's own silence.
+    # TWO PRODUCERS SHARE THIS NAME — watchdog::_merged_config and notify.py::_merged_config —
+    # and the THIN report names the notify one. I measured the watchdog one first by reading
+    # the bare function name off the report instead of the full key, which is the same class
+    # as measuring the wrong neuter body: the entry is the fact, not the label on it.
+    #
+    # Worth having done anyway. This floor was recorded 0 and measures 20: the watchdog config
+    # drives the ring cap, the settle window and the waiting probe, so most of that 20 is
+    # DOWNSTREAM coverage rather than assertions about the merge. The two that are about the
+    # merge are new: it REPLACES a nested block whole rather than merging into it (surprising
+    # enough to pin — setting one watchdog key locally sends its siblings back to defaults),
+    # and game_loop's own config() agrees with it on the same two files. Two implementations of
+    # one merge that disagreed would make a local override mean different things in different
+    # components, which is the bug this function's own docstring is a story about.
     ("watchdog._merged_config -> the local config override is invisible to the watchdog",
      ".game_loop/bin/watchdog::_merged_config", "    return {}\n",
-     ["config.local", "override", "watchdog", "waiting"], None, 0),
+     ["config.local", "override", "watchdog", "waiting"], None, 20),
+    # THIN AT 2 -> 3, and this is the one the report meant. notify.py reimplements the config
+    # merge for exactly one purpose: the project label on every page it sends, which is how a
+    # human reading one Slack channel knows WHICH repo woke them. The structural check
+    # elsewhere proves notify.py MENTIONS config.local.json; nothing proved it HONOURS it —
+    # which is the war story in this function's own docstring, one component down.
     ("notify._merged_config -> paging never sees the local override",
      ".game_loop/bin/notify.py::_merged_config", "    return {}\n",
      ["notify", "config.local", "project"],
      # THIN at 1: this reader feeds only the project NAME used in page text, so one assertion
      # notices. Its siblings in the guards and the watchdog carry the load.
-     "one consumer -- the project name in page text; the deciding readers are elsewhere", 1),
+     "one consumer -- the project name in page text; the deciding readers are elsewhere", 3),
 ]
 
 # Every candidate producer that is NOT swept, and WHY. Default-deny: a name that is in neither this

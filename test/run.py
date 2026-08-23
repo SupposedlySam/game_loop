@@ -8702,12 +8702,15 @@ def main():
     #   <module> CLAIM_OUTCOMES  ✗ → ✓ on the refuted headline        PROVED 2026-08-23
     #   mark_publication_state   ✓ → ⚠ on the both-refs line          PROVED 2026-08-23
     #   pin_state                ✗ → ✓ on the MISSING arm             PROVED 2026-08-23
+    #   triggers_report          the whole ternary → always "✓"       PROVED 2026-08-23
+    #   external_claims_report   ⚠ → ✓ on the stale-version arm       PROVED 2026-08-23
     #
     # THE OTHERS ARE UNVERIFIED, and that is a statement rather than an omission: each costs a full
     # suite run twice (~15 min), so they are owed rather than skipped. Do not read the pinned count
     # as a measured one.
     _SYMBOL_MUTATION_VERIFIED = [
-        "<module>", "guards_report", "mark_publication_state", "pin_state",
+        "<module>", "external_claims_report", "guards_report", "mark_publication_state",
+        "pin_state", "triggers_report",
     ]
     check("every producer whose symbol assertion has KILLED A MUTANT is one this suite also claims "
           "to pin — the stronger list cannot name something the weaker one does not, or the record "

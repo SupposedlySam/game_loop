@@ -8031,6 +8031,44 @@ def main():
               '        else:\n            # SAY THAT IT DID NOT RUN.',
               '        elif False:\n            # SAY THAT IT DID NOT RUN.', 1))) != [])
 
+    print("whose invariants is status quoting? (the fallback used to look like yours):")
+    # status's INV line is DERIVED from the project's INVARIANTS.md — good, no drift by
+    # construction. But when no `## INVn — <title>` heading parses, it falls back to game_loop's own
+    # hardcoded creed, and that used to print as a bare `INV: ...`: identical in shape to the real
+    # thing, so "these are YOUR invariants" and "I could not read yours" were one observable.
+    #
+    # The fallback is STALE BY CONSTRUCTION — six hardcoded items maintained separately from any
+    # INVARIANTS.md, against this project's eight — so the failure shows a shorter, differently
+    # worded creed AS IF IT WERE THE PROJECT'S. Reshaping the headings is the likeliest way to get
+    # there, which is a thing a migrator does on purpose.
+    _iv = make_sandbox()
+    try:
+        _ivf = os.path.join(_iv, ".game_loop", "INVARIANTS.md")
+        _own = gl(_iv, "status", sid="sess-inv").stdout
+        check("status quotes the PROJECT's own invariants, parsed from its INVARIANTS.md rather "
+              "than a copy inside the tool — a migrator edits that file and expects to be held to "
+              "what it says",
+              has(_own, "INV: Enforcement lives in tools")
+              and not has(_own, "enforcement-in-tools-not-instructions"))
+        with open(_ivf) as f:
+            _ivt = f.read()
+        with open(_ivf, "w") as f:                    # the shape a reshaping migrator leaves
+            f.write(re.sub(r"^##\s+INV(\d+)", r"### \1.", _ivt, flags=re.M))
+        _fb = gl(_iv, "status", sid="sess-inv").stdout
+        check("...and when no heading parses it says the creed it printed is GAME_LOOP'S, not "
+              "theirs — the fallback is six hardcoded items against this project's eight, so a "
+              "silent one shows a shorter creed as if the project had written it",
+              has(_fb, "enforcement-in-tools-not-instructions")
+              and has(_fb, "NOT THIS PROJECT'S"))
+        check("...and it names the file to fix and the heading shape to restore, because a reader "
+              "told their invariants are not being read still has to know what to do",
+              has(_fb, "INVARIANTS.md") and has(_fb, "## INVn"))
+        check("...and status still WORKS in that state — the fallback exists so a reshaped file "
+              "cannot take the entry point down, and saying so must not change that",
+              gl(_iv, "status", sid="sess-inv").returncode == 0)
+    finally:
+        shutil.rmtree(_iv, ignore_errors=True)
+
     print("a guard nothing calls enforces nothing, whatever its coverage says:")
     # A FUNCTION REACHED ONLY FROM THE SUITE HAS COVERAGE AND NO EFFECT. It is the purest form of
     # INV1's failure — enforcement that lives somewhere nothing runs — and it is invisible to every

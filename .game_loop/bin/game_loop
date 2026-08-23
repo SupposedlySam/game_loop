@@ -484,7 +484,21 @@ def inv_oneline():
             titles = re.findall(r"^##\s+INV\d+\s*[—–:.-]*\s*(.+?)\s*$", f.read(), re.MULTILINE)
     except OSError:
         titles = []
-    return "INV: " + " · ".join(titles) if titles else _INV_FALLBACK
+    if titles:
+        return "INV: " + " · ".join(titles)
+    # AND SAY WHICH CREED THIS IS. The fallback used to print as a bare `INV: ...` — identical in
+    # shape to the project's own, so "these are YOUR invariants" and "I could not read yours, here
+    # is game_loop's" were one observable. The fallback is also STALE by construction: it is a
+    # hardcoded six-item list maintained separately from anybody's INVARIANTS.md, so a project
+    # whose headings get reshaped silently starts being shown a shorter, different creed as if it
+    # were theirs — and the reshaping is the likeliest way to get here.
+    #
+    # Still never breaks status, which is why the fallback exists. It just stops lying about whose
+    # north star it is quoting.
+    return (_INV_FALLBACK + "\n"
+            "  ⚠ THAT IS game_loop's OWN CREED, NOT THIS PROJECT'S — no `## INVn — <title>` "
+            "headings were readable in\n"
+            f"    {INV_F}. Restore that heading shape and status quotes your invariants again.")
 
 
 # Cost ladder, cheapest -> most expensive. T3 is the only hard-gated rung: it is the human's

@@ -317,6 +317,15 @@
       "change": "`verify` no longer prints \"all owed checks passed\" when it ran NOTHING. When every changed file's evidence is already newer than the change, it now says so in its own words and exits 0. The sentence is reserved for a run that actually executed a check.",
       "consequence": "a repeat `verify` on an unchanged tree prints \"every changed file's evidence is already newer than the change \u2014 nothing needed re-running\" instead of the success line. Same exit code, nothing refused. If you grep stdout for \"all owed checks passed\" to decide a tree is verified, that string now appears only when a check was actually run \u2014 which is what it was always read as meaning.",
       "why_it_qualifies": "a consumer who changed nothing sees a different sentence, and anything scripting on the old one changes behaviour. The old line conflated 'the checks ran and were green' with 'somebody ran them earlier and nothing has changed since' \u2014 different claims about how recently the tree was checked. `--check` had always distinguished this state; the run path had not, so the two halves of one tool disagreed."
+    },
+    {
+      "seq": 32,
+      "sha": "pending",
+      "notice": true,
+      "verb": "status",
+      "change": "when status cannot parse any `## INVn \u2014 <title>` heading from your INVARIANTS.md it still prints game_loop's built-in creed, but now SAYS that is what it is, names your INVARIANTS.md and the heading shape to restore. Projects whose headings parse are unaffected.",
+      "consequence": "if your INVARIANTS.md headings do not match `## INVn \u2014 <title>`, status gains a two-line warning under the INV line. Nothing is refused and status still works \u2014 that is why the fallback exists. If you were seeing a short creed that did not sound like yours, this is why.",
+      "why_it_qualifies": "the fallback is six hardcoded items maintained separately from any INVARIANTS.md \u2014 eight in this project \u2014 and it printed as a bare `INV: ..`, identical in shape to the real thing. So 'these are YOUR invariants' and 'I could not read yours, here is mine' were one observable, and a reshaped-heading migration silently swapped one for the other."
     }
   ],
   "schema": 1

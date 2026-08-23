@@ -3572,6 +3572,19 @@ def main():
                   and pub["notes_files"] == ["LEDGER.md"]
                   and sorted(pub["rule_files"] + pub["notes_files"])
                   == sorted(o["path"] for o in owned))
+            # THE SAME FACT IS PUBLISHED TWICE — a per-file `rule` flag on every owned entry, and
+            # the rule_files/notes_files lists — and the two are maintained separately in the
+            # source. They agree today and nothing said they must. The consequence of a divergence
+            # is not cosmetic: the FLAG is what `owned` prints to a human ("rule .game_loop/x"),
+            # while RULE_FILES is what the worktree comparison actually diffs between trees. A file
+            # flagged as a rule but missing from the list would be described as a gate and never
+            # compared as one, in two outputs of the same verb.
+            check("...and the per-file `rule` FLAG agrees with those lists — one fact published "
+                  "twice, where the flag is what a human is shown and the list is what the drift "
+                  "comparison diffs, so a disagreement gates nothing while reading as a gate",
+                  sorted(o["path"] for o in owned if o.get("rule")) == sorted(pub["rule_files"])
+                  and sorted(o["path"] for o in owned if not o.get("rule"))
+                  == sorted(pub["notes_files"]))
             # `owned` is asserted to be the full four in both: `all()` over an empty list is True,
             # and a check an empty answer satisfies is a check that cannot fail.
             check("...install.sh seeds exactly that set — one list, not two that drift apart",

@@ -352,9 +352,7 @@ MUTANTS = [
     # paired arms below.
     ("superseded -> never reports supersession", ".game_loop/bin/watchdog::superseded",
      "    return False\n", ["supersed", "pidfile", "watchdog"],
-     "measured at 4, floored at 2: the other two kills are the sweep's own bookkeeping noticing that "
-     "a neutered `superseded` no longer parses as a producer, which is an artifact of the mutation "
-     "and not evidence about the watchdog", 2),
+     "re-measured today: 2 kills, and BOTH are behavioural — the stand-down itself and the line that SAYS it stood down. This note used to read 'measured at 4, floored at 2: the other two kills are the sweep's own bookkeeping noticing that a neutered superseded no longer parses as a producer'. That reading no longer reproduces, and the accounting assertions changed under it during this session's work. The floor was right; its EXPLANATION had gone stale, which matters because a reader subtracting two artefacts from a future reading of 4 would record a floor of 2 for a producer that had genuinely improved", 2),
     # Measured on the working tree, not on HEAD: claims.json did not exist in HEAD when this was
     # measured, so the archived fixture could not be built and the baseline came back 0 — which the
     # measuring harness now refuses to report a number from rather than publishing an UNPROTECTED

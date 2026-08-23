@@ -10084,6 +10084,25 @@ def main():
         check("...and returns False — not None — for a tag that exists locally and was never "
               "pushed, which is the case the whole check was built for",
               _grr.remote_has_ref("stable-local-only") is False)
+        # IT ASKS THE REMOTE, NOT THE LOCAL TAG LIST, and that is not visible from the two arms
+        # above: both tags exist locally, so an implementation reading `git tag` would answer them
+        # identically. Delete the local tag and keep the remote one — a local reader now says
+        # False about a tag that IS published, which is the reading that would let unpublished
+        # work be reported as released.
+        subprocess.run(_g + ["tag", "-d", "stable-pushed"], check=True, capture_output=True)
+        check("...and it asks the REMOTE rather than the local tag list — a tag deleted locally "
+              "but still on origin is TRUE, which a `git tag` reader would get exactly backwards",
+              _grr.remote_has_ref("stable-pushed") is True)
+        # THE BOUNDARY THAT COST A GATE. This asks `ls-remote --tags`, so a pushed COMMIT is not
+        # a match. The release gate once used this to ask "is HEAD on the remote", got False for
+        # every pushed commit, and never fired — a function answering the NEIGHBOURING question,
+        # which is the most common way a check here goes quiet. Pinned so the boundary is a
+        # documented fact rather than a trap the next caller rediscovers.
+        _head_sha = subprocess.run(_g + ["rev-parse", "HEAD"],
+                                   capture_output=True, text=True).stdout.strip()
+        check("...and a pushed COMMIT is NOT a match, because this asks --tags: the distinction "
+              "that made a release gate answer False forever and fire never",
+              _grr.remote_has_ref(_head_sha) is False)
         subprocess.run(_g + ["remote", "remove", "origin"], check=True)
         check("...and a tree with NO remote is COULD NOT ASK (None), never False. An unanswerable "
               "question rendered as 'not pushed' would be a confident answer nobody established",

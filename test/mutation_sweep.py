@@ -831,9 +831,21 @@ MUTANTS += [
     ("mutation_liveness -> the probe never establishes anything",
      ".game_loop/bin/game_loop::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
      ["#80", "liveness", "INERT"], None, 0),
+    # THIN AT 2 -> 3, and the number depends on WHICH mutation, which nearly cost me the floor.
+    # Two added assertions: that it asks the REMOTE rather than the local tag list (both tags in
+    # the old fixture existed locally, so a `git tag` reader would answer them identically — delete
+    # the local one and a local reader gets a PUBLISHED tag exactly backwards), and that a pushed
+    # COMMIT is NOT a match because this asks --tags. That second boundary once made the release
+    # gate answer False for every pushed commit and fire never: a function answering the
+    # NEIGHBOURING question, the most common way a check here goes quiet.
+    #
+    # I MEASURED IT FIRST AGAINST `return None` AND GOT 4. The body recorded here is `return False`,
+    # and against THAT the pushed-COMMIT arm holds — a dead producer returns False too. Same
+    # assertions, same producer, different mutation, different coverage. A floor is only a fact
+    # about the mutation it was taken against, so measure the body this line actually names.
     ("remote_has_ref -> the remote never has the ref",
      ".game_loop/bin/game_loop::remote_has_ref", "    return False\n",
-     ["remote", "ref", "ONLY LOCAL", "push"], None, 0),
+     ["remote", "ref", "ONLY LOCAL", "push"], None, 3),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
      ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
      # THIN AT 1 -> 3. Three assertions called it and two asserted `issues is None and why` — which

@@ -335,6 +335,15 @@ mutate --prove ".." --test <command> --file <path> --replace ".." --with ".."
 #   each reported exactly that, and three stayed GREEN with the bug reintroduced.
 #   --replace must appear EXACTLY once. --timeout <sec> per run (default 900).
 #   A green mutated run is decisive; a red one is one specific claim, not a good test.
+#   YOUR --test RUNS IN THE REPO ROOT, not your cwd. A relative path in it resolves somewhere
+#   else and the runner exits before selecting anything — use --test "cd <dir> && ..". This
+#   cost a consumer one wrong conclusion, because a command that COULD NOT START and a test
+#   that RAN AND FAILED both exit non-zero. The verb now separates them: it says RAN and
+#   FAILED only when it read a test count, and COULD NOT TELL otherwise, naming the root.
+#   Before the result it also probes the anchor with a `raise`: a mutation that changes
+#   nothing is reported as INERT (your anchor is not on the test's path), NEVER as "the test
+#   is vacuous" — opposite conclusions, same observable. The probe needs the file to PARSE as
+#   Python; it reads the source, not the extension, so an extensionless program is fine.
 kinds
 #   every log record kind this code can write, with its fields, extracted from the SOURCE.
 #   READ THIS BEFORE MATCHING ON `kind` IN A TRIGGER. A consumer matched `kind == "mandate"`,

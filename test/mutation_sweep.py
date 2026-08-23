@@ -280,9 +280,15 @@ MUTANTS = [
      # branch entirely passed everything. The refusal must name ITS OWN counter: one that named the
      # wrong debt would send the agent to fix something that is not owed.
      ["retro", "overdue", "threshold"], None, 4),
+    # THIN AT 2 -> 3. The word AFTER is the whole mechanism — the debt is satisfied by a harden
+    # logged AFTER the stepback — and nothing exercised it: every sequence in the suite hardened
+    # after, so a comparison degenerated into "is there any harden in the log at all" passed them
+    # all. That failure would have been permanent and silent, because the log is append-only and
+    # shared: ONE harden ever recorded would pay every future retro debt for the life of the
+    # checkout, and it would hit hardest the sessions that had been encoding things longest.
     ("retro_debt_open -> the retro never owes its encoding",
      ".game_loop/bin/game_loop::retro_debt_open", "    return None\n",
-     ["retro", "encoded", "harden"], None, 2),
+     ["retro", "encoded", "harden"], None, 3),
     # THE CLAIMS EXERCISE. Both floors were MEASURED, and the first measurement of both was 0 —
     # against a tree copied without .git, which cost 166 baseline assertions including the ones
     # being measured, so nothing could FLIP. The control reproduced its floor anyway, because its

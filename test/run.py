@@ -7737,6 +7737,26 @@ def main():
           "indistinguishable from the silence this gate exists to stop",
           _refused.returncode != 0)
 
+    # THE WORD "AFTER" IS THE WHOLE MECHANISM, and nothing exercised it. The debt is satisfied by a
+    # harden logged AFTER the stepback; every sequence above hardens after, so a comparison that
+    # had degenerated into "is there any harden in the log at all" would have passed all of them.
+    # And it would have been permanent: this log is append-only and shared, so ONE harden ever
+    # recorded would pay every future retro debt for the life of the checkout, silently, for
+    # exactly the sessions that had been doing the right thing longest.
+    gl(rw, "harden", "--learning", "encoded before the chapter it belongs to", "--artifact", _art,
+       "--mechanism", "z", "--rung", "3", sid="sess-r1")
+    gl(rw, "stepback", "--notes", "a chapter that came after that harden", sid="sess-r1")
+    _stale = _gate("sess-r1")
+    check("...and a harden logged BEFORE the stepback does NOT pay it — the debt is cleared by "
+          "encoding something FROM this chapter, so an older harden satisfying it would let one "
+          "entry ever recorded pay every future retro for the life of the log",
+          _stale.returncode == 2 and "encoded nothing" in _stale.stderr)
+    gl(rw, "harden", "--learning", "encoded from this chapter", "--artifact", _art,
+       "--mechanism", "z2", "--rung", "3", sid="sess-r1")
+    check("...and the NEXT harden pays it, so the arm above is about ordering rather than a gate "
+          "that has stopped being satisfiable",
+          _gate("sess-r1").returncode == 0)
+
     # THE NUDGE ITSELF, escalating. A printed nudge is a thing to remember; agents pass over it and
     # never re-check. It stays advice for a whole threshold, then closes.
     _sd = os.path.join(rw, ".game_loop", "sessions", "sess-r2")

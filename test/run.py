@@ -8692,6 +8692,32 @@ def main():
         "cmd_checkpoint", "cmd_harden", "cmd_measure",
         "cmd_pin", "cmd_status", "instruments_report",
     ]
+    # WHICH OF THE PINNED ONES HAVE ACTUALLY KILLED A MUTANT. An assertion that has never failed
+    # has never been run in anger, and today proved that twice: the guards_report symbol assertion
+    # passed while the mutation it was written for survived, because the word INERT has two arms.
+    # So "pinned" is a claim about an assertion EXISTING; this list is the stronger claim, and it
+    # is deliberately shorter. Each was measured with `mutate --prove` against the exact literal:
+    #
+    #   guards_report            ✗ → ✓ on the script-missing arm      PROVED 2026-08-23
+    #   <module> CLAIM_OUTCOMES  ✗ → ✓ on the refuted headline        PROVED 2026-08-23
+    #   mark_publication_state   ✓ → ⚠ on the both-refs line          PROVED 2026-08-23
+    #   pin_state                ✗ → ✓ on the MISSING arm             PROVED 2026-08-23
+    #
+    # THE OTHERS ARE UNVERIFIED, and that is a statement rather than an omission: each costs a full
+    # suite run twice (~15 min), so they are owed rather than skipped. Do not read the pinned count
+    # as a measured one.
+    _SYMBOL_MUTATION_VERIFIED = [
+        "<module>", "guards_report", "mark_publication_state", "pin_state",
+    ]
+    check("every producer whose symbol assertion has KILLED A MUTANT is one this suite also claims "
+          "to pin — the stronger list cannot name something the weaker one does not, or the record "
+          "reads as verified coverage of a producer nothing asserts",
+          set(_SYMBOL_MUTATION_VERIFIED) <= set(_SYMBOL_PINNED))
+    check("...and it is SHORTER than the pinned list, which is the honest state: an assertion that "
+          "exists and an assertion that has failed for the right reason are different claims, and "
+          "conflating them is what let a passing assertion sit beside a surviving mutant today",
+          len(_SYMBOL_MUTATION_VERIFIED) < len(_SYMBOL_PINNED))
+
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))
     check("every producer that can emit MORE THAN ONE symbol is on one of the two recorded lists "

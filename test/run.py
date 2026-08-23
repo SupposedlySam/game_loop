@@ -1947,6 +1947,44 @@ def main():
               r.returncode == 0 and "EFFECTOR PROVED" in r.stdout)
         check("an accepted proof states what it does NOT catch (INV6)",
               "DOES NOT CATCH" in r.stdout and "point-in-time" in r.stdout)
+        # EFFECTOR_STATE'S FOUR ARMS, none of which had an assertion until now — the same family
+        # gap measured on pin_state, in the producer next door. Each drift case gets its OWN
+        # effector and its own capture files, so proving one unverifiable cannot quietly change
+        # what a later assertion about `scroll` is reading.
+        _eline = lambda out, nm: next((l for l in out.splitlines()
+                                       if l.strip().startswith(("✓", "•", "✗", "?"))
+                                       and nm in l), "")
+        _es = gl(proj, "status").stdout
+        check("a proved effector renders ✓ and names the change it asserted — the ordinary case, "
+              "and the one every claim leaning on an effector is standing on",
+              has(_es, "acted, and the change was the asserted one")
+              and _eline(_es, "scroll").strip().startswith("✓"))
+        _ub, _ua = os.path.join(cap, "unch-b.txt"), os.path.join(cap, "unch-a.txt")
+        with open(_ub, "w") as f:
+            f.write("panel: closed\n")
+        with open(_ua, "w") as f:
+            f.write("panel: open\n")
+        gl(proj, "effector", "--prove", "toggle", "--known-state", "the panel starts closed",
+           "--before", _ub, "--observed", _ua)
+        _us = gl(proj, "status").stdout
+        check("...and one proved with NO --expect renders • and says UNCHECKED — the pair proves "
+              "SOMETHING changed, which is not the same claim as the asserted thing changing",
+              has(_us, "acted (UNCHECKED — no --expect")
+              and _eline(_us, "toggle").strip().startswith("•"))
+        with open(_ua, "w") as f:
+            f.write("panel: open, and then something else wrote here\n")
+        _os_ = gl(proj, "status").stdout
+        check("...and an artifact OVERWRITTEN since the comparison is ? unverifiable, not ✓ — the "
+              "file at that path is no longer the one that was compared, and a proof pointing at "
+              "different bytes than it was made from is not a proof of anything",
+              has(_os_, "no longer the one that was compared")
+              and _eline(_os_, "toggle").strip().startswith("?"))
+        os.remove(_ua)
+        _ms = gl(proj, "status").stdout
+        check("...and a GONE artifact is ✗ MISSING, which is a different answer again: overwritten "
+              "means the evidence changed, missing means there is none to inspect",
+              has(_ms, "MISSING — the observed artifact is gone")
+              and _eline(_ms, "toggle").strip().startswith("✗"))
         r = gl(proj, "claim", "--assert", "the app cannot scroll at all", "--read", real,
                "--effector", "click")
         check("a claim depending on an unproven effector is refused",
@@ -2591,6 +2629,62 @@ def main():
         check("status carries the fix proof and its promised outcome through compaction",
               "FIXES" in r.stdout and "accepts a null id" in r.stdout
               and "the repro, kept separate on purpose" in r.stdout)
+        # FIX_STATE'S FIVE ARMS — the last of the three state producers, and the same gap in all
+        # three: the accept message says "moved to what the fix promised", and nothing checked that
+        # STATUS still says it, or with which symbol. A separate proof and its own files, so
+        # walking one through overwritten-then-gone cannot disturb `null-id` above.
+        _fline = lambda out, nm: next((l for l in out.splitlines()
+                                       if l.strip().startswith(("✓", "•", "✗", "?"))
+                                       and nm in l), "")
+        check("a proved fix renders ✓ in status and names the promise the verdict moved to — the "
+              "accept message said it once; nothing checked that the report still does",
+              has(r.stdout, "moved to what the fix promised")
+              and _fline(r.stdout, "null-id").strip().startswith("✓"))
+        # ITS OWN SANDBOX, for the reason the pin block above documents: a proof registered in a
+        # shared tree changes what LATER assertions about that session see. Adding `two-id` to the
+        # main sandbox broke two handback-warning checks — the same leak as the sequential pin ids,
+        # through a different door. State a fixture adds is state some other fixture is reading.
+        _fxproj = make_sandbox()
+        _fxd2 = os.path.join(_fxproj, "fixwork2")
+        os.makedirs(_fxd2, exist_ok=True)
+
+        def _fx2(name, body):
+            q = os.path.join(_fxd2, name)
+            with open(q, "w") as f:
+                f.write(body)
+            return q
+
+        _p2 = _fx2("gen2.dart", "class Two { Two(); }\n")
+        _r2 = _fx2("repro2.txt", "reproduced: Two() throws\n")
+        _b2 = _fx2("before2.txt", "gen2.dart:1:9: error: expected ';'\n")
+        _a2 = _fx2("after2.txt", "gen2.dart: Built — 0 errors\n")
+        gl(_fxproj, "fix", "--prove", "two-id", "--promises", "the second generator compiles",
+           "--produces", _p2, "--diagnosis", _r2, "--before", _b2, "--observed", _a2)
+        _f1 = gl(_fxproj, "status").stdout
+        check("...and one proved with NO --expect renders • and says UNCHECKED — the pair proves "
+              "the verdict MOVED, which is not the claim that it moved to the promised outcome",
+              has(_f1, "holds (UNCHECKED — no --expect")
+              and _fline(_f1, "two-id").strip().startswith("•"))
+        with open(_a2, "w") as f:
+            f.write("gen2.dart: Built — 0 errors, and then a later run wrote over this\n")
+        _f2 = gl(_fxproj, "status").stdout
+        check("...and a verdict OVERWRITTEN by a later run is ? unverifiable — the bytes at that "
+              "path are no longer the ones compared, so the proof no longer points at its evidence",
+              has(_f2, "no longer the one that was compared")
+              and _fline(_f2, "two-id").strip().startswith("?"))
+        os.remove(_a2)
+        _f3 = gl(_fxproj, "status").stdout
+        check("...and a verdict GONE is ✗ MISSING and says WHICH of the two it was, because "
+              "'observed' and 'before' send you to different places to look",
+              has(_f3, "MISSING — the observed verdict is gone")
+              and _fline(_f3, "two-id").strip().startswith("✗"))
+        os.remove(_p2)
+        _f4 = gl(_fxproj, "status").stdout
+        check("...and the fix's OWN OUTPUT going missing is reported ahead of either verdict — "
+              "with the artifact gone there is nothing for the pair to have been about, and that "
+              "is the first thing a reader needs rather than the third",
+              has(_f4, "MISSING — the fix's own output is gone"))
+
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             fxlog = f.read()
         check("the proof is greppable in the log as compared artifacts, not a verdict",

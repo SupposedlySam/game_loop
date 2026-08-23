@@ -1683,6 +1683,41 @@ def main():
         check("both the pin and its release are permanent in the log",
               '"pin"' in log and '"pin_release"' in log
               and "the API landed on the default branch" in log)
+        # THE REST OF pin_state's FAMILY, enumerated rather than sampled. Covering MISSING after
+        # the probe called it inert left the other arms exactly as they were, which is the partial
+        # sweep this repo keeps re-learning. Measured across all three state producers: DRIFTED had
+        # one assertion, MISSING now has its own, and `UNCHECKED`/`holds` had NONE anywhere — so
+        # the line a human sees on every pin registered WITHOUT --expect was unasserted in both
+        # symbol and word, and that is the commonest pin there is.
+        #
+        # ITS OWN SANDBOX, deliberately. Pin ids are sequential, so registering one in the block
+        # above renumbers every later `--release` — the trap documented three screens up, which I
+        # then walked into from the other side. A fresh tree cannot be renumbered by anybody.
+        _pinproj = make_sandbox()
+        _anch = os.path.join(_pinproj, "anchor-file.txt")
+        with open(_anch, "w") as f:
+            f.write("build-id abc123def456\n")
+        gl(_pinproj, "pin", "--fact", "the build id is abc123def456", "--reason",
+           "the release notes are generated from it", "--path", _anch, "--expect", "abc123def456")
+        gl(_pinproj, "pin", "--fact", "the toolchain directory is the one from the incident",
+           "--reason", "a rebuild picks a different one", "--path", _pinproj)
+        _ps = gl(_pinproj, "status").stdout
+        _hline = [l for l in _ps.splitlines() if "the build id is abc123def456" in l]
+        _uline = [l for l in _ps.splitlines() if "the toolchain directory" in l]
+        check("a pin whose --expect still HOLDS renders ✓ and says what it checked — the ordinary "
+              "case, and the one carrying the most pins",
+              has(_ps, "holds (still contains 'abc123def456')")
+              and bool(_hline) and _hline[0].strip().startswith("✓"))
+        check("...and a pin with NO --expect renders • and says UNCHECKED, never ✓ — existence is "
+              "not verification, and the incident behind pins left a real directory in place",
+              has(_ps, "UNCHECKED — no --expect")
+              and bool(_uline) and _uline[0].strip().startswith("•"))
+        # NOT `len({"✓", "•", "✗"}) == 3`, which is what I wrote first: a literal set compared
+        # against its own size is true whatever the program does. The claim is about these LINES.
+        check("...and the two do not render the same symbol — a verified pin and an unchecked one "
+              "side by side in one report, and the symbol is the part a human reads first",
+              bool(_hline) and bool(_uline)
+              and _hline[0].strip()[0] != _uline[0].strip()[0])
         # #15: a HUMAN-called break needs somewhere to go. Without it the only endings are "violate
         # the gate" or "fabricate a closure that reads forever as though the work was done". A park
         # keeps the mandate OPEN and attributes the break to the human — and, crucially, it is

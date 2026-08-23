@@ -1429,6 +1429,25 @@ def main():
               "report.")
         shutil.rmtree(base, ignore_errors=True)
         return 1
+    # WHAT THIS SET DIFFERENCE ASSUMES ABOUT ITS INPUTS — asked deliberately rather than after
+    # being bitten, and every answer is now either enforced or measured:
+    #
+    #   names are UNIQUE          a duplicate is one set element, so a kill in one of a pair is
+    #                             invisible and the producer reports thinner than it is.
+    #                             ENFORCED: test/run.py asserts uniqueness over its 1358 literal
+    #                             messages. There was exactly one collision when first checked.
+    #   names are STABLE run to   an interpolated value that varies between runs leaves the
+    #   run                       baseline set and enters the mutant set, which reads as a kill
+    #                             AND a new assertion. MEASURED 2026-08-23 at 3a83c411: two runs
+    #                             of the same tree, 1453 names each, zero differences either way.
+    #                             40 of the 1398 messages are computed; all interpolate from
+    #                             source scans, fixtures or loop variables, none from product
+    #                             output. A fact about that day, not a guarantee — re-run two
+    #                             copies and diff the names if a message starts embedding
+    #                             something the code under test produces.
+    #   the baseline FINISHED     refused below, loudly, rather than measured against a short run.
+    #   the mutant FINISHED       NOT MEASURED below, distinct from UNPROTECTED and from THIN.
+    #   the anchor MATCHED        neuter() reports a miss and it is not silently skipped.
     baseline = set(passing(baseline_out))
     # A FLOOR MEASURED AGAINST AN UNFINISHED SUITE IS NOT A FLOOR. Every kill count this file has
     # ever printed was measured against a baseline of 788 instead of 966, because the suite CRASHED

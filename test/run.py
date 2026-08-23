@@ -9699,6 +9699,30 @@ def main():
         check("...and with a VERSION it reports the sha it is pinned to, stripped — so the two "
               "answers above are verdicts rather than one constant",
               _g3.pin_status(_u3h) == (True, "deadbeef1234"))
+        # IT ANSWERS ABOUT THE TREE IT WAS HANDED, which none of the three arms above can see —
+        # they all pass one root. worktree_drift() calls this TWICE, for this tree and for the main
+        # checkout, and reports them as separate fields; a version that ignored its argument and
+        # answered about the process would fill both from one tree and the porcelain would claim
+        # the two trees agree whenever the caller's own happened to be pinned.
+        _other = tempfile.mkdtemp(prefix="gl_pin_other_")
+        try:
+            _otherh = os.path.join(_other, ".game_loop")
+            os.makedirs(_otherh)
+            check("...and it answers about the TREE IT WAS GIVEN — a second root with no pin says "
+                  "so while the first still reports its sha, in the same process",
+                  _g3.pin_status(_otherh) == (False, None)
+                  and _g3.pin_status(_u3h) == (True, "deadbeef1234"))
+            _op = os.path.join(_other, _g3.PINNED_DIRNAME, ".game_loop")
+            os.makedirs(_op)
+            with open(os.path.join(_op, "VERSION"), "w") as f:
+                f.write("cafe99\n")
+            check("...and two PINNED trees report their OWN shas rather than one shared answer — "
+                  "the porcelain publishes this tree's pin beside the main checkout's, and equal "
+                  "shas there is the reading that means 'these two agree'",
+                  _g3.pin_status(_otherh) == (True, "cafe99")
+                  and _g3.pin_status(_u3h) == (True, "deadbeef1234"))
+        finally:
+            shutil.rmtree(_other, ignore_errors=True)
 
         # running_host_version — which Claude Code binary is actually running. Its NOTHING arm
         # carries a reason, and the reasons differ: unset is a different fact from set-but-shapeless.

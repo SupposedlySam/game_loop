@@ -721,9 +721,16 @@ MUTANTS += [
     ("working_tree -> never resolves a worktree",
      ".game_loop/bin/game_loop::working_tree", "    return None, None\n",
      ["worktree", "working tree", "checkout"], None, 3),
+    # THIN AT 2 -> 4, measured against the RECORDED body `return False, None`. All three original
+    # arms passed ONE root, so none of them could see that this answers about the TREE IT WAS
+    # HANDED. worktree_drift() calls it twice — this tree and the main checkout — and publishes the
+    # two as separate porcelain fields, so a version that ignored its argument would fill both from
+    # one tree, and the report would claim the trees agree whenever the caller's own happened to be
+    # pinned. Two roots now, and two PINNED roots at different shas, which is the case that
+    # "equal shas means these two agree" actually rests on.
     ("pin_status -> never reports a tree as pinned",
      ".game_loop/bin/game_loop::pin_status", "    return False, None\n",
-     ["pin", "pinned"], None, 2),
+     ["pin", "pinned"], None, 4),
     ("probe_reading -> a probe's output never yields a reading",
      ".game_loop/bin/game_loop::probe_reading", "    return {}, None\n",
      ["probe", "rate-limit", "context window"], None, 3),

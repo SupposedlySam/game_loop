@@ -7875,6 +7875,43 @@ def main():
     # and 4 by a 28-minute run of all 47 producers, which is strictly better than being declared.
     # So this pins the stronger property, and the weaker one is gone because it stopped being true.
     _mut_src = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+    # A HAND-RUN IS THE MOST BELIEVABLE WRONG ENTRY (owner, llm_chat, 2026-08-23). Theirs excused
+    # a function as "all three outcomes asserted by running it" — true, and a hand-run, and it
+    # recorded the hand-run as coverage. The person writing that really did watch the thing work,
+    # which is exactly why nobody re-reads the line. An exclusion list is where a gap gets STATED
+    # instead of hidden, so a wrong reason in one is worse than no entry: an unexamined line
+    # invites a look, and "covered, because X" stops the next reader.
+    #
+    # THIS REPO HAS ONE SUCH REASON and it is already the right shape — `_saggar_agent`'s success
+    # arm can only be observed by letting a suite open real terminals, so it was proved once by
+    # hand and the entry says so: "point-in-time, not a check that runs again ... a STATED GAP over
+    # one half of one function, not a claim that the function is covered". The rule below is what
+    # keeps the NEXT one honest, because that sentence is the whole difference and it is one
+    # careless edit from being dropped.
+    def _handrun_without_disclaimer(entries):
+        """Exclusion reasons citing a hand-run WITHOUT saying it is not a check that runs again."""
+        cited = re.compile(r"\b(by hand|ran it|I ran|by running it|manually)\b", re.I)
+        owned = re.compile(r"point-in-time|not a check|STATED GAP|does not run again", re.I)
+        return sorted(k for k, why in entries.items()
+                      if cited.search(why or "") and not owned.search(why or ""))
+
+    _handrun = _handrun_without_disclaimer(_ns)
+    check("no exclusion cites a HAND-RUN as its coverage without saying in the same breath that a "
+          "hand-run is point-in-time and not a check — the most believable wrong entry there is, "
+          "because whoever wrote it really did watch the thing work",
+          _handrun == [])
+    check("...and the rule can fire: a reason that says it was proved by hand and stops there is "
+          "reported, so the clean result above is a verdict rather than a pattern matching nothing",
+          _handrun_without_disclaimer({"f::g": "proved by hand, called live and it worked"})
+          == ["f::g"])
+    check("...and it does NOT fire on the entry that owns its limit — the difference between the "
+          "two is one sentence, which is precisely why it needs a check rather than a habit",
+          _handrun_without_disclaimer(
+              {"f::g": "proved once by hand; that proof is point-in-time, not a check that runs "
+                       "again, so this is a STATED GAP"}) == [])
+    check("...and the repo's one hand-run entry is REAL rather than hypothetical — a rule about a "
+          "shape nothing here has is a rule nobody maintains, so this pins that the case exists",
+          any(re.search(r"\bby hand\b", w or "", re.I) for w in _ns.values()))
     check("the two producers gating turn-end are SWEPT with measured floors, not excluded — an "
           "entry in NOT_SWEPT is invisible to the instrument by construction, so paying 'floor owed "
           "on the next sweep' meant ceasing to exclude them",

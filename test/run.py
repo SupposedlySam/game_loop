@@ -3688,6 +3688,12 @@ def main():
             check("...and status says so as a note rather than as a finding",
                   "notes differ" in r.stdout and "RULES MATCH" in r.stdout
                   and "RULES DIFFER" not in r.stdout)
+            # THE SYMBOL ON THAT LINE. Two trees that ENFORCE DIFFERENT THINGS is the finding this
+            # report exists for, and ✓/⚠ is where it is read first — asserted here where the rules
+            # match, and below where they have drifted, so the pair is a discrimination.
+            _wline = lambda out: next((l for l in out.splitlines() if "RULES " in l), "")
+            check("a worktree whose rules MATCH the main checkout opens that line with ✓",
+                  _wline(r.stdout).strip().startswith("✓"))
 
             # Now drift a RULE, and make sure both renderings say the same thing about the same files.
             with open(os.path.join(wt, ".game_loop", "verify.yaml"), "a") as f:
@@ -3697,6 +3703,10 @@ def main():
                   "WORKTREE" in r.stdout and "RULES DIFFER" in r.stdout
                   and ".game_loop/verify.yaml" in r.stdout
                   and str(mainco) in r.stdout)
+            check("...and it opens with ⚠ rather than ✓ — the quiet direction of this drift is a "
+                  "verify.yaml that owes LESS and reports success while checking less, so a tree "
+                  "enforcing different rules must not be announced with the symbol for agreement",
+                  _wline(r.stdout).strip().startswith("⚠"))
             r = gl(wt, "worktree", "--porcelain")
             d = json_text(r.stdout)
             check("worktree --porcelain names WHICH files drifted, not merely that something did",
@@ -8524,14 +8534,14 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "effector_state", "external_claims_report", "fix_state", "guards_report", "pin_state",
-        "triggers_report",
+        "effector_state", "external_claims_report", "fix_state", "guards_report",
+        "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
         "<module>", "cmd_checkpoint", "cmd_claim", "cmd_confidence", "cmd_harden", "cmd_measure",
         "cmd_notify", "cmd_pin", "cmd_status", "fire_triggers",
-        "instruments_report", "mark_publication_state", "release_distance_warning",
-        "retro_outcome", "update_notice", "waiting_report", "worktree_report",
+        "instruments_report", "release_distance_warning",
+        "retro_outcome", "update_notice", "waiting_report",
     ]
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))
@@ -11198,6 +11208,19 @@ def main():
                   "nothing was compared rather than reporting either way",
                   "COULD NOT CHECK" in _unk and "NOT 'they are pushed'" in _unk
                   and "BOTH refs" not in _unk)
+            # AND THE SYMBOLS, which nothing pinned — the words above are all `in` checks, and a
+            # substring pins the substring and nothing else on the line. ✓ here means consumers can
+            # install this release; ⚠ means they cannot, or that nobody asked. Same block, same
+            # position, and the character is what a human scans before reading a word of it.
+            _sym1 = lambda t: t.strip().splitlines()[0].strip()[:1]
+            check("the publication mark carries ✓ only when BOTH refs are on the remote, and ⚠ "
+                  "when they are not — 'consumers can reach this' and 'this never left the "
+                  "machine' are opposite claims and must not open with the same character",
+                  _sym1(_ok) == "✓" and _sym1(_bad) == "⚠" and _sym1(_ptr) == "⚠")
+            check("...and a remote that could not be ASKED also opens ⚠, never ✓ — an offline "
+                  "`ls-remote` rendering as the symbol for 'published' is the substitution this "
+                  "whole project exists to refuse, and the symbol is where it would happen",
+                  _sym1(_unk) == "⚠")
         finally:
             _gm.remote_has_ref = _real
 

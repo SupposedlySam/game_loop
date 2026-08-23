@@ -995,7 +995,13 @@ def main():
         # coverage. The absence IS the finding here, so it has to be expressible as False.
         check("...and the AUTO handoff that same turn-end just wrote does NOT satisfy it",
               os.path.isfile(hpc) and os.path.getsize(hpc) > 0 and denied(limitgate(p_ctx)))
-        check("gate allows the Write that creates the handoff",
+        # NAMED APART FROM ITS TWIN in the usage-limit block, which asserts the same property of a
+        # different gate. The sweep counts kills as a set difference over passing assertion NAMES,
+        # so two checks sharing a name are ONE entry: if one flips and the other does not, the name
+        # is still in the passing set and the kill is invisible. It under-counts, silently, in the
+        # direction that makes coverage look worse than it is — and could push a producer under a
+        # floor for a reason that has nothing to do with the producer.
+        check("gate allows the Write that creates the handoff, on context",
               not denied(limitgate(dict(p_ctx, tool_name="Write",
                                         tool_input={"file_path": hpc}))))
         check("gate allows game_loop verbs while closed on context",
@@ -7907,6 +7913,38 @@ def main():
           "the wrong counter would send the agent to fix something that is not owed",
           _tover.returncode == 2 and has(_tover.stderr, "24 transitions")
           and not has(_tover.stderr, "pieces of evidence work"))
+
+    print("two assertions sharing a name are one row to the instrument that reads them:")
+    # THE MUTATION SWEEP COUNTS KILLS AS A SET DIFFERENCE OVER PASSING ASSERTION NAMES —
+    # `set(passing(baseline)) - set(passing(mutant))`. Two check() calls with the same message are
+    # therefore ONE element: if one of them flips under a mutant and the other still passes, the
+    # name never leaves the passing set and the kill is invisible. The count comes out low, for a
+    # reason that has nothing to do with the producer, and could push it under its recorded floor.
+    #
+    # Found by scanning for it, not by being bitten: there was exactly one pair, both asserting
+    # "gate allows the Write that creates the handoff" — one of the usage-limit gate and one of the
+    # context gate. Their neighbours were already differentiated with an "on context" suffix, so
+    # the collision was a missed rename rather than a disagreement about naming.
+    _msgs = []
+    for _c in ast.walk(ast.parse(read_or_empty(os.path.join(REPO, "test", "run.py")))):
+        if isinstance(_c, ast.Call) and getattr(_c.func, "id", None) == "check" and _c.args:
+            try:
+                _v = ast.literal_eval(_c.args[0])
+            except Exception:                        # noqa: BLE001 — a computed message, skipped
+                continue
+            if isinstance(_v, str):
+                _msgs.append((_c.lineno, _v))
+    _seen, _dupe = {}, []
+    for _ln, _v in _msgs:
+        if _v in _seen:
+            _dupe.append(f"lines {_seen[_v]} and {_ln}: {_v[:60]}")
+        else:
+            _seen[_v] = _ln
+    check(f"every literal assertion name in this suite is unique across all {len(_msgs)} of them — "
+          "the sweep's kill count is a set difference over these names, so a shared one hides a "
+          "real kill and reports the producer as thinner than it is: "
+          + ("; ".join(_dupe) or "no collisions"),
+          not _dupe)
 
     print("an assertion that can silently not run is worse than one that fails:")
     # AN `if` OVER LOCAL STATE DOES NOT FAIL WHERE ITS CONDITION IS FALSE — it is simply absent, and

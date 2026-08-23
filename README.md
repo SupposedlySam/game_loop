@@ -118,6 +118,15 @@ Installing several repos on one machine? `install.sh --central` wires a repo to 
 shared, machine-wide location instead of copying it in — see "Central install" in
 [docs/how-it-works.md](docs/how-it-works.md) for setup and tradeoffs.
 
+**Have linked worktrees? Upgrading the main checkout moves the bar for all of them.** The commit gate
+compares each worktree's harness against the main checkout's, so installing there changes what every
+other live tree is measured against. Nothing surfaces at the time — the install succeeds, `status`
+looks healthy, and the worktrees look fine because nothing has asked them anything yet. It shows up
+later as a *refused commit on finished work*, for whoever is holding that work rather than whoever
+caused the drift. So `install.sh` now counts the linked worktrees before writing anything, names each
+one, and prints the command to re-provision it. It warns rather than refusing: the upgrade is usually
+right, and a gate that blocked it would be routed around.
+
 ## Your first unattended run
 
 Three steps. This is genuinely most of what a human does.
@@ -320,6 +329,13 @@ an honest answer. Carry two files into the extraction and `install.sh` honours t
 .game_loop/VERSION       the sha the extraction came from
 .game_loop/CONFIDENCE    alpha | beta | stable
 ```
+
+Those three words are the whole vocabulary, and **anything else in that file is reported as no mark
+at all** — not as a weak one. A typo, a level a later version added, or a half-written file makes
+`status` say the value is not a level this build knows, and an empty file says the install recorded
+something that did not survive. Until this was fixed, every unrecognised value fell through to the
+*stable* wording and claimed the author had run their own agent on it, which is the strongest thing
+this scheme can say and was not true for anyone who saw it.
 
 That is the whole contract. game_loop names no package manager and needs nothing from one at runtime;
 whoever produces the tree is the only party that knows which commit it holds, so they are the only

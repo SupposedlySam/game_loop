@@ -8060,6 +8060,19 @@ def main():
           "answer above is a verdict rather than a comparison that never fires",
           _dupe_prev
           and _dupe_names(_dupe_prev) == ["gate allows the Write that creates the handoff"])
+    # AND IT DOES NOT STOP AT THE FIRST. The historical control carries exactly ONE collision, so a
+    # scan that reported only the earliest match would satisfy it and still hide every collision
+    # after the first — "reporting one of two is the failure" is a thing this suite has already been
+    # bitten by, on dead triggers. A one-instance fixture cannot see a claim about a SET.
+    #
+    # Synthetic here on purpose, and the distinction is worth keeping: the historical control proves
+    # the scan finds a REAL instance, this proves it ENUMERATES. Different claims, and only the
+    # first is a statement about the shape of the defect.
+    check("...and it reports EVERY collision rather than the first — a scan whose control carries "
+          "one instance cannot distinguish 'finds them' from 'finds one'",
+          _dupe_names('def check(m, c): pass\n'
+                      'check("alpha", 1)\ncheck("alpha", 2)\n'
+                      'check("beta", 3)\ncheck("beta", 4)\n') == ["alpha", "beta"])
 
     print("an assertion that can silently not run is worse than one that fails:")
     # AN `if` OVER LOCAL STATE DOES NOT FAIL WHERE ITS CONDITION IS FALSE — it is simply absent, and
@@ -8290,6 +8303,18 @@ def main():
     check("...and the scan FINDS the one that existed before this was fixed, so the clean answer "
           "above is a verdict rather than a pattern that matches nothing",
           _prev_src and _whole_file_log_readers(_prev_src) == ["retro_outcome"])
+    # SAME ARGUMENT: the historical tree held exactly one offender, so it cannot tell a scan that
+    # enumerates from one that returns the first hit and stops.
+    check("...and it names EVERY reader with that shape, not just the earliest — the real fixture "
+          "carries one, and one instance cannot answer a question about a set",
+          _whole_file_log_readers(
+              "import json\nLOG_F = 'x'\n"
+              "def one():\n    try:\n        with open(LOG_F) as f:\n"
+              "            return [json.loads(l) for l in f]\n"
+              "    except (OSError, ValueError):\n        return []\n"
+              "def two_():\n    try:\n        with open(LOG_F) as f:\n"
+              "            return [json.loads(l) for l in f]\n"
+              "    except (OSError, ValueError):\n        return []\n") == ["one", "two_"])
 
     print("a guard nothing calls enforces nothing, whatever its coverage says:")
     # A FUNCTION REACHED ONLY FROM THE SUITE HAS COVERAGE AND NO EFFECT. It is the purest form of

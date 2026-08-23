@@ -320,7 +320,7 @@
     },
     {
       "seq": 32,
-      "sha": "pending",
+      "sha": "f0866a1",
       "notice": true,
       "verb": "status",
       "change": "when status cannot parse any `## INVn \u2014 <title>` heading from your INVARIANTS.md it still prints game_loop's built-in creed, but now SAYS that is what it is, names your INVARIANTS.md and the heading shape to restore. Projects whose headings parse are unaffected.",

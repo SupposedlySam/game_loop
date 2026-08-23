@@ -2750,10 +2750,16 @@ def main():
                   "lib/new_package.py" in r.stdout and "docs/notes.md" not in r.stdout)
             check("generated output is excluded without anyone listing it",
                   "lib/new_package.py" in r.stdout and "pubspec.lock" not in r.stdout)
-            try:
-                cov = json_text(vfy("--coverage", "--porcelain").stdout)
-            except ValueError:
-                cov = {}          # no machine-readable answer is a FAILED check, not a crash
+            # `or {}` RATHER THAN A try/except, and the difference cost a producer its reading.
+            # This was `json.loads(...)` inside `except ValueError: cov = {}`. When I converted the
+            # file's json.loads calls to the non-raising json_text(), the handler that supplied the
+            # safe default became UNREACHABLE — json_text returns None instead of raising, so None
+            # flowed into cov.get() and the run died. Measured: verify::changed_files came back NOT
+            # MEASURED in the next sweep, the exact harm the conversion was meant to remove.
+            #
+            # A guard that stops something raising also disables every handler downstream that was
+            # catching it. Removing an exception is an interface change, not a local safety fix.
+            cov = json_text(vfy("--coverage", "--porcelain").stdout) or {}
             check("the three buckets are counted, not just the unchecked one",
                   cov.get("unchecked") == ["lib/new_package.py"] and cov.get("checked") == 1
                   and cov.get("excluded") == 2 and cov.get("rules") == 1
@@ -8394,7 +8400,7 @@ def main():
 
         # ADVISORY, NEVER A GATE: a model mismatch is a COST failure, not a correctness one. The
         # output is fine, which is exactly why nothing notices and why it can run for a week.
-        _rep = "\n".join(_g.model_report({"transcript_path": _mt}))
+        _rep = "\n".join(_g.model_report({"transcript_path": _mt}) or [])
         check("a mid-run model change is reported LOUDLY and explicitly not blocked — bricking a "
               "deliberately-dispatched Crawler would do more damage than the thing it guards",
               "MODEL CHANGED MID-RUN" in _rep and "Not blocked" in _rep and "COST failure" in _rep)
@@ -10037,12 +10043,12 @@ def main():
         _real, _gm.remote_has_ref = _gm.remote_has_ref, _fake
         try:
             _seen = {"stable-abc": True, "stable": True}
-            _ok = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            _ok = "\n".join(_gm.mark_publication_state("stable-abc", "stable") or [])
             check("with both refs on the remote, the mark's last word says consumers can reach it",
                   "BOTH refs" in _ok and "ONLY LOCAL" not in _ok)
 
             _seen = {"stable-abc": False, "stable": True}
-            _bad = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            _bad = "\n".join(_gm.mark_publication_state("stable-abc", "stable") or [])
             check("an immutable tag that never left this machine is named as STILL ONLY LOCAL, and "
                   "the release announced above it is called what it is — about a commit the remote "
                   "cannot serve",
@@ -10050,7 +10056,7 @@ def main():
                   and "cannot serve" in _bad and "git push origin stable-abc" in _bad)
 
             _seen = {"stable-abc": True, "stable": False}
-            _ptr = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            _ptr = "\n".join(_gm.mark_publication_state("stable-abc", "stable") or [])
             check("...and a pushed tag with an UNPUSHED channel pointer is still a failure — that "
                   "is the case where consumers installing the channel get the PREVIOUS release",
                   "ONLY LOCAL" in _ptr and "channel pointer" in _ptr)
@@ -10058,7 +10064,7 @@ def main():
             # THREE OUTCOMES. `ls-remote` failing offline must never render as "pushed" — that is
             # the substitution this whole project exists to refuse.
             _seen = {"stable-abc": None, "stable": True}
-            _unk = "\n".join(_gm.mark_publication_state("stable-abc", "stable"))
+            _unk = "\n".join(_gm.mark_publication_state("stable-abc", "stable") or [])
             check("a remote that could not be ASKED is its own outcome — not 'pushed', and it says "
                   "nothing was compared rather than reporting either way",
                   "COULD NOT CHECK" in _unk and "NOT 'they are pushed'" in _unk
@@ -10973,7 +10979,7 @@ def main():
 
         # AND THE CONSEQUENCE. pinned_report() is what a human reads; nothing drove it, so the
         # finding could have stopped reaching the page with every assertion above still green.
-        _rep = "\n".join(_gpd.pinned_report())
+        _rep = "\n".join(_gpd.pinned_report() or [])
         check("...and the REPORT names both files and says what the state MEANS — that edits here "
               "are inert because the hooks run the pinned copy, which is the part that turns a "
               "diff into an explanation of why your fix did nothing",
@@ -10990,7 +10996,7 @@ def main():
               _dr2 == [] and _why2 and "nothing was compared" in _why2)
         check("...and the report says COULD NOT COMPARE rather than going quiet, so the one state "
               "that must not read as agreement does not share an appearance with it",
-              has("\n".join(_gpd.pinned_report()), "COULD NOT COMPARE"))
+              has("\n".join(_gpd.pinned_report() or []), "COULD NOT COMPARE"))
 
         # THE OTHER HALF OF THE SAME REPORT, and it was measured at ZERO. `_git_sha(REPO_ROOT)` is
         # what puts the repo's commit beside the pinned one, and it is the only thing that can
@@ -11013,7 +11019,7 @@ def main():
         _gpd.REPO_ROOT = _pd
         with open(os.path.join(_code, "VERSION"), "w") as f:
             f.write("0" * 40 + "\n")          # a pinned copy from a DIFFERENT commit
-        _rep2 = "\n".join(_gpd.pinned_report())
+        _rep2 = "\n".join(_gpd.pinned_report() or [])
         check("the report names the REPO's commit beside the pinned one — one sha alone cannot "
               "show you that the code guarding this session came from somewhere else",
               has(_rep2, "repo @ " + _home_sha[:8]))
@@ -11026,7 +11032,7 @@ def main():
             f.write(_home_sha + "\n")
         check("...while a pinned copy at the SAME commit carries no such warning, so the line "
               "above is a verdict about two shas rather than a banner every pinned session prints",
-              not has("\n".join(_gpd.pinned_report()), "DIFFERENT commit"))
+              not has("\n".join(_gpd.pinned_report() or []), "DIFFERENT commit"))
     finally:
         os.environ.pop("GAME_LOOP_HOME", None)
         shutil.rmtree(_pd, ignore_errors=True)
@@ -11098,7 +11104,7 @@ def main():
         # triggers wired AND matching the wrong kinds, which is what this builds.
         with open(os.path.join(_lkh, "triggers.json"), "w") as f:
             json.dump({"harden": [{"name": "live", "command": "cat >/dev/null"}]}, f)
-        _rep = "\n".join(_glk.triggers_report())
+        _rep = "\n".join(_glk.triggers_report() or [])
         check("#87: ...and the REPORT names the file, the kind, and the remedy — a dead condition "
               "nobody is shown is indistinguishable from no dead condition",
               has(_rep, "deadA.sh") and has(_rep, "deadB.sh") and has(_rep, "'mandate'")
@@ -11110,10 +11116,10 @@ def main():
             os.remove(os.path.join(_td, _nm))
         check("#87: ...and with the dead triggers gone the report stops saying it, so the lines "
               "above are a verdict rather than boilerplate every run prints",
-              not has("\n".join(_glk.triggers_report()), "NOTHING HERE EVER WRITES"))
+              not has("\n".join(_glk.triggers_report() or []), "NOTHING HERE EVER WRITES"))
         check("#87: ...and the report still describes the LIVE trigger after they are gone, so the "
               "line above means 'no dead kinds' rather than 'the report went empty'",
-              has("\n".join(_glk.triggers_report()), "live"))
+              has("\n".join(_glk.triggers_report() or []), "live"))
         os.remove(os.path.join(_lkh, "triggers.json"))
         check("#87: ...and no triggers at all is silent too",
               _glk.trigger_dead_kinds() == [])

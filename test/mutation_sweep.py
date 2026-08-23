@@ -202,9 +202,18 @@ MUTANTS = [
     # reported ZERO crashes and was right about its own denominator: the crash class was gone from
     # the SWEPT set, not from the file. A gap is not only uncounted coverage, it is uncounted
     # exposure to the class the counting depends on.
+    # 150 -> 170 after a crash I introduced was removed. The sweep that followed my own THIN
+    # work reported this producer NOT MEASURED: I had written `"\n".join(_gpd.pinned_report())`
+    # in a new assertion, and a neutered producer returns None, so join(None) ended the run.
+    # Every join over a report producer in the suite is guarded now, not just that one.
+    #
+    # Worth stating plainly: I spent the day removing this exact class and then added an
+    # instance of it, in the assertions written to raise this producer's coverage, and the
+    # cost was the producer losing its reading entirely. Fluency is not protection; the sweep
+    # is.
     ("pinned_report -> the PINNED CODE block is never reported",
      ".game_loop/bin/game_loop::pinned_report", "    return None\n",
-     ["pinned", "self"], None, 150),
+     ["pinned", "self"], None, 170),
     ("parse_events -> no per-event distribution is ever seen",
      ".game_loop/bin/game_loop::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),
@@ -448,8 +457,17 @@ MUTANTS = [
     # The rest of #44's ten, measured against a baseline of 534 once the file list came from git.
     # Eight of the ten turned out to be genuinely well protected; the surprise was how well, which
     # is worth saying because the issue's framing (and mine) assumed the opposite.
+    # 0 -> 81, and it was NOT MEASURED until a fix this morning was finished properly. The
+    # coverage block read `cov = json.loads(..)` inside `except ValueError: cov = {}`. When I
+    # converted this file's json.loads calls to the non-raising json_text(), that handler
+    # became UNREACHABLE — json_text returns None rather than raising — so None flowed into
+    # cov.get() and the run died under this mutant.
+    #
+    # A guard that stops something raising also disables every handler downstream that was
+    # catching it. Removing an exception is an interface change, not a local safety fix, and
+    # the conversion that was meant to end crash-class readings created one.
     ("verify.changed_files -> no file ever looks changed", ".game_loop/bin/verify::changed_files",
-     "    return None\n", ["verify", "changed", "stale", "owes"], None, 0),
+     "    return None\n", ["verify", "changed", "stale", "owes"], None, 81),
     ("verify.staged_files -> nothing is ever staged", ".game_loop/bin/verify::staged_files",
      "    return []\n", ["staged", "blast", "commit"], None, 5),
     ("notify.send -> a page is never actually sent", ".game_loop/bin/notify.py::send",

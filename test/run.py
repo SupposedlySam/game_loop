@@ -6072,7 +6072,8 @@ def main():
         check("#97: --with-file carries a backtick and a $(..) through VERBATIM — the file path is "
               "the only route no shell touches, and it is the whole reason these two options are "
               "on the prose list at all (the 400-char bound never fires on a code fragment)",
-              "PROVED" in _mv.stdout and "`id` $(whoami)" in _mv.stdout)
+              has(_mv.stdout, "\u2713 PROVED") and not has(_mv.stdout, "NOT PROVED")
+              and has(_mv.stdout, "`id` $(whoami)"))
         check("#97: ...and a ✓ PROVED verdict NAMES THE MUTATION IT APPLIED. The refusal paths "
               "printed it and the success path did not, so the strongest thing this verb can say "
               "was the one place you could not see that a shell had rewritten the fragment",
@@ -7848,7 +7849,8 @@ def main():
         _good = _mut("t_good.py")
         check("a test that DOES pin the line proves it — the tool ran both halves itself, so no "
               "sentence could have produced this receipt",
-              _good.returncode == 0 and "PROVED" in _good.stdout)
+              _good.returncode == 0 and has(_good.stdout, "\u2713 PROVED")
+              and not has(_good.stdout, "NOT PROVED"))
         _weak = _mut("t_weak.py")
         check("...and a test that passes with the bug reintroduced is REFUSED, which is the finding "
               "worth having: three of eight leaves were in exactly this state",
@@ -7870,6 +7872,34 @@ def main():
               "command selected nothing' are the same observation",
               _silent.returncode != 0
               and "nothing establishes it RAN" in (_silent.stdout + _silent.stderr))
+        # #91, FROM THE CONSUMER SEAT: the pre-flight had TWO answers for THREE cases. A test that
+        # ran and failed and a test that could not start both exit non-zero, and the reporter — whose
+        # test was green — was told "get it green first", advice that cannot work. `--test` runs in
+        # the repo root, their relative path did not resolve there, and the `ran in :` line that
+        # would have shown it was printed only on the paths they never reached.
+        with open(os.path.join(mt, "t_red.py"), "w") as f:
+            f.write("print('2 passed')\nraise SystemExit(1)\n")
+        _red, _nostart = _mut("t_red.py"), _mut("t_no_such_file.py")   # the second is never created
+        _red_out, _nostart_out = _red.stdout + _red.stderr, _nostart.stdout + _nostart.stderr
+        check("#91: a test that RAN and failed says so and names the count that proves the runner "
+              "started — the remedy 'get it green first' is only honest when something establishes "
+              "there was a run to be green",
+              _red.returncode != 0 and has(_red_out, "RAN and FAILED")
+              and has(_red_out, "2 test(s) selected") and has(_red_out, "green first"))
+        check("#91: ...and a test that never STARTED is COULD NOT TELL, not a red test — it exits "
+              "non-zero with no count, which a failing suite and an unstartable command produce "
+              "identically, so the verb refuses to pick the remedy",
+              _nostart.returncode != 0 and has(_nostart_out, "COULD NOT TELL")
+              and not has(_nostart_out, "green first"))
+        check("#91: ...and THAT refusal prints the tree the test ran in, which is the whole "
+              "diagnosis: the reporter's command was correct relative to their cwd and meaningless "
+              "relative to the root it was run from",
+              has(_nostart_out, "ran in :") and has(_nostart_out, "TWO ROOTS"))
+        check("#91: ...and the two verdicts do not merely differ in wording — the one that names a "
+              "count never claims the run is unestablished, so a reader cannot land on both",
+              has(_red_out, "RAN and FAILED") and not has(_red_out, "COULD NOT TELL")
+              and has(_nostart_out, "COULD NOT TELL")
+              and not has(_nostart_out, "test(s) selected"))
         check("...and the tree is RESTORED either way — a verb that mutates somebody's source and "
               "leaves it mutated is worse than the self-report it replaces",
               read_or_empty(_prod).strip().endswith("return a + b"))
@@ -8092,6 +8122,41 @@ def main():
     # instead and needs no list of interesting condition shapes.
     _sfile = read_or_empty(os.path.join(REPO, "test", "run.py"))
     _stree = ast.parse(_sfile)
+
+    # A MATCHER THE OPPOSITE VERDICT ALSO SATISFIES (lamp-owner, #91). Both sites asserting a mutate
+    # SUCCESS read `"PROVED" in stdout` — and the refusal says "NOT PROVED", which CONTAINS it. Only
+    # the exit code beside them held the two verdicts apart; the word itself was doing no work.
+    # Derived from the binary rather than a list kept here, so a verdict pair shipped tomorrow is
+    # covered tomorrow. BOTH SIDES READ THE AST, NOT THE TEXT: my first version matched this very
+    # comment on one side and "CANNOT DRIFT" on the other, and reported two problems that were both
+    # its own — a scan whose only two findings are self-inflicted teaches you to ignore it.
+    def _swallowed_words(gl_src, suite_src):
+        """Verdict words a suite matches bare, which the tool's own NOT-form also contains."""
+        negated = set()
+        for n in ast.walk(ast.parse(gl_src)):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                negated.update(re.findall(r"(?<![A-Z])NOT ([A-Z]{4,})\b", n.value))
+        matched = {n.left.value for n in ast.walk(ast.parse(suite_src))
+                   if isinstance(n, ast.Compare) and len(n.ops) == 1
+                   and isinstance(n.ops[0], ast.In)
+                   and isinstance(n.left, ast.Constant) and isinstance(n.left.value, str)}
+        return sorted(negated & matched)
+
+    _glsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    _swallowed = _swallowed_words(_glsrc, _sfile)
+    if _swallowed:                      # name them; the assertion name itself has to stay literal
+        print(f"    (matched on swallowed verdict words: {_swallowed})")
+    check("no assertion matches a bare verdict word that the tool's own NEGATION of it also "
+          "contains — a success matcher the refusal satisfies is held up by nothing but the exit "
+          "code beside it, while reading as though the verdict were checked",
+          _swallowed == [])
+    check("...and the scan finds one when it is there, so the clean result above is a clean suite "
+          "and not a regex that matches nothing",
+          _swallowed_words('die("NOT SETTLED — ...")', 'check("x", "SETTLED" in out)')
+          == ["SETTLED"])
+    check("...and it does not fire on a word the tool only negates in a COMMENT, because a comment "
+          "is not a verdict anybody can match on",
+          _swallowed_words('# NOT SETTLED\nx = 1\n', 'check("x", "SETTLED" in out)') == [])
 
     def _asserts(nodes):
         return any(isinstance(x, ast.Call) and getattr(x.func, "id", None) == "check"

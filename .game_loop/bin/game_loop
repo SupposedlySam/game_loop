@@ -2985,8 +2985,30 @@ def cmd_mutate(s, a):
             "the tree above; from a linked git worktree those are different places, and a filter "
             "that matches nothing there fails silently. Compare the two paths printed above.")
     if before != 0:
-        die(f"the test already FAILS on the unmutated tree (exit {before}).\n"
-            "A red test proves nothing about what it pins: it is red either way. Get it green first.")
+        # THREE OUTCOMES, NOT TWO (#91). "Your test ran and failed" and "your test never started"
+        # are opposite conclusions with the same observable — a non-zero exit. The reporter hit the
+        # second and was told the first: `--test` runs in the repo root, their relative path did not
+        # resolve there, and "get it green first" is impossible advice about a test that was green.
+        if n_sel is not None:
+            die(f"the test RAN and FAILED on the unmutated tree (exit {before}).\n\n"
+                f"  {a.test}\n"
+                f"  ran in : {REPO_ROOT}\n"
+                f"  counted: {n_sel} test(s) selected, so the runner did start\n\n"
+                "A red test proves nothing about what it pins: it is red either way. Get it green "
+                "first.")
+        tail = "\n".join("    " + ln for ln in
+                         (before_out or "").strip().splitlines()[-8:]) or "    (no output at all)"
+        die(f"COULD NOT TELL whether the test RAN — it exited {before} and printed no test count.\n\n"
+            f"  {a.test}\n"
+            f"  ran in : {REPO_ROOT}\n"
+            f"  count  : {sel_why}\n\n"
+            f"  its last lines:\n{tail}\n\n"
+            "A test that ran and failed and a test that never started share this observable, and "
+            "they take opposite remedies — so this refuses to pick one for you rather than telling "
+            "you to fix a test that may already be green.\n\n"
+            "THE COMMON CAUSE IS TWO ROOTS: `--test` runs in the repo root printed above, NOT your "
+            "cwd, so a relative path in the command resolves somewhere else and the runner exits "
+            "before selecting anything. Try `--test \"cd <your dir> && ...\"`.")
     # THE POSITIVE CONTROL, BEFORE THE RESULT IT QUALIFIES (#80). Run first so a green mutated run
     # can be attributed: without it, "the test does not cover this" and "the mutation never ran"
     # are the same observation, and the verb was reporting the first for both.

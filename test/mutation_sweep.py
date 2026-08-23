@@ -581,10 +581,19 @@ MUTANTS = [
     ("installed_confidence_report -> an install never says what level it came from",
      ".game_loop/bin/game_loop::installed_confidence_report", "    return []\n",
      ["confidence", "alpha", "installed", "mid-flight"],
-     # THIN at 2: the alpha warning and the marked-level line. The third arm — an older install that
-     # recorded nothing — asserts ABSENCE and correctly survives a producer neutered to silence,
-     # which is the pairing working rather than a hole.
-     "two speaking arms; the third asserts absence and survives silence by design", 2),
+     # 2 -> 6, AND THE THINNESS WAS HIDING A LIVE DEFECT. Two speaking arms (the alpha warning and
+     # the marked-level line) plus an absence arm, and the levels nobody had written an arm for
+     # were the ones that were wrong: every value this build did not recognise fell through to the
+     # STABLE wording. A typo, a level added in a later version, or a half-written file printed
+     # "the author's own agent was running on it" — the strongest claim the scheme can make. An
+     # empty CONFIDENCE rendered as "installed from a  commit — the author's own agent was running
+     # on it".
+     #
+     # That is absence reading as reassurance, inside the one producer whose docstring says the
+     # whole scheme fails if absence reads as reassurance. Unrecognised and empty are now their own
+     # outcomes, and BETA — a weaker claim than stable — is exercised for the first time.
+     "alpha, beta, unrecognised and present-but-empty each say something different; absent is "
+     "silent and paired", 6),
     ("notify.cfg_source -> status never says WHICH notify.json is paging",
      ".game_loop/bin/notify.py::cfg_source", "    return None\n",
      ["notify", "user-level", "slack", "configured"],

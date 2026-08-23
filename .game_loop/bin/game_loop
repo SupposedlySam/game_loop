@@ -6946,6 +6946,28 @@ def installed_confidence_report():
                 "mid-flight.",
                 "  → For a commit they stand behind: `git tag -l 'beta-*' 'stable-*'` in the source "
                 "clone, then re-install."]
+    # EVERY OTHER VALUE USED TO READ AS STABLE. The line below was `"a suite passed on it" if
+    # lvl == "beta" else "the author's own agent was running on it"`, so ANY level this build does
+    # not know — a future one, a typo, a half-written file — printed the STRONGEST claim the scheme
+    # can make. An empty CONFIDENCE rendered as "installed from a  commit — the author's own agent
+    # was running on it". That is absence reading as reassurance, in the one function whose
+    # docstring says the whole scheme fails if absence reads as reassurance. Found by measuring:
+    # this producer was THIN, and the arm nobody had written is the arm that was wrong.
+    if not lvl:
+        return ["⚠ CONFIDENCE IS PRESENT BUT EMPTY — an install recorded a level and it did not "
+                "survive.",
+                "  This is NOT the same as an older install with no file, which is silent on "
+                "purpose, and it",
+                "  is not a level: nothing about this copy is established either way. Re-install "
+                "from a source",
+                "  clone to record one."]
+    if lvl not in ("beta", "stable"):
+        return [f"⚠ CONFIDENCE SAYS {lvl!r}, WHICH IS NOT A LEVEL THIS BUILD KNOWS.",
+                "  Either the file is damaged or this copy predates a level added later. Nothing "
+                "is established",
+                "  by it — an unrecognised mark is not a weak mark, it is no mark. "
+                "`git tag -l 'beta-*' 'stable-*'`",
+                "  in the source clone shows what the author actually stands behind."]
     return [f"confidence: installed from a {lvl.upper()} commit — "
             + ("a suite passed on it" if lvl == "beta"
                else "the author's own agent was running on it") + "."]

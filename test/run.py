@@ -4479,9 +4479,40 @@ def main():
             f.write("stable\n")
         check("...and a stable install says what stable actually means, not just the word",
               "author's own agent was running on it" in gl(cd, "status", sid="sess-conf").stdout)
+        with open(_cf, "w") as f:
+            f.write("beta\n")
+        check("...and a BETA install says what beta means — a suite passed, which is a weaker claim "
+              "than stable and had never been exercised here at all",
+              has(gl(cd, "status", sid="sess-conf").stdout, "a suite passed on it"))
+        # THE ARM THAT WAS WRONG, and it was wrong because nobody had written it. Every level this
+        # build does not recognise used to fall through to the STABLE wording, so a typo, a future
+        # level, or a half-written file printed "the author's own agent was running on it" — the
+        # strongest claim the scheme can make. In the one producer whose docstring says the whole
+        # scheme fails if absence reads as reassurance.
+        with open(_cf, "w") as f:
+            f.write("banana\n")
+        _unk = gl(cd, "status", sid="sess-conf").stdout
+        check("an UNRECOGNISED level is called out as not-a-level rather than rendered as the "
+              "strongest one — an unrecognised mark is not a weak mark, it is no mark",
+              has(_unk, "NOT A LEVEL THIS BUILD KNOWS") and has(_unk, "banana")
+              and not has(_unk, "author's own agent was running on it"))
+        check("...and it names how to find what the author DOES stand behind, since a reader told "
+              "their mark is meaningless still has to decide what to do",
+              has(_unk, "git tag -l"))
+        with open(_cf, "w") as f:
+            f.write("\n")
+        _empty = gl(cd, "status", sid="sess-conf").stdout
+        check("...and a PRESENT BUT EMPTY file is its own outcome — an install recorded a level and "
+              "it did not survive, which is neither an older install nor a level, and used to "
+              "render as 'installed from a  commit — the author's own agent was running on it'",
+              has(_empty, "PRESENT BUT EMPTY")
+              and not has(_empty, "author's own agent was running on it"))
         os.remove(_cf)
         check("...while an older install that recorded nothing is silent rather than accused",
               "ALPHA COMMIT" not in gl(cd, "status", sid="sess-conf").stdout)
+        check("...and silent means SILENT — the absent case says nothing about confidence at all, "
+              "so the four speaking arms above are verdicts rather than a line that always prints",
+              not has(gl(cd, "status", sid="sess-conf").stdout, "confidence: installed from"))
         with open(os.path.join(REPO, "install.sh")) as f:
             _ish = f.read()
         check("install.sh records the level it installed from, defaulting to alpha",

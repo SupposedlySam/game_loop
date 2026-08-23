@@ -8215,6 +8215,53 @@ def main():
     finally:
         shutil.rmtree(_iv, ignore_errors=True)
 
+    print("every reader of the append-only log skips a torn line rather than losing the file:")
+    # A HALF-WRITTEN LAST LINE IS THE ORDINARY STATE of log.jsonl — three shipped programs append
+    # to it, and an interrupted one leaves exactly that. Fourteen of game_loop's readers skip the
+    # bad line and keep the rest; retro_outcome wrapped the whole loop in `except ValueError` and
+    # returned [], so one torn line reported the chapter as having encoded NOTHING.
+    #
+    # The shape is structural, so the check is too: for a per-line reader the TRY sits INSIDE the
+    # loop; for the broken one the LOOP sat inside the TRY. No keyword list, nothing to judge.
+    def _whole_file_log_readers(_src):
+        _t = ast.parse(_src)
+        _bad = []
+        for _fn in ast.walk(_t):
+            if not isinstance(_fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(isinstance(_n, ast.Name) and _n.id == "LOG_F" for _n in ast.walk(_fn)):
+                continue
+            for _try in ast.walk(_fn):
+                if not isinstance(_try, ast.Try):
+                    continue
+                if not any("ValueError" in ast.unparse(_h.type or ast.Constant(None))
+                           for _h in _try.handlers):
+                    continue
+                for _loop in ast.walk(_try):
+                    if isinstance(_loop, (ast.For, ast.ListComp, ast.GeneratorExp)) and any(
+                            isinstance(_c, ast.Call) and getattr(_c.func, "attr", None) == "loads"
+                            for _c in ast.walk(_loop)):
+                        _bad.append(_fn.name)
+                        break
+                if _fn.name in _bad:
+                    break
+        return sorted(set(_bad))
+
+    _log_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+    _wf = _whole_file_log_readers(_log_src)
+    check("no reader of log.jsonl loses the WHOLE file to one torn line — the loop belongs inside "
+          "the try, not the other way round, and an append-only file three programs write to has a "
+          "half-written last line as its ordinary state: " + (", ".join(_wf) or "none"),
+          not _wf)
+    # THE CONTROL IS THE REAL DEFECT, taken from history rather than invented: the commit before
+    # the fix had exactly one, and a control built from the actual bug cannot be the shape you
+    # already knew how to catch.
+    _prev_src = subprocess.run(["git", "show", "cf133a00:.game_loop/bin/game_loop"],
+                               cwd=REPO, capture_output=True, text=True).stdout
+    check("...and the scan FINDS the one that existed before this was fixed, so the clean answer "
+          "above is a verdict rather than a pattern that matches nothing",
+          _prev_src and _whole_file_log_readers(_prev_src) == ["retro_outcome"])
+
     print("a guard nothing calls enforces nothing, whatever its coverage says:")
     # A FUNCTION REACHED ONLY FROM THE SUITE HAS COVERAGE AND NO EFFECT. It is the purest form of
     # INV1's failure — enforcement that lives somewhere nothing runs — and it is invisible to every

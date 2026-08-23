@@ -378,14 +378,47 @@ def config_local_keys():
         return []
 
 
+# Set by load() when state.json EXISTED and would not parse. Not stored in the state dict, because
+# that dict gets written back and this is a fact about one process, not about the session.
+STATE_UNREADABLE = None
+
+
 def load():
-    """Load state, seeding defaults on first run so a fresh checkout just works."""
+    """Load state, seeding defaults on first run so a fresh checkout just works.
+
+    ABSENT AND UNREADABLE ARE DIFFERENT, and this used to return the same pristine defaults for
+    both. A corrupt state.json therefore read as A BRAND NEW SESSION: the mandate vanished, the
+    stop gate went inert, the retro counters reset — and status said "MANDATE: none", which is
+    exactly what it says for a session that never had one. Then the next save() wrote the defaults
+    over the corrupt file and the mandate text was gone for good.
+
+    That is the shape a neighbouring project reported to me the same day: unreadable rendered as
+    absent, AND THEN OVERWRITTEN. Their case was a swap record; this is the file that decides
+    whether an unattended run is still under orders.
+
+    Still never raises — everything here calls load(), and a state file nobody can parse must not
+    take the tool down. It sets the bytes aside first, so the answer to "what was my mandate" is
+    recoverable rather than a thing to reconstruct from memory.
+    """
+    global STATE_UNREADABLE
     try:
         with open(STATE_F) as f:
-            s = dict(DEFAULT_STATE)
-            s.update(json.load(f))
-            return s
-    except (OSError, ValueError):
+            raw = f.read()
+    except OSError:
+        return dict(DEFAULT_STATE)          # absent: a genuinely fresh session, and that is fine
+    try:
+        s = dict(DEFAULT_STATE)
+        s.update(json.loads(raw))
+        return s
+    except ValueError:
+        kept = STATE_F + ".unreadable"
+        try:
+            if not os.path.exists(kept):    # never clobber an earlier copy with a later mangling
+                with open(kept, "w") as f:
+                    f.write(raw)
+            STATE_UNREADABLE = kept
+        except OSError:
+            STATE_UNREADABLE = "(could not be set aside either)"
         return dict(DEFAULT_STATE)
 
 
@@ -8512,6 +8545,19 @@ def cmd_status(s, a):
         mandate_line = f"MANDATE: {m['text']}"
     else:
         mandate_line = "MANDATE: none (Stop gate inert)"
+    # AND WHY IT IS NONE, when the reason is that nobody could read the file. "no mandate was ever
+    # set" and "your mandate is in a file this process could not parse" are opposite situations —
+    # one means you are free, the other means an unattended run has quietly stopped being governed
+    # — and they printed the same line. The bytes are set aside by load(); this is what points at
+    # them, because a preserved copy nobody is told about is the same as no copy.
+    if STATE_UNREADABLE:
+        mandate_line += ("\n  ⚠ AND THAT MAY BE WRONG: .game_loop/…/state.json EXISTS AND WOULD "
+                         "NOT PARSE, so this session\n"
+                         "    read as brand new — no mandate, gate counters at zero, retro debt "
+                         "cleared. The original\n"
+                         f"    bytes are kept at {STATE_UNREADABLE}\n"
+                         "    Recover the mandate from there and re-bind it, or clear it on the "
+                         "record if it is done.")
     session_line = (f"session: {SESSION[:8]} (state: .game_loop/sessions/…)" if SESSION
                     else "session: none detected — repo-global state (.game_loop/state.json)")
     others, active = _sibling_sessions()

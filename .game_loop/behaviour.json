@@ -326,6 +326,15 @@
       "change": "when status cannot parse any `## INVn \u2014 <title>` heading from your INVARIANTS.md it still prints game_loop's built-in creed, but now SAYS that is what it is, names your INVARIANTS.md and the heading shape to restore. Projects whose headings parse are unaffected.",
       "consequence": "if your INVARIANTS.md headings do not match `## INVn \u2014 <title>`, status gains a two-line warning under the INV line. Nothing is refused and status still works \u2014 that is why the fallback exists. If you were seeing a short creed that did not sound like yours, this is why.",
       "why_it_qualifies": "the fallback is six hardcoded items maintained separately from any INVARIANTS.md \u2014 eight in this project \u2014 and it printed as a bare `INV: ..`, identical in shape to the real thing. So 'these are YOUR invariants' and 'I could not read yours, here is mine' were one observable, and a reshaped-heading migration silently swapped one for the other."
+    },
+    {
+      "seq": 33,
+      "sha": "pending",
+      "notice": true,
+      "verb": "status (and every verb that loads state)",
+      "change": "a state.json that EXISTS but will not parse is no longer treated as a fresh session. Its bytes are copied to state.json.unreadable before anything overwrites them, and status says the session read as brand new and names that copy. An ABSENT state file is unchanged \u2014 that really is a fresh session and stays silent.",
+      "consequence": "a new file, .game_loop/\u2026/state.json.unreadable, can appear next to a corrupt state file; it is written once and never clobbered by a later mangling. status gains a warning block under MANDATE in that case. Nothing is refused and no verb starts failing \u2014 a state file nobody can parse must not take the tool down.",
+      "why_it_qualifies": "before this, a half-written state.json made the session read as one that never had a mandate: MANDATE: none, stop gate inert, retro counters at zero, and no indication why. The next save then wrote defaults over the corrupt bytes and the mandate text was unrecoverable. For an unattended run that is the difference between being free and having quietly stopped being governed, and the two printed the same line."
     }
   ],
   "schema": 1

@@ -8031,6 +8031,57 @@ def main():
               '        else:\n            # SAY THAT IT DID NOT RUN.',
               '        elif False:\n            # SAY THAT IT DID NOT RUN.', 1))) != [])
 
+    print("a state file nobody can parse is not a session that never had a mandate:")
+    # THE MOST IMPORTANT FILE IN THE TOOL, and load() returned pristine DEFAULT_STATE for BOTH
+    # "absent" and "present but corrupt". So a half-written state.json read as a brand new session:
+    # mandate gone, stop gate inert, retro counters zeroed — and status said "MANDATE: none", which
+    # is exactly what it says for a session that never had one. The next save() then wrote the
+    # defaults over the corrupt bytes and the mandate text was unrecoverable.
+    #
+    # Unreadable rendered as absent, AND THEN OVERWRITTEN — the shape a neighbouring project
+    # reported the same day, about a swap record. This is the file that decides whether an
+    # unattended run is still under orders.
+    _cs = make_sandbox()
+    try:
+        _csid = "sess-corrupt"
+        gl(_cs, "mandate", "--set", "keep working the queue until it is empty", sid=_csid)
+        _csf = os.path.join(_cs, ".game_loop", "sessions", _csid, "state.json")
+        _craw = read_or_empty(_csf)
+        check("the fixture really did bind a mandate, or everything below passes for the wrong "
+              "reason",
+              has(gl(_cs, "status", sid=_csid).stdout, "keep working the queue"))
+        with open(_csf, "w") as f:
+            f.write(_craw[: len(_craw) // 2])        # what an interrupted write leaves
+        _cout = gl(_cs, "status", sid=_csid).stdout
+        check("a state.json that EXISTS and will not parse says so, instead of reading as a "
+              "session that never had a mandate — free and ungoverned-without-knowing-it are "
+              "opposite situations and they printed the same line",
+              has(_cout, "WOULD NOT PARSE") and has(_cout, "read as brand new"))
+        _kept = _csf + ".unreadable"
+        check("...and the original bytes are SET ASIDE before anything overwrites them, so the "
+              "mandate is recoverable rather than a thing to reconstruct from memory",
+              os.path.isfile(_kept)
+              and has(read_or_empty(_kept), "keep working the queue"))
+        check("...and status NAMES that copy, because a preserved file nobody is told about is the "
+              "same as no copy",
+              has(_cout, ".unreadable"))
+        gl(_cs, "trans", "--doing", "x", sid=_csid)   # the write that used to destroy the evidence
+        check("...and a later save does not take the copy with it — the save itself is fine, the "
+              "loss was that nothing had kept what it replaced",
+              os.path.isfile(_kept)
+              and has(read_or_empty(_kept), "keep working the queue"))
+        check("...and status still WORKS throughout: a state file nobody can parse must not take "
+              "the entry point down, which is why load() swallowed this in the first place",
+              gl(_cs, "status", sid=_csid).returncode == 0)
+        # PAIRED: an ABSENT file is a fresh session and must stay silent, or the warning fires on
+        # every first run and becomes the thing people scroll past.
+        _fresh = gl(_cs, "status", sid="sess-never-existed").stdout
+        check("...while a session with NO state file at all is silent — absent really is a fresh "
+              "session, and only present-but-unparseable is the alarming case",
+              has(_fresh, "MANDATE: none") and not has(_fresh, "WOULD NOT PARSE"))
+    finally:
+        shutil.rmtree(_cs, ignore_errors=True)
+
     print("whose invariants is status quoting? (the fallback used to look like yours):")
     # status's INV line is DERIVED from the project's INVARIANTS.md — good, no drift by
     # construction. But when no `## INVn — <title>` heading parses, it falls back to game_loop's own

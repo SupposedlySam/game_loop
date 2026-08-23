@@ -482,11 +482,21 @@ MUTANTS = [
     ("_remote_behaviour -> the record on main can never be fetched",
      ".game_loop/bin/game_loop::_remote_behaviour", "    return None\n",
      ["behaviour", "update", "fetch", "unreachable"],
-     # THIN at 2 by construction: an unreachable record is DESIGNED to be indistinguishable from a
-     # quiet one in everything except that it must not claim 'nothing changed'. There is little
-     # surface to assert beyond that, which is the point rather than a gap.
-     "an unreachable record is meant to be quiet; only its refusal to claim 'nothing changed' shows",
-     2),
+     # 2 -> 5, and this note USED TO SAY "there is little surface to assert beyond that, which is
+     # the point rather than a gap". Measurement says otherwise, and the sentence is worth keeping
+     # visible because it is the most confident wrong thing in this file: a claim that a producer is
+     # thin BY DESIGN reads as a decision already taken, so nobody re-opens it. It was not a
+     # decision, it was an absence of looking.
+     #
+     # The surface it missed is the ARGUMENTS. This takes (repo, raw_base) and builds a URL from
+     # both, and the fake server answers ANY path containing "behaviour.json" — so a fetcher that
+     # dropped the repo, or read a branch other than main, or looked elsewhere in the tree, passed
+     # every assertion here. The request path is now asserted whole. The rest came free: the record
+     # it returns must survive being served SHUFFLED and PARTLY MALFORMED, which are properties of
+     # what it fetches rather than of the fetch, and were unasserted for the same reason.
+     "the request path built from both arguments, plus the shuffled and malformed records it "
+     "must carry back intact",
+     5),
     ("_compare_versions -> the update check can never tell ahead from behind",
      ".game_loop/bin/game_loop::_compare_versions", "    return None\n",
      ["update", "ahead", "behind", "ancestry", "determined"],

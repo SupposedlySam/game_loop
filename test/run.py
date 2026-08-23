@@ -1238,7 +1238,9 @@ def main():
             sha = "a" * 40
             behaviour = None            # set per-assertion; None = 404, i.e. "could not fetch"
             compare = "behind"          # where the INSTALLED sha sits relative to latest (#49)
+            paths = []                  # every path actually REQUESTED, so the URL can be asserted
             def do_GET(self):
+                FakeGH.paths.append(self.path)
                 if "/compare/" in self.path:
                     if FakeGH.compare is None:
                         self.send_response(500)
@@ -1400,9 +1402,19 @@ def main():
 
         with open(_bhv_f, "w") as f:
             f.write(_rec(1))
+        FakeGH.paths.clear()
         _one = fresh_status()
         check("an update names the behaviour changes this install has NOT seen, and only those",
               "BEHAVIOUR CHANGE" in _one and "v2: c2" in _one and "v1: c1" not in _one)
+        # THE URL IS BUILT FROM BOTH ARGUMENTS, which every assertion here was blind to: this fake
+        # serves the record to ANY path containing "behaviour.json", so a fetcher that dropped the
+        # repo, or read a branch other than main, or looked somewhere else in the tree entirely,
+        # would have satisfied all of them. The producer takes (repo, raw_base) and nothing checked
+        # that either reaches the request.
+        check("...and the record is fetched from the CONFIGURED repo's main at the path this "
+              "project actually publishes — the fake answers any URL with 'behaviour.json' in it, "
+              "so without this the repo and the branch were free variables",
+              "/me/gl/main/.game_loop/behaviour.json" in FakeGH.paths)
 
         # PAIRED: caught up must be SILENT about behaviour, or every update carries the same
         # paragraph forever and the one that matters is the one nobody reads.

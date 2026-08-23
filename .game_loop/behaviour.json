@@ -329,7 +329,7 @@
     },
     {
       "seq": 33,
-      "sha": "pending",
+      "sha": "0700886",
       "notice": true,
       "verb": "status (and every verb that loads state)",
       "change": "a state.json that EXISTS but will not parse is no longer treated as a fresh session. Its bytes are copied to state.json.unreadable before anything overwrites them, and status says the session read as brand new and names that copy. An ABSENT state file is unchanged \u2014 that really is a fresh session and stays silent.",

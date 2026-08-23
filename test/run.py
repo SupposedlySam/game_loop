@@ -8026,11 +8026,40 @@ def main():
             _dupe.append(f"lines {_seen[_v]} and {_ln}: {_v[:60]}")
         else:
             _seen[_v] = _ln
+    def _dupe_names(_src):
+        _seen2, _out = {}, []
+        for _c in ast.walk(ast.parse(_src)):
+            if not (isinstance(_c, ast.Call) and getattr(_c.func, "id", None) == "check"
+                    and _c.args):
+                continue
+            try:
+                _v2 = ast.literal_eval(_c.args[0])
+            except Exception:                     # noqa: BLE001 — a computed message, skipped
+                continue
+            if not isinstance(_v2, str):
+                continue
+            if _v2 in _seen2:
+                _out.append(_v2)
+            else:
+                _seen2[_v2] = _c.lineno
+        return sorted(set(_out))
+
     check(f"every literal assertion name in this suite is unique across all {len(_msgs)} of them — "
           "the sweep's kill count is a set difference over these names, so a shared one hides a "
           "real kill and reports the producer as thinner than it is: "
           + ("; ".join(_dupe) or "no collisions"),
           not _dupe)
+    # THE CONTROL IS THE COLLISION THAT ACTUALLY EXISTED, at the parent of the commit that fixed
+    # it. This check shipped without one — I asserted "no duplicates" over a tree that had none and
+    # called it done, which is the shape it exists to refuse. A real prior commit is a free fixture
+    # and cannot be the case my own matcher was written around.
+    _dupe_prev = subprocess.run(["git", "show", "aacc8ba7:test/run.py"],
+                                cwd=REPO, capture_output=True, text=True).stdout
+    check("...and the scan FINDS the collision that was really here — 'gate allows the Write that "
+          "creates the handoff', named twice at aacc8ba7 for two different gates — so the clean "
+          "answer above is a verdict rather than a comparison that never fires",
+          _dupe_prev
+          and _dupe_names(_dupe_prev) == ["gate allows the Write that creates the handoff"])
 
     print("an assertion that can silently not run is worse than one that fails:")
     # AN `if` OVER LOCAL STATE DOES NOT FAIL WHERE ITS CONDITION IS FALSE — it is simply absent, and

@@ -2779,6 +2779,27 @@ def main():
             check("a passing verify run still names what nothing checked",
                   r.returncode == 0 and "all owed checks passed" in r.stdout
                   and "NOT CHECKED" in r.stdout and "lib/new_package.py" in r.stdout)
+            # RAN-AND-PASSED IS NOT NOTHING-WAS-OWED, and the same exit code carries both. The
+            # success line is the sentence an agent reads to decide the work is verified — it is
+            # read here dozens of times a session — so the two must not share it. verify already
+            # gets this right and NOTHING ASSERTED IT, which means it could regress into one
+            # sentence and every reader downstream would keep believing checks had run.
+            _owed_run = r.stdout
+            _again = vfy()            # immediately again: the first run recorded the evidence
+            check("a verify with nothing STALE says the evidence was already newer than the "
+                  "change — it must not reuse the sentence that means the checks just ran, which "
+                  "is what an agent reads to decide how recently this tree was actually checked",
+                  _again.returncode == 0
+                  and "already newer than the change" in _again.stdout
+                  and "all owed checks passed" not in _again.stdout)
+            check("...and the run that DID execute a check says the other thing, so the pair is a "
+                  "distinction rather than one branch nobody reaches",
+                  "all owed checks passed" in _owed_run
+                  and "already newer than the change" not in _owed_run)
+            check("...and `--check` agreed with the run path all along — it has always had its own "
+                  "wording for this state, which is how the two halves of one tool were found "
+                  "disagreeing about whether the distinction mattered",
+                  "evidence is newer than the change" in vfy("--check").stdout)
             r = vfy("--check")
             check("a GREEN --check says what it did not look at (green != nothing unverified)",
                   r.returncode == 0 and "evidence is newer than the change" in r.stdout

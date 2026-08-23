@@ -308,6 +308,15 @@
       "change": "status no longer reports an UNRECOGNISED or EMPTY .game_loop/CONFIDENCE as a stable install. An unknown level is called out as not-a-level, and a present-but-empty file is its own message. alpha, beta, stable and absent are unchanged.",
       "consequence": "if your CONFIDENCE file holds anything other than alpha/beta/stable, status now says so instead of printing 'installed from a <X> commit \u2014 the author's own agent was running on it'. Nothing is refused. If you saw that line and the level looked odd, it was never established.",
       "why_it_qualifies": "a consumer who changed nothing may see a warning where they previously saw the strongest confidence line this tool prints. That old line was wrong: every level the build did not recognise fell through to the stable wording, so a typo or a future level read as 'the author ran their own agent on it'. Found by measuring coverage of the producer, not by a report."
+    },
+    {
+      "seq": 31,
+      "sha": "pending",
+      "notice": true,
+      "verb": "verify",
+      "change": "`verify` no longer prints \"all owed checks passed\" when it ran NOTHING. When every changed file's evidence is already newer than the change, it now says so in its own words and exits 0. The sentence is reserved for a run that actually executed a check.",
+      "consequence": "a repeat `verify` on an unchanged tree prints \"every changed file's evidence is already newer than the change \u2014 nothing needed re-running\" instead of the success line. Same exit code, nothing refused. If you grep stdout for \"all owed checks passed\" to decide a tree is verified, that string now appears only when a check was actually run \u2014 which is what it was always read as meaning.",
+      "why_it_qualifies": "a consumer who changed nothing sees a different sentence, and anything scripting on the old one changes behaviour. The old line conflated 'the checks ran and were green' with 'somebody ran them earlier and nothing has changed since' \u2014 different claims about how recently the tree was checked. `--check` had always distinguished this state; the run path had not, so the two halves of one tool disagreed."
     }
   ],
   "schema": 1

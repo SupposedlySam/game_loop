@@ -465,6 +465,23 @@ def main():
         print("\nA green check from BEFORE your change is evidence about code that no longer exists.")
         return 1
 
+    # ALREADY-FRESH IS NOT JUST-RAN, and this path used to spell them the same way. When `hits` is
+    # non-empty but nothing is STALE, the loop below executes zero times and the old code fell
+    # straight through to "all owed checks passed ✓" — a sentence an agent reads as "the checks ran
+    # and were green", after running nothing at all. `--check` has always distinguished this state
+    # ("every changed file's evidence is newer than the change"); the RUN path did not, so the two
+    # halves of one tool disagreed about whether the distinction mattered.
+    #
+    # Found by asking what this verdict assumes rather than by being bitten: the sentence is read
+    # dozens of times in a working session, and "I ran them" and "somebody ran them earlier" are
+    # different claims about how much the tree has been checked SINCE it last changed.
+    if not stale:
+        print("verify: every changed file's evidence is already newer than the change — "
+              "nothing needed re-running. ✓")
+        if (tail := unchecked_tail(mapping, exclusions, files)):
+            print(tail)
+        return 0
+
     failed = False
     for pattern, changed, _, _ in stale:
         for cmd in mapping[pattern]:

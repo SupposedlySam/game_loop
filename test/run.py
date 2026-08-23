@@ -12590,9 +12590,20 @@ def main():
               "UNKNOWN" in _blk3 and "ACTIVE" not in _blk3
               and "never asked" in _blk3)
         _cfg([{"name": "gone.sh", "script": ".game_loop/not-here.sh", "probe": "true"}])
+        _gone_blk = _guard_block(_status())
         check("#90: ...and a guard whose SCRIPT is missing is INERT rather than probed — a probe "
               "answering about a script that is not there would be a fact about nothing",
-              "INERT" in _status())
+              has(_gone_blk, "INERT"))
+        # THERE ARE TWO INERT ARMS, and asserting the symbol on one does not cover the other. I
+        # added the ✗ assertion above for the probe-disabled arm, then re-ran the mutation that
+        # started all of this — ✗ to ✓ on THIS line, the script-missing arm — and it still
+        # survived. One word, two producers of it, and the assertion I had just written was about
+        # the other one. The measurement is the only reason I know that.
+        check("#90: ...and THAT INERT — the one whose script is absent — carries ✗ too. Two arms "
+              "print the same word from two literals, so an assertion on the word covers whichever "
+              "arm it happened to reach and leaves the other free to say ✓",
+              next((l for l in _gone_blk.splitlines() if "gone.sh" in l), "").strip()
+              .startswith("✗"))
         _cfg([{"name": "hangs.sh", "probe": "sleep 30"}])
         check("#90: ...and a probe that does not ANSWER is UNKNOWN too, bounded rather than "
               "hanging the status block",

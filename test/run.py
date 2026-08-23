@@ -4788,6 +4788,51 @@ def main():
               "already records rather than reporting a bare git error",
               _r2.returncode != 0 and _new_head[:8] in (_r2.stdout + _r2.stderr))
 
+        # THE CHANNEL POINTER FAILING IS ITS OWN OUTCOME, and it had no test. `confidence` writes
+        # two refs: the immutable `beta-<sha>` tag, and the moving `beta` pointer consumers install
+        # through. If the second cannot be written the first still exists, so the release LOOKS
+        # published while `GAME_LOOP_CHANNEL=beta ./install.sh` keeps serving the PREVIOUS commit —
+        # a stale answer indistinguishable from a current one, which is this project's whole
+        # subject. The ✓ and ⚠ arms are an if/else at the same position, so a swapped symbol
+        # announces a half-published release as a whole one.
+        #
+        # I had this function on the OWED list as the weak additive shape. Third one today where
+        # that classification, made by reading, was wrong — hence the rule now hardened: measure
+        # the reason for skipping with the instrument you would have used to cover it.
+        _cg("commit", "-q", "--allow-empty", "-m", "pointer-conflict")
+        _pc_head = _cg("rev-parse", "HEAD").stdout.strip()
+        # A D/F CONFLICT is the honest way to make the move fail: git refuses to create the ref
+        # `refs/tags/beta` while `refs/tags/beta/sub` exists. No stubbing, and the failure is git's.
+        #
+        # THE CONFLICT RUNS BOTH WAYS, which my first version of this fixture got backwards: with
+        # `refs/tags/beta` ALREADY a tag from the marks above, creating `beta/sub` is what fails,
+        # silently, and the setup no-ops into a passing publish. The assertion caught it because it
+        # names the outcome rather than "no error". Drop the channel tag first, then plant the
+        # conflict, then put it back where it was.
+        _beta_was = _points_at("beta")
+        _cg("tag", "-d", "beta")
+        _mk = _cg("tag", "beta/sub")
+        check("the conflict fixture actually PLANTED its conflict — a setup step that fails "
+              "silently turns the two assertions below into a test of nothing, which is how this "
+              "one first passed the publish it was written to catch",
+              _mk.returncode == 0 and "beta/sub" in _cg("tag").stdout)
+        _pf = _conf("--mark", "beta", "--notes", "pointer cannot move")
+        _pfl = next((l for l in _pf.stdout.splitlines() if "CHANNEL POINTER" in l), "")
+        check("a channel pointer that CANNOT be moved is reported, and says what a consumer gets "
+              "meanwhile — the immutable tag exists, so the release looks published while the "
+              "channel keeps serving the previous commit",
+              has(_pf.stdout, "CHANNEL POINTER could not be moved")
+              and has(_pf.stdout, "keeps installing the PREVIOUS commit"))
+        check("...and that line opens ⚠, not the ✓ its success twin uses — they are an if/else at "
+              "one position, so the symbol is the only thing distinguishing 'published' from "
+              "'half-published' for anyone skimming",
+              _pfl.strip().startswith("⚠"))
+        check("...while the IMMUTABLE tag was still created, because the two refs are two facts "
+              "and the report must not imply the first failed with the second",
+              f"beta-{_pc_head[:8]}" in _cg("tag").stdout)
+        _cg("tag", "-d", "beta/sub")
+        _cg("tag", "-f", "beta", _beta_was)        # put the channel back where the block left it
+
         # THE INSTALLED SIDE. A consumer who took a copy months ago cannot run `confidence` against
         # a clone they no longer have, so the level is recorded at install time and status says it.
         _cf = os.path.join(cd, ".game_loop", "CONFIDENCE")
@@ -8639,12 +8684,12 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "<module>", "cmd_notify", "effector_state", "external_claims_report", "fire_triggers",
-        "fix_state", "guards_report", "mark_publication_state", "pin_state", "triggers_report",
-        "worktree_report",
+        "<module>", "cmd_confidence", "cmd_notify", "effector_state", "external_claims_report",
+        "fire_triggers", "fix_state", "guards_report", "mark_publication_state", "pin_state",
+        "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "cmd_checkpoint", "cmd_confidence", "cmd_harden", "cmd_measure",
+        "cmd_checkpoint", "cmd_harden", "cmd_measure",
         "cmd_pin", "cmd_status", "instruments_report",
     ]
     _multi = _multi_symbol_producers(read_or_empty(

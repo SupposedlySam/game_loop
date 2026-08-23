@@ -2867,9 +2867,15 @@ def mutation_liveness(orig, replace, path, run):
     inside a PARSE ERROR and called a dead anchor live, which is why the compile check comes first
     and why the marker must appear in the output rather than merely somewhere in a red run.
     """
-    if not path.endswith(".py"):
+    # WHAT THE FILE IS, NOT WHAT IT IS CALLED. This gate read `path.endswith(".py")`, and every
+    # program this project ships is extensionless Python — so the strongest control this verb has
+    # was unavailable on its own binary, and it said "this file is not Python" about a file that is.
+    # A label standing in for the fact it labels, in the verb whose job is refusing exactly that.
+    # Nothing downstream needed the extension: the poisoned tree must PARSE before the probe runs,
+    # so a JSON file that happens to read as a Python literal is still declined a line below.
+    if not _py_parses(orig):
         return "unknown", ("liveness probing is Python-only — it has to parse what it writes, and "
-                           "this file is not Python")
+                           "this file does not parse as Python")
     at = orig.index(replace)
     line_start = orig.rfind("\n", 0, at) + 1
     prefix = orig[line_start:at]
@@ -3024,7 +3030,11 @@ def cmd_mutate(s, a):
             "type annotation, an unreachable branch, or a line this test simply never reaches all "
             "look like this. Move the anchor to code the test executes.")
     mutated_src = orig.replace(a.replace, a.with_, 1)
-    if path.endswith(".py") and not _py_parses(mutated_src):
+    # SAME LABEL-FOR-FACT (see mutation_liveness): gated on the NAME, so a mutation that broke this
+    # project's own extensionless Python went unchecked and its red run read as ✓ PROVED. Asking
+    # whether the ORIGINAL parses is what makes this a Python question at all — a mutated JSON file
+    # is not "no longer a program", it never was one, and must not be refused on those grounds.
+    if _py_parses(orig) and not _py_parses(mutated_src):
         die(f"COULD NOT PROVE — the mutated file does not COMPILE.\n\n"
             f"  {a.file}: {a.replace!r} -> {a.with_!r}\n\n"
             "A test cannot fail 'because of your mutation' when the file has stopped being a "

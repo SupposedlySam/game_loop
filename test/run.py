@@ -281,6 +281,21 @@ def has(hay, needle):
     return bool(hay) and needle in hay
 
 
+def historical(sha, path):
+    """The file as it was at `sha`, or None when THIS TREE cannot reach that commit.
+
+    Four of the standing scans take their positive control from a real prior commit, which is the
+    honest fixture — but a shallow clone, an archive or an export has no history, and `git show`
+    then returns an empty string. Falsy, so the control failed, and it failed saying "the scan does
+    not find the collision that was really here" — blaming the scan for the tree's missing history.
+    Found by running the published stable in a --depth 1 clone: 1495/2 there against 1499/0 here.
+    That is the same misattribution this suite spent the morning removing from `mutate`, one level
+    up: could-not-run and did-not-find are different answers and must not share a line.
+    """
+    r = subprocess.run(["git", "show", f"{sha}:{path}"], cwd=REPO, capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 and r.stdout else None
+
+
 def in_order(hay, first, second):
     """True when BOTH needles are present and `first` comes before `second`. Never raises.
 
@@ -1637,6 +1652,32 @@ def main():
               r2.returncode == 0 and "registered by ANOTHER session" in r2.stdout)
         check("...and with every pin released the empty-pins line is back",
               "pins: none" in gl(proj, "status").stdout)
+        # AFTER the release sequence deliberately: pin ids are sequential (p1, p2), so registering
+        # one earlier renumbers every later `--release` and breaks assertions that name an id.
+        # THE ARM THAT REPORTS A VANISHED ANCHOR WAS NEVER REACHED. Found by mutating the glyph in
+        # `pin_state`'s MISSING return and asking this verb's own probe what happened: INERT — a
+        # `raise` on that line does not redden the suite, so nothing here executes it. The question
+        # came from lamp-owner, whose measurement was that a glyph is the least-asserted part of a
+        # CLI because it looks too obvious to test; mine turned out to be one step worse than that.
+        _gone = os.path.join(proj, "vanishing-anchor.txt")
+        with open(_gone, "w") as f:
+            f.write("this file is about to stop existing\n")
+        gl(proj, "pin", "--fact", "the anchor exists", "--reason", "it is about to not",
+           "--path", _gone)
+        os.remove(_gone)
+        _missing = gl(proj, "status").stdout
+        check("status reports a pin whose anchor is GONE — the failure pins exist for, and the one "
+              "arm of pin_state nothing was executing",
+              has(_missing, "MISSING") and has(_missing, "vanishing-anchor.txt"))
+        # AND THE GLYPH IS ON A DIFFERENT LINE FROM THE WORD, which is lamp-owner's shape
+        # exactly: `{sym} [id] {fact}` renders one line and `anchor : ... — {note}` another, so an
+        # assertion reading "MISSING" is invariant under the symbol. Scoped to the fact's own line
+        # rather than searching the whole report, where any other ✗ would satisfy it.
+        _glyph_line = next((l for l in _missing.splitlines() if "the anchor exists" in l), "")
+        check("...and THAT line carries the ✗ — the glyph is what a human actually scans, it is "
+              "rendered on a different line from the word MISSING, and an assertion on the word "
+              "alone passes with the symbol reversed",
+              _glyph_line.strip().startswith("✗"))
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("both the pin and its release are permanent in the log",
@@ -7866,6 +7907,36 @@ def main():
               "else in the output would say so",
               "ran in :" in (_zero.stdout + _zero.stderr)
               and "mutating:" in (_zero.stdout + _zero.stderr))
+        # WHAT THE FILE IS, NOT WHAT IT IS CALLED. The liveness probe and the compile check were
+        # both gated on `path.endswith(".py")`, and every program this project ships is
+        # EXTENSIONLESS Python — so the verb's strongest control was unavailable on its own binary,
+        # while printing "this file is not Python" about a file that is. Found by using the verb on
+        # game_loop itself to answer a question from another consumer.
+        _noext = os.path.join(mt, "prodbin")             # Python, no extension — this repo's shape
+        with open(_noext, "w") as f:
+            f.write("def add(a, b):\n    return a + b\n")
+        with open(os.path.join(mt, "t_noext.py"), "w") as f:
+            f.write("import importlib.machinery as mach\n"
+                    "m = mach.SourceFileLoader('p', 'prodbin').load_module()\n"
+                    "assert m.add(2, 2) == 4\nprint('1 passed')\n")
+        _ne = gl(mtw, "mutate", "--prove", "add adds", "--test", f"cd {mt} && python3 t_noext.py",
+                 "--file", _noext, "--replace", "a + b", "--with", "a - b")
+        _ne_out = _ne.stdout + _ne.stderr
+        check("#91: an EXTENSIONLESS Python file is probed like any other — every program this "
+              "repo ships is one, so a gate reading the filename put the verb's own binary beyond "
+              "the reach of its strongest control",
+              _ne.returncode == 0 and has(_ne_out, "\u2713 PROVED")
+              and not has(_ne_out, "not parse as Python"))
+        # THE OTHER DIRECTION, because a gate that answers "yes" to everything is not a content
+        # test either. The .py NAME must not buy a probe the CONTENT cannot support.
+        _fake = os.path.join(mt, "notpython.py")
+        with open(_fake, "w") as f:
+            f.write("this file is prose, not source; it merely ends in .py\n")
+        _fk = gl(mtw, "mutate", "--prove", "prose", "--test", f"cd {mt} && python3 t_good.py",
+                 "--file", _fake, "--replace", "prose", "--with", "verse")
+        check("#91: ...and a file NAMED .py that does not parse is still declined, so the gate "
+              "reads content in both directions rather than trading one label for another",
+              has(_fk.stdout + _fk.stderr, "does not parse as Python"))
         _silent = _mut("t_silent.py")
         check("#85: ...and a test that prints NO count and cannot be probed is COULD NOT PROVE "
               "rather than NOT PROVED — with both instruments silent, 'the test is weak' and 'the "
@@ -8083,13 +8154,18 @@ def main():
     # it. This check shipped without one — I asserted "no duplicates" over a tree that had none and
     # called it done, which is the shape it exists to refuse. A real prior commit is a free fixture
     # and cannot be the case my own matcher was written around.
-    _dupe_prev = subprocess.run(["git", "show", "aacc8ba7:test/run.py"],
-                                cwd=REPO, capture_output=True, text=True).stdout
-    check("...and the scan FINDS the collision that was really here — 'gate allows the Write that "
-          "creates the handoff', named twice at aacc8ba7 for two different gates — so the clean "
-          "answer above is a verdict rather than a comparison that never fires",
-          _dupe_prev
-          and _dupe_names(_dupe_prev) == ["gate allows the Write that creates the handoff"])
+    _dupe_prev = historical("aacc8ba7", "test/run.py")
+    if _dupe_prev is None:
+        check("the duplicate-name control could not run in THIS tree — SKIPPED, not passed: "
+              "aacc8ba7 is unreachable here, which a shallow clone or an export legitimately is, "
+              "and a missing fixture is not a scan that found nothing",
+              subprocess.run(["git", "cat-file", "-e", "aacc8ba7^{commit}"], cwd=REPO,
+                             capture_output=True).returncode != 0)
+    else:
+        check("...and the scan FINDS the collision that was really here — 'gate allows the Write "
+              "that creates the handoff', named twice at aacc8ba7 for two different gates — so the "
+              "clean answer above is a verdict rather than a comparison that never fires",
+              _dupe_names(_dupe_prev) == ["gate allows the Write that creates the handoff"])
     # AND IT DOES NOT STOP AT THE FIRST. The historical control carries exactly ONE collision, so a
     # scan that reported only the earliest match would satisfy it and still hide every collision
     # after the first — "reporting one of two is the failure" is a thing this suite has already been
@@ -8372,11 +8448,17 @@ def main():
     # THE CONTROL IS THE REAL DEFECT, taken from history rather than invented: the commit before
     # the fix had exactly one, and a control built from the actual bug cannot be the shape you
     # already knew how to catch.
-    _prev_src = subprocess.run(["git", "show", "cf133a00:.game_loop/bin/game_loop"],
-                               cwd=REPO, capture_output=True, text=True).stdout
-    check("...and the scan FINDS the one that existed before this was fixed, so the clean answer "
-          "above is a verdict rather than a pattern that matches nothing",
-          _prev_src and _whole_file_log_readers(_prev_src) == ["retro_outcome"])
+    _prev_src = historical("cf133a00", ".game_loop/bin/game_loop")
+    if _prev_src is None:
+        check("the log-reader control could not run in THIS tree — SKIPPED, not passed: cf133a00 "
+              "is unreachable here, and reporting that as 'the scan matched nothing' would blame "
+              "the scan for history the checkout never had",
+              subprocess.run(["git", "cat-file", "-e", "cf133a00^{commit}"], cwd=REPO,
+                             capture_output=True).returncode != 0)
+    else:
+        check("...and the scan FINDS the one that existed before this was fixed, so the clean "
+              "answer above is a verdict rather than a pattern that matches nothing",
+              _whole_file_log_readers(_prev_src) == ["retro_outcome"])
     # SAME ARGUMENT: the historical tree held exactly one offender, so it cannot tell a scan that
     # enumerates from one that returns the first hit and stops.
     check("...and it names EVERY reader with that shape, not just the earliest — the real fixture "
@@ -10705,7 +10787,11 @@ def main():
 
         _verdicts, _whys = {}, {}
         for _name, _args in (
-                ("not-python", (_src_ok, "    x = 1", "thing.sh", 1, _MARK)),
+                # CONTENT, NOT NAME. This case used to be `_src_ok` under the name "thing.sh" —
+                # valid Python behind a shell extension — because the gate read the extension. It
+                # now reads the source, so the fixture has to be a file that genuinely is not
+                # Python; the old one is live and correctly probed.
+                ("not-python", ("#!/bin/sh\nexit 0\n", "exit 0", "thing.sh", 1, _MARK)),
                 ("mid-line",   (_src_ok, "1", "t.py", 1, _MARK)),
                 # WHOLE LINES, but inside a bracket continuation, so a `raise` cannot live there.
                 # My first fixture for this used "(1 +\n   2)" out of a `return`, which starts

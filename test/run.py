@@ -1841,6 +1841,26 @@ def main():
                "--outcome", "refuted", "--evidence", control)
         check("a refuted claim with real evidence is recorded",
               r.returncode == 0 and "REFUTED" in r.stdout)
+        # THE HEADLINE SYMBOLS, which nothing pinned — CLAIM_OUTCOMES is a table mapping how a
+        # claim landed to the line it prints, and the three sit one character apart at the same
+        # position. A run that recorded a REFUTED claim while opening with ✓ would be announcing a
+        # ruled-out path as a sourced one, in the verb this whole harness is built around. `"REFUTED"
+        # in stdout` is satisfied by that line whatever character precedes it.
+        _refuted_out = r.stdout
+        r = gl(proj, "claim", "--assert", "the retry budget is three", "--read", real,
+               "--outcome", "inconclusive", "--evidence", control)
+        _inconc = r.stdout
+        check("a claim that DID NOT SETTLE is its own outcome — recorded, and not quietly filed as "
+              "either sourced or refuted",
+              r.returncode == 0 and has(_inconc, "INCONCLUSIVE"))
+        _hl = lambda out, w: next((l for l in out.splitlines() if w in l), "")
+        check("...and the three outcomes open with three DIFFERENT characters — sourced ✓, refuted "
+              "✗, unsettled ~ — because the symbol is what a reader takes from the line, and a "
+              "ruled-out path wearing the success symbol is the record training the wrong lesson",
+              _hl(_refuted_out, "REFUTED").strip().startswith("✗")
+              and _hl(_inconc, "INCONCLUSIVE").strip().startswith("~")
+              and _hl(gl(proj, "claim", "--assert", "the flag defaults off", "--read", real).stdout,
+                      "CLAIM sourced").strip().startswith("✓"))
         r = gl(proj, "claim", "--assert", "x", "--read", real, "--outcome", "nonsense")
         check("an unknown --outcome is refused",
               r.returncode != 0 and "inconclusive" in r.stderr)
@@ -6823,6 +6843,20 @@ def main():
         _bad = _harden("--general", "G")
         check("a FAILING trigger is announced loudly, naming the failure",
               "tp-bad FAILED" in _bad.stdout and "nope" in _bad.stdout)
+        # THE PAIR AT THE MOMENT OF FIRING, which is a DIFFERENT producer from the status line
+        # covered further down: `fire_triggers` prints ✓ name or ✗ name FAILED, same position,
+        # opposite meaning, and both were matched by word. I had recorded this function as owing
+        # nothing on the grounds that its ⚠ is additive — a claim I made by reading, and wrong.
+        # It has no ⚠ at all; it has a substitutive ✓/✗ pair, which is the strongest case there is.
+        _fl = lambda out, nm: next((l for l in out.splitlines()
+                                    if nm in l and "triggers ·" not in l), "")
+        check("a trigger that fired and FAILED opens ✗ at the moment it fires — the agent reads "
+              "this line in the verb's own output, before any status ever renders it",
+              _fl(_bad.stdout, "tp-bad").strip().startswith("✗"))
+        check("...and one that succeeded opens ✓ there, so the immediate report discriminates as "
+              "well as the status block does — two producers, one distinction, and covering either "
+              "alone leaves the other free to disagree with it",
+              _fl(_fired.stdout, "tp-ok").strip().startswith("✓"))
         check("...and the harden still stands — a trigger never blocks the work",
               _bad.returncode == 0 and "HARDENED" in _bad.stdout
               and "never blocks the work" in _bad.stdout)
@@ -8605,12 +8639,13 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "cmd_notify", "effector_state", "external_claims_report", "fix_state", "guards_report",
-        "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
+        "<module>", "cmd_notify", "effector_state", "external_claims_report", "fire_triggers",
+        "fix_state", "guards_report", "mark_publication_state", "pin_state", "triggers_report",
+        "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "<module>", "cmd_checkpoint", "cmd_confidence", "cmd_harden", "cmd_measure",
-        "cmd_pin", "cmd_status", "fire_triggers", "instruments_report",
+        "cmd_checkpoint", "cmd_confidence", "cmd_harden", "cmd_measure",
+        "cmd_pin", "cmd_status", "instruments_report",
     ]
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))

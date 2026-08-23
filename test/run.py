@@ -8431,11 +8431,17 @@ def main():
     # `verify`, `watchdog` and the guard scripts, which have verdicts of their own. Nothing was
     # swallowed in the five it could not see, but the check could not have said so.
     # EVERY PLACE A SYMBOL IS CARRIED BY A VARIABLE, recorded so a new one cannot appear unnoticed.
-    # A glyph written INTO the same literal as its words ("✗ {name} — INERT") is pinned by any
-    # assertion on the words. A glyph held in a VARIABLE is not: it is a second value that can be
-    # wrong on its own, which is how a FAILING trigger could have rendered ✓ while still printing
-    # the word FAILING. There are seven such sites and all seven are asserted line-scoped; this
-    # check exists so the eighth arrives with a failure rather than with silence.
+    #
+    # THE RULE I FIRST WROTE HERE WAS WRONG, and it was refuted with a measurement rather than an
+    # argument (lamp-owner, 2026-08-23). I claimed a glyph written INTO the same literal as its
+    # words is pinned by any assertion on those words. It is not: `"INERT" in out` is satisfied by
+    # a line whose ✗ has become ✓, and I confirmed it HERE by mutating exactly that and watching
+    # the suite stay green. The rule holds only under equality, and a CLI suite matches with `in`,
+    # because pinning whole rendered lines makes every test break when a hint changes.
+    #
+    # So this scan is NECESSARY BUT NOT SUFFICIENT, and it stays for what it does catch cheaply:
+    # a symbol in a variable is the shape most likely to be added next. The real class — any
+    # producer whose branches can yield a DIFFERENT symbol — is enumerated after it.
     def _glyph_var_sites(src):
         """(function, variable) wherever a symbol-holding NAME is interpolated into an f-string."""
         _GL = set("✓✗•⚠?")
@@ -8476,18 +8482,73 @@ def main():
         ("triggers_report", "mark"),
     ]
     _gsites = _glyph_var_sites(read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop")))
-    check("every place a SYMBOL is carried by a variable rather than written beside its words is "
-          "one of the seven with a line-scoped assertion — a glyph in its own value can be wrong "
-          "on its own, and an eighth site would otherwise arrive silently",
+    check("every place a SYMBOL is carried by a variable is one of the seven with a line-scoped "
+          "assertion, and an eighth arrives as a failure — necessary, and NOT sufficient: see the "
+          "wider enumeration below, which is the class this one is a subset of",
           _gsites == _COVERED_GLYPH_SITES)
     check("...and the scan finds them by structure, so it reports a site whose variable is named "
           "anything: the two found last were called `mark`, not `sym`",
           _glyph_var_sites('def r():\n    q = "✓" if ok else "✗"\n    return f"{q} thing"\n')
           == [("r", "q")])
-    check("...and a glyph written INTO the literal beside its words is NOT reported, because any "
-          "assertion on those words already pins it — reporting those would bury the seven that "
-          "matter in sixty that do not",
+    check("...and a glyph written INTO the literal beside its words is not reported BY THIS scan "
+          "— which is the scan's limit, not a statement that such a glyph is safe: the wider "
+          "enumeration below is what covers those, after one of them was measured unpinned here",
           _glyph_var_sites('def r(n):\n    return f"  ✗ {n} — INERT"\n') == [])
+
+    # THE REAL CLASS: any producer whose branches can yield a DIFFERENT symbol. lamp-owner's
+    # formulation, and it is a property of the PRODUCER rather than of where the character sits —
+    # "can this statement yield another symbol", not "is the symbol in a literal". A function that
+    # prints one symbol on one success line had no other character it could have printed, and
+    # cannot be classified wrongly; a function with several is making a decision a reader acts on.
+    #
+    # RECORDED, NOT ASSERTED-AWAY. Six of these have line-scoped symbol assertions; the rest do
+    # not, and this list is how that stays countable instead of becoming a vague intention. The
+    # check fails when a NEW multi-symbol producer appears, which is the moment to decide whether
+    # its symbols carry a distinction worth pinning — not months later when one is wrong.
+    def _multi_symbol_producers(src):
+        """Functions whose string literals can yield more than one decision symbol."""
+        tree = ast.parse(src)
+        own = {}
+        for nd in ast.walk(tree):
+            if isinstance(nd, ast.FunctionDef):
+                for c in ast.walk(nd):
+                    own.setdefault(id(c), nd.name)
+        seen = {}
+        for nd in ast.walk(tree):
+            if isinstance(nd, ast.Constant) and isinstance(nd.value, str):
+                g = {c for c in "✓✗•⚠" if c in nd.value}
+                if nd.value.strip() == "?":
+                    g.add("?")
+                if g:
+                    seen.setdefault(own.get(id(nd), "<module>"), set()).update(g)
+        return sorted(k for k, v in seen.items() if len(v) > 1)
+
+    _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
+        "effector_state", "fix_state", "guards_report", "pin_state", "triggers_report",
+    ]
+    _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
+        "<module>", "cmd_checkpoint", "cmd_claim", "cmd_confidence", "cmd_harden", "cmd_measure",
+        "cmd_notify", "cmd_pin", "cmd_status", "external_claims_report", "fire_triggers",
+        "instruments_report", "mark_publication_state", "release_distance_warning",
+        "retro_outcome", "update_notice", "waiting_report", "worktree_report",
+    ]
+    _multi = _multi_symbol_producers(read_or_empty(
+        os.path.join(REPO, ".game_loop", "bin", "game_loop")))
+    check("every producer that can emit MORE THAN ONE symbol is on one of the two recorded lists "
+          "— pinned, or owed. A new one fails here so somebody decides which, rather than it "
+          "joining the majority by default",
+          _multi == sorted(_SYMBOL_PINNED + _SYMBOL_NOT_PINNED))
+    check("...and the two lists do not overlap, so 'covered' is a claim about a name in exactly "
+          "one of them and the owed count cannot be reduced by listing something twice",
+          not (set(_SYMBOL_PINNED) & set(_SYMBOL_NOT_PINNED)))
+    check("...and the scan sees a producer whose symbols differ across BRANCHES, which is the "
+          "shape the variable scan above misses entirely — one literal per arm, each with its own "
+          "character, and nothing carrying it",
+          _multi_symbol_producers(
+              'def r(k):\n    if k:\n        return "✓ fine"\n    return "✗ broken"\n') == ["r"])
+    check("...and it does NOT flag a producer with only one symbol to give — there was no other "
+          "character it could have printed, so a reader cannot be misled by which one appeared",
+          _multi_symbol_producers('def r():\n    return "✓ done"\n') == [])
 
     _binfiles = sorted(f for f in os.listdir(os.path.join(REPO, ".game_loop", "bin"))
                        if os.path.isfile(os.path.join(REPO, ".game_loop", "bin", f)))
@@ -11142,6 +11203,20 @@ def main():
               _verdicts == {"not-python": "unknown", "mid-line": "unknown", "no-parse": "unknown",
                             "timed-out": "unknown", "live": "live", "red-no-mark": "unknown",
                             "inert": "inert"})
+        # THE SAME ANCHOR, WITH AND WITHOUT ITS OWN INDENTATION, must reach the same verdict. It
+        # did not: the probe spliced `indent + raise` in place of the anchor while the file's own
+        # leading whitespace was still there, doubling it, and reported the resulting
+        # IndentationError as "the anchor is not a whole statement" — blaming an anchor that was
+        # fine. The bare form is the natural one to write and the one `--replace-file` produces
+        # after stripping, so the strongest control this tool has was unavailable for it and said
+        # the fault was yours. Found only because a consumer refuted a claim of mine and I ran
+        # their case here instead of arguing about it.
+        _indented = "def g():\n    if x:\n        y = 1\n    return 2\n"
+        _same = [_ml(_indented, a, "t.py", 1, _MARK)[0] for a in ("        y = 1", "y = 1")]
+        check("#80: an anchor reaches the same verdict whether or not it carries its own leading "
+              "whitespace — one form is what a human types and the other is what --replace-file "
+              "hands over, and a probe that refuses one of them refuses it by blaming the anchor",
+              _same == ["live", "live"])
         check("#80: ...and a test that went RED WITHOUT the marker is UNKNOWN rather than live — "
               "something other than the probe broke it, and the reporter's first cut matched the "
               "marker inside a parse error and called a dead anchor live",
@@ -12241,6 +12316,33 @@ def main():
         check("#90: ...and a probe that does not ANSWER is UNKNOWN too, bounded rather than "
               "hanging the status block",
               "UNKNOWN" in _status())
+
+        # AND THE SYMBOLS, which nothing pinned. I had claimed a glyph written INTO the same
+        # literal as its words is pinned by any assertion on those words. lamp-owner refuted it
+        # with a measurement, so I ran their case here: mutating ✗ to ✓ on the INERT line, leaving
+        # the word alone, SURVIVED this whole suite — the probe reddened the run, so the line
+        # executes. The rule is wrong wherever assertions match with `in` rather than by equality,
+        # which is every CLI suite, because pinning whole rendered lines makes each of them break
+        # when a hint changes. Where the symbol LIVES is not the discriminator; whether anything
+        # matches it is.
+        _gline = lambda blk, nm: next((l for l in blk.splitlines() if nm in l), "")
+        _cfg([{"name": "guard-lead-seat.sh", "script": ".game_loop/guard-lead-seat.sh",
+               "probe": _probe}])
+        _seat("worker")
+        _sym_inert = _guard_block(_status())
+        _seat("lead")
+        _sym_active = _guard_block(_status())
+        _cfg([{"name": "no-probe.sh"}])
+        _sym_unknown = _guard_block(_status())
+        check("#90: an INERT guard carries ✗ — a guard the state has disabled, rendered with the "
+              "symbol a reader scans before any word on the line",
+              _gline(_sym_inert, "guard-lead-seat.sh").strip().startswith("✗"))
+        check("#90: ...and an ACTIVE one carries ✓, so the symbols discriminate rather than "
+              "decorate — the same report, the same guard, one state apart",
+              _gline(_sym_active, "guard-lead-seat.sh").strip().startswith("✓"))
+        check("#90: ...and one nobody can interrogate carries ? — NOT ✓, which is the entire "
+              "finding this report was built from, and the symbol is where it is read first",
+              _gline(_sym_unknown, "no-probe.sh").strip().startswith("?"))
 
         _cfg([])
         check("#90: ...and a project with no guards block says nothing at all — most installs have "

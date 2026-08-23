@@ -2887,7 +2887,14 @@ def mutation_liveness(orig, replace, path, run):
     if prefix.strip():
         return "unknown", ("the anchor starts mid-line, so a `raise` cannot be substituted for it "
                            "without changing the surrounding expression")
-    poisoned = orig.replace(replace, f'{indent}raise SystemExit("{_MUTATE_MARKER}")', 1)
+    # SPLICE FROM THE START OF THE LINE, never `orig.replace(anchor, indent + raise)`. The prefix is
+    # still in the file, so re-adding it doubled the indentation and the poisoned tree failed to
+    # compile — reported as "the anchor is not a whole statement", blaming an anchor that was fine.
+    # An anchor written WITHOUT its own leading whitespace is the natural form and the one
+    # `--replace-file` produces, so the tool's strongest control was quietly unavailable for it.
+    # Found by taking a consumer's refutation seriously enough to run it here (lamp-owner, #91).
+    poisoned = (orig[:line_start] + f'{indent}raise SystemExit("{_MUTATE_MARKER}")'
+                + orig[at + len(replace):])
     if not _py_parses(poisoned):
         return "unknown", ("the anchor is not a whole statement — replacing it with a `raise` does "
                            "not compile, so the probe cannot be run here")

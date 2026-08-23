@@ -1694,6 +1694,12 @@ def main():
         # above renumbers every later `--release` — the trap documented three screens up, which I
         # then walked into from the other side. A fresh tree cannot be renumbered by anybody.
         _pinproj = make_sandbox()
+        # READ THE CAP FROM THE PROGRAM, never restate it: a fixture carrying its own copy of a
+        # threshold stops crossing it the day the threshold moves, and passes while testing nothing.
+        PIN_PROBE_MAX_FOR_TEST = int(re.search(r"PIN_PROBE_MAX = 1 << (\d+)",
+                                               read_or_empty(os.path.join(
+                                                   SRC_GAME_LOOP, "bin", "game_loop"))).group(1))
+        PIN_PROBE_MAX_FOR_TEST = 1 << PIN_PROBE_MAX_FOR_TEST
         _anch = os.path.join(_pinproj, "anchor-file.txt")
         with open(_anch, "w") as f:
             f.write("build-id abc123def456\n")
@@ -1718,6 +1724,29 @@ def main():
               "side by side in one report, and the symbol is the part a human reads first",
               bool(_hline) and bool(_uline)
               and _hline[0].strip()[0] != _uline[0].strip()[0])
+        # THE ? ARM IS REACHABLE ONLY BY DRIFT, which is why it had no test: registration refuses
+        # anything that is not ✓ ("a check born red is a check nobody will believe later"), so a
+        # pin cannot be BORN unverifiable. It can become so — the anchor grows past the probe cap,
+        # or a path that was a file becomes a directory — and then the pin is neither holding nor
+        # drifted. Reporting either would be a claim nobody made: ✓ asserts a check that did not
+        # run, ✗ asserts a change nobody observed.
+        with open(_anch, "a") as f:
+            f.write("x" * (PIN_PROBE_MAX_FOR_TEST + 1))
+        _grown = gl(_pinproj, "status").stdout
+        _gline = [l for l in _grown.splitlines() if "the build id is abc123def456" in l]
+        check("a pin whose anchor grew past the probe cap reports UNVERIFIABLE — not ✓, which "
+              "would claim a check that did not run, and not ✗, which would claim a drift nobody "
+              "observed; the same file was ✓ one assertion ago",
+              has(_grown, "unverifiable") and has(_grown, "too large")
+              and bool(_gline) and _gline[0].strip().startswith("?"))
+        _dirpin = gl(_pinproj, "pin", "--fact", "a directory with an expectation",
+                     "--reason", "to see which refusal this is", "--path", _pinproj,
+                     "--expect", "anything")
+        check("...and --expect on a DIRECTORY is refused at registration as unverifiable rather "
+              "than as not-holding — one says the check cannot run here, the other says it ran and "
+              "failed, and they send you to fix different things",
+              _dirpin.returncode != 0
+              and has(_dirpin.stdout + _dirpin.stderr, "--expect reads a file"))
         # #15: a HUMAN-called break needs somewhere to go. Without it the only endings are "violate
         # the gate" or "fabricate a closure that reads forever as though the work was done". A park
         # keeps the mandate OPEN and attributes the break to the human — and, crucially, it is

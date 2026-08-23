@@ -8756,10 +8756,28 @@ def retro_outcome():
     rather than passed over. Read from the log because it is the record neither optimism nor
     compaction can edit.
     """
+    # PER LINE, NOT PER FILE. This was a list comprehension inside `except (OSError, ValueError)`,
+    # so ONE malformed line failed the whole thing and returned [] — the retro then reported that
+    # nothing had been encoded. In the function whose docstring says an empty yield must be STATED
+    # rather than passed over, and which exists precisely because "produced nothing" and "never
+    # happened" look the same afterwards. It could not tell either of those from "could not read
+    # the log".
+    #
+    # A half-written last line is the ORDINARY state of an append-only file, and three programs
+    # append to this one. Every other reader here already skips the bad line and keeps the rest;
+    # this one discarded the record. Now it skips too, and SAYS how many it skipped, because a
+    # yield counted over a log with holes in it is not the same number.
+    recs, skipped = [], 0
     try:
         with open(LOG_F) as f:
-            recs = [json.loads(l) for l in f if l.strip()]
-    except (OSError, ValueError):
+            for _l in f:
+                if not _l.strip():
+                    continue
+                try:
+                    recs.append(json.loads(_l))
+                except ValueError:
+                    skipped += 1
+    except OSError:
         return []
     last = max((i for i, r in enumerate(recs) if r.get("kind") == "stepback"), default=None)
     # NO PRIOR RETRO IS NOT NO PRIOR WORK. This returned "this is the first" and counted nothing, so
@@ -8784,6 +8802,10 @@ def retro_outcome():
                      "taught nothing, or the")
         lines.append("    last retro ended at the writing-it-down step. Only one of those is worth "
                      "repeating.")
+    if skipped:
+        lines.append(f"  ⚠ {skipped} log line(s) would not parse and were SKIPPED — these counts "
+                     "are over a record with holes")
+        lines.append("    in it, so a low yield here may be the log rather than the chapter.")
     return lines
 
 

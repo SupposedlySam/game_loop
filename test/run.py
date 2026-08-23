@@ -7674,6 +7674,30 @@ def main():
     check("...while the SECOND retro goes back to counting since the last one — the paired arm, or "
           "every retro would report the whole log forever",
           "beginning of this tree's record" not in _second)
+    # ONE BAD LINE USED TO DISCARD THE WHOLE LOG. This read `[json.loads(l) for l in f]` inside
+    # `except (OSError, ValueError)`, so a single malformed line failed the comprehension and
+    # returned [] — the retro then reported NO YIELD AT ALL. In the function whose docstring says
+    # an empty yield must be stated rather than passed over, and which exists because "produced
+    # nothing" and "never happened" look identical afterwards. It could tell neither of those from
+    # "could not read the log".
+    #
+    # A half-written last line is the ORDINARY state of an append-only file, and three shipped
+    # programs append to this one. Every other reader of it already skipped the bad line.
+    gl(fw, "harden", "--learning", "z", "--artifact", _art, "--mechanism", "w", "--rung", "3",
+       sid="sess-fr")
+    with open(os.path.join(fw, ".game_loop", "log.jsonl"), "a") as f:
+        f.write('{"kind": "harden", "t": "trunc\n')          # an interrupted append
+    _torn = gl(fw, "stepback", "--notes", "third", sid="sess-fr").stdout
+    check("a torn last line does not cost the whole log — the yield is still counted and reported, "
+          "where one unparseable line used to return nothing and read as a chapter that encoded "
+          "nothing",
+          has(_torn, "hardened ·"))
+    check("...and it SAYS how many lines it skipped, because a yield counted over a record with "
+          "holes in it is not the same number and a low one may be the log rather than the chapter",
+          has(_torn, "would not parse") and has(_torn, "1 log line(s)"))
+    check("...while a clean log says nothing about skipping, so the caveat is a verdict rather "
+              "than a line every retro carries",
+          not has(_second, "would not parse"))
 
     print("checkpoint is the escape that always works, so it gets ritualised (#75):")
     # Measured from ONE session — mine: 16 checkpoints, 14 stop-gate blocks, 3 mandate events. The

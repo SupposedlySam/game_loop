@@ -1971,6 +1971,15 @@ def main():
               "SOMETHING changed, which is not the same claim as the asserted thing changing",
               has(_us, "acted (UNCHECKED — no --expect")
               and _eline(_us, "toggle").strip().startswith("•"))
+        # AND THE PROVE LINE ITSELF carries the same symbol, from the same producer — `{sym}
+        # EFFECTOR PROVED` is the sentence an agent reads at the moment it decides the proof is
+        # good, and "EFFECTOR PROVED" is identical whether the symbol says checked or unchecked.
+        _tog = gl(proj, "effector", "--prove", "toggle2", "--known-state", "the panel starts closed",
+                  "--before", _ub, "--observed", _ua)
+        check("...and the ACCEPT line carries the symbol too: an unchecked proof announces itself "
+              "as • at the moment it is granted, not only later in status",
+              _tog.returncode == 0 and has(_tog.stdout, "EFFECTOR PROVED")
+              and _tog.stdout.strip().startswith("•"))
         with open(_ua, "w") as f:
             f.write("panel: open, and then something else wrote here\n")
         _os_ = gl(proj, "status").stdout
@@ -2658,8 +2667,18 @@ def main():
         _r2 = _fx2("repro2.txt", "reproduced: Two() throws\n")
         _b2 = _fx2("before2.txt", "gen2.dart:1:9: error: expected ';'\n")
         _a2 = _fx2("after2.txt", "gen2.dart: Built — 0 errors\n")
-        gl(_fxproj, "fix", "--prove", "two-id", "--promises", "the second generator compiles",
-           "--produces", _p2, "--diagnosis", _r2, "--before", _b2, "--observed", _a2)
+        _fxacc = gl(_fxproj, "fix", "--prove", "two-id",
+                    "--promises", "the second generator compiles",
+                    "--produces", _p2, "--diagnosis", _r2, "--before", _b2, "--observed", _a2)
+        # THE ACCEPT LINE'S OWN SYMBOL, the fix-side twin of the effector assertion: `{sym} FIX
+        # PROVED` is what an agent reads when it decides the fix is good, and the words are the
+        # same whether the symbol says checked or unchecked. Both halves of that pair are covered
+        # now — leaving one of the two would be the partial sweep again, in the same commit that
+        # records the list of seven.
+        check("a fix proved with NO --expect announces itself as • on the ACCEPT line — the moment "
+              "the proof is granted is where an agent decides to lean on it, not status later",
+              _fxacc.returncode == 0 and has(_fxacc.stdout, "FIX PROVED")
+              and _fxacc.stdout.strip().startswith("•"))
         _f1 = gl(_fxproj, "status").stdout
         check("...and one proved with NO --expect renders • and says UNCHECKED — the pair proves "
               "the verdict MOVED, which is not the claim that it moved to the promised outcome",
@@ -6824,6 +6843,22 @@ def main():
         _st3 = _run("status").stdout
         check("a trigger that fires but FAILS is carried into status as failing, not as fired",
               "tp-broken" in _st3 and "FAILING" in _st3)
+        # AND THE MARK BESIDE IT, which nothing pinned. `mark = "✓" if rec.get("ok") else "✗"` is a
+        # SEPARATE value from the words, so inverting that ternary leaves "FAILING" printed on the
+        # line and every assertion above green — a trigger reported as healthy in the symbol and
+        # broken in the text, on one line. Same shape as the state producers, one report along; it
+        # was found by enumerating every glyph a variable carries into an f-string rather than by
+        # reading this function, which I had already read twice.
+        _tl = lambda out, nm: next((l for l in out.splitlines() if nm in l and "last" in l), "")
+        _okl = _tl(_st2, "tp-never")
+        _badl = _tl(_st3, "tp-broken")
+        check("...and a FAILING trigger carries ✗ on its own line, not merely the word — the "
+              "symbol is a separate value from the message, so one can say healthy while the other "
+              "says broken",
+              bool(_badl) and _badl.strip().startswith("✗"))
+        check("...while a trigger that fired and SUCCEEDED carries ✓, so the pair is a "
+              "discrimination rather than a symbol that is always the same one",
+              bool(_okl) and _okl.strip().startswith("✓"))
 
         # THE RETRO NUDGE, which could not fire for the whole life of this project: it counted
         # `trans`, an optional verb that had run ONCE against twelve hardens and zero retros.
@@ -8395,6 +8430,65 @@ def main():
     # had a denominator of 21 of the 26 words this project actually negates in print — blind to
     # `verify`, `watchdog` and the guard scripts, which have verdicts of their own. Nothing was
     # swallowed in the five it could not see, but the check could not have said so.
+    # EVERY PLACE A SYMBOL IS CARRIED BY A VARIABLE, recorded so a new one cannot appear unnoticed.
+    # A glyph written INTO the same literal as its words ("✗ {name} — INERT") is pinned by any
+    # assertion on the words. A glyph held in a VARIABLE is not: it is a second value that can be
+    # wrong on its own, which is how a FAILING trigger could have rendered ✓ while still printing
+    # the word FAILING. There are seven such sites and all seven are asserted line-scoped; this
+    # check exists so the eighth arrives with a failure rather than with silence.
+    def _glyph_var_sites(src):
+        """(function, variable) wherever a symbol-holding NAME is interpolated into an f-string."""
+        _GL = set("✓✗•⚠?")
+
+        def _bare(x):
+            return (isinstance(x, ast.Constant) and isinstance(x.value, str)
+                    and x.value.strip() in _GL)
+
+        tree = ast.parse(src)
+        owner = {}
+        for nd in ast.walk(tree):
+            if isinstance(nd, ast.FunctionDef):
+                for c in ast.walk(nd):
+                    owner.setdefault(id(c), nd.name)
+        carriers = set()
+        for nd in ast.walk(tree):
+            if not isinstance(nd, ast.Assign):
+                continue
+            v = nd.value
+            if isinstance(v, ast.Call) and getattr(v.func, "id", "").endswith("_state"):
+                for t in nd.targets:
+                    if isinstance(t, ast.Tuple) and t.elts and isinstance(t.elts[0], ast.Name):
+                        carriers.add(t.elts[0].id)
+            if _bare(v) or (isinstance(v, ast.IfExp) and _bare(v.body) and _bare(v.orelse)):
+                carriers |= {t.id for t in nd.targets if isinstance(t, ast.Name)}
+        out = set()
+        for nd in ast.walk(tree):
+            if isinstance(nd, ast.JoinedStr):
+                for v in nd.values:
+                    if (isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)
+                            and v.value.id in carriers):
+                        out.add((owner.get(id(nd), "<module>"), v.value.id))
+        return sorted(out)
+
+    _COVERED_GLYPH_SITES = [
+        ("cmd_effector", "sym"), ("cmd_fix", "sym"), ("config_paths_report", "mark"),
+        ("effectors_report", "sym"), ("fixes_report", "sym"), ("pins_report", "sym"),
+        ("triggers_report", "mark"),
+    ]
+    _gsites = _glyph_var_sites(read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop")))
+    check("every place a SYMBOL is carried by a variable rather than written beside its words is "
+          "one of the seven with a line-scoped assertion — a glyph in its own value can be wrong "
+          "on its own, and an eighth site would otherwise arrive silently",
+          _gsites == _COVERED_GLYPH_SITES)
+    check("...and the scan finds them by structure, so it reports a site whose variable is named "
+          "anything: the two found last were called `mark`, not `sym`",
+          _glyph_var_sites('def r():\n    q = "✓" if ok else "✗"\n    return f"{q} thing"\n')
+          == [("r", "q")])
+    check("...and a glyph written INTO the literal beside its words is NOT reported, because any "
+          "assertion on those words already pins it — reporting those would bury the seven that "
+          "matter in sixty that do not",
+          _glyph_var_sites('def r(n):\n    return f"  ✗ {n} — INERT"\n') == [])
+
     _binfiles = sorted(f for f in os.listdir(os.path.join(REPO, ".game_loop", "bin"))
                        if os.path.isfile(os.path.join(REPO, ".game_loop", "bin", f)))
     _binsrcs = [read_or_empty(os.path.join(REPO, ".game_loop", "bin", f)) for f in _binfiles]

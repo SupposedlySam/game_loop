@@ -8553,18 +8553,36 @@ def main():
     # check fails when a NEW multi-symbol producer appears, which is the moment to decide whether
     # its symbols carry a distinction worth pinning — not months later when one is wrong.
     def _multi_symbol_producers(src):
-        """Functions whose string literals can yield more than one decision symbol."""
+        """Functions whose string literals can yield more than one decision symbol.
+
+        A BARE "?" IS USUALLY NOT A SYMBOL. `last.get("t", "?")` and `_git(..) or "?"` render a
+        missing timestamp or an unknown sha — placeholder DATA, chosen by absence rather than by a
+        producer deciding anything. Counting those put five functions on the owed list that emit no
+        second verdict at all, which inflates a debt figure and, worse, sends the next reader to
+        assert something that is not a distinction. Excluded structurally, by the position the
+        literal sits in, rather than by naming the five.
+        """
         tree = ast.parse(src)
         own = {}
         for nd in ast.walk(tree):
             if isinstance(nd, ast.FunctionDef):
                 for c in ast.walk(nd):
                     own.setdefault(id(c), nd.name)
+        placeholder = set()
+        for nd in ast.walk(tree):
+            if (isinstance(nd, ast.Call) and isinstance(nd.func, ast.Attribute)
+                    and nd.func.attr == "get" and len(nd.args) == 2
+                    and isinstance(nd.args[1], ast.Constant) and nd.args[1].value == "?"):
+                placeholder.add(id(nd.args[1]))
+            if isinstance(nd, ast.BoolOp) and isinstance(nd.op, ast.Or):
+                for v in nd.values:
+                    if isinstance(v, ast.Constant) and v.value == "?":
+                        placeholder.add(id(v))
         seen = {}
         for nd in ast.walk(tree):
             if isinstance(nd, ast.Constant) and isinstance(nd.value, str):
                 g = {c for c in "✓✗•⚠" if c in nd.value}
-                if nd.value.strip() == "?":
+                if nd.value.strip() == "?" and id(nd) not in placeholder:
                     g.add("?")
                 if g:
                     seen.setdefault(own.get(id(nd), "<module>"), set()).update(g)
@@ -8575,10 +8593,8 @@ def main():
         "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "<module>", "cmd_checkpoint", "cmd_claim", "cmd_confidence", "cmd_harden", "cmd_measure",
-        "cmd_notify", "cmd_pin", "cmd_status", "fire_triggers",
-        "instruments_report", "release_distance_warning",
-        "retro_outcome", "update_notice", "waiting_report",
+        "<module>", "cmd_checkpoint", "cmd_confidence", "cmd_harden", "cmd_measure",
+        "cmd_notify", "cmd_pin", "cmd_status", "fire_triggers", "instruments_report",
     ]
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))
@@ -8597,6 +8613,14 @@ def main():
     check("...and it does NOT flag a producer with only one symbol to give — there was no other "
           "character it could have printed, so a reader cannot be misled by which one appeared",
           _multi_symbol_producers('def r():\n    return "✓ done"\n') == [])
+    check("...and a bare '?' standing in for MISSING DATA is not a symbol — `x.get(k, \"?\")` and "
+          "`f() or \"?\"` render an unknown timestamp or sha, chosen by absence rather than by a "
+          "producer deciding anything, and counting them listed five functions as owing a "
+          "distinction they never make",
+          _multi_symbol_producers(
+              'def r(d):\n    return f"✓ {d.get(\'t\', \"?\")}"\n') == []
+          and _multi_symbol_producers(
+              'def r(d):\n    if d:\n        return "✓ y"\n    return "?"\n') == ["r"])
 
     # A THIRD KIND OF UNTESTED, from owner (llm_chat, 2026-08-23), who hit it in their own gate:
     # a line can RUN, be covered, and still only ever be evaluated at a value production never

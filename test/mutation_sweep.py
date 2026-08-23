@@ -1414,6 +1414,38 @@ def producer_liveness(original, fn, run_mutant):
                        "probe broke it")
 
 
+def in_a_copy_of(base, rel, run):
+    """A runner that drops `src` at `rel` in a throwaway copy of `base` and runs the suite there."""
+    def go(src):
+        pt = tempfile.mkdtemp(prefix="sweep-probe-")
+        try:
+            shutil.copytree(base, pt, dirs_exist_ok=True)
+            with open(os.path.join(pt, rel), "w") as f:
+                f.write(src)
+            os.chmod(os.path.join(pt, rel), 0o755)
+            return run(pt)
+        finally:
+            shutil.rmtree(pt, ignore_errors=True)
+    return go
+
+
+def probed_verdict(original, fn, run_mutant):
+    """(verdict, note) for a producer that killed NOTHING — INERT, or UNPROTECTED with a reason.
+
+    LIFTED OUT OF THE SWEEP LOOP so it can be driven (lamp-owner's push, and my own INV6 note
+    saying this wiring had never fired). It still has not fired on a real producer — no producer
+    here kills zero — but the mapping from probe state to verdict is no longer reachable only
+    through a branch nothing has taken. A nested closure is untestable by construction, and
+    "untestable by construction" was the whole of the admission.
+    """
+    state, why = producer_liveness(original, fn, run_mutant)
+    if state == "inert":
+        return INERT, why
+    if state == "unknown":
+        return UNPROTECTED, "liveness UNESTABLISHED — " + why
+    return UNPROTECTED, why
+
+
 def neuter(src, fn, body):
     """Replace fn's body with `body`, keeping its signature and dropping its docstring."""
     lines = src.split("\n")
@@ -1597,30 +1629,16 @@ def main():
         # ASKED ONLY AT ZERO, because one kill already proves the producer executes — and a probe
         # run costs another full suite. At zero the number cannot distinguish "nothing asserts it"
         # from "nothing runs it", and those take opposite repairs.
-        # WHAT THIS HAS NOT DONE (INV6): the probe's VERDICTS are unit-controlled in test/run.py
-        # across all five outcomes, but this WIRING has never fired on a real producer, because no
-        # producer in this repo currently kills zero — which is the same sweep result that makes
-        # the branch unreachable today. So the first real INERT reading will also be the first
-        # exercise of the code that produces it. Read it as a lead, confirm it by hand with
-        # `mutate --prove` on the same function, and do not act on it before you have.
+        # WHAT THIS HAS NOT DONE (INV6), narrowed since the first version said it: the probe's five
+        # outcomes AND the verdict they map to are both driven in test/run.py now — `probed_verdict`
+        # was lifted out of a nested closure for exactly that reason, because untestable-by-
+        # construction was the whole of the admission. What remains unexercised is only this line:
+        # no producer here kills zero, which is the same clean sweep that makes the branch
+        # unreachable. Confirm a first real INERT reading by hand with `mutate --prove` on the same
+        # function before acting on it.
         live_why = ""
         if killed == 0:
-            def _probe(src):
-                pt = tempfile.mkdtemp(prefix="sweep-probe-")
-                try:
-                    shutil.copytree(base, pt, dirs_exist_ok=True)
-                    with open(os.path.join(pt, rel), "w") as f:
-                        f.write(src)
-                    os.chmod(os.path.join(pt, rel), 0o755)
-                    return run(pt)
-                finally:
-                    shutil.rmtree(pt, ignore_errors=True)
-
-            state, live_why = producer_liveness(original, fn, _probe)
-            if state == "inert":
-                v = INERT
-            elif state == "unknown":
-                live_why = "liveness UNESTABLISHED — " + live_why
+            v, live_why = probed_verdict(original, fn, in_a_copy_of(base, rel, run))
         drift = "  ↓ BELOW FLOOR" if killed < floor else ""
         lines = [f"{label}", f"  suite: {tail}",
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]

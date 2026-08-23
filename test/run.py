@@ -10076,6 +10076,23 @@ def main():
           "producer nothing reacts to is a hole in the denominator this file exists to defend",
           "if bad or drifted or unscored or inert:\n        return 1"
           in read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py")))
+    # AND THE MAPPING FROM PROBE STATE TO VERDICT, which used to live in a closure nested inside
+    # the sweep loop — reachable only by a branch no producer has ever taken, and therefore
+    # untestable by construction. That was the whole of the INV6 admission published with it, and
+    # lifting it out is what closes the half that could be closed. What is still unexercised is one
+    # call site; what is now driven is every decision it makes.
+    check("a probe that finds the producer INERT maps to the INERT verdict, and one that finds it "
+          "live leaves UNPROTECTED standing — the two the sweep must not merge, decided in a "
+          "function that can be called rather than in a closure nothing can reach",
+          sweep.probed_verdict(_psrc, "f", lambda _s: "1493 passed, 0 failed")[0] == sweep.INERT
+          and sweep.probed_verdict(_psrc, "f", lambda _s: "boom " + sweep._PROBE_MARK)[0]
+          == sweep.UNPROTECTED)
+    check("...and an UNKNOWN probe reports UNPROTECTED with the liveness caveat ATTACHED, never a "
+          "bare UNPROTECTED — the verdict a reader acts on and the doubt about it travel together "
+          "or the doubt does not travel",
+          sweep.probed_verdict(_psrc, "f", lambda _s: None)
+          == (sweep.UNPROTECTED, "liveness UNESTABLISHED — the probe run did not finish, so "
+                                 "nothing was established either way"))
     # A producer renamed out from under the sweep is the quiet failure it could most easily have:
     # neuter() would not find it, the entry would report nothing, and the count would look fine.
     with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:

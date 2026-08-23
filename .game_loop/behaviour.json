@@ -311,7 +311,7 @@
     },
     {
       "seq": 31,
-      "sha": "pending",
+      "sha": "a49c633",
       "notice": true,
       "verb": "verify",
       "change": "`verify` no longer prints \"all owed checks passed\" when it ran NOTHING. When every changed file's evidence is already newer than the change, it now says so in its own words and exits 0. The sentence is reserved for a run that actually executed a check.",

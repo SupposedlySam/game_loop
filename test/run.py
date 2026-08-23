@@ -4865,6 +4865,34 @@ def main():
               "override only SOME of them honour works where you test it and not where it matters",
               len(_readers) == 5)
 
+        # THE SAME ARGUMENT FOR state.json, added after the same failure happened again. Fixing the
+        # corrupt-state collapse in game_loop's load() did NOT fix the watchdog, which parses the
+        # same file with its own loader — and a watchdog that reads no mandate stands down, so the
+        # run stopped being watched in exactly the situation where nobody is looking. One format,
+        # two programs, one fix.
+        #
+        # DEFINES STATE_F is the discriminator, not "mentions state.json": `verify` names the path
+        # in an exclusion list and never parses it, and a substring scan called that a reader. The
+        # AST answers the question the substring only approximates.
+        _st_readers, _st_missing = [], []
+        for _f in ("game_loop", "watchdog", "notify.py", "verify", "flair.py"):
+            _src2 = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", _f))
+            if not any(isinstance(_n, ast.Assign)
+                       and any(getattr(_t, "id", None) == "STATE_F" for _t in _n.targets)
+                       for _n in ast.walk(ast.parse(_src2))):
+                continue
+            _st_readers.append(_f)
+            if ".unreadable" not in _src2:
+                _st_missing.append(_f)
+        check("every program that PARSES state.json sets the bytes aside when it will not parse — "
+              "a reader that treats corrupt as absent makes the session read as ungoverned, and "
+              "one that also writes destroys what it replaced: " + (", ".join(_st_missing) or "none"),
+              _st_readers and not _st_missing)
+        check("...and there is more than one such program, or the check above passes by there "
+              "being nobody to hold to it — game_loop and the watchdog both parse it, which is the "
+              "whole reason one fix was not enough: " + ", ".join(_st_readers),
+              len(_st_readers) >= 2)
+
         # And behaviourally, in the two that decide things: the guard and the watchdog.
         with open(_clj, "w") as f:
             json.dump({"watchdog": {"idle_sec": 99, "settle_sec": 0, "ring_cap": 7}}, f)

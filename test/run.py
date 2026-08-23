@@ -8206,20 +8206,41 @@ def main():
     # covered tomorrow. BOTH SIDES READ THE AST, NOT THE TEXT: my first version matched this very
     # comment on one side and "CANNOT DRIFT" on the other, and reported two problems that were both
     # its own — a scan whose only two findings are self-inflicted teaches you to ignore it.
-    def _swallowed_words(gl_src, suite_src):
-        """Verdict words a suite matches bare, which the tool's own NOT-form also contains."""
-        negated = set()
-        for n in ast.walk(ast.parse(gl_src)):
+    def _printed_negations(src):
+        """Words a program negates in text it PRINTS. AST where it parses; text where it cannot.
+
+        The shell guards are not Python and have no string literals to walk, so their whole body is
+        read — minus comment lines, because a comment is not a verdict and matching one is how the
+        first version of this scan invented two findings.
+        """
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+            return set(re.findall(r"(?<![A-Z])NOT ([A-Z]{4,})\b", body))
+        out = set()
+        for n in ast.walk(tree):
             if isinstance(n, ast.Constant) and isinstance(n.value, str):
-                negated.update(re.findall(r"(?<![A-Z])NOT ([A-Z]{4,})\b", n.value))
+                out.update(re.findall(r"(?<![A-Z])NOT ([A-Z]{4,})\b", n.value))
+        return out
+
+    def _swallowed_words(sources, suite_src):
+        """Verdict words a suite matches bare, which some program's own NOT-form also contains."""
+        negated = set().union(set(), *(_printed_negations(s) for s in sources))
         matched = {n.left.value for n in ast.walk(ast.parse(suite_src))
                    if isinstance(n, ast.Compare) and len(n.ops) == 1
                    and isinstance(n.ops[0], ast.In)
                    and isinstance(n.left, ast.Constant) and isinstance(n.left.value, str)}
         return sorted(negated & matched)
 
-    _glsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
-    _swallowed = _swallowed_words(_glsrc, _sfile)
+    # EVERY SHIPPED PROGRAM, not just the big one. The first cut read `bin/game_loop` alone and so
+    # had a denominator of 21 of the 26 words this project actually negates in print — blind to
+    # `verify`, `watchdog` and the guard scripts, which have verdicts of their own. Nothing was
+    # swallowed in the five it could not see, but the check could not have said so.
+    _binfiles = sorted(f for f in os.listdir(os.path.join(REPO, ".game_loop", "bin"))
+                       if os.path.isfile(os.path.join(REPO, ".game_loop", "bin", f)))
+    _binsrcs = [read_or_empty(os.path.join(REPO, ".game_loop", "bin", f)) for f in _binfiles]
+    _swallowed = _swallowed_words(_binsrcs, _sfile)
     if _swallowed:                      # name them; the assertion name itself has to stay literal
         print(f"    (matched on swallowed verdict words: {_swallowed})")
     check("no assertion matches a bare verdict word that the tool's own NEGATION of it also "
@@ -8228,11 +8249,23 @@ def main():
           _swallowed == [])
     check("...and the scan finds one when it is there, so the clean result above is a clean suite "
           "and not a regex that matches nothing",
-          _swallowed_words('die("NOT SETTLED — ...")', 'check("x", "SETTLED" in out)')
+          _swallowed_words(['die("NOT SETTLED — ...")'], 'check("x", "SETTLED" in out)')
           == ["SETTLED"])
     check("...and it does not fire on a word the tool only negates in a COMMENT, because a comment "
           "is not a verdict anybody can match on",
-          _swallowed_words('# NOT SETTLED\nx = 1\n', 'check("x", "SETTLED" in out)') == [])
+          _swallowed_words(['# NOT SETTLED\nx = 1\n'], 'check("x", "SETTLED" in out)') == [])
+    check("...and a SHELL guard's verdicts count too — they do not parse, so their text is read "
+          "with comment lines dropped: the programs this project ships are not all Python, and a "
+          "scan that silently covers only the ones that parse reports a clean set it never saw",
+          _swallowed_words(['if x; then echo "NOT SETTLED"; fi\n'],
+                           'check("x", "SETTLED" in out)') == ["SETTLED"]
+          and _swallowed_words(['# NOT SETTLED — a comment, not a verdict\nrun_it\n'],
+                               'check("x", "SETTLED" in out)') == [])
+    check("...and it reads EVERY program in bin/, not only the largest — measured at 26 negated "
+          "words across the set against 21 in `game_loop` alone, so five belonged to programs the "
+          "first version of this scan could not see",
+          len(_binfiles) >= 8 and len(set().union(set(), *(_printed_negations(x)
+                                                           for x in _binsrcs))) > 21)
 
     def _asserts(nodes):
         return any(isinstance(x, ast.Call) and getattr(x.func, "id", None) == "check"

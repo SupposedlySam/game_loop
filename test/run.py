@@ -8124,6 +8124,15 @@ def main():
           _vanishing(ast.parse(_sfile.replace(
               '        else:\n            # SAY THAT IT DID NOT RUN.',
               '        elif False:\n            # SAY THAT IT DID NOT RUN.', 1))) != [])
+    # ENUMERATES, not first-hit. The historical control above carries ONE site, so it cannot tell a
+    # scan that lists them from one that stops at the earliest — lamp-owner's one-instance point,
+    # which applies to every scan added today and not just the two it was noticed on.
+    check("...and it finds BOTH when a file holds two, so a single historical site cannot be "
+          "satisfied by a scan that returns the first and stops",
+          len(_vanishing(ast.parse(
+              "import os\ndef check(m, c): pass\n"
+              "if os.path.exists('a'):\n    check('one', 1)\n"
+              "if os.path.exists('b'):\n    check('two', 1)\n"))) == 2)
 
     print("a state file nobody can parse is not a session that never had a mandate:")
     # THE MOST IMPORTANT FILE IN THE TOOL, and load() returned pristine DEFAULT_STATE for BOTH
@@ -8365,6 +8374,10 @@ def main():
           "rather than a scan that matches nothing",
           _orphans(extra_def="orphan_guard_probe",
                    extra_ref="orphan_guard_probe") == ["orphan_guard_probe"])
+    check("...and it names each planted orphan rather than only the first it meets, so the "
+          "one-instance control above cannot be satisfied by a scan that stops at a hit",
+          _orphans(extra_def="orphan_probe_a", extra_ref="orphan_probe_a") == ["orphan_probe_a"]
+          and _orphans(extra_def="orphan_probe_b", extra_ref="orphan_probe_b") == ["orphan_probe_b"])
     # WHAT THIS CANNOT SEE (INV6): a function reached through a COMPUTED name — getattr, a dispatch
     # dict built from strings, a hook wired by name in JSON — reads as an orphan here. There are
     # none today. If one appears, the fix is to name it somewhere the scan can see rather than to

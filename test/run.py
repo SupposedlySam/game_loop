@@ -775,12 +775,28 @@ def main():
               and any(p == "/chat.postMessage" for p, _ in FakeSlack.posts))
         check("notify --test verifies reply READS work (history scope present)",
               "reply reads work" in r.stdout)
+        # AND THE SYMBOLS, which nothing pinned. This verb is the wake path: ✓ says a human can be
+        # reached, ✗ says the page failed, ⚠ says they can be paged but their answer will never come
+        # back, • says one-way. Every one of those was matched by word only, and a word match is
+        # satisfied by a line whose character has been swapped — measured on this project's guards
+        # report earlier today, where exactly that survived a mutation.
+        _nl = lambda out, txt: next((l for l in out.splitlines() if txt in l), "")
+        check("the page line opens ✓ when the channel ACCEPTED it — the verb that decides whether "
+              "anybody can be reached, and the symbol is read before the sentence",
+              _nl(r.stdout, "ACCEPTED").strip().startswith("✓"))
+        check("...and the reply-read line opens ✓ too, because paging and being ANSWERED are two "
+              "facts and this one is the half the watchdog depends on",
+              _nl(r.stdout, "reply reads work").strip().startswith("✓"))
         # a wrong history scope (channels:history on a PRIVATE channel) must be NAMED, not swallowed
         FakeSlack.history_error = "missing_scope"
         r = gl(proj, "notify", "--test")
         check("notify --test names a missing history scope instead of failing silently",
               "READS FAILED" in r.stdout and "missing_scope" in r.stdout
               and "groups:history" in r.stdout)
+        check("...and THAT line opens ⚠, not ✓ — 'they can be paged but the answer will not come "
+              "back' is a different fact from 'reply reads work', and one character apart in a "
+              "report somebody skims when they are deciding whether the run can ask for help",
+              _nl(r.stdout, "READS FAILED").strip().startswith("⚠"))
         FakeSlack.history_error = None
         gl(proj, "mandate", "--set", "notify work", sid="sess-slk")
         FakeSlack.posts.clear()
@@ -8589,12 +8605,12 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "effector_state", "external_claims_report", "fix_state", "guards_report",
+        "cmd_notify", "effector_state", "external_claims_report", "fix_state", "guards_report",
         "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
         "<module>", "cmd_checkpoint", "cmd_confidence", "cmd_harden", "cmd_measure",
-        "cmd_notify", "cmd_pin", "cmd_status", "fire_triggers", "instruments_report",
+        "cmd_pin", "cmd_status", "fire_triggers", "instruments_report",
     ]
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))

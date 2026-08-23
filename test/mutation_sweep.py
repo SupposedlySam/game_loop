@@ -948,6 +948,13 @@ NOT_SWEPT = {
             "denominator even after the read guards landed. Neutering it to a constant None makes "
             "every assertion that reads producer-written state fail at once, which those "
             "assertions catch directly.",
+    "test/run.py::_vanishing": "the scan for assertions that can silently not run, inside the "
+                               "suite. Its empty list is the ordinary answer — the file has no "
+                               "such site — and it is the one producer here whose OWN positive "
+                               "control is asserted beside it, against the real commit where the "
+                               "case existed. Mutating the instrument voids the reading rather "
+                               "than measuring it",
+
     "test/run.py::json_text": "the same guard as json_or_none for the other door — a JSON STRING "
                               "rather than a path. Its None arm is the honest answer for a hook "
                               "that printed nothing, which is what a neutered producer makes them "

@@ -7908,6 +7908,57 @@ def main():
           _tover.returncode == 2 and has(_tover.stderr, "24 transitions")
           and not has(_tover.stderr, "pieces of evidence work"))
 
+    print("an assertion that can silently not run is worse than one that fails:")
+    # AN `if` OVER LOCAL STATE DOES NOT FAIL WHERE ITS CONDITION IS FALSE — it is simply absent, and
+    # every signal a reader checks is unchanged: exit code, failure count, the word green. Found by
+    # diffing the ok-line COUNT between this tree (1459) and a clone of the same commit (1456): the
+    # shipped waiting-probe assertion sat behind `if os.path.exists(triggers.d/...)` and triggers.d
+    # is gitignored, so in a clone it vanished with nothing saying so.
+    #
+    # THE RULE IS NOT "no conditional assertions". It is that the CONDITION must itself be asserted,
+    # or the else must say it was skipped. The one legitimate site here reads `if _fn:` immediately
+    # after `check("the README defines the function ..", _fn is not None)` — absence already fails
+    # loudly there, and the `if` only stops a crash cascade behind an assertion that has already
+    # gone red. That is assert-then-guard, and it is correct.
+    #
+    # My first version of this scan matched conditions containing exists/isfile/environ/which — an
+    # enumeration, and it MISSED the `if _fn:` site entirely. The rule below reads the structure
+    # instead and needs no list of interesting condition shapes.
+    _sfile = read_or_empty(os.path.join(REPO, "test", "run.py"))
+    _stree = ast.parse(_sfile)
+
+    def _asserts(nodes):
+        return any(isinstance(x, ast.Call) and getattr(x.func, "id", None) == "check"
+                   for n in nodes for x in ast.walk(n))
+
+    def _names(node):
+        return {x.id for x in ast.walk(node) if isinstance(x, ast.Name)}
+
+    _checks = [(c.lineno, _names(c)) for c in ast.walk(_stree)
+               if isinstance(c, ast.Call) and getattr(c.func, "id", None) == "check"]
+
+    def _vanishing(tree):
+        out = []
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.If) or not _asserts(n.body) or _asserts(n.orelse):
+                continue
+            cn = _names(n.test)
+            if not any(ln < n.lineno and (cn & nm) for ln, nm in _checks):
+                out.append(f"line {n.lineno}: if {ast.unparse(n.test)[:60]}")
+        return out
+
+    _van = _vanishing(_stree)
+    check("every conditional assertion either has its CONDITION asserted too, or an else that says "
+          "it was SKIPPED — otherwise it silently does not run wherever the condition is false, and "
+          "the only trace is a total nobody compares: " + ("; ".join(_van) or "none"),
+          not _van)
+    check("...and the scan FINDS one when there is one — checked against the commit before this "
+          "was fixed, where the shipped waiting probe's assertion had no else, rather than against "
+          "a synthetic case",
+          _vanishing(ast.parse(_sfile.replace(
+              '        else:\n            # SAY THAT IT DID NOT RUN.',
+              '        elif False:\n            # SAY THAT IT DID NOT RUN.', 1))) != [])
+
     print("a guard nothing calls enforces nothing, whatever its coverage says:")
     # A FUNCTION REACHED ONLY FROM THE SUITE HAS COVERAGE AND NO EFFECT. It is the purest form of
     # INV1's failure — enforcement that lives somewhere nothing runs — and it is invisible to every

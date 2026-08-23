@@ -878,9 +878,22 @@ MUTANTS += [
     ("selected_tests -> a run's test count is never readable",
      ".game_loop/bin/game_loop::selected_tests", "    return None, \"neutered\"\n",
      ["#85", "selected", "ZERO tests", "count"], None, 0),
+    # THIN AT 2 -> 6, and it has SEVEN outcomes: live, inert, and FOUR different unknowns.
+    # Exactly one was asserted, end-to-end, in a producer whose entire job is telling apart
+    # answers that look identical from outside. Driven directly now with an injected runner,
+    # and the four unknown reasons are required to be PAIRWISE distinct — the reporter's own
+    # first cut matched the marker inside a PARSE ERROR and called a dead anchor live, which
+    # is the confusion those reasons exist to prevent.
+    #
+    # Two things went wrong writing it, both caught by measuring. My "no-parse" fixture took
+    # the MID-LINE branch instead and never reached the branch it was for. And the
+    # distinctness assertion was `len(set(reasons)) == 4`, which PASSED while two situations
+    # shared a reason — five entries, four distinct values. A cardinality test over a set
+    # cannot say WHICH pair collided, so it reads clean for a collision plus a spare, which
+    # is the shape it was written to catch. Pairwise and by name now.
     ("mutation_liveness -> the probe never establishes anything",
      ".game_loop/bin/game_loop::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
-     ["#80", "liveness", "INERT"], None, 0),
+     ["#80", "liveness", "INERT"], None, 6),
     # THIN AT 2 -> 3, and the number depends on WHICH mutation, which nearly cost me the floor.
     # Two added assertions: that it asks the REMOTE rather than the local tag list (both tags in
     # the old fixture existed locally, so a `git tag` reader would answer them identically — delete

@@ -10129,6 +10129,65 @@ def main():
               "that refuse",
               read_or_empty(_sub).endswith("    x = 1\n    return x\n"))
 
+        # THE PROBE'S SEVEN OUTCOMES, driven directly with an injected runner. Only "live" was
+        # asserted, through one end-to-end path — and this producer's whole job is telling apart
+        # answers that look identical from outside. FOUR of them are UNKNOWN for four different
+        # reasons, and a reason shared between them names the function rather than the finding:
+        # the reporter's own first cut matched the marker inside a PARSE ERROR and called a dead
+        # anchor live, which is the exact confusion these reasons exist to prevent.
+        _gml = importlib.machinery.SourceFileLoader(
+            "gl_ml", os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+        _mlm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_ml", _gml))
+        _gml.exec_module(_mlm)
+        _MARK = _mlm._MUTATE_MARKER
+        _src_ok = "def f():\n    x = 1\n    return x\n"
+
+        def _ml(orig, replace, path, rc, out):
+            return _mlm.mutation_liveness(orig, replace, path, lambda _p: (rc, out))
+
+        _verdicts, _whys = {}, {}
+        for _name, _args in (
+                ("not-python", (_src_ok, "    x = 1", "thing.sh", 1, _MARK)),
+                ("mid-line",   (_src_ok, "1", "t.py", 1, _MARK)),
+                # WHOLE LINES, but inside a bracket continuation, so a `raise` cannot live there.
+                # My first fixture for this used "(1 +\n   2)" out of a `return`, which starts
+                # MID-LINE — it took the mid-line branch and never reached this one.
+                ("no-parse",   ("x = (\n    1 +\n    2\n)\n", "    1 +\n    2\n", "t.py",
+                                1, _MARK)),
+                ("timed-out",  (_src_ok, "    x = 1", "t.py", None, "")),
+                ("live",       (_src_ok, "    x = 1", "t.py", 1, "boom " + _MARK)),
+                ("red-no-mark",(_src_ok, "    x = 1", "t.py", 1, "unrelated explosion")),
+                ("inert",      (_src_ok, "    x = 1", "t.py", 0, ""))):
+            _verdicts[_name], _whys[_name] = _ml(*_args)
+        check("#80: the probe's verdicts are LIVE only when the test went red CARRYING the marker, "
+              "INERT only when it passed, and UNKNOWN for everything it could not establish — "
+              "reported: " + ", ".join(f"{k}={v}" for k, v in _verdicts.items()),
+              _verdicts == {"not-python": "unknown", "mid-line": "unknown", "no-parse": "unknown",
+                            "timed-out": "unknown", "live": "live", "red-no-mark": "unknown",
+                            "inert": "inert"})
+        check("#80: ...and a test that went RED WITHOUT the marker is UNKNOWN rather than live — "
+              "something other than the probe broke it, and the reporter's first cut matched the "
+              "marker inside a parse error and called a dead anchor live",
+              _verdicts["red-no-mark"] == "unknown"
+              and has(_whys["red-no-mark"], "WITHOUT the marker"))
+        # PAIRWISE, BY NAME — not len(set(...)). The count version PASSED while two of these
+        # situations shared a reason, because the list had five entries and four distinct values.
+        # A cardinality test over a set cannot say WHICH pair collided, so it reports fine for a
+        # collision plus a spare, which is the shape it exists to catch.
+        _unk = {k: _whys[k] for k, v in _verdicts.items() if v == "unknown"}
+        _dupes = sorted(f"{a}=={b}" for i, a in enumerate(sorted(_unk))
+                        for b in sorted(_unk)[i + 1:] if _unk[a] == _unk[b])
+        check("#80: ...and no two unknown reasons are the SAME — an agent handed 'unknown' has to "
+              "decide whether to fix the anchor, the file type or the timeout, and one reason "
+              "serving two situations names the function rather than the finding: "
+              + (", ".join(_dupes) or "no collisions"),
+              not _dupes and len(_unk) == 5)
+        check("#80: ...and each names its own cause, so the reason is actionable rather than "
+              "merely distinct",
+              has(_whys["not-python"], "Python-only") and has(_whys["mid-line"], "mid-line")
+              and has(_whys["no-parse"], "not a whole statement")
+              and has(_whys["timed-out"], "timed out"))
+
         _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
         _t4 = _r4.stderr + _r4.stdout
         check("#80/#85: an anchor that cannot be probed, in a run that also prints no test count, "

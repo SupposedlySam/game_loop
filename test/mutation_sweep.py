@@ -986,7 +986,8 @@ NOT_SWEPT = {
             "and measure nothing finer than 'the verb runs'.",
 
     ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
-            "callers (unpushed_warning, config_paths_report, main_checkout), which assert the "
+            "callers (config_paths_report, main_checkout, release_owed, and ahead_of_upstream, "
+            "which is how unpushed_warning reaches it), which assert the "
             "git-failed arm beside the git-worked one",
     ".game_loop/bin/game_loop::_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
                 "mechanical outcome. Its callers are attribution_tree, merge_files and "

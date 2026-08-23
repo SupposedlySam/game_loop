@@ -3978,6 +3978,18 @@ def main():
             check("this repo's own waiting probe RESOLVES its tracker CLI under a minimal PATH — "
                   "the environment a hook actually gets, not the one a hand-check is run in",
                   "not found on PATH" not in _p.stderr)
+        else:
+            # SAY THAT IT DID NOT RUN. triggers.d/ is gitignored, so in a fresh clone this file is
+            # absent and the assertion above silently vanished — a green run with one fewer check in
+            # it and nothing anywhere saying so. Found by diffing the ok-line COUNT between this
+            # working tree and a clone of the same commit: 1459 against 1456, all green both times.
+            #
+            # The trigger block a screen above already handles the same situation properly, by
+            # printing "skipped, not passed". This is that, for the case that was missed.
+            check("this repo's own waiting probe is not present in this checkout — SKIPPED, not "
+                  "passed: triggers.d is gitignored, so a clone legitimately has no probe to "
+                  "resolve, and a check that quietly disappears is the shape this suite refuses",
+                  not os.path.exists(_shipped))
 
         # CONFIG-AUTHORED ONLY. A wait the agent can declare for itself is the off switch.
         _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()

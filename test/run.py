@@ -8524,11 +8524,12 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "effector_state", "fix_state", "guards_report", "pin_state", "triggers_report",
+        "effector_state", "external_claims_report", "fix_state", "guards_report", "pin_state",
+        "triggers_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
         "<module>", "cmd_checkpoint", "cmd_claim", "cmd_confidence", "cmd_harden", "cmd_measure",
-        "cmd_notify", "cmd_pin", "cmd_status", "external_claims_report", "fire_triggers",
+        "cmd_notify", "cmd_pin", "cmd_status", "fire_triggers",
         "instruments_report", "mark_publication_state", "release_distance_warning",
         "retro_outcome", "update_notice", "waiting_report", "worktree_report",
     ]
@@ -9845,6 +9846,58 @@ def main():
           "wearing the authority of six",
           "have NOT been re-read" in _cs
           and _block["verified_on"] in _cs and _block["verified_on"] != _redone[0]["verified_on"])
+
+    # THE THREE PER-CLAIM ARMS, none of which had an assertion — not the symbol and not the words.
+    # Which arm fires against the real repo depends on whether a recorded version happens to equal
+    # the running one, so the block above could only ever exercise whichever the day supplied.
+    # Driven directly instead: the module reads CLAIMS_F and asks running_host_version(), and both
+    # are patchable, which makes all three reachable without waiting for the right afternoon.
+    #
+    # THIS IS THE SYMBOL DECIDING WHETHER TO TRUST A CROSS-REPO CLAIM. ⚠ says the version it was
+    # checked against is not the one running; ✓ says it is; · says nobody knows. Reading ✓ for
+    # either of the others is how a stale claim about the host gets leaned on.
+    _xl = importlib.machinery.SourceFileLoader(
+        "gl_claims", os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+    _xm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_claims", _xl))
+    _xl.exec_module(_xm)
+    _xdir = tempfile.mkdtemp(prefix="gameloop-claims-")
+    try:
+        _xf = os.path.join(_xdir, "claims.json")
+        with open(_xf, "w") as f:
+            json.dump({"host": {"subject": "the host", "verified_on": "2026-08-01", "claims": [
+                {"id": "stale-one", "says": "x", "breaks": "y",
+                 "verified_on": "2026-08-01", "verified_against": "2.1.100", "verified_how": "h"},
+                {"id": "current-one", "says": "x", "breaks": "y",
+                 "verified_on": "2026-08-02", "verified_against": "2.1.222", "verified_how": "h"},
+            ]}}, f)
+        _xm.CLAIMS_F = _xf
+        _xm.running_host_version = lambda: ("2.1.222", "from a stub")
+        _xlines = _xm.external_claims_report()
+        _pick = lambda ls, nm: next((l for l in ls if nm in l), "")
+        check("a host claim re-read against a version that is NOT the one running carries ⚠ and "
+              "says re-read it — the symbol is what decides whether the claim gets leaned on, and "
+              "the words beside it are identical in shape to the arm that means the opposite",
+              _pick(_xlines, "stale-one").strip().startswith("⚠")
+              and has(_pick(_xlines, "stale-one"), "RUNNING 2.1.222"))
+        check("...and one re-read against the running version carries ✓ — the same report, the "
+              "same shape of sentence, one field apart",
+              _pick(_xlines, "current-one").strip().startswith("✓")
+              and has(_pick(_xlines, "current-one"), "that is what is running"))
+        _xm.running_host_version = lambda: (None, "no version available")
+        _xnone = _xm.external_claims_report()
+        check("...and with the running version UNKNOWN both become ·, never ✓ — 'we could not "
+              "compare' must not render as the symbol for 'we compared and it matched', which is "
+              "the whole reason this block refuses to imply it checked anything",
+              _pick(_xnone, "current-one").strip().startswith("·")
+              and _pick(_xnone, "stale-one").strip().startswith("·")
+              and has(_pick(_xnone, "current-one"), "version UNKNOWN"))
+        check("...so the three arms use three different symbols, measured on one claim carried "
+              "through all of them rather than on three claims that might differ for other reasons",
+              len({_pick(_xlines, "current-one").strip()[0],
+                   _pick(_xlines, "stale-one").strip()[0],
+                   _pick(_xnone, "current-one").strip()[0]}) == 3)
+    finally:
+        shutil.rmtree(_xdir, ignore_errors=True)
 
     _rep = "\n".join(gl(REPO, "status").stdout.split("\n"))
     check("status reports the claims, and says plainly that nothing here checks whether one is TRUE",

@@ -8550,6 +8550,54 @@ def main():
           "character it could have printed, so a reader cannot be misled by which one appeared",
           _multi_symbol_producers('def r():\n    return "✓ done"\n') == [])
 
+    # A THIRD KIND OF UNTESTED, from owner (llm_chat, 2026-08-23), who hit it in their own gate:
+    # a line can RUN, be covered, and still only ever be evaluated at a value production never
+    # sends. Their case was `if crashed and not share:` — `share` is set by the orchestrator on
+    # every real worker, so in production that condition was false in every process that ever
+    # reached it, and the only caller taking the guarded branch was the test suite, BECAUSE it
+    # sets no shard. 100% line coverage, assertions present, and the branch was theatre.
+    #
+    #     undefended   the line runs, nothing asserts it
+    #     INERT        the line never runs
+    #     this one     the line runs, only ever at a value production never sends
+    #
+    # A throw probe comes back KILLED here and tells you nothing: the line does execute, on the
+    # path tests take. The tell is a condition on something the ENVIRONMENT sets. Measured here:
+    # exactly two, both controlled by the suite at more than one value. This check is so that a
+    # THIRD one has to be looked at rather than inheriting that clean result.
+    def _env_gates(src):
+        """Env vars a program COMPARES — a gate. Reading one to report it is not this shape."""
+        got = set()
+        for nd in ast.walk(ast.parse(src)):
+            if not isinstance(nd, ast.Compare):
+                continue
+            for side in [nd.left] + list(nd.comparators):
+                for c in ast.walk(side):
+                    if (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                            and c.func.attr == "get"
+                            and isinstance(c.func.value, ast.Attribute)
+                            and c.func.value.attr == "environ" and c.args
+                            and isinstance(c.args[0], ast.Constant)):
+                        got.add(c.args[0].value)
+                    if (isinstance(c, ast.Subscript) and isinstance(c.value, ast.Attribute)
+                            and c.value.attr == "environ" and isinstance(c.slice, ast.Constant)):
+                        got.add(c.slice.value)
+        return got
+
+    _gates = set()
+    for _bf in ("game_loop", "verify", "watchdog", "notify.py"):
+        _gates |= _env_gates(read_or_empty(os.path.join(REPO, ".game_loop", "bin", _bf)))
+    check("every environment variable a shipped program GATES on is one the suite controls — a "
+          "condition whose value only production supplies runs green forever while never once "
+          "being evaluated the way it will be in the field",
+          _gates == {"CLAUDE_CODE_ENTRYPOINT", "TERM_PROGRAM"}
+          and all(_sfile.count(v) >= 2 for v in _gates))
+    check("...and the scan counts a COMPARISON, not a reading: `os.environ.get(X)` printed in a "
+          "report is a fact being shown, while the same call inside an `if` decides what happens, "
+          "and only the second can be evaluated at a value the field never sends",
+          _env_gates('import os\nif os.environ.get("A") == "x":\n    pass\n') == {"A"}
+          and _env_gates('import os\nprint(os.environ.get("B"))\n') == set())
+
     _binfiles = sorted(f for f in os.listdir(os.path.join(REPO, ".game_loop", "bin"))
                        if os.path.isfile(os.path.join(REPO, ".game_loop", "bin", f)))
     _binsrcs = [read_or_empty(os.path.join(REPO, ".game_loop", "bin", f)) for f in _binfiles]

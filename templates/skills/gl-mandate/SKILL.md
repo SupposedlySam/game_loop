@@ -102,6 +102,19 @@ work. Three things worth checking before a long unattended run:
   a limit will stop the run in silence. On an API-key session those windows are simply not exposed
   and the gates cannot arm; that is worth saying out loud to the human before they walk away, rather
   than discovering it from a run that died quietly.
+- **Hand over with the verb, not by hand.** When the context fills, `game_loop successor` is what
+  starts the next session — and it is also what stands THIS session's watchdog down, by recording the
+  handover where the watchdog reads it. Hand off any other way and the retired session keeps ringing
+  itself back into a mandate the new one already owns: two sessions driving one goal, which is a real
+  logged failure and not a hypothetical. `status` shows a retired session as `⇢ HANDED OVER`.
+  One thing does NOT travel: a T3 question armed before the handover. The arm lives in the old
+  session's state, so put the question in the handoff file — `successor` says so when it sees one.
+  One thing does not travel by default either: **permission bypass**. An unattended successor that
+  opens on a permission prompt stalls where nobody is watching, and the flag is read at launch, so
+  the successor cannot grant it to itself. `limits.successor.skip_permissions: true` in
+  `.game_loop/config.json` puts `--dangerously-skip-permissions` on the command `successor` builds.
+  It is the human's key to set, not a session's to choose — there is deliberately no flag for it —
+  and it does NOT reach the `saggar-agent` mode, which builds its own invocation and says so.
 
 ## Never
 

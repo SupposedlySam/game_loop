@@ -79,6 +79,10 @@ Guardrails on the watchdog itself:
 - **Fails visibly** — every quiet exit logs *why*, so a broken watchdog is distinguishable from a
   correctly-silent one. If the harness ever stops honouring asyncRewake, the last-ring record in
   `game_loop status` is where the silence shows.
+- **Stands down after a handover** — once `successor` has started the next session, this one has given
+  its mandate away and a ring would drag it back into work somebody else is doing. See the successor
+  section; the flag is what stands the engine down, because a Stop hook arms a fresh watchdog at every
+  turn-end.
 
 Tune all three knobs in `.game_loop/config.json → watchdog`.
 
@@ -394,6 +398,32 @@ the auto-generated handoff, this accepts it and says so — the gate is asking t
 account, while this is the last act of a run that may be out of road, and the generated floor beats
 starting the successor blind.
 
+**A handover stands the predecessor's watchdog down.** Observed, not imagined: in a sibling project on
+2026-08-18 the limit gate closed, `successor` started the next session, and nothing stopped the old
+session's watchdog. It rang the retired session back into a mandate the new one already owned — both
+drove it, six worktrees existed for three problems, and the run then spent T3 asking a human which of
+them was driving. That watchdog was still alive six days later, holding the question open.
+
+Killing the armed process cannot be the fix on its own: a Stop hook arms a **fresh** watchdog at every
+turn-end, so the very next turn re-creates what the kill removed. So `successor` records `handed_off` in
+this session's state and `bin/watchdog` reads it — on every arm, and again after every sleep. The SIGTERM
+it also sends is only latency: it stops the one process already sleeping from waking up once more to
+learn what the flag already says.
+
+The two ways to be wrong here are not symmetric. Standing down when nobody actually took over strands a
+live mandate with no engine and tells no one; ringing a session that *did* hand over costs one wake-up.
+So the quiet is bought with an **observed** successor — the state file under its own session directory,
+which nothing but a real session start writes — with a short boot grace for the seconds between a tab
+opening and the session existing. `print` mode hands over a *command*, not a session, so it records
+nothing and says the watchdog stays armed; a handover recorded but never taken up rings anyway and logs
+`watchdog_handover_gone`. `mandate --set` clears the flag, so a retired session put back to work is not
+disarmed for the rest of its life.
+
+What this costs, stated: a **T3 question armed before the handover does not travel**. The arm lives in the
+predecessor's state and the successor never sees it, so nothing is left listening for the answer.
+`successor` says so loudly when it hands over on top of a live arm — the question belongs in the handoff
+file.
+
 **Which one it does is READ, not configured.** `limits.successor.mode` defaults to `auto`, and there are
 two hosts it knows how to start a session in:
 
@@ -433,6 +463,25 @@ terminal ends up named after the prompt. It also starts in the calling terminal'
 `--cwd`. All three are named in the output every time, and the portable command is printed in **every** mode
 precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is a
 call to a running app, so unlike `warp-tab` it writes nothing anywhere.
+
+**The successor can be launched with permission prompts bypassed** — `limits.successor.skip_permissions`,
+default `false`. A handover happens at the worst moment there is: the gate closed, the context full, the
+human asleep. A successor that opens on a permission prompt is a handover that stalls exactly where nobody
+is watching. `--dangerously-skip-permissions` is read at **launch** — the running claude refuses `Cannot set
+permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions`
+— so the command line is the only place the decision exists, and this verb builds the only command line there
+is. When it is on, the output says `permissions : BYPASSED` and names the key; when it is off it says nothing,
+because the exceptional state is the one worth a line.
+
+It is a **config key and not an argument**, deliberately, and `successor --skip-permissions` is refused. A
+session that could hand its own successor a bypass is a session widening its permissions across a handover and
+calling the result a new session. The human writes it into `.game_loop/config.json`, or it does not happen —
+and that file is the artifact naming who chose it.
+
+It does **not** reach `saggar-agent`, for the same reason the session id does not: `saggar agent <agent>
+<task…>` takes a task, not argv. That gap is the one that costs the most — the setting is bought precisely
+because nobody will be there — so it is printed beside the setting in every saggar run, dry or live, rather
+than left for a successor to discover by stalling on a prompt at 3am. Only `print` and `warp-tab` carry it.
 
 The tab is titled `<R> | <task>` — the repo's initial so a row of tabs stays readable, plus what that
 session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than

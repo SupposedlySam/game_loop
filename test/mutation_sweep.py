@@ -234,13 +234,13 @@ MUTANTS = [
      ["events", "dominance"], None, 21),
     ("recurrence_lines -> a reason that bought the hatch before is never called out",
      ".game_loop/bin/game_loop::recurrence_lines", "    return []\n",
-     ["authorize", "recurrence"], None, 8),
+     ["authorize", "recurrence", "callout", "recurring"], None, 8),
     ("metric_movement -> the metric never appears to have moved",
      ".game_loop/bin/game_loop::metric_movement", "    return None\n",
      ["metric", "instrument"], None, 3),
     ("_asked_the_user -> no turn is ever seen to have asked",
      ".game_loop/bin/game_loop::_asked_the_user", "    return False\n",
-     ["ask", "checkpoint"], None, 3),
+     ["ask", "checkpoint", "launder"], None, 3),
     ("binding_windows -> no usage window ever binds",
      ".game_loop/bin/game_loop::binding_windows", "    return []\n",
      ["limit", "handoff", "gate"], None, 5),
@@ -841,7 +841,7 @@ MUTANTS += [
      ["limit gate", "limit", "window"], None, 8),
     ("_last_assistant_text -> the closing message is never recoverable",
      ".game_loop/bin/game_loop::_last_assistant_text", "    return None, \"neutered\"\n",
-     ["closing message", "assistant text", "stop gate"], None, 3),
+     ["closing message", "assistant text", "stop gate", "launder"], None, 3),
     ("merge_files -> a merge never yields the paths it touched",
      ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
      ["merge", "attribute", "merge-base"], None, 10),
@@ -958,7 +958,7 @@ MUTANTS += [
      # real failures now have to stay DISTINGUISHABLE FROM EACH OTHER: no gh on PATH, gh ran and
      # failed, and gh exited 0 while printing non-JSON — the last being the one most easily read as
      # "nothing to report", since the process itself reported no error at all.
-     ["#76", "upstream"], None, 3),
+     ["#76", "upstream", "`gh`", "gh on PATH"], None, 3),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
      ["notify", "probe", "read"], None, 3),

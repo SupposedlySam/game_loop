@@ -240,7 +240,9 @@ DEFAULT_CONFIG = {
     # OFF/inert; "successor" defaults to "auto", which is inert until somebody RUNS the verb and
     # then reads the terminal rather than a config key. Its one non-mode key,
     # "skip_permissions", defaults FALSE: true appends --dangerously-skip-permissions to the
-    # successor's command line, which is a decision only a human writing this file may make.
+    # successor's command line. It is NOT read from here -- config.json is tracked and seeds fresh
+    # installs, so a bypass written here would travel to every clone. skip_permissions_grant()
+    # reads config.local.json only, and `successor` says out loud when it finds one set here.
     "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
     # Update check: on `status`, compare the installed game_loop commit (.game_loop/VERSION, written by
     # install.sh) against the latest on the source repo's main, and note when a re-install is due. Best
@@ -6574,6 +6576,71 @@ def in_saggar():
 SUCCESSOR_MODES = ("auto", "print", "warp-tab", "saggar-agent")
 
 
+def skip_permissions_grant():
+    """Whether the successor's command carries --dangerously-skip-permissions, and whether a grant
+    was found in a file that is NOT allowed to make one.
+
+    Returns (granted, ignored_in_tracked_config, shadowed). The second half is the reason this is a function
+    rather than a dict lookup: `skip_permissions: true` in the tracked config.json used to work, and
+    a key that silently stops working is worse than one that never did. Somebody sets it, reads
+    nothing, walks away -- and the unattended run they armed stalls on the first prompt at 3am,
+    which is the precise failure this whole verb exists to prevent. So the tracked value is read for
+    the sole purpose of SAYING IT WAS IGNORED.
+
+    config.local.json only, read directly. See successor_cfg() for why that file and not the other,
+    and for the three blind spots this does not close.
+
+    `shadowed` is the OTHER cost of naming that file as the only home, and it is one this change
+    CREATED rather than found. config() is a shallow top-level update, so the moment a human adds
+    the `limits` block this key lives in, that block replaces the tracked one WHOLE -- and
+    `mode`, `name`, `threshold_pct`, `exhausted_pct` and `handoff_file` that they never restated
+    are gone, silently. Caught by running it: a tree with mode "print" in config.json reported
+    `configured "auto"` the moment the local grant appeared. Reading skip_permissions directly
+    saves this key and does nothing for its neighbours, so the neighbours get NAMED instead.
+    """
+    ignored = False
+    try:
+        with open(CONFIG_F) as f:
+            d = json.load(f)
+        tracked = ((d.get("limits") or {}).get("successor") or {})
+        ignored = bool(isinstance(tracked, dict) and tracked.get("skip_permissions"))
+    except (OSError, ValueError, AttributeError):
+        pass                    # unreadable is config()'s problem to report, not this one's
+    granted, shadowed = False, []
+    try:
+        with open(CONFIG_LOCAL_F) as f:
+            d = json.load(f)
+        local_limits = d.get("limits")
+        local = ((local_limits or {}).get("successor") or {})
+        granted = bool(isinstance(local, dict) and local.get("skip_permissions"))
+        if isinstance(local_limits, dict):
+            # The whole tracked block is gone, not just the keys with the same name -- so the
+            # comparison is against config.json's limits directly, never against the merged view,
+            # which by then already reflects the loss.
+            tracked_limits = _tracked_limits()
+            for k, v in sorted(tracked_limits.items()):
+                if k not in local_limits:
+                    shadowed.append(k)
+                elif k == "successor" and isinstance(v, dict):
+                    inner = local_limits.get(k)
+                    if isinstance(inner, dict):
+                        shadowed += [f"successor.{ik}" for ik in sorted(v) if ik not in inner]
+    except (OSError, ValueError, AttributeError):
+        granted = False         # absent is the DEFAULT and the safe direction: no bypass
+    return granted, ignored, shadowed
+
+
+def _tracked_limits():
+    """config.json's own limits block, unmerged. Only skip_permissions_grant() needs this."""
+    try:
+        with open(CONFIG_F) as f:
+            d = json.load(f)
+        lim = d.get("limits")
+        return lim if isinstance(lim, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 def successor_cfg():
     """How `successor` starts the next session: AUTO by default — open a Warp tab under Warp, ask
     saggar for a new agent terminal under saggar, and print the command everywhere else.
@@ -6607,9 +6674,34 @@ def successor_cfg():
 
     It is A CONFIG KEY AND NOT A FLAG, deliberately. A `--skip-permissions` argument would let a
     session decide its own successor runs unprompted, which is a session widening its permissions
-    across a handover and calling the result a new session. The human writes it into
-    .game_loop/config.json once, or it does not happen — and that file is the artifact naming who
-    chose it.
+    across a handover and calling the result a new session.
+
+    AND IT IS READ FROM config.local.json ONLY -- never from the tracked config.json. Two reasons,
+    and the second is the one that has already cost this project a commit:
+
+    ENFORCEMENT. Both write rails refuse that file by name: Write/Edit since #65, and the shell path
+    (a redirect, `sed -i`, `tee`, a copy onto it) since #86. config.local.json is refused WHETHER OR
+    NOT IT EXISTS, so there is no provisioning arm to slip through. A session that wants the bypass
+    must therefore spend `authorize`, which writes a human's own words into log.jsonl permanently --
+    the grant cannot happen without leaving the record of who granted it. That is what makes "a
+    human decided this" a checkable fact rather than a sentence in a docstring.
+
+    WHAT THAT STILL DOES NOT COVER, said here because a guard goes quiet exactly where it is blind
+    (INV6): a `python3 -c` that writes the file, a path built from a shell variable, or any MCP
+    tool. The guard names those three in its own refusal text. No choice of config layer closes
+    them -- ~/.game_loop/config.json falls to the identical one-liner -- so this buys a logged,
+    refused-by-default door, not an unpickable lock.
+
+    LEAKAGE. config.json is TRACKED and is the seed a fresh install copies from (install.sh:339),
+    so a bypass granted there would be handed to everyone who clones the checkout and everyone who
+    installs from it. This project shipped exactly that leak once, for the length of one commit,
+    about a different key. A permission bypass has a stronger claim on the gitignored layer than
+    the key that taught us did.
+
+    Read DIRECTLY rather than through config(), which is a shallow top-level update: a "limits"
+    block in config.local.json would replace the tracked one WHOLE, silently dropping the
+    threshold_pct/handoff_file/mode keys the local file did not happen to restate. Granting one
+    bypass must not quietly reconfigure the rest of the run.
 
     WHAT IT DOES NOT REACH, for the same reason the session id does not: saggar-agent. `saggar agent`
     takes a provider and a task, not argv (`saggar --help`: `saggar agent <agent> <task…>`), so it
@@ -6618,6 +6710,7 @@ def successor_cfg():
     """
     lc = (config().get("limits") or {})
     c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
+    skip, ignored, shadowed = skip_permissions_grant()
     configured = str(c.get("mode") or "auto")
     if configured not in SUCCESSOR_MODES:
         configured = "auto"
@@ -6627,7 +6720,8 @@ def successor_cfg():
     mode = auto if configured == "auto" else configured
     return {"mode": mode, "configured": configured, "detected": detected, "host": host,
             "term_program": os.environ.get("TERM_PROGRAM") or "",
-            "skip_permissions": bool(c.get("skip_permissions")),
+            "skip_permissions": skip, "skip_permissions_ignored": ignored,
+            "limits_shadowed": shadowed,
             "name": str(c.get("name") or "game-loop-successor")}
 
 
@@ -6778,13 +6872,39 @@ def cmd_successor(s, a):
              f"working directory   : {cwd}",
              f"tab title           : {title}",
              f"command             : {cmd}"]
+    # SET IN THE WRONG FILE. Printed on its own terms, before and independent of the grant: the
+    # failure being prevented is somebody writing the key into the tracked config, reading a normal
+    # successor line, and walking away believing the run is armed. Silence there is the 3am stall.
+    if sc["skip_permissions_ignored"]:
+        lines += ["permissions         : \u26a0 limits.successor.skip_permissions is set in "
+                  ".game_loop/config.json",
+                  "                      and was IGNORED. That file is TRACKED and seeds every "
+                  "fresh install, so a",
+                  "                      bypass written there would be handed to everyone who "
+                  "clones this checkout.",
+                  "                      Move it to .game_loop/config.local.json (gitignored) if "
+                  "you meant it."]
+    # THE COST OF THE FILE WE JUST MADE MANDATORY. Printed whenever the local limits block shadows
+    # tracked keys, grant or no grant: the human came here to set one key and took the whole block
+    # with them, and every dropped key fails toward a default that looks deliberate.
+    if sc["limits_shadowed"]:
+        lines += ["config              : \u26a0 .game_loop/config.local.json has a \"limits\" "
+                  "block, which REPLACES the",
+                  "                      tracked one whole rather than merging into it. These keys "
+                  "from config.json",
+                  "                      are not in effect: " + ", ".join(sc["limits_shadowed"])
+                  + ".",
+                  "                      Restate the ones you still want in config.local.json."]
     # Only when it is ON. The default is the safe direction and announcing it every run would make
     # the exceptional case one more line in a wall of them; a bypass is the thing worth a line.
     if sc["skip_permissions"]:
         lines += ["permissions         : BYPASSED — the command carries "
                   + SKIP_PERMISSIONS_FLAG + ",",
                   "                      set by limits.successor.skip_permissions in "
-                  ".game_loop/config.json.",
+                  ".game_loop/config.local.json",
+                  "                      — a gitignored file both write rails refuse, so this "
+                  "grant cost an `authorize`",
+                  "                      and a human's words are in log.jsonl.",
                   "                      The successor will not prompt for anything, including the "
                   "calls this",
                   "                      session would have been asked about."]
@@ -6913,6 +7033,8 @@ def cmd_successor(s, a):
              "configured_mode": sc["configured"], "warp_detected": sc["detected"],
              "host": sc["host"], "title": title,
              "skip_permissions": sc["skip_permissions"],
+             "skip_permissions_ignored": sc["skip_permissions_ignored"],
+             "limits_shadowed": sc["limits_shadowed"],
              "dry_run": bool(a.dry_run), "auto_handoff": auto, "handed": handed})
     out("\n".join(lines))
 

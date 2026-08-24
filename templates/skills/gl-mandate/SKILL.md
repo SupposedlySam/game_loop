@@ -112,9 +112,13 @@ work. Three things worth checking before a long unattended run:
   One thing does not travel by default either: **permission bypass**. An unattended successor that
   opens on a permission prompt stalls where nobody is watching, and the flag is read at launch, so
   the successor cannot grant it to itself. `limits.successor.skip_permissions: true` in
-  `.game_loop/config.json` puts `--dangerously-skip-permissions` on the command `successor` builds.
-  It is the human's key to set, not a session's to choose — there is deliberately no flag for it —
-  and it does NOT reach the `saggar-agent` mode, which builds its own invocation and says so.
+  `.game_loop/config.local.json` — the GITIGNORED file, not the tracked one — puts
+  `--dangerously-skip-permissions` on the command `successor` builds. There is deliberately no flag
+  for it, and both write rails refuse that file, so a session that grants it must spend `authorize`
+  and leave a human's words in the log; set it in the tracked `config.json` and `successor` says so
+  and ignores it. That is a refused-by-default door with an audit trail, NOT prevention — a
+  `python3 -c` still writes any file here. It does NOT reach the `saggar-agent` mode, which builds
+  its own invocation and says so.
 
 ## Never
 

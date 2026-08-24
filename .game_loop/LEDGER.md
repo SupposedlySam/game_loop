@@ -66,6 +66,17 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
 
 _Questions still outstanding. What would close each one._
 
+- **How do you re-read `statusline-config-keys` at 2.1.241?** The method that worked at 2.1.223 —
+  reading the schema out of the running binary — does not reproduce. The install is now a single
+  325MB native build (`bin/claude.exe`) rather than a readable `cli.js`, and `strings` recovers
+  `refreshInterval` / `refreshIntervalMs` as bare tokens with no surrounding schema; the only two
+  windows carrying both `padding` and `refreshInterval` are coincidental hits in unrelated minified
+  code. So the claim is neither re-verified nor refuted: **the instrument is gone, which is a
+  different state from the claim being stale**, and status will keep flagging it ⚠ until somebody
+  says which. Closed by: a re-read against the published statusline doc, or any method that survives
+  a native build. Source: `bin/claude.exe` at 2.1.241, read 2026-08-24 (`strings -a`, grepped, not
+  eyeballed).
+
 - **Does a Stop hook fire on the turn a rate-limit error kills?** Unconfirmed either way; the park
   design deliberately doesn't depend on it (the watchdog armed by the *previous* turn-end reads
   limits.json before spending its ring budget). Closed by: observing a real limit death with the

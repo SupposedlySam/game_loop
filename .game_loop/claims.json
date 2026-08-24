@@ -48,7 +48,7 @@
     "PER-CLAIM VERIFICATION, because the block stamp could not express a partial re-read. This file",
     "promised that the first re-verification would fill in the null and make THAT entry checkable.",
     "With one stamp for six claims, filling it in would have asserted six re-readings where one",
-    "happened \u2014 so the promise was unkeepable as written, which is a small instance of exactly what",
+    "happened — so the promise was unkeepable as written, which is a small instance of exactly what",
     "this file exists to catch. Each claim now carries its own verified_on/verified_against, and the",
     "block values remain the original reading for entries nobody has revisited."
   ],
@@ -81,7 +81,7 @@
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
         "verified_on": "2026-08-13",
         "verified_against": "2.1.223",
-        "verified_how": "re-read in the running binary: type:literal(\"command\"), command:string(), padding:number().optional(), refreshInterval:number().min(1).optional() \u2014 all four keys and the 1s floor, from the client's own schema rather than from the docs page the claim cites"
+        "verified_how": "re-read in the running binary: type:literal(\"command\"), command:string(), padding:number().optional(), refreshInterval:number().min(1).optional() — all four keys and the 1s floor, from the client's own schema rather than from the docs page the claim cites"
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -103,9 +103,9 @@
         "ledger": "A headless `claude usage` / `--usage` flag exists",
         "exercisable": "no",
         "exercisable_why": "unconditional: the case where the flag exists is the one I cannot construct, so there is nothing to provoke and no control to pair",
-        "verified_on": "2026-08-05",
-        "verified_against": "2.1.223",
-        "verified_how": "read `claude --help` in full at 2.1.223: no --usage/--limit/--quota option and no usage/limit/quota subcommand (the command list is agents, auth, auto-mode, doctor, gateway, import, install, mcp, plugin, project, setup-token, ultrareview, update). Re-read because a user asked whether a spawned session could report usage \u2014 the question walked straight into a claim nobody had checked in a week."
+        "verified_on": "2026-08-24",
+        "verified_against": "2.1.241",
+        "verified_how": "read `claude --help` in full at 2.1.241 (242 lines, captured to a file and grepped rather than eyeballed): no --usage/--limit/--quota option, and none of the 13 subcommands is usage, limits or quota. The only match for 'usage' anywhere in the output is the `Usage:` banner line."
       },
       {
         "id": "no-readable-ratelimit-headers",
@@ -117,7 +117,7 @@
         "exercisable_why": "unconditional: nothing local produces the headers, so no run can discriminate",
         "verified_on": "2026-07-29",
         "verified_against": null,
-        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists \u2014 but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
+        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists — but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
       },
       {
         "id": "no-weekly-opus-window",
@@ -141,19 +141,19 @@
         "verified_against": "2.1.223",
         "verified_how": "three probes at 2.1.223 reading usage from --output-format json: baseline 31,547 / --strict-mcp-config 30,323 / plus 13 tools disabled 24,377. Decomposed rather than estimated, because a single number cannot say what is trimmable.",
         "exercisable": "yes-not-yet",
-        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage \u2014 read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone."
+        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage — read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone."
       },
       {
         "id": "statusline-context-window",
-        "says": "the statusline payload's context_window carries ABSOLUTE token counts \u2014 total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} \u2014 alongside used_percentage/remaining_percentage",
+        "says": "the statusline payload's context_window carries ABSOLUTE token counts — total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} — alongside used_percentage/remaining_percentage",
         "source": "read in the running binary at 2.1.223 (the client's own embedded payload schema)",
         "breaks": "the harness reads only used_percentage, so every absolute token question is currently answered by inference or by spawning something. If these fields moved, any future usage work resting on them silently loses its measurement",
         "ledger": "The statusline payload exposes only a PERCENTAGE of context used",
         "exercisable": "yes-not-yet",
-        "exercisable_why": "exercisable the same way the rate_limits claim is \u2014 our own tap sees the payload, so a snapshot carrying the fields IS the claim holding, with a known field present as the positive control. Not yet wired: this host renders no statusline, so the tap never fires here and only `limitprobe` produces a render.",
+        "exercisable_why": "exercisable the same way the rate_limits claim is — our own tap sees the payload, so a snapshot carrying the fields IS the claim holding, with a known field present as the positive control. Not yet wired: this host renders no statusline, so the tap never fires here and only `limitprobe` produces a render.",
         "verified_on": "2026-08-13",
         "verified_against": "2.1.223",
-        "verified_how": "found by grepping the running binary for used_percentage while checking whether the probe could exercise fresh-session-token-floor for free. I had just asserted the payload carried 'a percentage, not an absolute count' from reading OUR parser rather than the host \u2014 the parser reads used_percentage, which is a fact about us, not about the payload."
+        "verified_how": "found by grepping the running binary for used_percentage while checking whether the probe could exercise fresh-session-token-floor for free. I had just asserted the payload carried 'a percentage, not an absolute count' from reading OUR parser rather than the host — the parser reads used_percentage, which is a fact about us, not about the payload."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

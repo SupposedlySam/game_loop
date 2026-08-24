@@ -969,6 +969,24 @@ older harness) falls back to the repo-global `state.json`, which behaves exactly
 repo-global file — that is how a leftover pre-per-session mandate gets cleared. Authorizations
 (`game_loop authorize`) are session-scoped too: granted in a session, spendable only there.
 
+**The one case where NOT setting it costs you isolation silently.** A dispatched in-process subagent
+inherits `CLAUDE_CODE_SESSION_ID`, so its state writes land in the *parent's* session. `mandate --set`
+refuses to replace a live mandate with different words and says so loudly (#88) — but two verbs fail
+in the permissive direction and say nothing at all:
+
+| verb | what a worker's call does to its parent |
+|---|---|
+| `checkpoint` | **buys the parent a turn-end** — its next Stop gate passes on a permission it never purchased |
+| `arm` | **primes a T3 on the parent** — the most expensive rung, holding a question it did not frame |
+
+The mandate collision was at least loud after the fact: the watchdog started nagging the lead about
+the worker's goal, which is how it was noticed. These two are silent, and they LOOSEN a gate rather
+than redirecting it. Give each dispatched worker `GAME_LOOP_SESSION=<unique>`; it is an environment
+variable, so a worker that dispatches further must set a fresh one at every level.
+
+Reported by a consumer running a lead that dispatches in-process workers — observed live, not
+theorised.
+
 ### Running the harness from a pinned checkout
 
 Only relevant if you are editing game_loop itself — or any project whose hooks run code that project

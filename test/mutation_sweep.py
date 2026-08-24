@@ -372,11 +372,16 @@ MUTANTS = [
     # measured, so the archived fixture could not be built and the baseline came back 0 — which the
     # measuring harness now refuses to report a number from rather than publishing an UNPROTECTED
     # that means "the suite died".
+    # FLOOR RE-RECORDED 2026-08-24, WITH THE REASON, from a full sweep with the tests held still:
+    # measured 25 kills, of which 13 NAME this producer's subject. Floored at the TARGETED count
+    # rather than the total, because the other 12 include the glyph tripwire and the orphan scan —
+    # both read the binary's SHAPE, so they redden for any producer at all and would drop out the
+    # day either is refactored. A floor set to 25 would then fail for a reason that is not a loss
+    # of coverage. The previous floor was 2, recorded when the producer had two arms; it has since
+    # gained the three-way version-comparison block, and nothing re-reads a floor either.
     ("external_claims_report -> reports nothing", ".game_loop/bin/game_loop::external_claims_report",
      "    return []\n", ["claim", "host", "stale"],
-     "2 kills, and both are the arms written for it: that status SAYS nothing here checks whether a "
-     "claim is true, and that an unrecorded version reports 'cannot compare' rather than agreement. "
-     "Thin because the producer is one report; the pair is what the report must never imply.", 2),
+     None, 13),
     ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
     ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",
@@ -1656,8 +1661,17 @@ def main():
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
         if live_why:
             lines.append(f"  probe : {live_why}")
-        if thin_note:
+        # A THIN NOTE PRINTED BESIDE A HEALTHY NUMBER IS PROSE CONTRADICTING ITS OWN MEASUREMENT.
+        # `external_claims_report` printed "why it is thin: 2 kills, and both are the arms written
+        # for it" directly under `killed: 25`. The note was true when written and the producer has
+        # since gained coverage; nothing re-reads a note, and this one had become the confident
+        # wrong half of the entry. The note now prints only while the verdict IS thin, and the
+        # STALE line below says so out loud rather than letting a reader find the contradiction.
+        if thin_note and v == THIN:
             lines.append(f"  why it is thin: {thin_note}")
+        elif thin_note and v == OK:
+            lines.append(f"  (this entry still carries a THIN note, and is no longer thin — the "
+                         f"note describes a state that ended: {thin_note[:60]}…)")
         # A KILL NEEDS A NAMED KILLER, AND THE NAME HAS TO BE ABOUT YOUR GUARD (lamp-owner,
         # 2026-08-23). A mutation that breaks something ELSE reddens the suite and reports the same
         # word as one the guard actually caught — collateral and genuine wear the identical verdict

@@ -10549,6 +10549,27 @@ def main():
     # first sweep that could say so. Twelve of the eighteen dead marks match a real assertion name
     # once lowercased, so most of that "finding" was the matcher. A scan's first findings are
     # evidence about the scan — the third time today that has been the answer.
+    # AN OBSERVATION MUST NAME THE BUILD IT WATCHED (2026-08-24). Three host claims here were being
+    # CONFIRMED LIVE every day against a version nobody had written down, and closing that meant
+    # reconstructing which build was running from the installed binary's mtime — an inference I had
+    # to state rather than a fact the record carried. "Observed today" and "observed under this
+    # version" are different claims; a reading that cannot name its subject leaves the second one to
+    # be guessed by whoever reads it next.
+    #
+    # UNKNOWN IS AN EXPLICIT NULL WITH ITS REASON, never an omitted key: absent-because-unknowable
+    # and absent-because-nobody-wrote-it are the pair this file exists to keep apart, and
+    # `running_host_version()` already returns its own why-not.
+    _obs_src = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    check("both observation writers record the host version beside the reading — a claim exercised "
+          "live against a build nobody named is a date, not an attribution, and somebody has to "
+          "rebuild it from mtimes",
+          _obs_src.count('"host_version": _hv, "host_version_how": _hw') == 2)
+    check("...and the version is taken from running_host_version(), which prefers the EXECPATH over "
+          "PATH — measured on this machine as 2.1.145 against 2.1.222, so the convenient answer "
+          "names the wrong subject",
+          "def running_host_version" in _obs_src
+          and "CLAUDE_CODE_EXECPATH" in _obs_src)
+
     check("a mark carrying a capital still matches — the assertion name is lowercased, so leaving "
           "the mark as written silently retires it, and the failure looks like missing coverage "
           "rather than a broken comparison",

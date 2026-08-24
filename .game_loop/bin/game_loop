@@ -1271,7 +1271,15 @@ def record_context_window(cw):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         tmp = p + ".tmp"
         with open(tmp, "w") as f:
+            # THE OBSERVATION CARRIES ITS OWN ATTRIBUTION (2026-08-24). Three claims here were
+            # being CONFIRMED LIVE every day against a version nobody had written down, and
+            # closing that meant reconstructing which build was running from the binary's mtime.
+            # "Observed today" and "observed under this version" are different claims; a reading
+            # that cannot name its subject makes the second one a guess somebody has to redo.
+            # Unknown is recorded as an explicit null WITH its reason, never omitted.
+            _hv, _hw = running_host_version()
             json.dump({"context_window": cw, "observed_at": int(time.time()),
+                       "host_version": _hv, "host_version_how": _hw,
                        "note": "raw, uninterpreted: what the probe's fresh-session render carried"},
                       f, indent=2)
             f.write("\n")
@@ -7216,11 +7224,16 @@ def record_hook_claim_observation(payload):
     if not isinstance(payload, dict):
         return
     try:
+        # ATTRIBUTION TRAVELS WITH THE READING, for the reason recorded at record_context_window:
+        # an observation that cannot name the build it watched leaves `verified_against` to be
+        # inferred later from mtimes. Unknown is an explicit null with its reason.
+        _hv, _hw = running_host_version()
         rec = {"claim": "no-rate-limits-in-hooks",
                "control": bool(payload.get("session_id")),
                "rate_limit_keys": _rate_limit_keys(payload),
                "top_level_keys": sorted(str(k) for k in payload),
                "hook": str(payload.get("hook_event_name") or ""),
+               "host_version": _hv, "host_version_how": _hw,
                "observed_at": int(time.time())}
         os.makedirs(os.path.dirname(HOOK_CLAIM_F), exist_ok=True)
         tmp = HOOK_CLAIM_F + ".tmp"

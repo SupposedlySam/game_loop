@@ -10539,6 +10539,31 @@ def main():
                         {"an orphan scan"}, ["claim", "host", "stale"])
           == (["a claim about the HOST", "a stale window"],
               ["a claim about the HOST", "a stale window"]))
+    # MARKS ARE MATCHED CASE-INSENSITIVELY ON BOTH SIDES. Comparing a mark against `x.lower()`
+    # while leaving the mark as written kills every mark carrying a capital — 18 of 302 here,
+    # across 15 producers, including `INERT`, `PINNED CODE`, `ZERO tests` and `ONLY LOCAL`. The
+    # flaw was in the SURVIVED line for as long as those marks existed, and I copied it into
+    # `killers()` an hour after writing it.
+    #
+    # It presented as a COVERAGE finding: five producers reported EVERY KILL COLLATERAL on the
+    # first sweep that could say so. Twelve of the eighteen dead marks match a real assertion name
+    # once lowercased, so most of that "finding" was the matcher. A scan's first findings are
+    # evidence about the scan — the third time today that has been the answer.
+    check("a mark carrying a capital still matches — the assertion name is lowercased, so leaving "
+          "the mark as written silently retires it, and the failure looks like missing coverage "
+          "rather than a broken comparison",
+          sweep.killers({"a guard reported INERT with no probe"}, set(), ["INERT"])
+          == (["a guard reported INERT with no probe"], ["a guard reported INERT with no probe"]))
+    check("...and a mark that genuinely matches nothing still reports nothing, so the fix widened "
+          "the comparison rather than making everything match",
+          sweep.killers({"a guard reported INERT"}, set(), ["nothing-like-this"])
+          == (["a guard reported INERT"], []))
+    check("...and BOTH comparison sites lowercase the mark — the survivors line had this wrong "
+          "first and the kill line inherited it, so fixing one and not the other would leave the "
+          "same defect reporting from the other half of the same entry",
+          read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py")).count(
+              "m.lower() in x.lower()") == 2)
+
     check("...and EVERY KILL COLLATERAL is reachable: a mutation can redden the suite with nothing "
           "whose name mentions the producer, which is the case worth shouting about because the "
           "count alone reads as coverage",

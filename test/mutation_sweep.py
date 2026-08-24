@@ -1404,7 +1404,14 @@ def killers(baseline, still, marks):
     `marks` the SURVIVED lines already use — one vocabulary per producer, not two.
     """
     killed_names = sorted(baseline - still)
-    return killed_names, [x for x in killed_names if any(m in x.lower() for m in marks)]
+    # BOTH SIDES LOWERCASED. Comparing a mark against `x.lower()` while leaving the mark as written
+    # means any mark carrying a capital can never match — 18 of 302 here, across 15 producers, with
+    # `INERT`, `PINNED CODE` and `ZERO tests` among them. The flaw was in the SURVIVED line below
+    # first and I copied it into this function an hour after writing that one. It made five
+    # producers report EVERY KILL COLLATERAL, which reads as a coverage finding and was a matcher
+    # bug — a scan's first findings are evidence about the scan.
+    return killed_names, [x for x in killed_names
+                          if any(m.lower() in x.lower() for m in marks)]
 
 
 def producer_liveness(original, fn, run_mutant):
@@ -1701,7 +1708,8 @@ def main():
                          "producer's subject failed. The number says the suite noticed a change, "
                          "not that anything here is checked. Read the marks, or the assertions.")
         lines += [f"    SURVIVED: {c[:96]}"
-                  for c in sorted(x for x in still if any(m in x.lower() for m in marks))]
+                  for c in sorted(x for x in still
+                                  if any(m.lower() in x.lower() for m in marks))]
         return (key, killed, v, floor), "\n".join(lines) + "\n"
 
     # ONE FULL SUITE PER PRODUCER IS THE COST, AND IT WAS BEING PAID SERIALLY (#59). Measured at

@@ -8742,6 +8742,10 @@ def main():
     #   triggers_report          the whole ternary → always "✓"       PROVED 2026-08-23
     #   external_claims_report   ⚠ → ✓ on the stale-version arm       PROVED 2026-08-23
     #   effector_state           ✗ → ✓ on the artifact-gone arm       PROVED 2026-08-23
+    #   fire_triggers            ✗ → ✓ on the failed-at-fire line     PROVED 2026-08-23
+    #   cmd_notify               ⚠ → ✓ on reply READS FAILED          PROVED 2026-08-23
+    #   worktree_report          ⚠ → ✓ on RULES DIFFER                PROVED 2026-08-23
+    #   cmd_confidence           ⚠ → ✓ on the unmoved channel pointer PROVED 2026-08-23
     #   fix_state                ✗ → ✓ on the output-gone arm         SURVIVED, then PROVED —
     #                            the arm was matched by words while its three siblings were
     #                            line-scoped, which is the only reason the gap existed
@@ -8750,17 +8754,24 @@ def main():
     # suite run twice (~15 min), so they are owed rather than skipped. Do not read the pinned count
     # as a measured one.
     _SYMBOL_MUTATION_VERIFIED = [
-        "<module>", "effector_state", "external_claims_report", "fix_state", "guards_report",
-        "mark_publication_state", "pin_state", "triggers_report",
+        "<module>", "cmd_confidence", "cmd_notify", "effector_state", "external_claims_report",
+        "fire_triggers", "fix_state", "guards_report", "mark_publication_state", "pin_state",
+        "triggers_report", "worktree_report",
     ]
     check("every producer whose symbol assertion has KILLED A MUTANT is one this suite also claims "
           "to pin — the stronger list cannot name something the weaker one does not, or the record "
           "reads as verified coverage of a producer nothing asserts",
           set(_SYMBOL_MUTATION_VERIFIED) <= set(_SYMBOL_PINNED))
-    check("...and it is SHORTER than the pinned list, which is the honest state: an assertion that "
-          "exists and an assertion that has failed for the right reason are different claims, and "
-          "conflating them is what let a passing assertion sit beside a surviving mutant today",
-          len(_SYMBOL_MUTATION_VERIFIED) < len(_SYMBOL_PINNED))
+    # THIS ARM SAID "STRICTLY SMALLER" WHILE THE DEBT EXISTED, and it was the right shape then:
+    # it stopped the two lists being levelled by editing rather than by measuring. The debt is paid
+    # — all twelve have killed a real mutant — so the honest claim inverts. It is now EQUALITY that
+    # must hold, and a NEW pinned producer arriving unverified fails here until somebody runs the
+    # mutation. The assertion moved with the fact rather than being deleted when it stopped being
+    # true, which is the only way a record like this survives its own success.
+    check("...and every pinned producer has now killed a real mutant — the two lists are equal, so "
+          "a new symbol assertion cannot join the pinned set on the strength of existing: it owes "
+          "a mutation run, and this fails until it has one",
+          sorted(_SYMBOL_MUTATION_VERIFIED) == sorted(_SYMBOL_PINNED))
 
     _multi = _multi_symbol_producers(read_or_empty(
         os.path.join(REPO, ".game_loop", "bin", "game_loop")))

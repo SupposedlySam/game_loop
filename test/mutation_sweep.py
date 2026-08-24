@@ -838,7 +838,7 @@ MUTANTS += [
      ["flair", "milestone"], None, 4),
     ("_limitgate_verdict -> the limit gate always allows the turn to end",
      ".game_loop/bin/game_loop::_limitgate_verdict", "    return True, None\n",
-     ["limit gate", "limit", "window"], None, 8),
+     ["limit gate", "limit", "window", "gate denies", "context deny"], None, 8),
     ("_last_assistant_text -> the closing message is never recoverable",
      ".game_loop/bin/game_loop::_last_assistant_text", "    return None, \"neutered\"\n",
      ["closing message", "assistant text", "stop gate", "launder"], None, 3),
@@ -1696,9 +1696,22 @@ def main():
         # killer that is about this producer, so the report now says how many of the kills were.
         killed_names, targeted = killers(baseline, still, marks)
         if killed:
-            lines.append(f"  of those {killed}, {len(targeted)} name this producer's subject "
-                         f"({', '.join(marks)}) — the rest reddened for other reasons")
+            lines.append(f"  of those {killed}, at least {len(targeted)} name this producer's "
+                         f"subject ({', '.join(marks)}) — a LOWER BOUND, see below")
             lines += [f"    KILLED BY: {t[:88]}" for t in targeted[:3]]
+        # THE TARGETED COUNT IS A LOWER BOUND, NOT A MEASURE, and the reason is structural: `marks`
+        # was written for ONE job — picking out the SURVIVORS worth reading, where a handful of
+        # relevant words is enough — and I repurposed it for a second, deciding whether a KILL is
+        # about this producer. The second job needs the full vocabulary the tests actually use.
+        #
+        # Measured, not assumed: `_limitgate_verdict` reported 10 killed / 1 targeted, and hand-
+        # neutering it showed ALL TEN are about the limit gate — "gate denies ordinary work over
+        # the threshold", "the AUTO handoff does NOT satisfy the limit gate", "removing the handoff
+        # closes it again". Nine of them simply do not contain the words `limit gate`, `limit` or
+        # `window`. Nine producers sit at targeted 1 and that list is a VOCABULARY artefact, not a
+        # coverage finding — chasing it by adding whichever words appear in today's failures would
+        # fit the marks to one run and make the number rise while nothing improved.
+        #
         # EVERY KILL COLLATERAL is a finding wearing a healthy number: the count says the suite
         # noticed something, and nothing in it was about this producer. Reported, not fatal — a
         # producer can be genuinely covered by assertions whose names do not carry its marks, and

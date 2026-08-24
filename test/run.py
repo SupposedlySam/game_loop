@@ -10564,6 +10564,21 @@ def main():
           read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py")).count(
               "m.lower() in x.lower()") == 2)
 
+    # THE TARGETED COUNT IS A LOWER BOUND AND THE REPORT MUST SAY SO. `marks` was written for one
+    # job — picking out SURVIVORS worth reading, where a handful of words suffices — and I
+    # repurposed it to decide whether a KILL is about the producer, which needs the full vocabulary
+    # the tests use. Measured: `_limitgate_verdict` read 10 killed / 1 targeted, and hand-neutering
+    # showed ALL TEN are about the limit gate; nine just do not contain `limit gate`, `limit` or
+    # `window`. Nine producers sit at targeted 1 and that list is a vocabulary artefact.
+    #
+    # NOT FIXED BY WIDENING NINE VOCABULARIES: adding whichever words appear in today's failures
+    # fits the marks to one run and makes the number rise while nothing improves. The caveat is the
+    # honest fix; a widening is only justified where the killers were actually read.
+    check("the sweep calls the targeted count a LOWER BOUND rather than a measure — the marks were "
+          "written to filter survivors, not to enumerate coverage, and a number read as coverage "
+          "would say nine well-tested producers have one assertion each",
+          "at least" in _swsrc and "a LOWER BOUND" in _swsrc)
+
     check("...and EVERY KILL COLLATERAL is reachable: a mutation can redden the suite with nothing "
           "whose name mentions the producer, which is the case worth shouting about because the "
           "count alone reads as coverage",

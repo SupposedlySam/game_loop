@@ -48,10 +48,12 @@
   - "python3 test/run.py"
 ".game_loop/bin/guard-writes-impl.sh":
   - "python3 test/run.py"
+  - "python3 test/behaviour_gate.py"
 ".game_loop/bin/guard-mcp.sh":
   - "python3 test/run.py"
 ".game_loop/bin/guard-mcp-impl.sh":
   - "python3 test/run.py"
+  - "python3 test/behaviour_gate.py"
 ".game_loop/bin/verify":
   - "python3 test/run.py"
 ".game_loop/bin/flair.py":
@@ -76,10 +78,11 @@
 # that nobody would notice. The mechanism existed and the discipline lapsed silently — twelve
 # refusal-touching commits after the record's only entry, four of them qualifying — so it is a gate
 # now rather than a habit. It fires only when a refusal LINE moves, not on every edit.
-".game_loop/bin/guard-writes-impl.sh":
-  - "python3 test/behaviour_gate.py"
-".game_loop/bin/guard-mcp-impl.sh":
-  - "python3 test/behaviour_gate.py"
+# The behaviour_gate command for the two impl scripts is listed with them in the bin block above,
+# NOT repeated here. It used to be declared a second time at this spot, and a repeated key silently
+# discarded the earlier `python3 test/run.py` rule -- so the write guard owed the suite on paper and
+# owed nothing in fact. verify now MERGES a repeated key and says so out loud; this file should not
+# need that mercy.
 "test/behaviour_gate.py":
   - "python3 test/run.py"
 ".game_loop/behaviour.json":
@@ -101,10 +104,6 @@
 "install.sh":
   - "python3 test/run.py"
 # The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --
-# the notice would report nothing and look exactly like an install with nothing to report. That is
-# the failure class this repo keeps paying for, so the shipped file owes the suite too.
-".game_loop/behaviour.json":
-  - "python3 test/run.py"
 
 # THE TWO DOCUMENTS A CONSUMER OPERATES FROM. Added after editing both and being told "nothing
 # changed that owes a check" -- while test/run.py asserts, over every tracked file, that the house

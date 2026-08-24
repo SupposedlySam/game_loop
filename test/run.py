@@ -3177,6 +3177,103 @@ def main():
             check("status calls an empty manifest what it is, without calling it safe",
                   "NO RULES in .game_loop/verify.yaml" in r.stdout
                   and "not the same thing as safe" in r.stdout)
+
+            # ONE RUN PER DISTINCT COMMAND. Every gate file in this repo owes `python3 test/run.py`,
+            # and verify used to loop per RULE — so a change touching four gate files ran that one
+            # command four times: same string, same cwd, against a tree that cannot change between
+            # the passes. One pass of this suite is six minutes, so the tool whose whole purpose is
+            # making a check cheap billed twenty-four minutes for six minutes of evidence. Note the
+            # direction it failed in: the loop broke on the first failure, so the duplication was
+            # charged ONLY when everything passed. The all-green run was the slow one.
+            EXCL = '"unchecked-ok":\n  - "COUNTER"\n  - ".game_loop/**"\n'
+            ONE = "sh -c 'echo run >> COUNTER'"
+
+            def _counter():
+                try:
+                    with open(os.path.join(cv, "COUNTER")) as f:
+                        return len([ln for ln in f if ln.strip()])
+                except OSError:
+                    return 0
+
+            print("verify runs each DISTINCT command once, not once per matching rule:")
+            cvyaml(f'"a.txt":\n  - "{ONE}"\n"b.txt":\n  - "{ONE}"\n'
+                   f'"c.txt":\n  - "{ONE}"\n"d.txt":\n  - "{ONE}"\n' + EXCL)
+            for _n in "abcd":
+                cvwrite(f"{_n}.txt", "seed\n")
+            cvgit("add", "-A")
+            cvgit("commit", "-q", "-m", "four rules, one command")
+            for _n in "abcd":
+                cvwrite(f"{_n}.txt", "changed\n")
+            cvwrite("COUNTER", "")
+            _rv = vfy()
+            check("four rules owing ONE identical command run it ONCE, not four times",
+                  _counter() == 1 and _rv.returncode == 0)
+            check("...and the verdict is unchanged — one run is the same evidence, not less of it",
+                  "all owed checks passed" in _rv.stdout)
+            check("...and the run names the rules that share it, so the saving is visible",
+                  "RUN ONCE" in _rv.stdout and "a.txt" in _rv.stdout)
+            check("...and ALL FOUR rules are stamped from that single run, so none re-runs",
+                  "newer than the change" in vfy("--check").stdout)
+
+            # STOPPING EARLY MUST LEAVE THE UNRUN RULES UNSTAMPED, or the next run inherits a stamp
+            # nobody earned. The old per-rule loop got this free by construction; a deduped run has
+            # to mean it, so it is asserted here rather than assumed.
+            cvyaml('"a.txt":\n  - "sh -c \'exit 3\'"\n'
+                   '"b.txt":\n  - "sh -c \'echo run >> COUNTER\'"\n' + EXCL)
+            cvwrite("COUNTER", "")
+            cvwrite("a.txt", "again\n")
+            cvwrite("b.txt", "again\n")
+            _fv = vfy()
+            check("a failing command still stops the run — the later distinct command never runs",
+                  _fv.returncode == 1 and _counter() == 0)
+            _fc = vfy("--check")
+            check("...and NEITHER rule is stamped, so the one whose command never ran stays owed",
+                  _fc.returncode == 1 and "a.txt" in _fc.stdout and "b.txt" in _fc.stdout)
+
+            # A REPEATED KEY USED TO RESET THE LIST, so the rule declared FIRST vanished with no
+            # output anywhere. This repo declared `.game_loop/bin/guard-writes-impl.sh` twice — once
+            # owing the suite, once owing the behaviour gate — and the second silently won. The
+            # 1621-line write guard owed the suite in the manifest and did not owe it in fact, and
+            # `--coverage` reported that path CHECKED because a rule DID claim it: a hole shaped
+            # exactly like coverage.
+            print("a rule key declared twice MERGES and says so, instead of discarding one:")
+            cvyaml('"a.txt":\n  - "sh -c \'echo first >> COUNTER\'"\n'
+                   '"a.txt":\n  - "sh -c \'echo second >> COUNTER\'"\n' + EXCL)
+            cvwrite("COUNTER", "")
+            cvwrite("a.txt", "dup\n")
+            _dv = vfy()
+            check("both commands under a twice-declared key are owed — the first is not discarded",
+                  _counter() == 2 and _dv.returncode == 0)
+            check("...and the duplicate is announced, so a merge is never a quiet one",
+                  "DUPLICATE RULE KEY" in _dv.stdout and "declared 2x" in _dv.stdout)
+            check("...and --coverage says it too, because a duplicate key IS a coverage question",
+                  "DUPLICATE RULE KEY" in vfy("--coverage").stdout)
+
+            # The manifest that shipped the bug. A rule merged loudly is the safety net; this is the
+            # repo declining to need it.
+            _keys = [ln.rstrip()[:-1].strip().strip('"')
+                     for ln in open(os.path.join(REPO, ".game_loop", "verify.yaml"))
+                     if ln.strip() and not ln.lstrip().startswith("#")
+                     and not ln.startswith(" ") and ln.rstrip().endswith(":")]
+            check("...and THIS repo's own manifest declares no path twice",
+                  len(_keys) == len(set(_keys)))
+            _own, _k = {}, None
+            for ln in open(os.path.join(REPO, ".game_loop", "verify.yaml")):
+                _t = ln.rstrip("\n")
+                if not _t.strip() or _t.lstrip().startswith("#"):
+                    continue
+                if not _t.startswith(" ") and _t.rstrip().endswith(":"):
+                    _k = _t.rstrip()[:-1].strip().strip('"')
+                    _own.setdefault(_k, [])
+                elif _k and _t.lstrip().startswith("- "):
+                    _own[_k].append(_t.lstrip()[2:].strip().strip('"'))
+            check("...and the write guard's impl owes BOTH the suite and the behaviour gate — the "
+                  "rule the duplicate key used to swallow",
+                  sorted(_own.get(".game_loop/bin/guard-writes-impl.sh", []))
+                  == ["python3 test/behaviour_gate.py", "python3 test/run.py"])
+            check("...and so does the mcp guard's impl, which had the same duplicate",
+                  sorted(_own.get(".game_loop/bin/guard-mcp-impl.sh", []))
+                  == ["python3 test/behaviour_gate.py", "python3 test/run.py"])
         finally:
             shutil.rmtree(cv, ignore_errors=True)
 

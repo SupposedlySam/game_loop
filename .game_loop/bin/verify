@@ -444,8 +444,27 @@ def main():
         last = rec.get(pattern, {}).get("at", 0)
         newest = max((os.path.getmtime(os.path.join(REPO, f))
                       for f in changed if os.path.exists(os.path.join(REPO, f))), default=0)
-        if newest > last:
-            stale.append((pattern, changed, newest, last))
+        # THE RULE'S MTIME IS NOT THE RULE'S CONTENT (reported by lamp-owner, verified in this
+        # source before it was sent, 2026-08-23). `at` is stamped per PATTERN, so ADDING A COMMAND
+        # under an existing pattern left `newest <= last` and this said "nothing changed that owes
+        # a check". The new gate did not run on the commit that introduced it — silently, and in
+        # the reassuring direction: you add a guard, verify goes green, you commit believing it
+        # ran. Its first real execution is some arbitrary later commit that happens to touch a
+        # gated file, which is where you find out the guard was wrong.
+        #
+        # The commands were ALREADY being recorded beside the timestamp (`rec[pattern]["cmds"]`,
+        # written on every green run) and never read. So the record already described the bytes
+        # it checked; only the decision was still reading the clock.
+        #
+        # This is line 166's observation one level up: that comment says a DIRECTORY's mtime does
+        # not change when a file inside it is edited. A RULE's mtime is not its content either.
+        was = rec.get(pattern, {}).get("cmds")
+        if was is not None and was != mapping[pattern]:
+            stale.append((pattern, changed, newest, last, "the rule itself changed since it last "
+                                                          "ran — a NEW or EDITED command owes a "
+                                                          "run even where no file moved"))
+        elif newest > last:
+            stale.append((pattern, changed, newest, last, ""))
 
     if check_only:
         if not stale:
@@ -454,8 +473,8 @@ def main():
                 print(tail)
             return 0
         print("VERIFY REFUSED — you changed things whose checks have not run SINCE the change:\n")
-        for pattern, changed, newest, last in stale:
-            print(f"  {pattern}")
+        for pattern, changed, newest, last, why in stale:
+            print(f"  {pattern}" + (f"   ({why})" if why else ""))
             for f in changed[:4]:
                 print(f"      {f}")
             print(f"      last verified: {'never' if not last else time.ctime(last)}")
@@ -483,7 +502,7 @@ def main():
         return 0
 
     failed = False
-    for pattern, changed, _, _ in stale:
+    for pattern, changed, _, _, _ in stale:
         for cmd in mapping[pattern]:
             print(f"\n=== {pattern}: {cmd}")
             r = subprocess.run(cmd, shell=True, cwd=REPO)

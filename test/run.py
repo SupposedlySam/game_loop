@@ -3057,6 +3057,36 @@ def main():
                   "distinction rather than one branch nobody reaches",
                   "all owed checks passed" in _owed_run
                   and "already newer than the change" not in _owed_run)
+            # A GATE ADDED TO verify.yaml WAS INERT ON THE COMMIT THAT ADDED IT (reported by
+            # lamp-owner, whose Crawler hit it and who verified it in this source before sending).
+            # `at` is stamped per PATTERN, so adding a NEW command under an existing pattern left
+            # `newest <= last` and verify said "nothing changed that owes a check". The guard did
+            # not run on the commit that introduced it — silently, and in the reassuring direction:
+            # you add a gate, verify goes green, you commit believing it ran. Its first execution
+            # is some arbitrary later commit that touches a gated file, which is where you learn
+            # the gate was wrong. It bites the tidy commit that adds a gate AND NOTHING ELSE.
+            #
+            # The commands were already recorded beside the timestamp and never read, so the record
+            # described the bytes checked while the decision still read the clock.
+            cvyaml('"src/**":\n  - "true"\n  - "true  # a NEW gate, added without touching src"\n'
+                   '"unchecked-ok":\n  - ".game_loop/**"\n  - "docs/**"\n')
+            _newgate = vfy("--check")
+            check("adding a COMMAND to a rule owes a run even though no file it gates moved — a "
+                  "gate that goes green on the commit introducing it has never executed, and the "
+                  "commit that adds a gate and nothing else is the careful one",
+                  _newgate.returncode != 0
+                  and has(_newgate.stdout, "the rule itself changed"))
+            check("...and running it CLEARS the debt, so the new state is recorded rather than the "
+                  "rule staying permanently stale — otherwise the fix trades a silent pass for a "
+                  "refusal nobody can satisfy",
+                  vfy().returncode == 0 and vfy("--check").returncode == 0)
+            # THE CONTROL: an UNCHANGED rule must not report itself changed, or every run after
+            # this fix refuses and the gate becomes the thing people bypass.
+            check("...and a rule whose commands are untouched is NOT stale on that account — the "
+                  "check compares the recorded command set, so re-running with the same rules is "
+                  "quiet",
+                  vfy("--check").returncode == 0
+                  and not has(vfy("--check").stdout, "the rule itself changed"))
             check("...and `--check` agreed with the run path all along — it has always had its own "
                   "wording for this state, which is how the two halves of one tool were found "
                   "disagreeing about whether the distinction mattered",

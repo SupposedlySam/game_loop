@@ -2739,6 +2739,13 @@ def main():
               "with the artifact gone there is nothing for the pair to have been about, and that "
               "is the first thing a reader needs rather than the third",
               has(_f4, "MISSING — the fix's own output is gone"))
+        # AND ITS SYMBOL. I line-scoped the other three arms of this producer and left this one
+        # matched by words, then proved the gap by mutating it: ✗ → ✓ SURVIVED. Third time today
+        # that covering a producer's arms unevenly left the uncovered one free, and the second time
+        # inside work whose entire subject was that failure. The word is not the unit; the ARM is.
+        check("...and THAT line carries ✗ too — a fix whose output has vanished, announced with "
+              "the symbol for a fix that holds, is the strongest wrong thing this report could say",
+              _fline(_f4, "two-id").strip().startswith("✗"))
 
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             fxlog = f.read()
@@ -8704,13 +8711,17 @@ def main():
     #   pin_state                ✗ → ✓ on the MISSING arm             PROVED 2026-08-23
     #   triggers_report          the whole ternary → always "✓"       PROVED 2026-08-23
     #   external_claims_report   ⚠ → ✓ on the stale-version arm       PROVED 2026-08-23
+    #   effector_state           ✗ → ✓ on the artifact-gone arm       PROVED 2026-08-23
+    #   fix_state                ✗ → ✓ on the output-gone arm         SURVIVED, then PROVED —
+    #                            the arm was matched by words while its three siblings were
+    #                            line-scoped, which is the only reason the gap existed
     #
     # THE OTHERS ARE UNVERIFIED, and that is a statement rather than an omission: each costs a full
     # suite run twice (~15 min), so they are owed rather than skipped. Do not read the pinned count
     # as a measured one.
     _SYMBOL_MUTATION_VERIFIED = [
-        "<module>", "external_claims_report", "guards_report", "mark_publication_state",
-        "pin_state", "triggers_report",
+        "<module>", "effector_state", "external_claims_report", "fix_state", "guards_report",
+        "mark_publication_state", "pin_state", "triggers_report",
     ]
     check("every producer whose symbol assertion has KILLED A MUTANT is one this suite also claims "
           "to pin — the stronger list cannot name something the weaker one does not, or the record "

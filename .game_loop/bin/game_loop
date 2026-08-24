@@ -238,7 +238,9 @@ DEFAULT_CONFIG = {
     # name: "probe" (probe_cfg), "context" (context_cfg — the context-size trigger on the same gate)
     # and "successor" (successor_cfg — how the next session is started). The first two default
     # OFF/inert; "successor" defaults to "auto", which is inert until somebody RUNS the verb and
-    # then reads the terminal rather than a config key.
+    # then reads the terminal rather than a config key. Its one non-mode key,
+    # "skip_permissions", defaults FALSE: true appends --dangerously-skip-permissions to the
+    # successor's command line, which is a decision only a human writing this file may make.
     "limits": {"threshold_pct": 98, "exhausted_pct": 99, "handoff_file": "HANDOFF.md"},
     # Update check: on `status`, compare the installed game_loop commit (.game_loop/VERSION, written by
     # install.sh) against the latest on the source repo's main, and note when a re-install is due. Best
@@ -6452,6 +6454,14 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
 SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes. "
                     "It is a handoff from a previous session; you have no other context.")
 
+# The flag that starts a session with permission prompts bypassed. Read off the running binary
+# (2.1.241) rather than remembered, and it sits there beside the refusal "Cannot set permission mode
+# to bypassPermissions because the session was not launched with --dangerously-skip-permissions" —
+# which is the whole reason this belongs to `successor` at all. It is a LAUNCH decision: a successor
+# that starts without it cannot grant itself the bypass afterwards, so the only moment anybody can
+# make it is the moment the command line is built, and by then the predecessor may be out of road.
+SKIP_PERMISSIONS_FLAG = "--dangerously-skip-permissions"
+
 
 # Warp's own identification of itself to child processes. Read off a live environment rather than
 # guessed: TERM_PROGRAM=WarpTerminal, beside TERM_PROGRAM_VERSION=v0.2026.07.29.09.05.stable_02.
@@ -6532,6 +6542,23 @@ def successor_cfg():
     invocation: the successor's session id cannot be handed to it, and saggar names the terminal
     from the task, so --task/--title do not reach it either. The printed command still carries both,
     which is why it is printed in every mode rather than only when nothing was opened.
+
+    `skip_permissions` (default FALSE) appends --dangerously-skip-permissions to that command. An
+    unattended run hands over at the worst possible moment — the gate closed, the context full, the
+    human asleep — and a successor that opens on a permission prompt is a handover that stalls where
+    nobody is watching. This is the only place the decision can be made, because the flag is read at
+    LAUNCH: the successor cannot grant it to itself once it is running.
+
+    It is A CONFIG KEY AND NOT A FLAG, deliberately. A `--skip-permissions` argument would let a
+    session decide its own successor runs unprompted, which is a session widening its permissions
+    across a handover and calling the result a new session. The human writes it into
+    .game_loop/config.json once, or it does not happen — and that file is the artifact naming who
+    chose it.
+
+    WHAT IT DOES NOT REACH, for the same reason the session id does not: saggar-agent. `saggar agent`
+    takes a provider and a task, not argv (`saggar --help`: `saggar agent <agent> <task…>`), so it
+    builds its own claude invocation and nothing here can add a flag to it. That is said in the
+    output rather than left for a run to discover by stalling on a prompt at 3am.
     """
     lc = (config().get("limits") or {})
     c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
@@ -6544,6 +6571,7 @@ def successor_cfg():
     mode = auto if configured == "auto" else configured
     return {"mode": mode, "configured": configured, "detected": detected, "host": host,
             "term_program": os.environ.get("TERM_PROGRAM") or "",
+            "skip_permissions": bool(c.get("skip_permissions")),
             "name": str(c.get("name") or "game-loop-successor")}
 
 
@@ -6679,8 +6707,12 @@ def cmd_successor(s, a):
     sid = a.session_id or str(uuid.uuid4())
     cwd = a.cwd or REPO_ROOT
     prompt = SUCCESSOR_PROMPT.format(handoff=hp)
-    cmd = " ".join(shlex.quote(x) for x in ["claude", "--session-id", sid, prompt])
     sc = successor_cfg()
+    argv = ["claude", "--session-id", sid]
+    if sc["skip_permissions"]:
+        argv.append(SKIP_PERMISSIONS_FLAG)
+    argv.append(prompt)
+    cmd = " ".join(shlex.quote(x) for x in argv)
     title = successor_title(a.task, a.title, cwd)
     why = successor_why(sc)
     sid_note = (f"{sid}  (the printed command's — `saggar agent` mints its own)"
@@ -6690,6 +6722,30 @@ def cmd_successor(s, a):
              f"working directory   : {cwd}",
              f"tab title           : {title}",
              f"command             : {cmd}"]
+    # Only when it is ON. The default is the safe direction and announcing it every run would make
+    # the exceptional case one more line in a wall of them; a bypass is the thing worth a line.
+    if sc["skip_permissions"]:
+        lines += ["permissions         : BYPASSED — the command carries "
+                  + SKIP_PERMISSIONS_FLAG + ",",
+                  "                      set by limits.successor.skip_permissions in "
+                  ".game_loop/config.json.",
+                  "                      The successor will not prompt for anything, including the "
+                  "calls this",
+                  "                      session would have been asked about."]
+        # The gap that costs the most, so it is said beside the setting rather than left in the
+        # mode's own paragraph: skip_permissions is turned on precisely because nobody will be
+        # there, and saggar-agent is the one mode that drops it. It is stated here because here it
+        # is true in every sub-case — dry run, terminal opened, or call refused — where the started
+        # branch it would otherwise live in is the one seam no test may run for real.
+        if sc["mode"] == "saggar-agent":
+            lines += ["                    \u26a0 MODE saggar-agent DOES NOT CARRY IT. `saggar "
+                      "agent` takes a task, not argv,",
+                      "                      so a terminal it opens WILL prompt — and an "
+                      "unattended successor stalls on",
+                      "                      the first one. Only the printed command above carries "
+                      "the flag; mode",
+                      "                      \"print\" or \"warp-tab\" is how the bypass "
+                      "actually reaches the successor."]
     if a.dry_run:
         lines.append(f"mode                : {sc['mode']} — {why}, configured "
                      f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
@@ -6749,6 +6805,7 @@ def cmd_successor(s, a):
     logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
              "configured_mode": sc["configured"], "warp_detected": sc["detected"],
              "host": sc["host"], "title": title,
+             "skip_permissions": sc["skip_permissions"],
              "dry_run": bool(a.dry_run), "auto_handoff": auto})
     out("\n".join(lines))
 

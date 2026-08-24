@@ -1195,6 +1195,71 @@ def main():
               in succ_mode(TERM_PROGRAM="WarpTerminal"))
         succ_cfg("auto")
 
+        # ── the bypass setting (limits.successor.skip_permissions) ────────────────────────────
+        #
+        # A handover happens at the worst moment there is — gate closed, context full, human
+        # asleep — and a successor that opens on a permission prompt is a handover that stalls
+        # where nobody is watching. The flag is read at LAUNCH (the running claude refuses
+        # "Cannot set permission mode to bypassPermissions because the session was not launched
+        # with --dangerously-skip-permissions"), so the command line is the only place it can be
+        # decided, and this verb builds the only command line there is.
+        def succ_skip(v, mode="auto"):
+            c = json.load(open(ctx_cf))
+            lim = c.get("limits") or {}
+            lim["successor"] = {"mode": mode, "skip_permissions": v}
+            c["limits"] = lim
+            json.dump(c, open(ctx_cf, "w"))
+
+        # Read the COMMAND LINE, never the whole output. `in out` was the first shape of these
+        # checks and a mutation caught it: the run prints the flag's NAME in its own announcement,
+        # so two of them passed with the flag removed from argv — a check whose subject was the
+        # sentence about the thing rather than the thing.
+        def succ_cmdline(out):
+            m = re.search(r"^command +: (.*)$", out, re.M)
+            return m.group(1) if m else ""
+
+        check("the default carries NO bypass — an unset key never widens what the next session may do",
+              succ_cmdline(succ_mode(TERM_PROGRAM="Apple_Terminal")).startswith("claude --session-id")
+              and "--dangerously-skip-permissions"
+              not in succ_cmdline(succ_mode(TERM_PROGRAM="Apple_Terminal")))
+        succ_skip(True)
+        out_skip = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("skip_permissions puts --dangerously-skip-permissions in the successor's COMMAND",
+              "--dangerously-skip-permissions" in succ_cmdline(out_skip))
+        check("...before the prompt, so it is read as a flag and not as part of what to do",
+              re.search(r"^claude --session-id \S+ --dangerously-skip-permissions '",
+                        succ_cmdline(out_skip)))
+        check("...and it is SAID, not merely done — a bypass nobody announced is one nobody chose",
+              "permissions         : BYPASSED" in out_skip
+              and "limits.successor.skip_permissions" in out_skip)
+        # The two halves must agree. An announcement that outlives the flag it describes is worse
+        # than no announcement: it reads as proof to the one person checking before walking away.
+        check("...and the announcement never outlives the flag — it is printed IFF the command has it",
+              ("permissions         : BYPASSED" in out_skip)
+              == ("--dangerously-skip-permissions" in succ_cmdline(out_skip)))
+        # The gap that costs the most is the one the setting is bought for: nobody is watching.
+        # `saggar agent` takes a task, not argv, so this mode cannot carry the flag — and a mode
+        # that silently drops it is discovered by a successor stalling on a prompt at 3am.
+        check("saggar-agent says out loud that it does NOT carry the bypass it was configured with",
+              "MODE saggar-agent DOES NOT CARRY IT"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
+        check("...and names the two modes that do, rather than leaving the run to find out",
+              "\"print\" or \"warp-tab\"" in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
+        check("no such warning where the mode DOES carry it — the notice is the exception, not noise",
+              "DOES NOT CARRY IT" not in out_skip)
+        # There is deliberately no --skip-permissions ARGUMENT. A session that could hand its
+        # successor a bypass is a session widening its own permissions across a handover and
+        # calling the result a new session; the config file is the artifact naming who chose it.
+        r = gl(proj, "successor", "--dry-run", "--skip-permissions", sid="sess-succ")
+        check("there is no --skip-permissions flag — only the human editing config.json may grant it",
+              r.returncode != 0 and "unrecognized arguments" in (r.stdout + r.stderr))
+        succ_skip(False)
+        off = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("skip_permissions:false is the default said out loud, not a third state",
+              "--dangerously-skip-permissions" not in succ_cmdline(off)
+              and "permissions         : BYPASSED" not in off)
+        succ_cfg("auto")
+
         # The tab title. A tab is narrow, so the cap is a REFUSAL — prose guidance did not hold it in
         # the sibling launcher, which shipped `O | push and scope backups` into a truncating tab.
         check("the title defaults to `<R> | successor` — the repo's initial, so a row of tabs reads",

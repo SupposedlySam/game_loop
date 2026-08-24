@@ -4513,7 +4513,10 @@ def main():
               'git -C "$SRC" diff --quiet HEAD' in _isrc and '-dirty' in _isrc)
         check("...and it MARKS rather than refuses — installing from a work-in-progress checkout is "
               "how this repo is developed",
-              "exit 1" not in _isrc.split('git -C "$SRC" diff --quiet HEAD')[1][:400])
+              # THE LINE ABOVE ASSERTS THAT STRING IS PRESENT — and a failed check does not stop
+              # the run, so this line executed anyway and split(..)[1] raised. An assertion is not
+              # a control-flow guard; the next statement runs whatever it reported.
+              "exit 1" not in after_marker(_isrc, 'git -C "$SRC" diff --quiet HEAD')[:400])
 
         # GIT RESOLVES BY WALKING UP. A vendored source — one with no .git of its own, which is what
         # any extraction or package manager produces — makes `git -C "$SRC" rev-parse HEAD` succeed
@@ -9940,7 +9943,11 @@ def main():
     # join quietly. (OPEN is excluded on purpose: those are questions, not claims.)
     with open(os.path.join(SRC_GAME_LOOP, "LEDGER.md")) as f:
         _led = f.read()
-    _sec = _led.split("## VERIFIED", 1)[1].split("## OPEN", 1)[0]
+    # after_marker RATHER THAN split(..)[1]: if that heading is ever renamed, the split raises and
+    # the run ENDS — taking every later assertion with it and inflating the sweep's kill counts,
+    # instead of this check failing with the heading's name in it. The helper exists for this and
+    # I reached past it. (The same shape, one file over, is what made a producer NOT MEASURED.)
+    _sec = after_marker(_led, "## VERIFIED", "## OPEN")
     _titles = re.findall(r"^- \*\*(.+?)\*\*", _sec, re.M)
     _accounted = {c.get("ledger") for c in _claims}
     _missing = [t for t in _titles if t not in _accounted]
@@ -10522,8 +10529,11 @@ def main():
         with open(os.path.join(REPO, key.split("::")[0])) as f:
             return f.read()
 
+    # `[-1]` NOT `[1]`: a key missing its "::" would raise here — one line above the check written
+    # to catch exactly that — so the crash would pre-empt its own diagnostic. With [-1] the whole
+    # key is used as the function name, neuter finds nothing, and the entry is REPORTED by name.
     missing = [m[1] for m in sweep.MUTANTS
-               if not sweep.neuter(_mut_src(m[1]), m[1].split("::")[1], "    pass\n")[1]]
+               if not sweep.neuter(_mut_src(m[1]), m[1].split("::")[-1], "    pass\n")[1]]
     check("every producer the sweep names still exists in the file it names — no silent no-op entry",
           not missing)
     check("...and every entry is FILE-QUALIFIED, so one name in two files cannot collapse into one "

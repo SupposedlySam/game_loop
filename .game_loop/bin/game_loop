@@ -55,10 +55,43 @@ try:
     import flair  # decoration only; game_loop works identically without it
 except Exception:  # noqa: BLE001 — a missing/broken flair file must never break a real command
     flair = None
-try:
-    import notify  # paging only; game_loop works identically without it
-except Exception:  # noqa: BLE001 — a missing/broken notify file must never break a real command
-    notify = None
+
+
+class _LazyModule:
+    """Imported on first USE, never at startup.
+
+    `notify` reaches urllib.request -> http.client -> ssl, and profiling one `game_loop claim` put
+    25ms of a 168ms run inside that import chain — paid by EVERY invocation of this binary, to reach
+    a module only three commands ever touch. The suite alone starts it 721 times per run.
+
+    Truthiness is the load trigger, so `if notify:` still answers "is paging available?" exactly as
+    it did when the import was eager, and a missing or broken file still degrades to falsey instead
+    of raising — the property the original try/except existed to provide, kept rather than traded.
+    """
+
+    def __init__(self, name):
+        self._name = name
+        self._mod = False               # False = never tried; None = tried and not available
+
+    def _load(self):
+        if self._mod is False:
+            try:
+                self._mod = __import__(self._name)
+            except Exception:  # noqa: BLE001 — a missing/broken file must never break a real command
+                self._mod = None
+        return self._mod
+
+    def __bool__(self):
+        return self._load() is not None
+
+    def __getattr__(self, attr):
+        mod = self._load()
+        if mod is None:
+            raise AttributeError(attr)
+        return getattr(mod, attr)
+
+
+notify = _LazyModule("notify")          # paging only; game_loop works identically without it
 
 CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the .game_loop/ this CODE is in
 
@@ -1636,7 +1669,7 @@ def cmd_limitprobe(s, a):
 
 def cmd_notify(s, a):
     """Page the configured channel by hand: a test ping, or a message the run's human should see."""
-    if notify is None:
+    if not notify:
         die("notify module missing (.game_loop/bin/notify.py) — reinstall game_loop.")
     if not a.test and not a.text:
         die("notify needs --text \"<message>\" (or --test to verify the channel works).")

@@ -1736,10 +1736,13 @@ def main():
               and bool(_uline) and _uline[0].strip().startswith("•"))
         # NOT `len({"✓", "•", "✗"}) == 3`, which is what I wrote first: a literal set compared
         # against its own size is true whatever the program does. The claim is about these LINES.
+        # SAME NON-RAISING SHAPE as the claims block: `bool(_hline)` proves the list is non-empty,
+        # not that the LINE has a non-space character, and `"   ".strip()[0]` still throws. The
+        # guard that reads as sufficient is the one worth replacing with a helper.
+        _first = lambda ls: ((ls[0] if ls else "").strip() or " ")[0]
         check("...and the two do not render the same symbol — a verified pin and an unchecked one "
               "side by side in one report, and the symbol is the part a human reads first",
-              bool(_hline) and bool(_uline)
-              and _hline[0].strip()[0] != _uline[0].strip()[0])
+              bool(_hline) and bool(_uline) and _first(_hline) != _first(_uline))
         # THE ? ARM IS REACHABLE ONLY BY DRIFT, which is why it had no test: registration refuses
         # anything that is not ✓ ("a check born red is a check nobody will believe later"), so a
         # pin cannot be BORN unverifiable. It can become so — the anchor grows past the probe cap,
@@ -10139,11 +10142,17 @@ def main():
               _pick(_xnone, "current-one").strip().startswith("·")
               and _pick(_xnone, "stale-one").strip().startswith("·")
               and has(_pick(_xnone, "current-one"), "version UNKNOWN"))
+        # `"".strip()[0]` RAISES, and an assertion whose CONDITION raises ends the whole run —
+        # unrun assertions never print `ok`, so the sweep counts them as killed and reports a
+        # number about a run that stopped. The mutation sweep caught this the first time it
+        # neutered this producer to `return []`: every _pick came back empty, the indexing threw,
+        # and the entry read NOT MEASURED. I wrote this line today, in a session whose own handoff
+        # names this class. A helper that cannot raise is the fix; remembering not to index is not.
+        _sym = lambda ls, nm: ((_pick(ls, nm) or "").strip() or " ")[0]
         check("...so the three arms use three different symbols, measured on one claim carried "
               "through all of them rather than on three claims that might differ for other reasons",
-              len({_pick(_xlines, "current-one").strip()[0],
-                   _pick(_xlines, "stale-one").strip()[0],
-                   _pick(_xnone, "current-one").strip()[0]}) == 3)
+              len({_sym(_xlines, "current-one"), _sym(_xlines, "stale-one"),
+                   _sym(_xnone, "current-one")}) == 3)
     finally:
         shutil.rmtree(_xdir, ignore_errors=True)
 

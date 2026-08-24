@@ -10515,6 +10515,23 @@ def main():
     # Measured here rather than taken on faith: neutering `external_claims_report` kills 25, and 4
     # of those are the glyph tripwire and the orphan scan, which read the BINARY'S SHAPE and so
     # redden for any producer neutered at all. Collateral and genuine wear the identical verdict.
+    # THE NOTE'S HEADER FOLLOWS THE VERDICT. "why it is thin" printed under `killed: 25` is prose
+    # contradicting its own number, and my first fix was to treat every such note as expired and
+    # clear it. Reading the other ten stopped that: they are ARM INVENTORIES — which pairs exist,
+    # which are absence arms, what a control covers — under a header that only holds while the
+    # entry is thin. The content was right and the label had gone wrong. A record that looks stale
+    # is sometimes mislabelled, and "delete" is the diagnosis that destroys the evidence.
+    _swsrc = read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))
+    check("a producer's note is headed 'why it is thin' only while it IS thin, and 'what it covers' "
+          "otherwise — the same sentence under a header its own number contradicts is how ten arm "
+          "inventories came to read as stale prose",
+          "'why it is thin' if v == THIN else 'what it covers'" in _swsrc)
+    check("...and the notes were KEPT rather than cleared: every entry that carries one still does, "
+          "because an arm inventory is the most specific thing an entry knows about itself and the "
+          "header was the only thing wrong with it",
+          _swsrc.count("thin_note") >= 3
+          and "this entry still carries a THIN note" not in _swsrc)
+
     check("the sweep separates kills whose NAME is about the producer from the rest — collateral "
           "and genuine reddening report the same count, and a producer can look covered because "
           "something unrelated broke",

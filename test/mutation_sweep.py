@@ -373,15 +373,19 @@ MUTANTS = [
     # measuring harness now refuses to report a number from rather than publishing an UNPROTECTED
     # that means "the suite died".
     # FLOOR RE-RECORDED 2026-08-24, WITH THE REASON, from a full sweep with the tests held still:
-    # measured 25 kills, of which 13 NAME this producer's subject. Floored at the TARGETED count
-    # rather than the total, because the other 12 include the glyph tripwire and the orphan scan —
-    # both read the binary's SHAPE, so they redden for any producer at all and would drop out the
-    # day either is refactored. A floor set to 25 would then fail for a reason that is not a loss
-    # of coverage. The previous floor was 2, recorded when the producer had two arms; it has since
-    # gained the three-way version-comparison block, and nothing re-reads a floor either.
+    # measured 25 kills against a floor of 2 that was set when this producer had two arms. It has
+    # since gained the three-way version-comparison block and nothing re-reads a floor.
+    #
+    # A FLOOR IS A FLOOR ON THE TOTAL — the same thing every other floor in this file means. My
+    # first version of this line set it to the TARGETED count and said so, which would have put two
+    # different metrics in one field and silently redefined every floor recorded before it. 13 is a
+    # conservative total: comfortably above the 2 it replaces, and far enough below 25 that the
+    # collateral kills drifting (the glyph tripwire and orphan scan redden for any producer at all)
+    # cannot fail this entry for a reason that is not a loss of coverage.
     ("external_claims_report -> reports nothing", ".game_loop/bin/game_loop::external_claims_report",
      "    return []\n", ["claim", "host", "stale"],
-     None, 13),
+     "the three version arms — checked-against-what-is-running, checked-against-something-else, and "
+     "nothing-to-compare — plus that status says outright it never checks whether a claim is TRUE", 13),
     ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
     ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",
@@ -1661,17 +1665,19 @@ def main():
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
         if live_why:
             lines.append(f"  probe : {live_why}")
-        # A THIN NOTE PRINTED BESIDE A HEALTHY NUMBER IS PROSE CONTRADICTING ITS OWN MEASUREMENT.
+        # THE NOTE WAS MISLABELLED, NOT STALE — and I nearly deleted ten of them finding that out.
         # `external_claims_report` printed "why it is thin: 2 kills, and both are the arms written
-        # for it" directly under `killed: 25`. The note was true when written and the producer has
-        # since gained coverage; nothing re-reads a note, and this one had become the confident
-        # wrong half of the entry. The note now prints only while the verdict IS thin, and the
-        # STALE line below says so out loud rather than letting a reader find the contradiction.
-        if thin_note and v == THIN:
-            lines.append(f"  why it is thin: {thin_note}")
-        elif thin_note and v == OK:
-            lines.append(f"  (this entry still carries a THIN note, and is no longer thin — the "
-                         f"note describes a state that ended: {thin_note[:60]}…)")
+        # for it" directly under `killed: 25`, which reads as prose contradicting its own number.
+        # My first fix was to treat every such note as expired and clear it. Then I READ the other
+        # ten: they are arm inventories — which pairs exist, which are absence arms, what a control
+        # covers — written under a header that only makes sense while the entry is thin. The
+        # content was right and the LABEL had gone wrong, so deleting them would have destroyed the
+        # most specific thing each entry knows about itself to fix a header.
+        #
+        # A record that looks stale is sometimes a record that is mislabelled. Read it before
+        # believing the first diagnosis, especially when the first diagnosis is "delete".
+        if thin_note:
+            lines.append(f"  {'why it is thin' if v == THIN else 'what it covers'}: {thin_note}")
         # A KILL NEEDS A NAMED KILLER, AND THE NAME HAS TO BE ABOUT YOUR GUARD (lamp-owner,
         # 2026-08-23). A mutation that breaks something ELSE reddens the suite and reports the same
         # word as one the guard actually caught — collateral and genuine wear the identical verdict

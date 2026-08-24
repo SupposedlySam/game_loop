@@ -149,11 +149,11 @@
         "source": "read in the running binary at 2.1.223 (the client's own embedded payload schema)",
         "breaks": "the harness reads only used_percentage, so every absolute token question is currently answered by inference or by spawning something. If these fields moved, any future usage work resting on them silently loses its measurement",
         "ledger": "The statusline payload exposes only a PERCENTAGE of context used",
-        "exercisable": "yes-not-yet",
-        "exercisable_why": "exercisable the same way the rate_limits claim is — our own tap sees the payload, so a snapshot carrying the fields IS the claim holding, with a known field present as the positive control. Not yet wired: this host renders no statusline, so the tap never fires here and only `limitprobe` produces a render.",
-        "verified_on": "2026-08-13",
-        "verified_against": "2.1.223",
-        "verified_how": "found by grepping the running binary for used_percentage while checking whether the probe could exercise fresh-session-token-floor for free. I had just asserted the payload carried 'a percentage, not an absolute count' from reading OUR parser rather than the host — the parser reads used_percentage, which is a fact about us, not about the payload."
+        "exercisable": "yes",
+        "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one — which is exactly what closed it.",
+        "verified_on": "2026-08-24",
+        "verified_against": "2.1.241",
+        "verified_how": "EXERCISED, not stamped: read .game_loop/probe/context-window.json, a real reading the limit probe recorded at 2.1.241. Every field the claim names is present — total_input_tokens 63943, total_output_tokens 673, context_window_size 1000000, current_usage with all four token counts, used_percentage 6 and remaining_percentage 94. Checked field by field against the recorded JSON rather than by eye."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

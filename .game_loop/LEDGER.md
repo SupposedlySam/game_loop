@@ -66,6 +66,16 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
 
 _Questions still outstanding. What would close each one._
 
+- **Has the fresh-session token floor doubled, or has this machine's MCP surface grown?** Measured
+  2026-08-24 at 2.1.241: a probe spawn's own render carried **63,943 input tokens** (2 fresh, 3,162
+  cache-creation, 60,779 cache-read) against the ~31.5k recorded at 2.1.223 for a spawn of the same
+  shape. The claim decomposes as ~24k base preamble + ~6k tool definitions + ~1k MCP schemas, and
+  **one total cannot apportion the growth** — this machine's MCP surface has also grown since. So
+  the headline is stale and the breakdown is unknown; `fresh-session-token-floor` is NOT stamped.
+  Closed by: two readings that differ only in surface — one spawn stripped to the bone, one with
+  tools and MCP — which separates the host's floor from what this project adds. Source:
+  `.game_loop/probe/context-window.json`, recorded by our own limit probe, read 2026-08-24.
+
 - **How do you re-read `statusline-config-keys` at 2.1.241?** The method that worked at 2.1.223 —
   reading the schema out of the running binary — does not reproduce. The install is now a single
   325MB native build (`bin/claude.exe`) rather than a readable `cli.js`, and `strings` recovers

@@ -1214,6 +1214,96 @@ def main():
               "tab title           : a much longer deliberate title"
               in succ_mode("--title", "a much longer deliberate title"))
 
+        # ── a handover stands the predecessor's watchdog down ─────────────────────────────────
+        #
+        # OBSERVED, not imagined (landlord, 2026-08-18, sessions 48641588 → 9187f2e8): the limit
+        # gate closed, `successor` started the next session, and nothing stopped the predecessor's
+        # watchdog. It rang the retired session back into a mandate the new one already owned. Both
+        # drove it — six worktrees existed for three problems — and the run then spent T3 asking a
+        # human which of them was driving. That watchdog was still alive six days later, holding the
+        # question open. Killing the armed process could not have been the fix on its own: a Stop
+        # hook arms a fresh one at every turn-end, so the handover has to be STATE the next watchdog
+        # reads.
+        print("a handover stands the predecessor's watchdog down:")
+        hsid = "sess-hand"
+        hdir = os.path.join(proj, ".game_loop", "sessions", hsid)
+        os.makedirs(hdir, exist_ok=True)
+        hstate = os.path.join(hdir, "state.json")
+        hpid = os.path.join(hdir, ".watchdog.pid")
+        with open(os.path.join(hdir, "HANDOFF.md"), "w") as f:
+            f.write("# handing over\nwhat the successor reads\n")
+        gl(proj, "mandate", "--set", "finish the migration", sid=hsid)
+
+        gl(proj, "successor", "--dry-run", sid=hsid)
+        check("--dry-run hands nothing over, so nothing is stood down",
+              "handed_off" not in open(hstate).read())
+        r = gl(proj, "successor", sid=hsid)
+        check("print mode hands over a COMMAND, not a session — the watchdog stays ARMED",
+              "handover NOT recorded" in r.stdout and "stays ARMED" in r.stdout
+              and "handed_off" not in open(hstate).read())
+
+        # The one start path a test may actually let run: saggar-agent against a FAKE `saggar` that
+        # exits 0. warp-tab would write ~/.warp and open a real tab on the developer's screen; a real
+        # saggar would spawn — and bill — a live claude session. This reaches the same branch with
+        # neither cost, which is why the branch is reachable at all.
+        fakebin = os.path.join(proj, "fakebin")
+        os.makedirs(fakebin, exist_ok=True)
+        with open(os.path.join(fakebin, "saggar"), "w") as f:
+            f.write("#!/bin/sh\necho 'agent terminal opened'\nexit 0\n")
+        os.chmod(os.path.join(fakebin, "saggar"), 0o755)
+        succ_cfg("saggar-agent")
+        # A REAL armed watchdog to stand down. The kill is proved against a live process, because a
+        # pid removed from a file is not a process that stopped.
+        sleeper = subprocess.Popen(["sleep", "60"])
+        with open(hpid, "w") as f:
+            f.write(str(sleeper.pid))
+        r = gl(proj, "successor", sid=hsid,
+               PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
+        to = re.search(r"successor session id : (\S+)", r.stdout).group(1)
+        check("a started successor records the handover in the predecessor's state",
+              (json.load(open(hstate)).get("handed_off") or {}).get("to") == to)
+        check("...and says so where the run will actually read it",
+              "handover recorded" in r.stdout and "STOOD DOWN" in r.stdout)
+        for _ in range(50):
+            if sleeper.poll() is not None:
+                break
+            time.sleep(0.1)
+        check("...and the watchdog already sleeping is killed, not merely flagged",
+              sleeper.poll() is not None and not os.path.exists(hpid))
+
+        def wd_hand(**envx):
+            return run_watchdog(wd_bin, {"session_id": hsid, "transcript_path": tpath},
+                                WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0", **envx)
+
+        # The asymmetry this rests on: standing down when nobody took over strands a live mandate
+        # with no engine and tells no one, while ringing a session that did hand over costs one
+        # wake-up. So the quiet is bought with an OBSERVED successor, never with a recorded promise.
+        check("a handover the successor never took up still RINGS — a mandate with no engine and "
+              "nobody told is the worse failure",
+              wd_hand(WATCHDOG_SUCCESSOR_BOOT_SEC="0").returncode == 2)
+        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+            check("...and the log says which ring that was, so the silence is readable either way",
+                  '"kind": "watchdog_handover_gone"' in f.read())
+        check("inside the boot grace an unseen successor is assumed to be starting, not absent",
+              wd_hand(WATCHDOG_SUCCESSOR_BOOT_SEC="600").returncode == 0)
+        os.makedirs(os.path.join(proj, ".game_loop", "sessions", to), exist_ok=True)
+        with open(os.path.join(proj, ".game_loop", "sessions", to, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "finish the migration"}}, f)
+        check("once the successor has written state of its own, the predecessor stands down",
+              wd_hand(WATCHDOG_SUCCESSOR_BOOT_SEC="0").returncode == 0)
+        r = gl(proj, "status", sid=hsid)
+        check("status says the session is retired instead of showing a live-looking mandate",
+              "HANDED OVER to" in r.stdout and "STOOD DOWN" in r.stdout)
+
+        gl(proj, "mandate", "--clear", "--notes", "the successor has it", sid=hsid)
+        gl(proj, "mandate", "--set", "actually I am driving again", sid=hsid)
+        check("a NEW mandate re-arms the engine — a retired session put back to work must not stay "
+              "disarmed for the rest of its life",
+              "handed_off" not in open(hstate).read()
+              and wd_hand(WATCHDOG_SUCCESSOR_BOOT_SEC="0").returncode == 2)
+        gl(proj, "mandate", "--clear", "--notes", "done", sid=hsid)
+        succ_cfg("auto")
+
         print("watchdog parks at an exhausted limit and rings at reset:")
         gl(proj, "mandate", "--set", "limit park work", sid="sess-park")
         json.dump({"captured_at": _t.time(),

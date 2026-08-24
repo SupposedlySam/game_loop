@@ -188,6 +188,12 @@ RING_CAP = int(_WD["ring_cap"])  # consecutive unproductive rings before standin
 EXHAUSTED_PCT = float(_LC["exhausted_pct"])   # at/over this, the session is treated as rate-limited
 # Grace after a window resets before ringing — the reset timestamp is Anthropic's clock, not ours.
 RESUME_BUFFER_SEC = int(os.environ.get("WATCHDOG_RESUME_BUFFER_SEC") or 30)
+# How long a successor is allowed to be booting before this watchdog stops taking the handover on
+# trust. `successor` records the handover the instant it starts the next session; that session only
+# exists once its own SessionStart hook has run, which is a tab opening, a process spawning and a
+# hook firing. Below this age an unseen successor is assumed to be on its way; above it, it never
+# came, and the ring is the right answer.
+SUCCESSOR_BOOT_SEC = int(os.environ.get("WATCHDOG_SUCCESSOR_BOOT_SEC") or 120)
 
 
 def handoff_path():
@@ -265,6 +271,55 @@ def quiet(why):
     """
     logline({"kind": "watchdog_quiet", "why": why})
     sys.exit(0)
+
+
+def _age_sec(stamp):
+    """Seconds since an ISO stamp written by bin/game_loop's now(), or None if it cannot be read."""
+    try:
+        return (datetime.datetime.now() - datetime.datetime.fromisoformat(stamp)).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def handed_off_quiet(state):
+    """Why this watchdog must stand down because the session HANDED OVER — or None to carry on.
+
+    THE FAILURE THIS CLOSES, observed and logged (landlord, 2026-08-18, sessions 48641588 →
+    9187f2e8): the limit gate closed at 369K of context, `successor` started the next session, and
+    nothing stopped the predecessor's watchdog. It rang the old session back into a mandate the new
+    one already owned. Both drove it — six worktrees existed for three problems — and the run then
+    spent T3, the most expensive rung there is, asking a human "which of us is driving?". The
+    predecessor's watchdog was STILL ALIVE six days later, holding that question open.
+
+    Killing the armed process cannot be the fix on its own: a Stop hook arms a fresh watchdog at
+    EVERY turn-end, so the very next turn re-creates what the kill removed. The handover has to be
+    STATE the next watchdog reads. `successor` writes it; this reads it.
+
+    The two ways to be wrong here are not symmetric:
+      * quiet when nobody actually took over → the run stalls with no engine and nobody is told.
+      * ring when somebody did               → one wasted wake-up on a session with nothing to do.
+    The first is strictly worse, so this quiets only on an OBSERVED successor: its session state
+    file, which nothing but a real session start writes. `successor` in "print" mode hands over a
+    COMMAND, not a session, and a human who never runs it must not silently disarm the engine.
+    A handover recorded but never taken up falls through to the ring and says so in the log.
+    """
+    ho = state.get("handed_off")
+    if not isinstance(ho, dict):
+        return None
+    to = ho.get("to") or ""
+    short = to[:8] or "(unnamed)"
+    if to and os.path.isfile(os.path.join(ROOT, "sessions", to, "state.json")):
+        return (f"handed off to {short} at {ho.get('at')} — that session exists and owns this "
+                "mandate now; two sessions driving one mandate is the failure this avoids")
+    age = _age_sec(ho.get("at"))
+    if age is not None and age < SUCCESSOR_BOOT_SEC:
+        return (f"handed off to {short} {int(age)}s ago and it has not written state yet — inside "
+                f"the {SUCCESSOR_BOOT_SEC}s boot grace, so it is assumed to be starting")
+    logline({"kind": "watchdog_handover_gone", "to": to, "at": ho.get("at"),
+             "mode": ho.get("mode"), "age_sec": None if age is None else int(age),
+             "note": "a handover was recorded but the successor never wrote state — ringing this "
+                     "session rather than leaving the mandate with no engine"})
+    return None
 
 
 def superseded():
@@ -654,6 +709,18 @@ def main():
     tpath = payload.get("transcript_path")
     state["_tpath"] = tpath
 
+    # A HANDOVER OUTRANKS EVERYTHING BELOW, the Slack poll included. Once another session owns this
+    # mandate, every job this watchdog has is somebody else's: ringing drags a retired session back
+    # into work that is being done, and forwarding a Slack reply carries an answer to the one session
+    # that can no longer act on it. Stand down first and let the successor's own watchdog do the job.
+    #
+    # WHAT THIS COSTS, said plainly: a T3 question armed BEFORE the handover does not travel — the
+    # arm lives in this session's state and the successor never sees it. `successor` warns when it
+    # hands over on top of a live arm; the answer belongs in the handoff file, not in a poll nobody
+    # is left to hear.
+    if (why := handed_off_quiet(state)):
+        quiet(why)
+
     # A live T3 arm means the human is legitimately holding the ball — do not ring. Unless the arm was
     # paged to Slack, in which case the ball can come back from a phone: poll the thread. This runs
     # BEFORE the mandate check on purpose — carrying back the answer to a question you already asked is
@@ -764,6 +831,12 @@ def main():
         quiet("the human called a break while sleeping")
     if state.get("t3_armed"):
         quiet("T3 armed while sleeping")
+    # The handover can land while we sleep — `successor` kills the armed watchdog, but a kill is
+    # latency, not a gate: it can lose the race, fail on permissions, or never run at all in a mode
+    # that only printed a command. The state flag is what actually decides, so it is read again HERE,
+    # against the world as it is now rather than as it was when this watchdog armed.
+    if (why := handed_off_quiet(state)):
+        quiet(why)
 
     # A DECLARED WAIT STOPS THE RING, not merely the escalation at the cap.
     #

@@ -962,6 +962,21 @@ MUTANTS += [
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
      ["notify", "probe", "read"], None, 3),
+    # MEASURED AT 3, AND MEASURED AGAINST THE WORKING TREE rather than against HEAD — said here
+    # because a floor whose provenance is unstated is a number. This producer did not exist in HEAD
+    # when it was measured, so the archive the sweep normally runs could not carry it; the run used
+    # this file's own neuter() and run(), over the tracked working copy, with the assertions held
+    # still. Baseline 1329 named assertions passing (9 failing in a tree with no .git, outside the
+    # denominator for the usual reason: they cannot flip). The next full sweep re-measures it in the
+    # ordinary way, and THAT number supersedes this one.
+    #
+    # The three that flip are the three arms worth having: the successor observed live, the boot
+    # grace, and the log line that says which ring a ring was. The fourth assertion — that a
+    # handover nobody took up still RINGS — deliberately does NOT flip, because a neutered producer
+    # returns None and ringing is what None already means. That is the safe direction by design.
+    ("handed_off_quiet -> a handover never stands the predecessor's watchdog down",
+     ".game_loop/bin/watchdog::handed_off_quiet", "    return None\n",
+     ["handover", "handed over", "boot grace", "stands down", "successor"], None, 3),
 ]
 
 
@@ -1036,7 +1051,28 @@ NOT_SWEPT = {
             "asserting nothing was started must never do. It was proved once by hand instead — "
             "called live, `saggar list` went 4 terminals to 5 — and that proof is point-in-time, "
             "not a check that runs again. So this is a STATED GAP over one half of one function, "
-            "not a claim that the function is covered.",
+            "not a claim that the function is covered. AMENDED: the success BRANCH is now exercised "
+            "in-suite by the handover tests, which put a stub `saggar` that exits 0 on PATH and "
+            "assert the handover is recorded behind it. That proves the branch is wired, and it "
+            "still proves nothing about the app — the stated gap is now the app half only.",
+
+    ".game_loop/bin/game_loop::disarm_watchdog": "SIGTERMs the watchdog armed for this session at "
+            "handover, returning (pid, note). IT IS NOT THE GATE and must not be read as one: a "
+            "Stop hook arms a fresh watchdog at every turn-end, so what actually stands the engine "
+            "down is `handed_off` in state, which bin/watchdog reads and which IS swept. This is "
+            "the latency — it stops the one process already sleeping from waking once more to learn "
+            "what the flag already says. Its effect is asserted directly and against a LIVE "
+            "process: the suite arms a real `sleep`, records its pid in the pidfile, hands over, "
+            "and requires that the process is dead and the pidfile gone. A mutant that returned "
+            "without signalling is killed by that assertion, which is to say this is a producer "
+            "that SHOULD be swept and is not yet — it arrived with the handover work and has no "
+            "measured floor. Naming that is the point; pretending it is out of scope would not be.",
+
+    ".game_loop/bin/watchdog::_age_sec": "seconds since an ISO stamp. Its None is 'that stamp does "
+            "not parse', a mechanical outcome and not a finding withheld. Its one caller is "
+            "handed_off_quiet, which turns None into the LOUD direction — fall through and ring, "
+            "with `watchdog_handover_gone` in the log — and both of that caller's arms are asserted "
+            "there. Sweeping this would measure whether datetime.fromisoformat works.",
 
     # --- EXCLUDED: the "nothing" is the LOUD direction. These resolvers refuse by returning None,
     # and the refusal is a die() in the caller that the suite asserts many times over. Neutering

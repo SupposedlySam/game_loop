@@ -1082,6 +1082,55 @@ def handoff_path():
     return os.path.join(ROOT, name)
 
 
+def watchdog_pidfile():
+    """Mirrors bin/watchdog's PID_PATH exactly — per session, and for its reason: a shared pidfile
+    would let one session's hook kill another session's armed watchdog. Two files, one convention;
+    if either moves, both move."""
+    if SESSION:
+        return os.path.join(SESSIONS_DIR, SESSION, ".watchdog.pid")
+    return os.path.join(ROOT, ".watchdog.pid")
+
+
+def disarm_watchdog():
+    """SIGTERM the watchdog armed for THIS session and drop its pidfile. Returns (pid, note).
+
+    This is LATENCY, not enforcement. A Stop hook arms a fresh watchdog at every turn-end, so a kill
+    is undone by the next turn — what actually stands the engine down is `handed_off` in state, which
+    bin/watchdog reads. This exists so the one process already sleeping stops within seconds instead
+    of waking once more to discover the flag.
+
+    Only ever this session's own pid, read from this session's own pidfile. It never goes looking for
+    watchdog processes by name: a scan cannot tell this project's from another's, and killing another
+    project's autonomy engine is a far worse bug than the one being fixed.
+    """
+    f = watchdog_pidfile()
+    try:
+        with open(f) as fh:
+            pid = int(fh.read().strip())
+    except (OSError, ValueError):
+        return None, "none was armed"
+    note = f"stopped pid {pid}"
+    try:
+        os.kill(pid, 15)
+    except ProcessLookupError:
+        note = f"pid {pid} had already exited"
+    except OSError as e:
+        note = f"could not signal pid {pid} ({e.__class__.__name__}) — the state flag still stands it down"
+    try:
+        os.remove(f)
+    except OSError:
+        pass
+    return pid, note
+
+
+def successor_seen(to):
+    """Has the session `successor` named ever actually existed? Its own state file is the artifact —
+    nothing but a real SessionStart writes one. Same test bin/watchdog uses to decide whether a
+    handover is real, and it must stay the same test: a status line that reads 'handed over' where
+    the watchdog reads 'nobody came' is the disagreement nobody would check."""
+    return bool(to) and os.path.isfile(os.path.join(SESSIONS_DIR, str(to), "state.json"))
+
+
 def load_limits():
     try:
         with open(limits_file()) as f:
@@ -2141,6 +2190,9 @@ def cmd_mandate(s, a):
         s["watchdog_rings"] = 0
         s["watchdog_last_ring_size"] = 0
         s["watchdog_exhausted_paged"] = False
+        # Same reason one step further: a session that handed over and is now being driven again is
+        # driving again. Leaving the flag would keep its watchdog stood down for the rest of its life.
+        s.pop("handed_off", None)
         save(s)
         logline({"kind": "mandate_resume", "text": m.get("text"), "parked_at": p.get("at"),
                  "reason": p.get("reason")})
@@ -2221,6 +2273,10 @@ def cmd_mandate(s, a):
     s["watchdog_rings"] = 0
     s["watchdog_last_ring_size"] = 0
     s["watchdog_exhausted_paged"] = False
+    # ...and it cancels any handover recorded here. Handing a mandate over stands this session's
+    # watchdog down; taking a NEW mandate is this session saying it is working again, and a fresh
+    # mandate with a permanently disarmed engine is the exact stall `handed_off` exists to avoid.
+    s.pop("handed_off", None)
     save(s)
     logline({"kind": "mandate_set", "text": a.set})
     out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
@@ -6690,11 +6746,18 @@ def cmd_successor(s, a):
              f"working directory   : {cwd}",
              f"tab title           : {title}",
              f"command             : {cmd}"]
+    # Did a SESSION start, or only a suggestion? Everything below turns on this: the handover is
+    # recorded — and this session's autonomy engine stood down — only where somebody is actually
+    # there to take over. "print" mode hands over a COMMAND, which is not a successor until a
+    # human runs it, and a mandate left with no engine because of a tab nobody opened is a stall
+    # nothing would report.
+    handed = False
     if a.dry_run:
         lines.append(f"mode                : {sc['mode']} — {why}, configured "
                      f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
     elif sc["mode"] == "saggar-agent":
         started, detail = _saggar_agent(cwd, prompt)
+        handed = bool(started)
         if started:
             lines += [f"mode                : saggar-agent — {why}. Opened a new agent terminal"
                       + (f" ({detail})" if detail else "") + ".",
@@ -6719,6 +6782,7 @@ def cmd_successor(s, a):
                       "not pass on."]
     elif sc["mode"] == "warp-tab":
         conf = _warp_tab(sc["name"], cwd, cmd, title)
+        handed = True
         lines += [f"mode                : warp-tab — {why}. Wrote {conf} and opened it.",
                   "                      That path is OUTSIDE this repo; pin "
                   "limits.successor.mode to \"print\"",
@@ -6739,6 +6803,48 @@ def cmd_successor(s, a):
                       "repo. saggar needs no such",
                       "                       override: SAGGAR_SESSION reaches hooks, so "
                       "\"auto\" resolves it there too.)"]
+    # ── stand this session's autonomy engine down ────────────────────────────────────────────
+    #
+    # A watchdog rings an idle session back to work. After a handover that is exactly wrong: the
+    # session it rings has given its mandate away, and the ring produces two sessions driving one
+    # goal. That is not hypothetical — it is what happened in landlord on 2026-08-18 (48641588 →
+    # 9187f2e8): six worktrees for three problems, and a T3 spend to ask a human which one was
+    # driving. The predecessor's watchdog was still alive six days later holding that question.
+    #
+    # The flag is the gate; the kill is only latency. Killing the armed process alone would be
+    # undone by the very next turn-end, which arms a fresh one — so what stands the engine down is
+    # `handed_off` in this session's state, which bin/watchdog reads on every arm and again after
+    # every sleep. The kill just stops the one already sleeping from waking up to learn it.
+    if handed:
+        s["handed_off"] = {"to": sid, "at": now(), "handoff": hp, "mode": sc["mode"]}
+        save(s)
+        pid, note = disarm_watchdog()
+        lines += ["", "handover recorded    : this session's watchdog is STOOD DOWN — "
+                      f"{sid[:8]} owns the mandate now.",
+                  f"                       armed watchdog: {note}.",
+                  "                       It will not ring you back into work you just handed over.",
+                  "                       Binding a NEW mandate here re-arms it (`mandate --set`)."]
+        logline({"kind": "handed_off", "to": sid, "mode": sc["mode"], "watchdog_pid": pid,
+                 "watchdog": note})
+        if (m := s.get("mandate") or {}).get("active"):
+            lines.append(f"                       still-open mandate  : {m.get('text')}")
+        if s.get("t3_armed"):
+            q = (s["t3_armed"].get("question") or "") if isinstance(s.get("t3_armed"), dict) else ""
+            lines += ["", "⚠ A T3 QUESTION IS ARMED HERE AND IT DOES NOT TRAVEL. The arm lives in this "
+                          "session's state;",
+                      "  the successor never sees it, and nothing is left listening for the answer.",
+                      f"  armed: {q[:120]}",
+                      "  → put the question, and what you would do under each answer, in the handoff "
+                      "file above."]
+    elif not a.dry_run:
+        lines += ["", "handover NOT recorded: nothing started, so this session still owns the "
+                      "mandate and its",
+                  "                       watchdog stays ARMED — a mandate with no engine and "
+                  "nobody told is worse",
+                  "                       than one wasted wake-up. Run the command above; the "
+                  "successor's first",
+                  "                       turn-end is what makes the handover real."]
+
     if auto:
         lines += ["",
                   "⚠ THIS IS THE GENERATED HANDOFF, not your own account of the run. It says what "
@@ -6749,7 +6855,7 @@ def cmd_successor(s, a):
     logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
              "configured_mode": sc["configured"], "warp_detected": sc["detected"],
              "host": sc["host"], "title": title,
-             "dry_run": bool(a.dry_run), "auto_handoff": auto})
+             "dry_run": bool(a.dry_run), "auto_handoff": auto, "handed": handed})
     out("\n".join(lines))
 
 
@@ -8597,6 +8703,17 @@ def cmd_status(s, a):
         mandate_line = f"MANDATE: {m['text']}"
     else:
         mandate_line = "MANDATE: none (Stop gate inert)"
+    if (ho := s.get("handed_off")) and isinstance(ho, dict):
+        # A handed-over session reads exactly like a live one — same mandate, same state file — and
+        # the difference is the whole story: nothing here rings any more. Say it on the line where
+        # the mandate is, or the next reader spends a turn wondering why the engine is silent.
+        seen = successor_seen(ho.get("to"))
+        mandate_line += (f"\n  ⇢ HANDED OVER to {str(ho.get('to'))[:8]} at {ho.get('at')} — this "
+                         "session's watchdog is STOOD DOWN.\n"
+                         f"    successor  : {'live (it has written state)' if seen else 'NOT SEEN YET — no state file of its own'}\n"
+                         f"    it reads   : {ho.get('handoff')}\n"
+                         "    → this session is retired. `mandate --set \"..\"` re-arms it if you "
+                         "are driving again.")
     # AND WHY IT IS NONE, when the reason is that nobody could read the file. "no mandate was ever
     # set" and "your mandate is in a file this process could not parse" are opposite situations —
     # one means you are free, the other means an unattended run has quietly stopped being governed

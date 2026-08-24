@@ -1386,6 +1386,18 @@ def coverage_gate(found=None, out=print):
     return 1
 
 
+def killers(baseline, still, marks):
+    """(every assertion this mutation killed, the subset whose NAME is about this producer).
+
+    LIFTED OUT rather than left inline for the reason the last one was: a classification nested in
+    the sweep loop is reachable only by running a sweep, and "untestable by construction" is a
+    construction you can remove. Matching is on the assertion NAME, lowercased, against the same
+    `marks` the SURVIVED lines already use — one vocabulary per producer, not two.
+    """
+    killed_names = sorted(baseline - still)
+    return killed_names, [x for x in killed_names if any(m in x.lower() for m in marks)]
+
+
 def producer_liveness(original, fn, run_mutant):
     """Does the suite REACT to this producer crashing? ("live"|"inert"|"unknown", why).
 
@@ -1646,6 +1658,28 @@ def main():
             lines.append(f"  probe : {live_why}")
         if thin_note:
             lines.append(f"  why it is thin: {thin_note}")
+        # A KILL NEEDS A NAMED KILLER, AND THE NAME HAS TO BE ABOUT YOUR GUARD (lamp-owner,
+        # 2026-08-23). A mutation that breaks something ELSE reddens the suite and reports the same
+        # word as one the guard actually caught — collateral and genuine wear the identical verdict
+        # and are not distinguishable from a count. Measured here on `external_claims_report`:
+        # 25 kills, of which 4 were the glyph tripwire and the orphan scan, both of which read the
+        # BINARY'S SHAPE and therefore redden for any producer that gets neutered at all.
+        #
+        # `marks` already existed to pick out SURVIVORS worth reading. The same words identify a
+        # killer that is about this producer, so the report now says how many of the kills were.
+        killed_names, targeted = killers(baseline, still, marks)
+        if killed:
+            lines.append(f"  of those {killed}, {len(targeted)} name this producer's subject "
+                         f"({', '.join(marks)}) — the rest reddened for other reasons")
+            lines += [f"    KILLED BY: {t[:88]}" for t in targeted[:3]]
+        # EVERY KILL COLLATERAL is a finding wearing a healthy number: the count says the suite
+        # noticed something, and nothing in it was about this producer. Reported, not fatal — a
+        # producer can be genuinely covered by assertions whose names do not carry its marks, and
+        # a gate that cannot tell those apart would fail honest entries.
+        if killed and not targeted:
+            lines.append("  ⚠ EVERY KILL WAS COLLATERAL — nothing whose name mentions this "
+                         "producer's subject failed. The number says the suite noticed a change, "
+                         "not that anything here is checked. Read the marks, or the assertions.")
         lines += [f"    SURVIVED: {c[:96]}"
                   for c in sorted(x for x in still if any(m in x.lower() for m in marks))]
         return (key, killed, v, floor), "\n".join(lines) + "\n"

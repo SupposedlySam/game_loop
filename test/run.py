@@ -10507,6 +10507,35 @@ def main():
     # untestable by construction. That was the whole of the INV6 admission published with it, and
     # lifting it out is what closes the half that could be closed. What is still unexercised is one
     # call site; what is now driven is every decision it makes.
+    # A KILL NEEDS A NAMED KILLER, AND THE NAME HAS TO BE ABOUT YOUR GUARD (lamp-owner, from a
+    # sweep of their own: two of five kills on their highest-stakes catalogue were about whether the
+    # command still RAN AT ALL, not about the guard the entry named — and the verdict read 5/5 both
+    # before and after they fixed it. The number did not change and what it was worth did).
+    #
+    # Measured here rather than taken on faith: neutering `external_claims_report` kills 25, and 4
+    # of those are the glyph tripwire and the orphan scan, which read the BINARY'S SHAPE and so
+    # redden for any producer neutered at all. Collateral and genuine wear the identical verdict.
+    check("the sweep separates kills whose NAME is about the producer from the rest — collateral "
+          "and genuine reddening report the same count, and a producer can look covered because "
+          "something unrelated broke",
+          sweep.killers({"a claim about the HOST", "an orphan scan", "a stale window"},
+                        {"an orphan scan"}, ["claim", "host", "stale"])
+          == (["a claim about the HOST", "a stale window"],
+              ["a claim about the HOST", "a stale window"]))
+    check("...and EVERY KILL COLLATERAL is reachable: a mutation can redden the suite with nothing "
+          "whose name mentions the producer, which is the case worth shouting about because the "
+          "count alone reads as coverage",
+          sweep.killers({"an orphan scan", "a shape check"}, set(), ["claim", "host"])
+          == (["a shape check", "an orphan scan"], []))
+    check("...and the sweep SAYS SO when that happens, rather than printing a healthy number and "
+          "leaving the reader to notice none of the names are about the thing",
+          "EVERY KILL WAS COLLATERAL" in read_or_empty(
+              os.path.join(REPO, "test", "mutation_sweep.py")))
+    check("...and it is NOT fatal — a producer can be covered by assertions whose names do not "
+          "carry its marks, and a gate that cannot tell those apart would fail honest entries",
+          "if bad or drifted or unscored or inert:" in read_or_empty(
+              os.path.join(REPO, "test", "mutation_sweep.py")))
+
     check("a probe that finds the producer INERT maps to the INERT verdict, and one that finds it "
           "live leaves UNPROTECTED standing — the two the sweep must not merge, decided in a "
           "function that can be called rather than in a closure nothing can reach",

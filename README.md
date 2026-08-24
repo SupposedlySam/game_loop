@@ -682,6 +682,13 @@ Your project's own rules live in three files the installer seeds once and never 
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and
 `.game_loop/config.json`.
 
+**Adding a command to `verify.yaml` owes a run, even if no file it gates has moved.** `verify`
+records what it ran beside *when* it ran, so a rule whose command list changed is stale on the next
+`verify --check` and says which of the two reasons applies — a changed FILE and a changed RULE send
+you to different places. Without that, the tidy commit that adds a gate and nothing else goes green
+having never executed the gate, and its first real run is some later commit that happens to touch a
+gated file. Reported by a consumer who hit it and read it in this source before saying so.
+
 **Testing a `stop` trigger before you trust it to block a turn:** a trigger that matches a `kind`
 nothing ever writes, or reads a payload that never arrives, fails open silently and looks exactly
 like one that is merely satisfied — `game_loop kinds` and `status`'s dead-kind check catch the

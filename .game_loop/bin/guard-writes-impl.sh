@@ -243,16 +243,61 @@ run_verify() {
   fi
 }
 
-REPO_REAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$REPO" 2>/dev/null)
-SLUG=$(python3 -c 'import re,sys; print(re.sub(r"[^a-zA-Z0-9]", "-", sys.argv[1]))' "$REPO_REAL" 2>/dev/null)
-
+# ONE INTERPRETER FOR EVERY SCALAR THIS GUARD DERIVES. These five values used to cost five separate
+# python3 starts — realpath, the slug, the session id, the tool name, and the tool's own argument —
+# and all five run on EVERY tool call, above every early exit. Measured on an allowed `Bash: ls`:
+# eleven interpreter starts, ~48ms each, against a total hook cost of 643ms. Four of them were this.
+#
+# The payload is parsed ONCE and the answers come back NUL-separated, because a `command` may contain
+# newlines and a line-delimited read would truncate it at the first one. `.rstrip("\n")` reproduces
+# what `$(...)` did to each of these values before, so nothing downstream sees a different string.
+#
+# STILL PYTHON RATHER THAN BASH, deliberately. `${REPO_REAL//[^a-zA-Z0-9]/-}` is one expansion and no
+# fork, but bash bracket ranges are locale-sensitive and this slug names the directory a session's
+# state lives in: under a locale that collates differently, the same repo would silently resolve to a
+# different state file. One interpreter is worth more than the fork it saves here.
+#
 # State is per-session: an authorization is granted IN a session and spendable only THERE. The hook
 # payload's session_id is authoritative; env is the fallback; neither → the repo-global legacy file
 # (human terminal, old harness). Mirrors set_session() in bin/game_loop and bin/watchdog.
-SID=$(printf '%s' "$payload" | python3 -c '
+#
+# `set -u` is on and a failed derivation must not abort a guard (INV5), so every name is bound first:
+# if python cannot run at all, each stays empty, which is exactly what the old `2>/dev/null` produced.
+REPO_REAL=""; SLUG=""; SID=""; tool=""; fp=""; cmd=""
+{
+  IFS= read -r -d '' REPO_REAL
+  IFS= read -r -d '' SLUG
+  IFS= read -r -d '' SID
+  IFS= read -r -d '' tool
+  IFS= read -r -d '' fp
+  IFS= read -r -d '' cmd
+} < <(python3 - "$REPO" "$payload" <<'PY' 2>/dev/null
 import json, os, re, sys
-sid = json.load(sys.stdin).get("session_id") or os.environ.get("GAME_LOOP_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
-print(re.sub(r"[^A-Za-z0-9._-]", "-", sid.strip())[:64])' 2>/dev/null)
+
+repo = sys.argv[1] if len(sys.argv) > 1 else ""
+try:
+    real = os.path.realpath(repo)
+except Exception:
+    real = repo
+slug = re.sub(r"[^a-zA-Z0-9]", "-", real)
+
+try:
+    d = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+except Exception:
+    d = {}
+if not isinstance(d, dict):
+    d = {}
+sid = (d.get("session_id") or os.environ.get("GAME_LOOP_SESSION")
+       or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
+sid = re.sub(r"[^A-Za-z0-9._-]", "-", str(sid).strip())[:64]
+ti = d.get("tool_input")
+if not isinstance(ti, dict):
+    ti = {}
+vals = [real, slug, sid, str(d.get("tool_name") or ""),
+        str(ti.get("file_path") or ""), str(ti.get("command") or "")]
+sys.stdout.write("\0".join(v.rstrip("\n") for v in vals) + "\0")
+PY
+)
 if [ -n "$SID" ]; then
   STATE_F="$GAMELOOP_DIR/sessions/$SID/state.json"
 else
@@ -419,11 +464,10 @@ for a in st.get("authorized", []):
 PY
 }
 
-tool=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name",""))' 2>/dev/null)
+# $tool, $fp and $cmd were derived from the payload above, in the same single parse.
 
 case "$tool" in
   Write|Edit|NotebookEdit)
-    fp=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))' 2>/dev/null)
     [ -z "$fp" ] && exit 0
     # THE PROJECT'S POLICY IS NOT THE SESSION'S TO EDIT (#65). Checked BEFORE the allow-roots
     # verdict, because these files are INSIDE the repo and every allow root would wave them through
@@ -627,7 +671,6 @@ explicitly authorized this path:
     ;;
 
   Bash)
-    cmd=$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))' 2>/dev/null)
     [ -z "$cmd" ] && exit 0
 
     # A heredoc/quoted DATA body (e.g. a commit message piped through a here-doc into cat) is DATA, not

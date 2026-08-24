@@ -46,13 +46,26 @@
   - "python3 test/run.py"
 ".game_loop/bin/guard-writes.sh":
   - "python3 test/run.py"
+# A SMALLER COMMAND THAN "EVERYTHING", AND WHAT IT COSTS. These two files are edited often and
+# each edit used to gate on all 1596 checks -- 5:19, nearly all of it about code the change did not
+# touch. That is the kind of tax that gets a rule deleted rather than obeyed, so the rule names the
+# sections that are ABOUT these files instead.
+#
+# WHAT THIS SKIPS, said out loud because a subset gates on less than the whole: any section whose
+# NAME does not match the patterns below but which exercises these guards anyway. `--section` closes
+# over names, not over the filesystem, and it cannot know that some unnamed section calls guard().
+# The list was read off `--list-sections` by hand, so it goes out of date the way every hand list
+# does -- if you add a guard section, add it here or it stops gating this file.
+#
+# The behaviour gate still runs in full: it is seconds, and it is the one that notices a REFUSAL
+# changing without a record entry.
 ".game_loop/bin/guard-writes-impl.sh":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'write guard' --section deploy --section 'authorize recurrence' --section 'unreadable commit target' --section 'unharnessed tree' --section "POLICY is not the session's" --section 'EMBEDDED in the shell guards' --section 'guard nothing calls' --section 'config paths'"
   - "python3 test/behaviour_gate.py"
 ".game_loop/bin/guard-mcp.sh":
   - "python3 test/run.py"
 ".game_loop/bin/guard-mcp-impl.sh":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'MCP guard' --section 'MCP writes' --section 'guard nothing calls' --section 'EMBEDDED in the shell guards'"
   - "python3 test/behaviour_gate.py"
 ".game_loop/bin/verify":
   - "python3 test/run.py"

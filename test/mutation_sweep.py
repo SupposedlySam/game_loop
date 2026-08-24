@@ -979,6 +979,13 @@ NOT_SWEPT = {
                                "case existed. Mutating the instrument voids the reading rather "
                                "than measuring it",
 
+    "test/run.py::_segments": "the selector's own index of sections, inside the suite. Neutered "
+            "to an empty list, every --section matches nothing and the selector REFUSES with exit "
+            "2 rather than running zero checks and reporting success — and that is asserted "
+            "directly beside it, in both directions: a real selection must exit 0 and print its "
+            "summary, a nonsense one must exit 2. Mutating the instrument voids those readings "
+            "rather than measuring them.",
+
     "test/run.py::json_text": "the same guard as json_or_none for the other door — a JSON STRING "
                               "rather than a path. Its None arm is the honest answer for a hook "
                               "that printed nothing, which is what a neutered producer makes them "

@@ -3267,13 +3267,19 @@ def main():
                     _own.setdefault(_k, [])
                 elif _k and _t.lstrip().startswith("- "):
                     _own[_k].append(_t.lstrip()[2:].strip().strip('"'))
-            check("...and the write guard's impl owes BOTH the suite and the behaviour gate — the "
-                  "rule the duplicate key used to swallow",
-                  sorted(_own.get(".game_loop/bin/guard-writes-impl.sh", []))
-                  == ["python3 test/behaviour_gate.py", "python3 test/run.py"])
+            # BOTH commands, not the exact text of either. These pinned the literal strings until
+            # the run.py rule grew `--section` arguments and they failed — on a manifest that was
+            # more precise, not less. What the duplicate key destroyed was a whole COMMAND, so that
+            # is what this asserts; a rule may say which sections it wants without breaking it.
+            def _owes_both(_cmds):
+                return (any("test/run.py" in c for c in _cmds)
+                        and any("test/behaviour_gate.py" in c for c in _cmds))
+
+            check("...and the write guard's impl owes BOTH a run.py gate and the behaviour gate — "
+                  "the rule the duplicate key used to swallow",
+                  _owes_both(_own.get(".game_loop/bin/guard-writes-impl.sh", [])))
             check("...and so does the mcp guard's impl, which had the same duplicate",
-                  sorted(_own.get(".game_loop/bin/guard-mcp-impl.sh", []))
-                  == ["python3 test/behaviour_gate.py", "python3 test/run.py"])
+                  _owes_both(_own.get(".game_loop/bin/guard-mcp-impl.sh", [])))
         finally:
             shutil.rmtree(cv, ignore_errors=True)
 
@@ -13368,9 +13374,234 @@ def main():
           "that a wake can reach an idle session",
           "WHAT THAT DOES NOT ESTABLISH" in _src_n and "idle" in _src_n)
 
+    # THE SELECTOR IS A GATE ABOUT GATES, so it owes the same suspicion as the rest. A subset run
+    # gates a real commit; if it can only ever pass, it is a green light nobody earned.
+    print("section selection — a smaller command the manifest can point at:")
+    _rp = os.path.join(REPO, "test", "run.py")
+
+    def _sel(*args):
+        return subprocess.run([sys.executable, _rp, *args], capture_output=True, text=True,
+                              cwd=REPO, timeout=300)
+
+    _ls = _sel("--list-sections")
+    check("--list-sections names the sections and exits 0",
+          _ls.returncode == 0 and _ls.stdout.count("\n") > 50
+          and "Select with: --section" in _ls.stdout)
+    _none = _sel("--section", "no-such-section-anywhere")
+    check("a --section matching NOTHING is REFUSED, never a silent zero-check run that exits 0 — "
+          "which is byte-identical to a suite that ran and passed",
+          _none.returncode == 2 and "matched NO section" in _none.stderr)
+    _sub = _sel("--section", "claim gate")
+    check("a selected run executes and REPORTS — the summary line survives pruning",
+          _sub.returncode == 0 and re.search(r"\n\d+ passed, \d+ failed", _sub.stdout))
+    check("...and it really is a SUBSET: fewer checks than the full suite, and it says so",
+          "SUBSET RUN" in _sub.stdout
+          and 0 < _sub.stdout.count("  ok   ") < 400)
+    check("...and it names what it skipped, because a subset gates on less than the whole",
+          "skipped." in _sub.stdout and "not the filesystem" in _sub.stdout)
+
+    # The bug this file shipped for exactly one revision: main() ends by REPORTING, and those
+    # statements sit inside the LAST section's range. Pruned away, main() fell off the end returning
+    # None and every subset run exited 0 no matter what failed. Asserted on the mechanism, so a
+    # future refactor of the pruner cannot quietly reintroduce it.
+    _tree = ast.parse(open(_rp).read())
+    _mainf = _main_node(_tree)
+    _epi = _epilogue(_mainf.body)
+    check("the pruner always keeps main()'s report: the summary line AND the exit status",
+          len(_epi) >= 2
+          and any(isinstance(_mainf.body[i], ast.Return) for i in _epi)
+          and any(isinstance(_mainf.body[i], ast.Expr) for i in _epi))
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
 
+# ---------------------------------------------------------------------------
+# SECTION SELECTION — so the manifest can say something smaller than "run everything".
+#
+# verify.yaml maps every gate file to `python3 test/run.py`, because that was the only command that
+# existed. A one-line change to one guard therefore gated on all 1596 checks: 5:19, most of it about
+# code the change did not touch. That is the cost that gets a rule deleted rather than obeyed.
+#
+# THE DEFAULT PATH IS UNTOUCHED. With no --section argument this file runs exactly as it did, in the
+# same order, and nothing below executes. Selection is additive, never a reordering: a selected run
+# is a SUBSET of the same statements in the same sequence, which is why it cannot produce an ordering
+# the full run never had.
+#
+# IT REFUSES TO GUESS. A section is a header print() and the statements it owns; sections are ordered
+# by source position, and a kept section pulls in every section that defines a name it reads, then
+# transitively. That closure is computed from this file's own AST at startup, so it cannot drift from
+# the code the way a hand-maintained list would. `--section` with no match is an error, never a
+# silent empty run — a suite that selects nothing and exits 0 is the failure this repo keeps paying
+# for.
+#
+# WHAT IT DOES NOT ESTABLISH, and the mapping in verify.yaml must be written knowing it: the closure
+# follows NAMES, not the filesystem. A kept section that reads state some skipped section wrote into
+# a shared sandbox is not detected here. Sections that build their own sandbox are unaffected; the
+# shared-fixture block is the one to be careful with, and a subset run says so on every run.
+
+
+def _is_header(st):
+    return (isinstance(st, ast.Expr) and isinstance(st.value, ast.Call)
+            and isinstance(st.value.func, ast.Name) and st.value.func.id == "print"
+            and st.value.args and isinstance(st.value.args[0], ast.Constant)
+            and isinstance(st.value.args[0].value, str)
+            and st.value.args[0].value.strip())
+
+
+def _main_node(tree):
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name == "main":
+            return n
+    raise SystemExit("test/run.py: no main() to select sections from")
+
+
+def _bodies(mainfn):
+    """Statement lists a header can live in: main's own, and each top-level try's.
+
+    Both levels, because the shared-fixture block is one `try` holding a third of the sections; a
+    selector that only saw main's top level could never name any of them.
+    """
+    yield mainfn.body
+    for st in mainfn.body:
+        if isinstance(st, ast.Try):
+            yield st.body
+
+
+def _segments(mainfn):
+    """[{name, body, first, last}] — each header and the statements it owns, in source order."""
+    segs = []
+    for body in _bodies(mainfn):
+        cur = None
+        for i, st in enumerate(body):
+            if _is_header(st):
+                if cur is not None:
+                    cur["last"] = i
+                cur = {"name": st.value.args[0].value.strip(), "body": body,
+                       "first": i, "last": len(body), "line": st.lineno}
+                segs.append(cur)
+    segs.sort(key=lambda sg: sg["line"])
+    return segs
+
+
+def _names(stmts):
+    d, u = set(), set()
+    for st in stmts:
+        for x in ast.walk(st):
+            if isinstance(x, ast.Name):
+                (d if isinstance(x.ctx, (ast.Store, ast.Del)) else u).add(x.id)
+            elif isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                d.add(x.name)
+            elif isinstance(x, ast.ExceptHandler) and x.name:
+                d.add(x.name)
+            elif isinstance(x, ast.alias):
+                d.add((x.asname or x.name).split(".")[0])
+    return d, u - d
+
+
+def _closure(segs, wanted):
+    """wanted section indices + every section they transitively read a name from."""
+    for sg in segs:
+        sg["defs"], sg["reads"] = _names(sg["body"][sg["first"]:sg["last"]])
+    keep, queue = set(wanted), list(wanted)
+    while queue:
+        i = queue.pop()
+        for name in segs[i]["reads"]:
+            for j in range(i - 1, -1, -1):          # the REACHING definition, nearest first
+                if name in segs[j]["defs"]:
+                    if j not in keep:
+                        keep.add(j)
+                        queue.append(j)
+                    break
+    return keep
+
+
+def _epilogue(body):
+    """Indices main() must keep whatever is selected: it ends by REPORTING.
+
+    The summary line and the exit status belong to no section, but they sit inside the LAST one's
+    range — so the first version of this pruned them, `main()` fell off the end returning None, and
+    a subset run exited 0 no matter how many checks had failed. A selector that can only ever pass
+    is worse than one that runs nothing, because it looks like evidence. Caught by noticing a subset
+    run printed no "N passed" line at all; it is asserted below rather than left to notice again.
+    """
+    keep = set()
+    for i, st in enumerate(body):
+        if isinstance(st, ast.Return):
+            keep.add(i)
+        elif (isinstance(st, ast.Expr) and isinstance(st.value, ast.Call)
+              and isinstance(st.value.func, ast.Name) and st.value.func.id == "print"
+              and any(isinstance(x, ast.Name) and x.id in ("passed", "failed")
+                      for x in ast.walk(st.value))):
+            keep.add(i)
+    return keep
+
+
+def _run_cli(argv):
+    picks = [argv[i + 1] for i, a in enumerate(argv) if a == "--section" and i + 1 < len(argv)]
+    if "--list-sections" not in argv and not picks:
+        return main()                               # the untouched default path
+
+    src = open(os.path.abspath(__file__)).read()
+    tree = ast.parse(src, filename=__file__)
+    segs = _segments(_main_node(tree))
+
+    if "--list-sections" in argv:
+        for sg in segs:
+            print(f"  {sg['line']:>6}  {sg['name'][:96]}")
+        print(f"\n{len(segs)} sections. Select with: --section <substring> [--section ...]")
+        return 0
+
+    wanted = {i for i, sg in enumerate(segs)
+              if any(pat.lower() in sg["name"].lower() for pat in picks)}
+    if not wanted:
+        print("test/run.py: --section matched NO section. Refusing to run zero checks and exit 0 —\n"
+              "  that is byte-identical to a suite that ran and passed. `--list-sections` shows them.",
+              file=sys.stderr)
+        return 2
+    keep = _closure(segs, wanted)
+
+    # A SHARED-FIXTURE BLOCK IS SELECTABLE ONLY AS A PREFIX. main()'s big `try` holds a third of the
+    # sections against ONE sandbox that earlier sections have already written to, so a later section
+    # there reads state its predecessors built. The name closure cannot see that — it follows names,
+    # and this dependency runs through the filesystem.
+    #
+    # Measured, not feared: selecting the write-guard sections pulled "watchdog (per-session)" in as
+    # a name dependency and two of its checks FAILED, both of which pass in a full run. They failed
+    # rather than passing vacuously, which is the safe direction, but a gate that always refuses is
+    # no gate. So any container other than main's own body is extended to a prefix: everything from
+    # its start through the last kept section. That is an exact leading slice of the original order,
+    # which is the only subset of a stateful sequence that is sound by construction.
+    mainfn = _main_node(tree)
+    for body in _bodies(mainfn):
+        if body is mainfn.body:
+            continue                       # top-level sections each build their own sandbox
+        here = [i for i, sg in enumerate(segs) if sg["body"] is body]
+        kept_here = [i for i in here if i in keep]
+        if kept_here:
+            keep.update(i for i in here if i <= max(kept_here))
+
+    for body in _bodies(mainfn):
+        drop = set()
+        for i, sg in enumerate(segs):
+            if sg["body"] is body and i not in keep:
+                drop.update(range(sg["first"], sg["last"]))
+        if body is mainfn.body:
+            drop -= _epilogue(body)          # the report is not a section's to take with it
+        body[:] = [st for i, st in enumerate(body) if i not in drop]
+    ast.fix_missing_locations(tree)
+
+    picked = sorted(keep)
+    print(f"SUBSET RUN — {len(wanted)} section(s) selected, {len(picked) - len(wanted)} pulled in as "
+          f"dependencies, {len(segs) - len(picked)} skipped.")
+    print("  A subset gates on LESS than the full suite. It follows names, not the filesystem: a\n"
+          "  section reading state a skipped section wrote into a shared sandbox is not detected.")
+    for i in picked:
+        print(f"    run: {segs[i]['name'][:88]}")
+    ns = {"__name__": "gl_suite_subset", "__file__": __file__}
+    exec(compile(tree, __file__, "exec"), ns)       # noqa: S102 — this file, pruned, by design
+    return ns["main"]()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run_cli(sys.argv[1:]))

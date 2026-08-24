@@ -81,11 +81,17 @@ _Questions still outstanding. What would close each one._
   325MB native build (`bin/claude.exe`) rather than a readable `cli.js`, and `strings` recovers
   `refreshInterval` / `refreshIntervalMs` as bare tokens with no surrounding schema; the only two
   windows carrying both `padding` and `refreshInterval` are coincidental hits in unrelated minified
-  code. So the claim is neither re-verified nor refuted: **the instrument is gone, which is a
-  different state from the claim being stale**, and status will keep flagging it ⚠ until somebody
-  says which. Closed by: a re-read against the published statusline doc, or any method that survives
-  a native build. Source: `bin/claude.exe` at 2.1.241, read 2026-08-24 (`strings -a`, grepped, not
-  eyeballed).
+  code. So the claim is neither re-verified nor refuted, and status will keep flagging it ⚠ until
+  somebody says which.
+
+  **Stated precisely, because an empty search is evidence about the SEARCH** (lamp-owner, 2026-08-24,
+  from a case where deleting a branch would have been "a change justified by not having found
+  something"): what is established is that **`strings -a` plus grep no longer recovers it** — ONE
+  method, on a compiled artifact that may hold the schema in a form that method cannot see. "The
+  instrument is gone" is the reading I first wrote here and it claims more than one negative search
+  supports. Closed by: a re-read against the published statusline doc, or any method that survives a
+  native build — and a second method returning empty would be worth more than this one did. Source:
+  `bin/claude.exe` at 2.1.241, read 2026-08-24 (`strings -a`, grepped, not eyeballed).
 
 - **Does a Stop hook fire on the turn a rate-limit error kills?** Unconfirmed either way; the park
   design deliberately doesn't depend on it (the watchdog armed by the *previous* turn-end reads

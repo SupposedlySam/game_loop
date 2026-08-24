@@ -68,8 +68,9 @@
         "exercise_note": "the host writes this through our own tap, so a snapshot in the expected shape IS the claim holding, observed on the consumer's machine rather than on the author's",
         "exercisable": "yes",
         "exercisable_why": "exercised: a snapshot in the expected shape IS the claim, and the missing-field arm is its positive control",
-        "verified_on": "2026-07-29",
-        "verified_against": null
+        "verified_on": "2026-08-24",
+        "verified_against": "2.1.241",
+        "verified_how": "EXERCISED: read .game_loop/limits.json, a snapshot captured 2026-08-24 from a real statusline render — five_hour and seven_day each with used_percentage and resets_at. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "statusline-config-keys",
@@ -91,9 +92,10 @@
         "ledger": "Hook payloads carry rate-limit data",
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence and exercisable, not yet exercised: every hook invocation supplies a payload I control, and the payload carrying session_id is the positive control that the read worked while rate_limits was still absent",
-        "verified_on": "2026-07-29",
-        "verified_against": null,
-        "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked"
+        "verified_on": "2026-08-24",
+        "verified_against": "2.1.241",
+        "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked",
+        "verified_how": "EXERCISED: read probe/claims-observed.json, a real Stop-hook payload recorded 2026-08-24 — 11 top-level keys, zero rate_limit keys, and `control: true` because session_id was present, which is what makes the empty result a reading rather than a payload that never arrived. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "no-headless-usage-flag",
@@ -128,8 +130,9 @@
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence, now exercised: our own tap supplies the input, a known window present is the mechanism demonstrably firing, and an unexpected window would falsify it",
         "exercised_by": "a known window present in limits.json (the control) with no third window beside it (the claim)",
-        "verified_on": "2026-07-29",
-        "verified_against": null
+        "verified_on": "2026-08-24",
+        "verified_against": "2.1.241",
+        "verified_how": "EXERCISED: the same 2026-08-24 snapshot carries EXACTLY two windows and no third — the absence is paired with a positive control (both known windows present), so 'no weekly window' is a reading and not a failed fetch. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "fresh-session-token-floor",

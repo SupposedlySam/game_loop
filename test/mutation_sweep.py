@@ -122,6 +122,7 @@ strictly better than a hand list; it is not the same thing as complete.
 """
 import ast
 import concurrent.futures
+import json
 import os
 import re
 import shutil
@@ -194,6 +195,80 @@ def overbroad_marks(marks, names, floor):
     """
     matched = sum(1 for n in names if any(m.lower() in n.lower() for m in marks))
     return matched, (matched >= 20 and matched > 10 * max(floor, 1))
+
+
+def _write_section_map(tree):
+    """Write {producer: [section, ...]} from the COMPLETE killer sets this run measured.
+
+    A byproduct of a full sweep, and only of a full sweep: a trimmed run does not observe the
+    sections it did not execute, so letting it rewrite the map would let the map shrink toward
+    whatever it happened to run last — a ratchet, tightening on itself until it measures nothing.
+    """
+    try:
+        r = subprocess.run([sys.executable, "test/run.py", "--list-sections"], cwd=tree,
+                           capture_output=True, text=True, timeout=120)
+        secs = sorted((int(m.group(1)), m.group(2).rstrip())
+                      for m in (re.match(r"^\s*(\d+)\s+(.*)$", l) for l in r.stdout.splitlines())
+                      if m)
+        src = open(os.path.join(tree, "test", "run.py")).read().split("\n")
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print("sweep: could NOT write the section map (%s: %s) — the next --fast run will fall "
+              "back to the whole suite for every producer, which is slow and correct rather than "
+              "fast and wrong." % (exc.__class__.__name__, str(exc)[:80]))
+        return
+    name_line = {}
+    for i, line in enumerate(src, 1):
+        m = re.search(r'check\("([^"]{6,})', line)
+        if m:
+            name_line.setdefault(m.group(1)[:60], i)
+
+    def section_of(ln):
+        cur = None
+        for s_ln, nm in secs:
+            if s_ln <= ln:
+                cur = nm
+            else:
+                break
+        return cur
+
+    # A KILLER WHOSE SECTION CANNOT BE FOUND DISQUALIFIES THE WHOLE PRODUCER. The name index is
+    # built by regex over `check("...` literals, so an assertion whose name is an f-string or is
+    # concatenated across lines is not in it. The first version dropped those names and mapped the
+    # producer from the rest — and seven producers then came back short by EXACTLY ONE kill each,
+    # every one of them a genuine killer living in a section the map had quietly omitted.
+    #
+    # Dropping an unlocatable name is the same act as a short denominator: the set looks complete
+    # because nothing says otherwise. So an unmappable killer means NO ENTRY, which means this
+    # producer runs the whole suite — slow and right, rather than fast and one short.
+    out, unmappable = {}, []
+    for key, names in KILL_NAMES.items():
+        missing = [n for n in names if n[:60] not in name_line]
+        if missing:
+            unmappable.append((key, len(missing), len(names)))
+            continue
+        found = {section_of(name_line[n[:60]]) for n in names}
+        found.discard(None)
+        if len(found) != len({section_of(name_line[n[:60]]) for n in names}):
+            continue                      # a name mapped to no section at all: same rule
+        if found:
+            out[key] = sorted(found)
+    if unmappable:
+        print("  %d producer(s) keep the WHOLE suite: a killer's section could not be located "
+              "(f-string or wrapped assertion name). Not a gap in coverage — a gap in the MAP, and "
+              "the safe answer is to run everything: %s"
+              % (len(unmappable), ", ".join("%s (%d/%d)" % (k.split("::")[-1], m, t)
+                                            for k, m, t in unmappable[:4])))
+    if not out:
+        return
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "sweep-sections.json"), "w") as f:
+            json.dump(out, f, indent=1, sort_keys=True)
+        spans = sorted(len(v) for v in out.values())
+        print("wrote sweep-sections.json: %d producers, median %d section(s), max %d "
+              "(GAME_LOOP_SWEEP_FAST=1 uses it)" % (len(out), spans[len(spans) // 2], spans[-1]))
+    except OSError:
+        pass
 
 
 def stale_low_floors(verdicts):
@@ -1185,6 +1260,11 @@ NOT_SWEPT = {
     # coverage verdict. `read_or_empty` alone would redden hundreds and report as the best-covered
     # producer in the repo while proving nothing about itself. That is the collateral-kill problem
     # with no genuine kills left underneath it.
+    "test/mutation_sweep.py::_write_section_map": "KNOWN GAP — writes the section map a trimmed "
+        "sweep reads. Neutering it produces no map, and no map means every producer falls back to "
+        "the WHOLE suite: correct results, no speedup, and nothing to notice. That is the shape "
+        "worth an assertion and it does not have one yet — the map's own correctness is what the "
+        "floor check catches, since a wrong map makes producers come back short and fail.",
     "test/run.py::read_or_empty": "a suite helper: neutering it reddens every assertion that reads "
         "a file, which counts users rather than coverage of the helper",
     "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "
@@ -1775,16 +1855,50 @@ def neuter(src, fn, body):
     return src, False
 
 
-def run(tree, timeout=1800):
+# THE SECTION MAP, and the two facts that make using it honest.
+#
+# SOUND: a kill count is {passing at baseline} - {passing with the producer neutered}. An assertion
+# in a section that never executes the producer is in BOTH sets and cancels, so running only the
+# sections where a producer's killers live gives the SAME number. Measured over 96 producers: 71
+# have every killer in ONE section, 17 in two, 8 in three, out of 79. The whole-suite denominator is
+# preserved by arithmetic; running all of it was preserving it by brute force.
+#
+# STALE-SAFE: the map comes from a previous FULL sweep, so an assertion added since could kill a
+# producer the map does not know about. Then the trimmed run finds FEWER kills, lands below the
+# recorded floor, and FAILS — loudly, with the remedy printed. It cannot report a producer covered
+# when it is not. That asymmetry is the whole licence for this mode; without it the trim would be
+# buying speed with the denominator, which is what this file exists to refuse.
+KILL_NAMES = {}          # key -> the COMPLETE set of assertion names a mutant flipped.
+                         # The printed report shows `targeted[:3]`; building the section map from
+                         # THAT is building it from a truncated view, which is exactly what I did
+                         # first: 40 of 102 producers came back short and the floor check failed
+                         # them. The map is written from this, the tool's own structure.
+FAST = os.environ.get("GAME_LOOP_SWEEP_FAST") == "1"
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "sweep-sections.json")) as _f:
+        SECTION_MAP = json.load(_f)
+except (OSError, ValueError):
+    SECTION_MAP = {}
+
+
+def run(tree, timeout=1800, sections=None):
     """The suite's stdout, or None if it did not finish in time.
 
     A DEADLINE, because a mutant that hangs measures nothing and waiting for it measures nothing
     either (showrunner). Before this, a timeout raised out of the worker and took the whole sweep
     with it — so one unscoreable producer cost every other producer's measurement too.
+   
+    `sections` runs a SUBSET, and the caller is responsible for the only thing that makes that
+    sound: the baseline and the mutant must be given the SAME subset. A kill count is a set
+    difference, so an assertion that runs in neither side cancels — but one that runs in only one
+    side is counted as a kill or missed as one, which is not a measurement at all.
     """
+    cmd = [sys.executable, "test/run.py"]
+    for sec in (sections or ()):
+        cmd += ["--section", sec]
     try:
-        r = subprocess.run([sys.executable, "test/run.py"], cwd=tree,
-                           capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, cwd=tree, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None
     return r.stdout
@@ -1922,7 +2036,20 @@ def main():
             with open(os.path.join(t, rel), "w") as f:
                 f.write(mutated)
             os.chmod(os.path.join(t, rel), 0o755)
-            out = run(t)
+            # THE SAME SUBSET ON BOTH SIDES, or the difference is not a measurement. In fast
+            # mode this producer gets its OWN baseline over its own sections — the shared
+            # whole-suite baseline would be a set of 1719 minus a set of 40, i.e. every assertion
+            # that simply did not run, reported as a kill.
+            _secs = SECTION_MAP.get(key) if FAST else None
+            if _secs:
+                _b = run(base, sections=_secs)
+                if _b is None:
+                    return ((key, None, NOT_MEASURED, floor),
+                            f"{label}\n  NOT MEASURED — the SUBSET baseline timed out.\n")
+                local_base = set(passing(_b))
+            else:
+                local_base = baseline
+            out = run(t, sections=_secs)
             if out is None:
                 return ((key, None, NOT_MEASURED, floor),
                         f"{label}\n  NOT MEASURED — the suite TIMED OUT under this mutant. A run\n"
@@ -1941,7 +2068,7 @@ def main():
                     f"  NOT MEASURED — the suite did not finish under this mutant, so its unrun\n"
                     f"  assertions never printed and would have counted as KILLED. That is an\n"
                     f"  inflated number about a run that stopped, not a coverage reading.\n")
-        killed = len(baseline - still)
+        killed = len(local_base - still)
         v = verdict(killed)
         # ASKED ONLY AT ZERO, because one kill already proves the producer executes — and a probe
         # run costs another full suite. At zero the number cannot distinguish "nothing asserts it"
@@ -1984,7 +2111,8 @@ def main():
         #
         # `marks` already existed to pick out SURVIVORS worth reading. The same words identify a
         # killer that is about this producer, so the report now says how many of the kills were.
-        killed_names, targeted = killers(baseline, still, marks)
+        killed_names, targeted = killers(local_base, still, marks)
+        KILL_NAMES[key] = sorted(killed_names)
         if killed:
             lines.append(f"  of those {killed}, at least {len(targeted)} name this producer's "
                          f"subject ({', '.join(marks)}) — a LOWER BOUND, see below")
@@ -2059,6 +2187,11 @@ def main():
             while nxt < len(MUTANTS) and reports[nxt] is not None:
                 print(reports[nxt] + f"  ({elapsed[nxt]:.0f}s)\n", flush=True)
                 nxt += 1
+    # BEFORE THE ARCHIVE IS REMOVED. The first version called this after the summary, 120 lines
+    # past `shutil.rmtree(base)` — so it opened a tree that no longer existed, hit OSError, and
+    # returned SILENTLY. A full sweep ran for 50 minutes and wrote no map, and nothing said so.
+    if not FAST:
+        _write_section_map(base)
     shutil.rmtree(base, ignore_errors=True)
 
     # RECORDED, so this argument is never had from memory again -- #59 was filed on a figure I had

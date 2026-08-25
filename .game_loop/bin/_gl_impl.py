@@ -5202,6 +5202,19 @@ _CONTINUE_MARKERS = [
     "moving on to", "proceeding to", "proceeding with", "starting on", "starting now",
     "i'll start", "ill start", "i'll now", "getting to work", "getting started",
     "i'll continue", "ill continue", "next i'll", "now i'll", "on to the next",
+    # A FIRST-PERSON FUTURE VERB ABOUT WORK, reported by a consumer who hardened this exact rule as
+    # a concept and then broke it the same day WITH THE RULE IN CONTEXT: "Next I'll pay those three
+    # chat debts, then take #63." Their diagnosis is the useful half — a concept-level rule is
+    # checked against INTENT, and the intent felt fine ("being helpful about what comes after"),
+    # so the reasoning was never the broken part. The writing was. A word fires on the text at the
+    # moment of composition, which is where the defect lives.
+    #
+    # Measured before adding: their sentence ALREADY fired on "next i'll", and so did "moving on
+    # to". These two forms did not, and both are the same act.
+    "after that i'll", "then i'll", "i'll take", "i'll pick up", "i'll move on",
+    # DELIBERATELY NOT a bare "i'll". "I'll leave that to you" and "I'll report if it changes" are
+    # handbacks, not commitments to keep working, and a ban that swallows them trades a visible
+    # stall for an invisible one — which is the caveat the reporter asked to carry with the rule.
 ]
 
 

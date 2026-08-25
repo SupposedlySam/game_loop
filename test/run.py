@@ -8826,14 +8826,27 @@ def main():
     # cannot produce. An empty queue is the outcome this list exists to drive toward — and it is
     # empty of the producers ANYBODY HAS ENUMERATED, which is the caveat that made the last "no
     # KNOWN GAP today" true right up until the detector learned to see `""`.
-    _expected_gaps = []
+    # ONE AGAIN, and named rather than counted: the section-map writer a trimmed sweep depends on.
+    # Neutering it writes no map, every producer falls back to the whole suite, and the run is
+    # correct but slow — which nothing would notice, so it is a real gap rather than a formality.
+    _expected_gaps = ["test/mutation_sweep.py::_write_section_map"]
     check("...and THIS repo's declared KNOWN GAPs are exactly the five the empty-string detector "
           "surfaced — a fact about today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
           _gaps(_ns) == _expected_gaps)
-    check("...and every one of them owes a FLOOR rather than an argument — each is a producer this "
-          "repo ships, not a helper the suite happens to use",
-          all(g.startswith(".game_loop/bin/") for g in _gaps(_ns)))
+    # A GAP MAY BE IN THE SWEEP'S OWN TOOLING, and that is not a loophole. This read
+    # `startswith(".game_loop/bin/")` while every gap happened to be a shipped producer — true when
+    # written, and it turned into a rule the moment `_write_section_map` became a declared gap: the
+    # writer a trimmed sweep depends on is infrastructure this repo maintains, and neutering it
+    # degrades the sweep silently. What must NOT be here is a suite FIXTURE helper, whose mutation
+    # measures how many assertions use it rather than whether anything asserts it.
+    _fixture_helpers = {k for k, w in _ns.items()
+                        if "suite helper" in (w or "") or "fixture helper" in (w or "")}
+    check("...and every declared gap is a producer this repo MAINTAINS — shipped in bin/, or the "
+          "sweep's own tooling — never one of the suite's fixture helpers, whose mutation counts "
+          "users rather than coverage",
+          all(g.startswith((".game_loop/bin/", "test/mutation_sweep.py::")) for g in _gaps(_ns))
+          and not (set(_gaps(_ns)) & _fixture_helpers))
 
     print("a tree's FIRST retro counts its chapter, rather than reporting nothing (#77):")
     # "No previous retro" returned "this is the first" and counted NOTHING, so everything encoded
@@ -11543,7 +11556,11 @@ def main():
     _delays = {0: 0.45, 1: 0.25, 2: 0.05}     # first submitted finishes LAST
     _calls = []
 
-    def _stub_run(tree):
+    # THE SAME SIGNATURE AS WHAT IT REPLACES. `run()` grew a `sections` argument for the trimmed
+    # sweep and this stub did not, so every producer raised TypeError and the suite died 1390
+    # assertions in — a fixture failure that reads exactly like the feature being broken. A stub is
+    # a claim that it stands in for the real thing; a narrower signature is that claim being false.
+    def _stub_run(tree, timeout=1800, sections=None):
         # The baseline call arrives before any mutant; after that, one call per producer.
         n = len(_calls)
         _calls.append(tree)

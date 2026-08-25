@@ -160,5 +160,26 @@
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."
+  },
+  "saggar": {
+    "subject": "saggar (the terminal manager `successor` can hand a session to)",
+    "verified_on": "2026-08-25",
+    "verified_against": "the installed bridge at ~/.saggar/claude-status-bridge.sh (mtime 2026-08-19), and every ~/.saggar/chat-info/*.json on this machine",
+    "why_it_matters": "`successor`'s saggar-agent mode is the handover a human is meant to find later. What that terminal is CALLED is the whole of finding it, and this repo asserted the wrong mechanism for it in two places \u2014 so the lever nobody could reach looked like an unfinished feature, and a subject line looked like it had a job it does not have.",
+    "claims": [
+      {
+        "id": "saggar-terminal-name-is-not-ours",
+        "says": "nothing game_loop passes to `saggar agent` reaches the displayed terminal name (RULED OUT): saggar shows `session_name` out of Claude Code's own status-line payload, mirrored verbatim into ~/.saggar/chat-info/<SAGGAR_SESSION>.json by ~/.saggar/claude-status-bridge.sh \u2014 Claude's auto-generated conversation title, which keys off the handoff FILENAME",
+        "source": "~/.saggar/claude-status-bridge.sh + ~/.saggar/chat-info/*.json",
+        "breaks": "if saggar ever took a name from its caller, `successor` would have a lever it currently does not \u2014 and the docs and `successor_cfg`'s docstring, which now say plainly that no argument names the terminal, would be wrong in the OTHER direction",
+        "ledger": "Anything game_loop passes to `saggar agent` names the saggar terminal",
+        "exercisable": "no",
+        "exercisable_why": "UNCONDITIONAL absence with no local instrument: confirming it needs a real saggar terminal opened by a real handover and its name read back off the app \u2014 an act, not a read. The bridge's 14 lines are the strongest cheap evidence and they are a source, not an exercise, so a stamp is honestly all there is here",
+        "exercised_by": null,
+        "verified_on": "2026-08-25",
+        "verified_against": "saggar's installed bridge, 2026-08-19",
+        "verified_how": "SOURCED + two live handovers: the bridge script has no field a caller could fill, and two real 2026-08-25 handovers both came out named `HANDOFF-<timestamp> continuation` \u2014 the second AFTER its prompt led with the subject `confirm saggar names the terminal from the subject line`, which is the positive control that the string reached the terminal and the titler ignored it. All three chat-info payloads on this machine carry session_name values traceable to a document's name (`Handoff saggar support`, `DELEGATION-dodgeball implementation`, `DELEGATION-barbell`), none to a task string."
+      }
+    ]
   }
 }

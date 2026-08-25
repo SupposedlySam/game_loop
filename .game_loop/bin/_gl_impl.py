@@ -6844,6 +6844,71 @@ def trailing_usage(transcript_path, window_sec=5 * 3600):
 SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes. "
                     "It is a handoff from a previous session; you have no other context.")
 
+SUBJECT_MAX = 100
+
+
+def successor_subject(hp, about=None, s=None):
+    """The short line that says WHAT IS BEING WORKED ON, prepended to the successor's prompt.
+
+    `successor` refuses to paraphrase the handoff into the prompt, for a reason that has not
+    changed: a paraphrase is a second copy of the state, free to disagree with the first, in the one
+    session with no way to check. THIS IS THE EXCEPTION, and it is one because the thing it fixes is
+    not a gap in the successor's knowledge — the successor reads the file — but a gap in the
+    HUMAN'S. `Read /repo/.game_loop/sessions/8aae5d8f/HANDOFF.md in full` is the first line of the
+    new session, the command in the tab config, and the row a person scans in a screen of eight
+    terminals asking which one is doing the thing they care about. It answers that with a UUID.
+
+    So the subject is a LABEL — never an instruction, never a status, never a next step, all of
+    which live in the file the prompt already points at. And it is DERIVED rather than authored,
+    which is what keeps it from becoming the second copy: a label lifted out of something that
+    already exists cannot disagree with it.
+
+    THE ORDER IS THE INTERESTING PART, because game_loop knows something a handoff file does not.
+
+    1. `--about`, when a human said what this is about. `--about ""` turns the subject off.
+    2. The document's own `# ` heading — the hand-written handoff's one-line description.
+    3. THE MANDATE. The generated handoff's heading is boilerplate ("written automatically at every
+       turn-end") and describes nothing, so it is skipped rather than used; but a session running
+       under a mandate has already been told, in a human's words, what it is for. That is a better
+       subject than any heading, and it is the case that matters most — an unattended run handing
+       over at 3am is exactly when nobody is there to have written a heading.
+    4. The phase, when there is no mandate but the run said what it was doing.
+    5. Nothing. No subject beats an invented one.
+    """
+    if about is not None:
+        subject = about
+    else:
+        subject = ""
+        try:
+            with open(hp) as f:
+                for line in f:
+                    if line.startswith("# "):
+                        subject = line[2:].strip()
+                        break
+        except OSError:
+            subject = ""
+        for kind in ("HANDOFF", "Handoff", "Delegation", "Work order"):
+            for sep in (" — ", " – ", " - ", ": "):
+                if subject.startswith(kind + sep):
+                    subject = subject[len(kind + sep):]
+            if subject == kind:
+                subject = ""
+        # The generated handoff describes when it was written, not what the run is doing. Using it
+        # would put "written automatically at every turn-end" on every unattended handover.
+        if "written automatically" in subject:
+            subject = ""
+        if not subject and s is not None:
+            m = (s.get("mandate") or {})
+            if m.get("active") and m.get("text"):
+                subject = str(m["text"])
+            else:
+                ph = (s.get("phase") or {})
+                subject = str(ph.get("doing") or ph.get("milestone") or "")
+    subject = " ".join(str(subject).split())
+    if len(subject) > SUBJECT_MAX:
+        subject = subject[:SUBJECT_MAX - 1].rstrip() + "\u2026"
+    return subject
+
 # The flag that starts a session with permission prompts bypassed. Read off the running binary
 # (2.1.241) rather than remembered, and it sits there beside the refusal "Cannot set permission mode
 # to bypassPermissions because the session was not launched with --dangerously-skip-permissions" —
@@ -6994,9 +7059,18 @@ def successor_cfg():
     saggar-agent does NOT pay that cost: `saggar agent` is a call to a running app, so it writes
     nothing anywhere. It pays a different one, and the difference is worth knowing before choosing a
     terminal. `saggar agent` takes a provider and a TASK, not argv, so it builds its own claude
-    invocation: the successor's session id cannot be handed to it, and saggar names the terminal
-    from the task, so --task/--title do not reach it either. The printed command still carries both,
-    which is why it is printed in every mode rather than only when nothing was opened.
+    invocation: the successor's session id cannot be handed to it, and --task/--title do not reach
+    it either. The printed command still carries both, which is why it is printed in every mode
+    rather than only when nothing was opened.
+
+    WHAT NAMES THE TERMINAL IS NOT US, and this was believed wrong here until it was measured. Two
+    live handovers on 2026-08-25 (sibling repo, the handoff skill's port of this verb) came out
+    named `HANDOFF-<timestamp> continuation` — the second one after leading its prompt with a
+    subject, which the namer ignored. What saggar displays is `session_name` from Claude Code's own
+    status-line payload, mirrored by ~/.saggar/claude-status-bridge.sh: Claude's auto-generated
+    CONVERSATION TITLE, which in every sample keyed off the handoff FILENAME. So nothing this verb
+    passes can name a saggar terminal, the subject earns its place by being read rather than by
+    naming anything, and a run that wants a legible terminal names its handoff file well.
 
     `skip_permissions` (default FALSE) appends --dangerously-skip-permissions to that command. An
     unattended run hands over at the worst possible moment — the gate closed, the context full, the
@@ -7188,7 +7262,13 @@ def cmd_successor(s, a):
         auto = False
     sid = a.session_id or str(uuid.uuid4())
     cwd = a.cwd or REPO_ROOT
+    subject = successor_subject(hp, a.about, s)
     prompt = SUCCESSOR_PROMPT.format(handoff=hp)
+    # Prepended, not appended: everything that displays this string displays its FRONT — a tab row
+    # truncates, a terminal list prints one line, and the successor's own first message opens with
+    # it.
+    if subject:
+        prompt = f"{subject} \u2014 {prompt}"
     sc = successor_cfg()
     argv = ["claude", "--session-id", sid]
     if sc["skip_permissions"]:
@@ -7199,8 +7279,10 @@ def cmd_successor(s, a):
     why = successor_why(sc)
     sid_note = (f"{sid}  (the printed command's — `saggar agent` mints its own)"
                 if sc["mode"] == "saggar-agent" else sid)
-    lines = [f"successor session id : {sid_note}",
-             f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
+    lines = [f"successor session id : {sid_note}"]
+    if subject:
+        lines.append(f"about               : {subject}")
+    lines += [f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
              f"working directory   : {cwd}",
              f"tab title           : {title}",
              f"command             : {cmd}"]
@@ -7275,8 +7357,10 @@ def cmd_successor(s, a):
                       "                      config file, so it costs none of what warp-tab costs.",
                       "                      WHAT DID NOT REACH IT: the session id above, and "
                       "--task/--title — `saggar agent`",
-                      "                      takes a task, not argv, and names the terminal from "
-                      "that task itself. It also",
+                      "                      takes a task, not argv. Nothing here names the "
+                      "terminal: saggar shows Claude's",
+                      "                      own session title, which keys off the handoff "
+                      "FILENAME. It also",
                       "                      starts in the CALLING terminal's directory, which is "
                       f"{cwd} only if you",
                       "                      have not cd'd away. Set limits.successor.mode to "
@@ -9959,6 +10043,10 @@ def main():
                                    "`<R> | <task>`")
     sc.add_argument("--title", help="tab title, verbatim and uncapped — the override for when "
                                     "--task is too small a box")
+    sc.add_argument("--about", help="one line saying WHAT IS BEING WORKED ON, prepended to the "
+                                    "successor's prompt so a human reading that terminal can tell. "
+                                    "Derived from the handoff's heading, or the mandate, when "
+                                    "omitted; pass \"\" to leave it out entirely")
     sc.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="print the id, the prompt and the command, and start nothing")
     cf = sub.add_parser("confidence")

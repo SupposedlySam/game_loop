@@ -1234,6 +1234,44 @@ def main():
         r = gl(proj, "successor", "--dry-run", sid="sess-succ")
         check("handing over the GENERATED handoff is allowed, and announced as such",
               r.returncode == 0 and "GENERATED handoff" in r.stdout)
+
+        # ── the subject line ──────────────────────────────────────────────────────────────────
+        #
+        # The prompt refuses to paraphrase the handoff, and this is the ONE exception, because what
+        # it fixes is not the successor's knowledge but the human's: `Read /repo/.game_loop/
+        # sessions/8aae5d8f/HANDOFF.md in full` is the row a person scans in a screen of terminals,
+        # and it answers "what is this one doing" with a UUID. The subject is DERIVED, never
+        # authored, so a label cannot disagree with the document it came from.
+        with open(hps, "w") as f:
+            f.write("# Handoff — the flaky golden tests\nbody\n")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("the subject is lifted from the handoff's own heading, kind prefix stripped",
+              "about               : the flaky golden tests" in r.stdout)
+        check("...and LEADS the prompt, because everything that shows a prompt shows its front",
+              "'the flaky golden tests — Read " in r.stdout)
+        # The generated handoff's heading says WHEN it was written, not what the run is doing.
+        with open(hps, "w") as f:
+            f.write("<!-- game_loop:auto -->\n# HANDOFF — written automatically at every turn-end\n")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("the generated heading is boilerplate and is NOT used as a subject",
+              "about " not in r.stdout and "written automatically" not in r.stdout)
+        # ...but game_loop knows something the file does not, and this is the case that matters:
+        # an unattended run hands over at 3am, when nobody was there to write a heading.
+        gl(proj, "mandate", "--set", "get the goldens green", sid="sess-succ")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("with no usable heading the MANDATE becomes the subject — the human's own words",
+              "about               : get the goldens green" in r.stdout)
+        r = gl(proj, "successor", "--dry-run", "--about", "port the subject line", sid="sess-succ")
+        check("--about overrides both", "about               : port the subject line" in r.stdout)
+        r = gl(proj, "successor", "--dry-run", "--about", "", sid="sess-succ")
+        check("--about \"\" turns the subject off entirely",
+              "about " not in r.stdout and "'Read " in r.stdout)
+        r = gl(proj, "successor", "--dry-run", "--about", "x" * 250, sid="sess-succ")
+        check("an over-long subject is truncated — it is a label, not a summary",
+              "\u2026" in r.stdout and ("x" * 200) not in r.stdout)
+        gl(proj, "mandate", "--clear", sid="sess-succ")
+        with open(hps, "w") as f:
+            f.write("<!-- game_loop:auto -->\n# HANDOFF\n")   # AUTO_HANDOFF_MARK
         r = gl(proj, "successor", sid="sess-succ")
         check("off a Warp-less, saggar-less terminal the default resolves to print — it opens "
               "nothing itself",
@@ -7052,6 +7090,12 @@ def main():
             # the tab title IS composed text, and is capped by its own refusal because a tab is
             # narrow. Bounding it at PROSE_MAX as well would refuse titles that render fine
             "--title",
+            # --about is the same shape as --title one field over: a LABEL, not a sentence anyone
+            # reasons from. successor_subject truncates it at SUBJECT_MAX (100), so PROSE_MAX's 400
+            # could never fire, and a --about-file twin would offer a file for a line that has to
+            # fit in a terminal's name. What it shares with prose — a shell rewriting a backtick on
+            # the way past — costs a garbled label here, not a corrupted claim
+            "--about",
         )
         _fn_of = {}
         for _f in ast.walk(_tree):
@@ -10714,10 +10758,18 @@ def main():
     # I reached past it. (The same shape, one file over, is what made a producer NOT MEASURED.)
     _sec = after_marker(_led, "## VERIFIED", "## OPEN")
     _titles = re.findall(r"^- \*\*(.+?)\*\*", _sec, re.M)
-    _accounted = {c.get("ledger") for c in _claims}
+    # EVERY BLOCK, not just claude_code. The ledger's VERIFIED and RULED-OUT sections hold claims
+    # about any external subject this harness leans on, and `external_claims_report()` has always
+    # iterated the blocks generically — so reading one block HERE meant a claim about a sibling tool
+    # could sit in the ledger, be reported by status, and still be unaccounted by the gate whose
+    # whole job is that nothing joins quietly. Found by adding the saggar block: the check fired on
+    # a claim that was already fully declared, one file over.
+    _accounted = {c.get("ledger")
+                  for _b in _cl.values() if isinstance(_b, dict)
+                  for c in (_b.get("claims") or [])}
     _missing = [t for t in _titles if t not in _accounted]
-    check(f"every LEDGER claim about the host is accounted for ({len(_titles)} found) — a new one "
-          "fails the run until somebody decides it, rather than joining quietly"
+    check(f"every LEDGER claim about an external subject is accounted for ({len(_titles)} found) — "
+          "a new one fails the run until somebody decides it, rather than joining quietly"
           + (" · UNACCOUNTED: " + "; ".join(_missing[:3]) if _missing else ""),
           _titles and not _missing)
     check("...and the check can FIRE — an invented heading is reported as unaccounted, so the clean "

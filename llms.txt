@@ -368,9 +368,12 @@ contribute --reviewed --filed "<urls, or none>" --note-file <path>
 stepback [--notes ".."] | stepback --nothing-to-harden --reason ".."
 #   the retro. The second form is the honest escape when a chapter truly yielded no rule —
 #   it takes a reason, because "nothing to learn" is a claim like any other.
-successor [--handoff <path>] [--task ".."] [--title ".."] [--cwd <dir>] [--dry-run]
+successor [--handoff <path>] [--task ".."] [--title ".."] [--about ".."] [--cwd <dir>] [--dry-run]
 #   mint the next session and hand over: it points the successor at your handoff rather
 #   than hoping it finds one. --dry-run prints what it would do without doing it.
+#   --about is the one-line SUBJECT that leads the successor's prompt, so the row a human
+#   scans says what the run is about instead of naming a UUID. Derived from the handoff's
+#   heading, or the bound mandate, when omitted; --about "" leaves it out.
 ```
 
 **The `proved` moment.** `fix --prove`, `effector --prove` and `mutate --prove` each fire a

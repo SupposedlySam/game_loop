@@ -61,6 +61,33 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
 - **The per-model weekly (Opus) limit is in the statusline payload** — it isn't; only `five_hour`
   and `seven_day` windows exist there (statusline.md, 2026-07-29). The limit machinery therefore
   cannot see it; a run can still die on it unwarned.
+- **Anything game_loop passes to `saggar agent` names the saggar terminal** — it doesn't, and this
+  repo asserted the opposite in two places until it was measured: `docs/how-it-works.md` said
+  "saggar names the terminal from the task, so `--task`/`--title` do not reach it either — the
+  terminal ends up named after the prompt", and `successor_cfg`'s docstring said the same.
+
+  What saggar displays is `session_name` out of **Claude Code's own status-line payload**, which
+  `~/.saggar/claude-status-bridge.sh` mirrors verbatim into
+  `~/.saggar/chat-info/<SAGGAR_SESSION>.json` — Claude's auto-generated *conversation title*, not a
+  string saggar or this verb supplies. The bridge is 14 lines and passes the payload through
+  unchanged; there is no field for a caller to fill. Two live handovers on 2026-08-25 (sibling repo,
+  the `handoff` skill's port of this verb) both came out named `HANDOFF-<timestamp> continuation` —
+  the second one *after* its prompt led with the subject `confirm saggar names the terminal from the
+  subject line`, so the titler saw the string and keyed off the **filename** anyway. All three
+  `chat-info` payloads on this machine agree: `Handoff saggar support`,
+  `DELEGATION-dodgeball implementation`, `DELEGATION-barbell` — each traceable to a document's name,
+  none to a task string.
+
+  **Why this one was worth an entry.** Nothing was broken by the wrong version; the cost was that it
+  was *load-bearing in the wrong direction*. It made "route `--title` through to saggar somehow"
+  look like an unfinished feature rather than an impossibility, and it was the justification a
+  subject line would most naturally have reached for — "it names the terminal" — which is a reason
+  that does not exist. The subject line earns its place by being **read** (the successor's opening
+  message, the printed command, the `about` report line), and the only lever on a saggar terminal's
+  name is **what the handoff file is called**.
+
+  Source: `~/.saggar/claude-status-bridge.sh` and `~/.saggar/chat-info/*.json`, read 2026-08-25.
+  Filed as a claim the same day with both probes (`--task`/`--title`, and the subject line).
 
 ## OPEN
 

@@ -851,7 +851,7 @@ MUTANTS += [
 MUTANTS += [
     ("note_line -> a floor nobody explained renders exactly like one somebody accepted",
      "test/mutation_sweep.py::note_line", "    return None\n",
-     ["thin", "NOT STATED", "unprotected", "note"],
+     ["why it is thin", "NOT STATED", "unprotected", "what it covers"],
      "4 kills, and one of them is weaker than the other three: the header check reads this file's "
      "SOURCE for the phrase rather than calling the function, so it would flip for any edit that "
      "moved that text. The other three drive the function. Measured against the working tree at a "
@@ -1091,7 +1091,7 @@ MUTANTS += [
     # about the mutation it was taken against, so measure the body this line actually names.
     ("remote_has_ref -> the remote never has the ref",
      ".game_loop/bin/game_loop::remote_has_ref", "    return False\n",
-     ["remote", "ref", "ONLY LOCAL", "push"], None, 3),
+     ["ls-remote", "ONLY LOCAL", "on the remote", "pushed"], None, 3),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
      ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
      # THIN AT 1 -> 3. Three assertions called it and two asserted `issues is None and why` — which
@@ -1104,7 +1104,7 @@ MUTANTS += [
      ["#76", "upstream", "`gh`", "gh on PATH"], None, 3),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
-     ["notify", "probe", "read"], None, 3),
+     ["notify", "limit probe", "probe reply"], None, 3),
     # MEASURED AT 3, AND MEASURED AGAINST THE WORKING TREE rather than against HEAD — said here
     # because a floor whose provenance is unstated is a number. This producer did not exist in HEAD
     # when it was measured, so the archive the sweep normally runs could not carry it; the run used

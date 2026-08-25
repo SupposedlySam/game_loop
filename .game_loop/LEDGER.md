@@ -83,6 +83,26 @@ _Questions still outstanding. What would close each one._
   the registry multi-subject so it can go stale loudly instead. Source: the paths above, read at
   showrunner's checkout on this machine, 2026-08-25.
 
+- **A mark set that matches 306 assertions cannot tell a genuine kill from collateral.** The sweep
+  distinguishes the two by asking whether a killed assertion's NAME carries one of the producer's
+  marks. Measured 2026-08-25 with the AST over 1626 assertion names: `read_probe`'s marks matched
+  **306**, `note_line`'s **287**, `remote_has_ref`'s **279** — against floors of 3, 4 and 3. At that
+  breadth almost any kill "names this producer's subject", so the check that exists to catch
+  collateral was, for those entries, agreeing with everything.
+
+  **The cause is short marks under substring matching, not the matcher.** `"ref"` is inside *refuse,
+  refusal, refs, prefer*; `"read"` and `"note"` are in a third of the suite's names. I checked
+  whether word-boundary matching was the fix and it is NOT: only 8 marks lose all their matches
+  under it, and 7 of those are DELIBERATE STEMS — `refut`, `supersed`, `attach`, `exhaust`,
+  `dogfood` — that a boundary rule would break to fix an unrelated problem. Prefix matching keeps
+  the stems and does not fix `ref`/`refuse` either. The three offenders were simply bad marks.
+
+  Narrowed to phrases: 306 → 8, 287 → 12, 279 → 18. `note_line`'s was mine, written that morning.
+
+  **Left deliberately**: 32 more entries match ≥20 assertion names against a floor ≤3. Each needs a
+  judgement about what that producer's subject actually IS, and doing it in bulk is how a mark set
+  becomes decoration. The measurement is here so the next pass is aimed rather than exhaustive.
+
 - **An ABSENCE is the cheapest thing a broken producer gives you, and 15.3% of this suite asks for
   one.** 2026-08-25: `_closing` measured 0 kills, so I wrote six assertions for it and it went to
   ONE. Five of the six were phrased as absences — `"continuing" not in _cl(...)` — and a producer

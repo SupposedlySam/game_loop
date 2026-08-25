@@ -913,7 +913,11 @@ if [ "$CENTRAL" = 1 ]; then
 else
   # Always refresh the executables — they are the tool. (flair.py is decoration and notify.py is
   # paging; both are imported by the others and both degrade to no-ops.)
-  cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/watchdog" \
+  # _gl_impl.py IS THE TOOL; bin/game_loop is a ~30-line door that imports it (so Python caches the
+  # bytecode instead of re-parsing 10k lines on all 3,126 spawns a suite makes). Ship the door
+  # without the room and every install is a stub importing a module that is not there.
+  cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/_gl_impl.py" \
+     "$SRC/.game_loop/bin/watchdog" \
      "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
      "$SRC/.game_loop/bin/guard-mcp.sh" "$SRC/.game_loop/bin/guard-mcp-impl.sh" \
      "$SRC/.game_loop/bin/verify" "$SRC/.game_loop/bin/flair.py" "$SRC/.game_loop/bin/notify.py" \

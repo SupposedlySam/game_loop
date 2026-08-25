@@ -72,6 +72,13 @@
 # The SECTIONED rules below are untouched: they are already the surgical path and already fast.
 ".game_loop/bin/game_loop":
   - "python3 test/prun.py"
+# THE DOOR AND THE ROOM BOTH OWE THE SUITE. bin/game_loop is now a ~30-line stub that imports
+# _gl_impl.py, which is where the 10k lines actually live — so a rule that named only the stub would
+# stop firing on the file that changes. Speed bought with a gate that no longer gates is not a
+# trade this manifest makes; both are listed, and the stub is listed FIRST so a reader meets the
+# entry point where they expect it.
+".game_loop/bin/_gl_impl.py":
+  - "python3 test/prun.py"
 ".game_loop/bin/watchdog":
   - "python3 test/prun.py"
 ".game_loop/bin/guard-writes.sh":

@@ -286,22 +286,22 @@ MUTANTS = [
     # cost was the producer losing its reading entirely. Fluency is not protection; the sweep
     # is.
     ("pinned_report -> the PINNED CODE block is never reported",
-     ".game_loop/bin/game_loop::pinned_report", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::pinned_report", "    return None\n",
      ["pinned", "self"], None, 170),
     ("parse_events -> no per-event distribution is ever seen",
-     ".game_loop/bin/game_loop::parse_events", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),
     ("recurrence_lines -> a reason that bought the hatch before is never called out",
-     ".game_loop/bin/game_loop::recurrence_lines", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::recurrence_lines", "    return []\n",
      ["authorize", "recurrence", "callout", "recurring"], None, 8),
     ("metric_movement -> the metric never appears to have moved",
-     ".game_loop/bin/game_loop::metric_movement", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::metric_movement", "    return None\n",
      ["metric", "instrument"], None, 3),
     ("_asked_the_user -> no turn is ever seen to have asked",
-     ".game_loop/bin/game_loop::_asked_the_user", "    return False\n",
+     ".game_loop/bin/_gl_impl.py::_asked_the_user", "    return False\n",
      ["ask", "checkpoint", "launder"], None, 3),
     ("binding_windows -> no usage window ever binds",
-     ".game_loop/bin/game_loop::binding_windows", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::binding_windows", "    return []\n",
      ["limit", "handoff", "gate"], None, 5),
     # legacy_mandate_warning had NOTHING exercising it — a mandate bound before state went
     # per-session sits in the repo-global file gating nobody, the stop gate and watchdog go quiet,
@@ -315,7 +315,7 @@ MUTANTS = [
     # can flip is how a floor gets set above its own measurement, which this file exists to refuse,
     # and I did it in the same change that quotes the rule. Measured 2, THIN, recorded THIN.
     ("legacy_mandate_warning -> a mandate that gates nobody is never announced",
-     ".game_loop/bin/game_loop::legacy_mandate_warning", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::legacy_mandate_warning", "    return None\n",
      ["legacy", "mandate"], None, 2),
     # ALL THREE MEASURED IN ONE RUN, WITH THE TESTS HELD STILL. The floors recorded for the first
     # two an hour earlier were not wrong about the code — they were measured against an assertion
@@ -346,7 +346,7 @@ MUTANTS = [
     # it with the same instrument; raising it from the run that prompted the fix would be a number
     # from a different experiment.
 ("retro_nudge -> never says a retro is due",
-     ".game_loop/bin/game_loop::retro_nudge", "    return None\n", ["retro", "due"], None, 4),
+     ".game_loop/bin/_gl_impl.py::retro_nudge", "    return None\n", ["retro", "due"], None, 4),
     # THE DEBT THE LAST SWEEP COULD NOT PAY. Both gate turn-end. They sat in NOT_SWEPT for one run
     # — which is what excludes a producer from the instrument — and were ALSO missing from the
     # KNOWN GAPS report because that list matches a prose prefix theirs did not have. Swept now,
@@ -354,7 +354,7 @@ MUTANTS = [
     # The debt is why they are here: an entry in NOT_SWEPT is invisible to the instrument by
     # construction, so the only way to pay "floor owed on the next sweep" was to stop excluding them.
     ("retro_overdue -> the nudge never escalates",
-     ".game_loop/bin/game_loop::retro_overdue", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::retro_overdue", "    return None\n",
      # THIN AT 1 -> 4. Two assertions drove it and one of them asserted exit 0 at the NUDGE
      # threshold, which a dead gate also produces. The refusal now has to carry the COUNT and the
      # THRESHOLD it crossed (exit 2 plus the word "overdue" is satisfied by any gate closing for
@@ -370,7 +370,7 @@ MUTANTS = [
     # shared: ONE harden ever recorded would pay every future retro debt for the life of the
     # checkout, and it would hit hardest the sessions that had been encoding things longest.
     ("retro_debt_open -> the retro never owes its encoding",
-     ".game_loop/bin/game_loop::retro_debt_open", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::retro_debt_open", "    return None\n",
      ["retro", "encoded", "harden"], None, 3),
     # THE CLAIMS EXERCISE. Both floors were MEASURED, and the first measurement of both was 0 —
     # against a tree copied without .git, which cost 166 baseline assertions including the ones
@@ -380,22 +380,22 @@ MUTANTS = [
     # finding: every assertion wrote the observation file by hand, so the RECORDER that runs in
     # production was covered by nothing. Driving it end to end took them to 3 and 5.
     ("_rate_limit_keys -> finds no rate-limit key anywhere",
-     ".game_loop/bin/game_loop::_rate_limit_keys", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::_rate_limit_keys", "    return []\n",
      ["rate-limit", "nested", "payload"], None, 3),
     ("_hooks_claim_live -> never reports an observation",
-     ".game_loop/bin/game_loop::_hooks_claim_live", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_hooks_claim_live", "    return None\n",
      ["no-rate-limits-in-hooks", "control", "payload"], None, 5),
-    ("unpushed_warning -> never warns", ".game_loop/bin/game_loop::unpushed_warning", "    return None\n",
+    ("unpushed_warning -> never warns", ".game_loop/bin/_gl_impl.py::unpushed_warning", "    return None\n",
      ["unpushed", "upstream", "quiet"], None, 7),
-    ("fix_warning -> never warns", ".game_loop/bin/game_loop::fix_warning", "    return None\n",
+    ("fix_warning -> never warns", ".game_loop/bin/_gl_impl.py::fix_warning", "    return None\n",
      ["fix", "quiet", "silence"], None, 9),
-    ("category_tell -> never detects", ".game_loop/bin/game_loop::category_tell", "    return None\n",
+    ("category_tell -> never detects", ".game_loop/bin/_gl_impl.py::category_tell", "    return None\n",
      ["nudge", "category", "scope"], None, 4),
-    ("aggregate_tell -> never detects", ".game_loop/bin/game_loop::aggregate_tell", "    return None\n",
+    ("aggregate_tell -> never detects", ".game_loop/bin/_gl_impl.py::aggregate_tell", "    return None\n",
      ["nudge", "aggregate", "sum"], None, 7),
-    ("dominance -> never finds an outlier", ".game_loop/bin/game_loop::dominance", "    return None\n",
+    ("dominance -> never finds an outlier", ".game_loop/bin/_gl_impl.py::dominance", "    return None\n",
      ["dominan", "distribution", "spread", "event"], None, 10),
-    ("ruled_out -> finds no refutations", ".game_loop/bin/game_loop::ruled_out", "    return []\n",
+    ("ruled_out -> finds no refutations", ".game_loop/bin/_gl_impl.py::ruled_out", "    return []\n",
      ["ruled", "refut"],
      # 1 -> 7. This note ended "Fixing it means asserting a later session INHERITS the list, not
      # deleting this note" — the remedy named exactly, and it is the FOURTH note in this file to
@@ -441,15 +441,15 @@ MUTANTS = [
     # conservative total: comfortably above the 2 it replaces, and far enough below 25 that the
     # collateral kills drifting (the glyph tripwire and orphan scan redden for any producer at all)
     # cannot fail this entry for a reason that is not a loss of coverage.
-    ("external_claims_report -> reports nothing", ".game_loop/bin/game_loop::external_claims_report",
+    ("external_claims_report -> reports nothing", ".game_loop/bin/_gl_impl.py::external_claims_report",
      "    return []\n", ["claim", "host", "stale"],
      "the three version arms — checked-against-what-is-running, checked-against-something-else, and "
      "nothing-to-compare — plus that status says outright it never checks whether a claim is TRUE", 13),
-    ("hooks_live_warning -> never warns", ".game_loop/bin/game_loop::hooks_live_warning", "    return None\n",
+    ("hooks_live_warning -> never warns", ".game_loop/bin/_gl_impl.py::hooks_live_warning", "    return None\n",
      ["hook", "probe", "live", "wired"], None, 6),
-    ("config_paths_report -> reports no keyed path", ".game_loop/bin/game_loop::config_paths_report", "    return []\n",
+    ("config_paths_report -> reports no keyed path", ".game_loop/bin/_gl_impl.py::config_paths_report", "    return []\n",
      ["config path", "tracked", "write root", "tilde", "read_roots"], None, 12),
-    ("worktree_report -> prints no worktree block", ".game_loop/bin/game_loop::worktree_report", "    return []\n",
+    ("worktree_report -> prints no worktree block", ".game_loop/bin/_gl_impl.py::worktree_report", "    return []\n",
      ["worktree", "drift", "rules"],
      # KNOWN GAP. #30's coverage went almost entirely to `worktree --porcelain`, which reads
      # worktree_drift() — a DIFFERENT producer — so the STATUS block this renders is asserted twice
@@ -457,7 +457,7 @@ MUTANTS = [
      # line and the "NOT compared" reach statement can all vanish unnoticed. Fixing it means
      # asserting the matched and unreadable arms of the block, not deleting this note.
      "coverage went to `worktree --porcelain` (a different producer); the status block has two", 2),
-    ("update_notice -> never announces an update", ".game_loop/bin/game_loop::update_notice", "    return None\n",
+    ("update_notice -> never announces an update", ".game_loop/bin/_gl_impl.py::update_notice", "    return None\n",
      ["update", "newer", "sha", "version"],
      # Thin, and defensibly so — but say which. Its two silences ("update_check:false silences the
      # notice", "no VERSION → silent") are real restraint assertions and they DO have a companion
@@ -465,14 +465,14 @@ MUTANTS = [
      # content — both shas, the re-install command — rests on a single string match.
      "its silences are properly paired; the MESSAGE rests on one assertion, and that is the gap", 1),
     ("limits_inert_warning -> never announces that the limit gates are inert",
-     ".game_loop/bin/game_loop::limits_inert_warning", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::limits_inert_warning", "    return None\n",
      ["limit", "inert", "snapshot", "tap"],
      # Measured at 6 against a baseline of 480. The paired negative — "a real window silences the
      # warning entirely" — correctly does NOT flip here: neutering to `return None` makes the
      # producer silent everywhere, which is the arm that assertion already permits. That is the
      # pairing behaving as designed rather than a hole, and it is why the count is 6 and not 7.
      None, 6),
-    ("fire_triggers -> a project's attachments never run", ".game_loop/bin/game_loop::fire_triggers", "    return []\n",
+    ("fire_triggers -> a project's attachments never run", ".game_loop/bin/_gl_impl.py::fire_triggers", "    return []\n",
      ["trigger", "attach", "harden", "stepback"], None, 9),
     # THE CONTEXT TRIGGER'S TWO HALVES — the one that RECORDS the reading at turn-end, and the one
     # that decides whether it binds. Both MEASURED on the working tree rather than on HEAD, for the
@@ -485,10 +485,10 @@ MUTANTS = [
     # trigger. The recorder scores higher because it also owns the readings the gate never sees —
     # the sidechain skip, the crossing carried forward, the drop back under the cap.
     ("record_context_reading -> no turn-end ever records a context reading",
-     ".game_loop/bin/game_loop::record_context_reading", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::record_context_reading", "    return None\n",
      ["context", "cap", "crossing", "sidechain", "successor verb"], None, 9),
     ("binding_context -> a recorded reading never binds the gate",
-     ".game_loop/bin/game_loop::binding_context", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::binding_context", "    return None\n",
      ["context", "cap", "crossing", "successor verb"], None, 5),
     # THE MOMENT THAT DECIDES (#64), and the most expensive silence in this file: neutered, no
     # attachment can ever refuse a turn-end, every `stop` trigger in every tree becomes advisory,
@@ -506,20 +506,20 @@ MUTANTS = [
     # than zeroes — which is worse, because it looks like coverage. The test now degrades instead of
     # raising, and the number below is from the re-run.
     ("stop_trigger_block -> no attachment can ever refuse a turn-end",
-     ".game_loop/bin/game_loop::stop_trigger_block", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::stop_trigger_block", "    return None\n",
      ["stop", "turn-end", "attachment", "stood down"], None, 22),
-    ("triggers_report -> status never mentions an attachment", ".game_loop/bin/game_loop::triggers_report",
+    ("triggers_report -> status never mentions an attachment", ".game_loop/bin/_gl_impl.py::triggers_report",
      "    return []\n", ["trigger", "attach", "never fired"],
      # Measured at 2 when first written, and that was the whole warning: the two assertions were the
      # never-fired pair, so the THIRD state — fires every time and fails every time — was invisible,
      # which is the one a never-fired warning is silent about. Adding it took this to 4.
      None, 4),
-    ("retro_outcome -> a retro never reports what the last one yielded", ".game_loop/bin/game_loop::retro_outcome",
+    ("retro_outcome -> a retro never reports what the last one yielded", ".game_loop/bin/_gl_impl.py::retro_outcome",
      "    return []\n", ["retro", "yield", "harden"],
      # Also 2 at first, both about hardens. A chapter can be all evidence and no encoding, and the
      # ledger has to show that SHAPE rather than one number, so the claims/triggers arm was added.
      None, 3),
-    ("working_tree_report -> never says you are in a different tree", ".game_loop/bin/game_loop::working_tree_report",
+    ("working_tree_report -> never says you are in a different tree", ".game_loop/bin/_gl_impl.py::working_tree_report",
      "    return []\n", ["worktree", "tree", "harness answers"], None, 3),
     # THE TWO #44 SURFACED THAT MATTER, now measured rather than described. Both were entirely
     # OUTSIDE the denominator until the file list came from git — not excluded, absent.
@@ -568,7 +568,7 @@ MUTANTS = [
      "one assertion carries it; the watchdog's own idleness measurement deserves a companion", 1),
     # #37's two, measured at 2 each against a baseline of 543.
     ("behaviour_changes -> the update notice never has anything to report",
-     ".game_loop/bin/game_loop::behaviour_changes", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::behaviour_changes", "    return []\n",
      ["behaviour", "update", "changed", "cost"],
      # THIN at 2 -> 4. This note used to end "A companion asserting seq order on a scrambled record
      # is what is owed" — the remedy, named exactly, sitting here across several sweeps until
@@ -585,7 +585,7 @@ MUTANTS = [
      "seq order on a scrambled record, and one bad row dropped without taking the good ones",
      4),
     ("_remote_behaviour -> the record on main can never be fetched",
-     ".game_loop/bin/game_loop::_remote_behaviour", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_remote_behaviour", "    return None\n",
      ["behaviour", "update", "fetch", "unreachable"],
      # 2 -> 5, and this note USED TO SAY "there is little surface to assert beyond that, which is
      # the point rather than a gap". Measurement says otherwise, and the sentence is worth keeping
@@ -603,7 +603,7 @@ MUTANTS = [
      "must carry back intact",
      5),
     ("_compare_versions -> the update check can never tell ahead from behind",
-     ".game_loop/bin/game_loop::_compare_versions", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_compare_versions", "    return None\n",
      ["update", "ahead", "behind", "ancestry", "determined"],
      # 7 against a baseline of 560. Neutered, every comparison degrades to "could not determine",
      # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
@@ -618,35 +618,35 @@ MUTANTS = [
      # an un-measurable producer into a measured one. See #50.
      None, 4),
     ("_hooks_stale_warning -> a dead Stop hook is never noticed",
-     ".game_loop/bin/game_loop::_hooks_stale_warning", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_hooks_stale_warning", "    return None\n",
      ["hook", "probe", "stale", "stop gate", "listening"],
      # 3 against a baseline of 568. Neutered, a Stop hook that fired once and then died reads
      # exactly like a healthy one for the rest of the session -- which is the defect #43 named:
      # registered, fired, and listening now are three different claims.
      None, 3),
     ("shared_pins -> the checkout's pins are invisible to every session",
-     ".game_loop/bin/game_loop::shared_pins", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::shared_pins", "    return []\n",
      ["pin", "tidy", "environment", "load-bearing"],
      # 9 against a baseline of 572. Neutered, no pin reaches any status -- which is the state #18
      # shipped in all but name, since a pin only the registering session could see never reached
      # the run that tidies it away.
      None, 9),
     ("waiting_report -> status never says what the run is blocked on",
-     ".game_loop/bin/game_loop::waiting_report", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::waiting_report", "    return []\n",
      ["waiting", "blocked", "dispatched", "probe"],
      # 1 when first written -- one assertion carried the whole producer -- and 3 after the other
      # three arms were added: NOT WAITING, configured-but-never-run, and the silent no-probe case.
      # Strengthened rather than recorded thin, which is what the ordering in this file is FOR.
      None, 3),
     ("code_files -> two trees always look like they run the same code",
-     ".game_loop/bin/game_loop::code_files", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::code_files", "    return []\n",
      ["harness", "code", "worktree", "drift"],
      # 3 against a baseline of 587. Neutered, the code comparison is empty on both sides, so every
      # pair of trees reports matching harnesses -- which is the state #38 found shipped, where the
      # field was named `harness` and contained only rules.
      None, 3),
     ("session_start_warning -> a harness that never announces itself is never noticed",
-     ".game_loop/bin/game_loop::session_start_warning", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::session_start_warning", "    return []\n",
      ["session start", "entry point", "bare", "rehydrat"],
      # THIN at 2, and honestly so rather than padded. The producer emits ONE message, and three of
      # its five assertions are ABSENCE arms -- recorded-and-quiet, opted-out-and-quiet -- which
@@ -660,7 +660,7 @@ MUTANTS = [
      # unable to say which one spoke. Scoped to the text AFTER "NO SESSION START RECORDED" and
      # pinned to the wording only this one uses, it flips.
      "one message plus a caveat scoped to its own block; the rest are absence arms", 3),
-    ("refresh_handoff -> no handoff is ever maintained", ".game_loop/bin/game_loop::refresh_handoff",
+    ("refresh_handoff -> no handoff is ever maintained", ".game_loop/bin/_gl_impl.py::refresh_handoff",
      "    return False\n", ["handoff", "turn-end", "cliff", "limit"],
      # THIN at 2, and the first measurement said 164 — which was a CRASH CASCADE, not coverage. The
      # tests read the handoff unguarded, so a neutered producer made them raise, the run aborted,
@@ -670,13 +670,13 @@ MUTANTS = [
      "two arms: the file appears, and a hand-written one survives. Its CONTENT is built elsewhere",
      2),
     ("trailing_usage -> the window's consumption is never recorded",
-     ".game_loop/bin/game_loop::trailing_usage", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::trailing_usage", "    return None\n",
      ["usage", "window", "evidence", "consumption"],
      # Also 2, and also honest: the producer feeds one log line, and both assertions read it. It
      # gates nothing by design, so there is little else to assert about it yet -- which is the
      # point, not a gap.
      "one log line, read by both arms; it deliberately gates nothing yet", 2),
-    ("pinned_sha -> stable can never be evidenced", ".game_loop/bin/game_loop::pinned_sha",
+    ("pinned_sha -> stable can never be evidenced", ".game_loop/bin/_gl_impl.py::pinned_sha",
      "    return None\n", ["confidence", "stable", "pinned", "dogfood"],
      # THIN at 2 by construction, and honestly so: this producer feeds exactly one decision -- can
      # `confidence --mark stable` prove the owning agent is running on this commit -- and that
@@ -684,7 +684,7 @@ MUTANTS = [
      # assert about it, which is the shape of the check rather than a gap in it.
      "one decision, two arms: stable refused without a pin, permitted with one", 2),
     ("installed_confidence_report -> an install never says what level it came from",
-     ".game_loop/bin/game_loop::installed_confidence_report", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::installed_confidence_report", "    return []\n",
      ["confidence", "alpha", "installed", "mid-flight"],
      # 2 -> 6, AND THE THINNESS WAS HIDING A LIVE DEFECT. Two speaking arms (the alpha warning and
      # the marked-level line) plus an absence arm, and the levels nobody had written an arm for
@@ -714,7 +714,7 @@ MUTANTS = [
      # fixed sentence.
      "the actual path in the status line, and the producer asked directly in both arms", 4),
     ("config_local_keys -> a local config override is never announced",
-     ".game_loop/bin/game_loop::config_local_keys", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::config_local_keys", "    return []\n",
      ["config.local", "override", "site wiring"],
      # Measured at 0 when first written -- I shipped config.local.json with no test at all, and this
      # sweep is what said so. Then THIN at 1, with this note already naming the reason: the
@@ -866,7 +866,7 @@ MUTANTS = [
 # would have recorded 6 here and called an orphan-detector's opinion coverage of a SIGTERM.
 MUTANTS += [
     ("disarm_watchdog -> a handover signals nothing, and reports that it did",
-     ".game_loop/bin/game_loop::disarm_watchdog", "    return None, \"none was armed\"\n",
+     ".game_loop/bin/_gl_impl.py::disarm_watchdog", "    return None, \"none was armed\"\n",
      ["#102", "disarm", "handover", "watchdog", "signalled"],
      "raw 6, genuine 3 — the other three are reachability assertions firing because the neutered "
      "body orphans watchdog_pid_identity, not because they know anything about handovers.", 3),
@@ -894,7 +894,7 @@ MUTANTS += [
      "5, and one of them is not mine: `--coverage says it too` was already asserting this report "
      "through a different door, which is why the producer was covered while being invisible.", 5),
     ("_closing -> the stop gate reads an empty closing, so nothing is ever a promise",
-     ".game_loop/bin/game_loop::_closing", '    return ""\n',
+     ".game_loop/bin/_gl_impl.py::_closing", '    return ""\n',
      ["closing", "tail", "quoted", "past-tense"],
      "5 of 6, and the sixth CANNOT flip: it asserts the empty input returns empty, which a neuter "
      "to `return \"\"` satisfies by definition. Worth the entry because the first version of these "
@@ -948,7 +948,7 @@ MUTANTS += [
      "positive (a matching identity IS signalled) can flip, and it does. Thin here measures the "
      "shape of the fallback, not a gap in it.", 1),
     ("watchdog_pid_identity -> game_loop's side can never identify a pid either",
-     ".game_loop/bin/game_loop::watchdog_pid_identity", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::watchdog_pid_identity", "    return None\n",
      ["#102", "identity", "disarm", "handover"],
      "same fail-safe shape as _proc_start above, one file over: an unreadable start time reads as "
      "'that pid had already exited', so the handover declines to signal and says so. The two that "
@@ -957,19 +957,19 @@ MUTANTS += [
 
 MUTANTS += [
     ("_stop_verdict -> the stop gate always allows the turn to end",
-     ".game_loop/bin/game_loop::_stop_verdict", "    return True, \"\", None\n",
+     ".game_loop/bin/_gl_impl.py::_stop_verdict", "    return True, \"\", None\n",
      ["stop gate", "stop_verdict", "turn-end", "mandate"], None, 12),
     ("waiting_verdict -> the watchdog never sees a run as waiting",
      ".game_loop/bin/watchdog::waiting_verdict", "    return False, \"\"\n",
      ["waiting", "watchdog", "subagent", "idle"], None, 12),
     ("upstream_check -> the upstream watcher reports nothing, ever",
-     ".game_loop/bin/game_loop::upstream_check", "    return [], \"off\"\n",
+     ".game_loop/bin/_gl_impl.py::upstream_check", "    return [], \"off\"\n",
      ["#76", "upstream"], None, 0),
     ("ahead_of_upstream -> never sees an unpushed commit",
-     ".game_loop/bin/game_loop::ahead_of_upstream", "    return 0, None, None\n",
+     ".game_loop/bin/_gl_impl.py::ahead_of_upstream", "    return 0, None, None\n",
      ["unpushed", "upstream", "ahead"], None, 5),
     ("working_tree -> never resolves a worktree",
-     ".game_loop/bin/game_loop::working_tree", "    return None, None\n",
+     ".game_loop/bin/_gl_impl.py::working_tree", "    return None, None\n",
      ["worktree", "working tree", "checkout"], None, 3),
     # THIN AT 2 -> 4, measured against the RECORDED body `return False, None`. All three original
     # arms passed ONE root, so none of them could see that this answers about the TREE IT WAS
@@ -979,16 +979,16 @@ MUTANTS += [
     # pinned. Two roots now, and two PINNED roots at different shas, which is the case that
     # "equal shas means these two agree" actually rests on.
     ("pin_status -> never reports a tree as pinned",
-     ".game_loop/bin/game_loop::pin_status", "    return False, None\n",
+     ".game_loop/bin/_gl_impl.py::pin_status", "    return False, None\n",
      ["pin", "pinned"], None, 4),
     ("probe_reading -> a probe's output never yields a reading",
-     ".game_loop/bin/game_loop::probe_reading", "    return {}, None\n",
+     ".game_loop/bin/_gl_impl.py::probe_reading", "    return {}, None\n",
      ["probe", "rate-limit", "context window"], None, 3),
     ("running_host_version -> the running host's version is never known",
-     ".game_loop/bin/game_loop::running_host_version", "    return None, \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::running_host_version", "    return None, \"neutered\"\n",
      ["host", "version", "EXECPATH"], None, 3),
     ("_scan_transcript -> the transcript never yields records",
-     ".game_loop/bin/game_loop::_scan_transcript",
+     ".game_loop/bin/_gl_impl.py::_scan_transcript",
      "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
      ["transcript", "denial", "oversized"], None, 0),
     ("vacuous_rules -> a rule matching nothing is never named",
@@ -1004,19 +1004,19 @@ MUTANTS += [
      ".game_loop/bin/flair.py::milestones", "    return [], []\n",
      ["flair", "milestone"], None, 4),
     ("_limitgate_verdict -> the limit gate always allows the turn to end",
-     ".game_loop/bin/game_loop::_limitgate_verdict", "    return True, None\n",
+     ".game_loop/bin/_gl_impl.py::_limitgate_verdict", "    return True, None\n",
      ["limit gate", "limit", "window", "gate denies", "context deny"], None, 8),
     ("_last_assistant_text -> the closing message is never recoverable",
-     ".game_loop/bin/game_loop::_last_assistant_text", "    return None, \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::_last_assistant_text", "    return None, \"neutered\"\n",
      ["closing message", "assistant text", "stop gate", "launder"], None, 3),
     ("merge_files -> a merge never yields the paths it touched",
-     ".game_loop/bin/game_loop::merge_files", "    return None, \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::merge_files", "    return None, \"neutered\"\n",
      ["merge", "attribute", "merge-base"], None, 10),
     ("wake_path_report -> a mandate with no external wake path is never named",
-     ".game_loop/bin/game_loop::wake_path_report", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::wake_path_report", "    return []\n",
      ["#95", "WAKE PATH", "wake path", "inert run"], None, 0),
     ("guards_report -> a disabled project guard is never reported as inert",
-     ".game_loop/bin/game_loop::guards_report", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::guards_report", "    return []\n",
      ["#90", "INERT", "UNKNOWN", "guard"], None, 0),
     # THIN AT 1 -> 4. Three assertions called it and TWO asserted `== []`, which a dead producer
     # returns too. Added: TWO dead triggers both named (reporting one of two is the failure the
@@ -1025,7 +1025,7 @@ MUTANTS += [
     # worth recording: the dead-kind loop sits after an early `return []` for projects with nothing
     # wired, so a stray script in triggers.d with no trigger configured is never reported at all.
     ("trigger_dead_kinds -> a trigger matching an impossible kind is never named",
-     ".game_loop/bin/game_loop::trigger_dead_kinds", "    return []\n",
+     ".game_loop/bin/_gl_impl.py::trigger_dead_kinds", "    return []\n",
      ["#87", "NEVER WRITES", "dead", "kind"], None, 4),
     # THIN AT 2 -> 6. Four assertions and two of them asserted `== ([], None)` — not pinned, and
     # pinned to identical bytes — which the neutered form returns for everything. Added: TWO
@@ -1048,10 +1048,10 @@ MUTANTS += [
     # fix sits unused while its author watches the guard not change. Nothing asserted it at all.
     # The third arm written (same commit -> no warning) is an absence arm and does not flip.
     ("_git_sha -> the repo's own commit is never resolved",
-     ".game_loop/bin/game_loop::_git_sha", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_git_sha", "    return None\n",
      ["PINNED CODE", "repo @", "DIFFERENT commit"], None, 2),
     ("pin_file_drift -> the pinned copy never differs from this tree",
-     ".game_loop/bin/game_loop::pin_file_drift", "    return [], None\n",
+     ".game_loop/bin/_gl_impl.py::pin_file_drift", "    return [], None\n",
      ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 6),
     # THIN AT 1, NOW 4, and the reason it was thin is the reason THIN is worth reporting. Four
     # assertions called this producer and THREE asserted it returns None — mid-work is silent, an
@@ -1065,25 +1065,25 @@ MUTANTS += [
     # with the mark and HEAD named. Two of the arms here used to grep cmd_checkpoint's SOURCE for
     # "release_deferred", which reads identically whether or not the verb does it.
     ("release_owed -> finished unreleased work is never owed at the handback",
-     ".game_loop/bin/game_loop::release_owed", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::release_owed", "    return None\n",
      ["release", "RELEASED TO NOBODY", "unreleased", "deferred"], None, 4),
     ("release_distance_warning -> the handback never says the release is behind",
-     ".game_loop/bin/game_loop::release_distance_warning", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::release_distance_warning", "    return None\n",
      ["release", "COMMIT(S) BEHIND", "newest mark", "not released"], None, 0),
     ("work_since_last_block -> nothing ever counts as work after a refusal",
-     ".game_loop/bin/game_loop::work_since_last_block", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::work_since_last_block", "    return None\n",
      ["#82", "laundering", "stop_after_block", "reworded"], None, 0),
     ("deferral_in_checkpoint -> a checkpoint never names a successor",
-     ".game_loop/bin/game_loop::deferral_in_checkpoint", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::deferral_in_checkpoint", "    return None\n",
      ["#81", "deferral", "next action"], None, 0),
     ("upstream_review_nudge -> nobody is ever asked whose defect a learning was",
-     ".game_loop/bin/game_loop::upstream_review_nudge", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::upstream_review_nudge", "    return None\n",
      ["#78", "upstream review", "TOOL's behaviour"], None, 0),
     ("hardens_since_review -> no learning is ever counted as unreviewed",
-     ".game_loop/bin/game_loop::hardens_since_review", "    return [], True\n",
+     ".game_loop/bin/_gl_impl.py::hardens_since_review", "    return [], True\n",
      ["#78", "baseline", "threshold"], None, 0),
     ("selected_tests -> a run's test count is never readable",
-     ".game_loop/bin/game_loop::selected_tests", "    return None, \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::selected_tests", "    return None, \"neutered\"\n",
      ["#85", "selected", "ZERO tests", "count"], None, 0),
     # THIN AT 2 -> 6, and it has SEVEN outcomes: live, inert, and FOUR different unknowns.
     # Exactly one was asserted, end-to-end, in a producer whose entire job is telling apart
@@ -1099,7 +1099,7 @@ MUTANTS += [
     # cannot say WHICH pair collided, so it reads clean for a collision plus a spare, which
     # is the shape it was written to catch. Pairwise and by name now.
     ("mutation_liveness -> the probe never establishes anything",
-     ".game_loop/bin/game_loop::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::mutation_liveness", "    return \"unknown\", \"neutered\"\n",
      ["#80", "liveness", "INERT"], None, 6),
     # THIN AT 2 -> 3, and the number depends on WHICH mutation, which nearly cost me the floor.
     # Two added assertions: that it asks the REMOTE rather than the local tag list (both tags in
@@ -1114,10 +1114,10 @@ MUTANTS += [
     # assertions, same producer, different mutation, different coverage. A floor is only a fact
     # about the mutation it was taken against, so measure the body this line actually names.
     ("remote_has_ref -> the remote never has the ref",
-     ".game_loop/bin/game_loop::remote_has_ref", "    return False\n",
+     ".game_loop/bin/_gl_impl.py::remote_has_ref", "    return False\n",
      ["ls-remote", "ONLY LOCAL", "on the remote", "pushed"], None, 3),
     ("_upstream_fetch -> every upstream repo reads as unreachable",
-     ".game_loop/bin/game_loop::_upstream_fetch", "    return None, None, \"neutered\"\n",
+     ".game_loop/bin/_gl_impl.py::_upstream_fetch", "    return None, None, \"neutered\"\n",
      # THIN AT 1 -> 3. Three assertions called it and two asserted `issues is None and why` — which
      # the neutered form, returning one canned "neutered" for everything, satisfies exactly. That is
      # showrunner's point in this repo's own file: NON-EMPTY AND INFORMATIVE ARE DIFFERENT CLAIMS,
@@ -1166,10 +1166,10 @@ MUTANTS += [
 # handed_off_quiet above.
 MUTANTS += [
     ("_spawn_verb_hit -> no command ever names a configured fan-out verb",
-     ".game_loop/bin/game_loop::_spawn_verb_hit", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::_spawn_verb_hit", "    return None\n",
      ["spawn", "fan-out", "brake", "verb", "cap"], None, 6),
     ("binding_spawn_block -> a session of any size may keep starting Crawlers",
-     ".game_loop/bin/game_loop::binding_spawn_block", "    return None\n",
+     ".game_loop/bin/_gl_impl.py::binding_spawn_block", "    return None\n",
      ["spawn", "fan-out", "brake", "handoff", "cap"], None, 6),
 ]
 
@@ -1200,7 +1200,7 @@ NOT_SWEPT = {
     # reports them every time rather than letting the number sit at a comfortable 0 undecided.
     
     
-    ".game_loop/bin/game_loop::run_verify_check": "MEASURED AT 0 AND THAT IS NOT A COVERAGE GAP "
+    ".game_loop/bin/_gl_impl.py::run_verify_check": "MEASURED AT 0 AND THAT IS NOT A COVERAGE GAP "
         "(#108). It answers whether a gated file's checks are stale, and its only caller reaches it "
         "three lines AFTER `--mark` has already died on an unclean tree — so the input it reads "
         "(changed_files, 'what a commit would actually carry') is empty by construction and it can "
@@ -1265,38 +1265,38 @@ NOT_SWEPT = {
             "returns normally. Mutating it would measure whether the sweep can sweep its own "
             "subprocess call, which is not a question about this repo's gates.",
 
-    ".game_loop/bin/game_loop::_ledger_last": "reads the last timestamp out of the ledger (#78). "
+    ".game_loop/bin/_gl_impl.py::_ledger_last": "reads the last timestamp out of the ledger (#78). "
             "Neutered to None it declares every project un-baselined, which the FIRST-ENCOUNTER "
             "assertion catches directly and loudly; neutered to a constant it breaks the counting "
             "the threshold assertions drive. Both arms are asserted through the producers above "
             "rather than through this reader, which is where the behaviour actually lives.",
 
-    ".game_loop/bin/game_loop::_py_parses": "ast.parse with a boolean face (#80). Neutered to a "
+    ".game_loop/bin/_gl_impl.py::_py_parses": "ast.parse with a boolean face (#80). Neutered to a "
             "constant it either passes every mutated file — which the COULD-NOT-PROVE assertion "
             "beside it catches directly — or refuses every one, which the ✓ PROVED assertion "
             "catches. Both arms are asserted in-suite against real broken and real valid sources, "
             "which is a stronger check than mutation and does not need the same name twice.",
-    ".game_loop/bin/game_loop::run_source": "a closure inside cmd_mutate that writes a source, runs "
+    ".game_loop/bin/_gl_impl.py::run_source": "a closure inside cmd_mutate that writes a source, runs "
             "the test and restores — it is the probe's I/O, not a producer that reports by "
             "silence. Its restore path is asserted directly (the tree is intact after every "
             "refusing path), which is the property worth pinning.",
-    ".game_loop/bin/game_loop::cmd_mutate": "the verb itself, whose every outcome is driven end to "
+    ".game_loop/bin/_gl_impl.py::cmd_mutate": "the verb itself, whose every outcome is driven end to "
             "end by the #80 assertions — unparseable, inert, unprobeable and proved, each with the "
             "tree checked afterwards. Neutering the command body would fail all of them at once "
             "and measure nothing finer than 'the verb runs'.",
 
-    ".game_loop/bin/game_loop::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
+    ".game_loop/bin/_gl_impl.py::_git": "pure git helper — None means git failed, not a finding withheld; swept through its "
             "callers (config_paths_report, main_checkout, release_owed, and ahead_of_upstream, "
             "which is how unpushed_warning reaches it), which assert the "
             "git-failed arm beside the git-worked one",
-    ".game_loop/bin/game_loop::_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
+    ".game_loop/bin/_gl_impl.py::_git_out": "pure git helper for an arbitrary tree — None is 'no such ref / not a repo', a "
                 "mechanical outcome. Its callers are attribution_tree, merge_files and "
                 "cmd_attribute, which turn every one of those Nones into a STATED refusal that "
                 "`game_loop attribute` is asserted on; none of them can report by silence",
-    ".game_loop/bin/game_loop::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
+    ".game_loop/bin/_gl_impl.py::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
             "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
 
-    ".game_loop/bin/game_loop::_saggar_agent": "asks saggar to open the successor's terminal (#79), "
+    ".game_loop/bin/_gl_impl.py::_saggar_agent": "asks saggar to open the successor's terminal (#79), "
             "reporting through a (started, detail) pair. Its DECLINE arm is asserted directly "
             "in-suite: `successor` is run for real with saggar absent from PATH, and the run must "
             "say NOTHING STARTED, name the shim remedy, send the reader to the printed command and "
@@ -1322,41 +1322,41 @@ NOT_SWEPT = {
     # and the refusal is a die() in the caller that the suite asserts many times over. Neutering
     # them makes every claim refuse — noisy, not silent. The silent failure here is the INVERSE
     # (resolving a path it should not), and that mutation is outside this sweep's shape (INV6).
-    ".game_loop/bin/game_loop::resolve_read": "its None is the REFUSAL, and the refusal is loud — `claim --read` dies on it "
+    ".game_loop/bin/_gl_impl.py::resolve_read": "its None is the REFUSAL, and the refusal is loud — `claim --read` dies on it "
                     "and that death is asserted repeatedly. The silent direction is the inverse "
                     "(resolving what it should not), which is the mutation this sweep cannot make",
-    ".game_loop/bin/game_loop::resolve_env": "same as resolve_read, for a pin's anchor: None makes the command die, which is "
+    ".game_loop/bin/_gl_impl.py::resolve_env": "same as resolve_read, for a pin's anchor: None makes the command die, which is "
                    "asserted; the dangerous direction is accepting an anchor that does not exist",
 
     # --- EXCLUDED: loaders and normalizers. Their "nothing" is a state the caller branches on, not
     # a report that was withheld.
-    ".game_loop/bin/game_loop::sanitize_session": "a normalizer, not a detector — None means 'not a usable session id' and "
+    ".game_loop/bin/_gl_impl.py::sanitize_session": "a normalizer, not a detector — None means 'not a usable session id' and "
                         "the caller branches to repo-global state. Neutering it changes WHICH "
                         "state file is used, which fails loudly across the session-scoping tests",
-    ".game_loop/bin/game_loop::load_limits": "a loader — None is 'no limits file yet', the ordinary first-run state, and the "
+    ".game_loop/bin/_gl_impl.py::load_limits": "a loader — None is 'no limits file yet', the ordinary first-run state, and the "
                    "callers already treat it as empty ((load_limits() or {}))",
-    ".game_loop/bin/game_loop::installed_version": "a loader — None is 'no VERSION file', which is documented as the "
+    ".game_loop/bin/_gl_impl.py::installed_version": "a loader — None is 'no VERSION file', which is documented as the "
                          "game_loop source repo's own state. The producer that turns this into a "
                          "verdict is update_notice, and that IS swept",
-    ".game_loop/bin/game_loop::_scan_text": "None is a STATED skip ('too big to grep'), not a finding withheld; --expect "
+    ".game_loop/bin/_gl_impl.py::_scan_text": "None is a STATED skip ('too big to grep'), not a finding withheld; --expect "
                   "reports UNCHECKED rather than ✓ when it gets nothing, and that is asserted",
 
     # --- EXCLUDED: a formatter whose silence is configured, and helpers of producers now swept.
-    ".game_loop/bin/game_loop::flair_lines": "a formatter, and its empty list is a configured opt-out (no flair module) "
+    ".game_loop/bin/_gl_impl.py::flair_lines": "a formatter, and its empty list is a configured opt-out (no flair module) "
                    "rather than a verdict about anything. Silence here is the shipped default",
-    ".game_loop/bin/game_loop::_home_keyed": "helper of config_paths_report — its None is 'not under anyone's home', the "
+    ".game_loop/bin/_gl_impl.py::_home_keyed": "helper of config_paths_report — its None is 'not under anyone's home', the "
                    "ordinary case for every entry. config_paths_report is a MUTANTS entry and "
                    "sweeps both of this helper's arms",
-    ".game_loop/bin/game_loop::main_checkout": "helper of worktree_drift — its None is 'this IS the main checkout', the "
+    ".game_loop/bin/_gl_impl.py::main_checkout": "helper of worktree_drift — its None is 'this IS the main checkout', the "
                      "ordinary case. worktree_report is a MUTANTS entry",
-    ".game_loop/bin/game_loop::_same_bytes": "helper of worktree_drift — its None is UNREADABLE, which worktree_report turns "
+    ".game_loop/bin/_gl_impl.py::_same_bytes": "helper of worktree_drift — its None is UNREADABLE, which worktree_report turns "
                    "into an explicit UNKNOWN line rather than 'matching'; swept there",
-    ".game_loop/bin/game_loop::admit_distribution": "its verdict is delivered by die(), not by this return value — the "
+    ".game_loop/bin/_gl_impl.py::admit_distribution": "its verdict is delivered by die(), not by this return value — the "
                           "return is the record it writes afterwards. Neutering the body deletes "
                           "those refusals and would re-measure the dominance gate, which already "
                           "has its own MUTANTS entry",
 
-    ".game_loop/bin/game_loop::authorize_recurrence": "a pure reader over log.jsonl — [] means no "
+    ".game_loop/bin/_gl_impl.py::authorize_recurrence": "a pure reader over log.jsonl — [] means no "
                           "prior grant carries these words, never a finding withheld. Swept "
                           "through its only caller, recurrence_lines, which asserts both arms "
                           "beside each other: a first grant silent, a second distinct path loud",
@@ -1389,42 +1389,42 @@ NOT_SWEPT = {
         "main(). Neutered it finds NO programs, so its own gate passes over an empty set — and the "
         "assertion that there ARE programs to check is the guard against exactly that, sitting "
         "beside it where a reader will see it.",
-    ".game_loop/bin/game_loop::session_models":
+    ".game_loop/bin/_gl_impl.py::session_models":
         "reads the running model off the transcript. Its None is one of two REPORTED outcomes — "
         "model_report says 'could not be read' rather than staying quiet — and all four arms "
         "(found, last-wins, synthetic-skipped, absent) are asserted directly against a fixture "
         "transcript. Neutering it to None reproduces the arm the suite already drives.",
-    ".game_loop/bin/game_loop::write_model_verdict":
+    ".game_loop/bin/_gl_impl.py::write_model_verdict":
         "publishes the model verdict where a PARENT reads it. Its None means there was nothing to "
         "publish (no transcript, or no session), which the caller reports rather than swallows — "
         "`model` dies naming the reason. The file's existence and content are asserted directly in "
         "a sandbox, including the changed:true case, so sweeping it would re-measure through the "
         "verb what two paired assertions decide at the source.",
-    ".game_loop/bin/game_loop::model_report":
+    ".game_loop/bin/_gl_impl.py::model_report":
         "the status lines for the model. Its empty return means 'nothing declared and nothing "
         "readable', which is the OPTIONAL case and is asserted as its own arm alongside the match "
         "and the mismatch. Sweeping it would re-measure through status what three paired "
         "assertions decide at the source.",
-    ".game_loop/bin/game_loop::absorb_rate_limits":
+    ".game_loop/bin/_gl_impl.py::absorb_rate_limits":
         "the one place a rate_limits reading becomes the snapshot, extracted so the statusline tap "
         "and the spawned probe cannot drift apart. Its return is the windows dict, never a silence: "
         "an empty result means the reading carried no usable window, which the callers report "
         "explicitly. Neutering it to {} reproduces the no-windows path the suite already drives "
         "through both callers, and its paging and carry-forward behaviour are asserted through the "
         "statusline tests that predate the extraction.",
-    ".game_loop/bin/game_loop::_windows_claim_live":
+    ".game_loop/bin/_gl_impl.py::_windows_claim_live":
         "the positive-control half of one conditional-absence exercise. Its None is one of three "
         "reported outcomes rather than a silence, and all three are asserted directly in a sandbox: "
         "no control fired, confirmed live, and FALSIFIED by an unexpected window. Neutering it to "
         "None reproduces the first arm the suite already drives on purpose.",
-    ".game_loop/bin/game_loop::_statusline_claim_live":
+    ".game_loop/bin/_gl_impl.py::_statusline_claim_live":
         "the EXERCISE behind one host claim: it returns a description of live evidence, or None "
         "when there is none. Its None is not a silence-on-pass — it is one of two reported "
         "outcomes, and both are asserted directly in a sandbox (observed, not-observed, and a "
         "snapshot missing the field). Neutering it to None reproduces the arm the suite already "
         "drives on purpose, so sweeping it would re-measure through status what three paired "
         "assertions decide at the source.",
-    ".game_loop/bin/game_loop::installed_by":
+    ".game_loop/bin/_gl_impl.py::installed_by":
         "reads the packager marker that decides WHICH upgrade command the update notice names. "
         "Neutered it returns None and the notice falls back to the curl — which is precisely the "
         "reported defect, and the suite asserts both branches by behaviour: a marked install must "

@@ -44,7 +44,11 @@ def make_sandbox():
     proj = tempfile.mkdtemp(prefix="gameloop-test-")
     dst = os.path.join(proj, ".game_loop")
     os.makedirs(os.path.join(dst, "bin"))
-    for f in ("game_loop", "watchdog", "guard-writes.sh", "guard-writes-impl.sh",
+    # _gl_impl.py IS THE TOOL. `game_loop` is a ~30-line door that imports it, so a fixture that
+    # copies the door and not the room gets a binary that cannot start — which is not a subtle
+    # failure but is a CONFUSING one: 95 assertions failed at once and none of them mentioned the
+    # missing file. install.sh had the identical explicit list and the identical trap.
+    for f in ("game_loop", "_gl_impl.py", "watchdog", "guard-writes.sh", "guard-writes-impl.sh",
               "guard-mcp.sh", "guard-mcp-impl.sh", "verify", "flair.py", "notify.py",
               "limit-probe.sh"):
         shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f), os.path.join(dst, "bin", f))
@@ -2096,7 +2100,7 @@ def main():
         # threshold stops crossing it the day the threshold moves, and passes while testing nothing.
         PIN_PROBE_MAX_FOR_TEST = int(re.search(r"PIN_PROBE_MAX = 1 << (\d+)",
                                                read_or_empty(os.path.join(
-                                                   SRC_GAME_LOOP, "bin", "game_loop"))).group(1))
+                                                   SRC_GAME_LOOP, "bin", "_gl_impl.py"))).group(1))
         PIN_PROBE_MAX_FOR_TEST = 1 << PIN_PROBE_MAX_FOR_TEST
         _anch = os.path.join(_pinproj, "anchor-file.txt")
         with open(_anch, "w") as f:
@@ -3513,7 +3517,7 @@ def main():
 
             # The reported behaviour must be the ENFORCED behaviour: `status` keeps its own copy of
             # the deploy verbs, and a status line that understates a rail's reach is worse than none.
-            src_gl = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+            src_gl = open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read()
             src_gd = open(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh")).read()
             def pick(s, pat):
                 m = _re.search(pat, s, _re.S)
@@ -4861,7 +4865,7 @@ def main():
                   not os.path.exists(_shipped))
 
         # CONFIG-AUTHORED ONLY. A wait the agent can declare for itself is the off switch.
-        _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        _bin_src = open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read()
         check("no verb can set the probe — it is config-authored only, never runtime-settable",
               "waiting_probe" not in after_marker(_bin_src, "def main(")
               and "def main(" in _bin_src)
@@ -5000,7 +5004,7 @@ def main():
               bool(_uw) and _uw[-1]["output_tokens"] == 150)
         # It must gate NOTHING. A threshold today would be invented, which is the defect the landed
         # half of #45 fixed; this is the evidence a real one would need first.
-        with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
+        with open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")) as f:
             _gsrc = f.read()
         check("...and nothing compares it against a threshold: no gate without a logged, observed "
               "failure, and there is not one yet",
@@ -5172,7 +5176,7 @@ def main():
     # a mid-prose mention the ending contradicts, and a guard that fires on an agent QUOTING a
     # marker phrase while writing the postmortem is a guard that gets switched off.
     print("the closing a stop gate reads is the TAIL, unquoted and present-tense:")
-    _gsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    _gsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
     _cm = {"re": re}
     exec(compile(_gsrc[_gsrc.index("def _closing(text, lines=4):"):
                        _gsrc.index("def _promised_to_continue(text):")],
@@ -5827,7 +5831,7 @@ def main():
         # NEW reader added without the merge, and no behavioural assertion catches that until
         # something silently ignores a setting somebody wrote down.
         _readers = []
-        for _f in ("game_loop", "watchdog", "notify.py", "guard-writes-impl.sh",
+        for _f in ("_gl_impl.py", "watchdog", "notify.py", "guard-writes-impl.sh",
                    "guard-mcp-impl.sh"):
             with open(os.path.join(SRC_GAME_LOOP, "bin", _f)) as fh:
                 _src = fh.read()
@@ -5847,7 +5851,7 @@ def main():
         # in an exclusion list and never parses it, and a substring scan called that a reader. The
         # AST answers the question the substring only approximates.
         _st_readers, _st_missing = [], []
-        for _f in ("game_loop", "watchdog", "notify.py", "verify", "flair.py"):
+        for _f in ("_gl_impl.py", "watchdog", "notify.py", "verify", "flair.py"):
             _src2 = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", _f))
             if not any(isinstance(_n, ast.Assign)
                        and any(getattr(_t, "id", None) == "STATE_F" for _t in _n.targets)
@@ -5920,7 +5924,7 @@ def main():
                   "import importlib.util,os,json\n"
                   "from importlib.machinery import SourceFileLoader\n"
                   f"os.environ['GAME_LOOP_HOME']={os.path.join(cl, '.game_loop')!r}\n"
-                  f"l=SourceFileLoader('gl',{os.path.join(cl, '.game_loop', 'bin', 'game_loop')!r})\n"
+                  f"l=SourceFileLoader('gl',{os.path.join(cl, '.game_loop', 'bin', '_gl_impl.py')!r})\n"
                   "s=importlib.util.spec_from_loader('gl',l); m=importlib.util.module_from_spec(s)\n"
                   "try: l.exec_module(m)\n"
                   "except SystemExit: pass\n"
@@ -6976,7 +6980,7 @@ def main():
 
         # THE FILE OPTION IS DERIVED, NOT LISTED. The defect being fixed is a rule that depended on
         # somebody remembering, so the safe path must not depend on somebody remembering either.
-        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read()
         # READ THE TUPLE, NOT THE TEXT AROUND IT. The first version pulled these out with
         # re.findall(r'"(--[a-z-]+)"') over the source between the parens — and a guard that matches
         # a quoted word is satisfied by PROSE about the thing. The comments inside PROSE_OPTS
@@ -7435,7 +7439,8 @@ def main():
     try:
         def _mkproj(path):
             os.makedirs(os.path.join(path, ".game_loop", "bin"))
-            for f in ("game_loop", "guard-writes.sh", "guard-writes-impl.sh", "guard-mcp.sh",
+            for f in ("game_loop", "_gl_impl.py", "guard-writes.sh", "guard-writes-impl.sh",
+                      "guard-mcp.sh",
                       "guard-mcp-impl.sh", "watchdog", "verify", "flair.py", "notify.py"):
                 shutil.copy(os.path.join(SRC_GAME_LOOP, "bin", f),
                             os.path.join(path, ".game_loop", "bin", f))
@@ -7523,7 +7528,7 @@ def main():
     # moment already existed inside `sessionstart` and was reachable from nothing anybody reads.
     # WHAT THIS DOES NOT CHECK (INV6): that the prose is right, or explains anything. A name
     # appearing is the floor, not the goal, and no grep can hold the rest.
-    _gl_ast = ast.parse(open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read())
+    _gl_ast = ast.parse(open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read())
     _moments = []
     for _n in ast.walk(_gl_ast):
         if isinstance(_n, ast.Assign) and any(getattr(t, "id", "") == "TRIGGER_EVENTS"
@@ -8299,7 +8304,7 @@ def main():
     cc_target = tempfile.mkdtemp(prefix="gameloop-central-target-")
     cc_plain = tempfile.mkdtemp(prefix="gameloop-central-plain-")
     try:
-        gl_bin = os.path.join(SRC_GAME_LOOP, "bin", "game_loop")
+        gl_bin = os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")
 
         # Populate the shared central copy from THIS repo's own HEAD — the real, already-tested
         # self --pin machinery, just pointed at an arbitrary path instead of the repo-relative
@@ -8793,7 +8798,7 @@ def main():
     check("the two producers gating turn-end are SWEPT with measured floors, not excluded — an "
           "entry in NOT_SWEPT is invisible to the instrument by construction, so paying 'floor owed "
           "on the next sweep' meant ceasing to exclude them",
-          all(f'game_loop::{n}"' in _mut_src for n in ("retro_overdue", "retro_debt_open"))
+          all(f'_gl_impl.py::{n}"' in _mut_src for n in ("retro_overdue", "retro_debt_open"))
           and not [k for k in _ns
                    if k.endswith("::retro_overdue") or k.endswith("::retro_debt_open")])
     # THE CATEGORY IS NOW EMPTY, AND THAT IS THE OUTCOME THE QUEUE EXISTS FOR. This used to assert
@@ -9423,7 +9428,7 @@ def main():
         ("effectors_report", "sym"), ("fixes_report", "sym"), ("pins_report", "sym"),
         ("triggers_report", "mark"),
     ]
-    _gsites = _glyph_var_sites(read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop")))
+    _gsites = _glyph_var_sites(read_or_empty(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py")))
     check("every place a SYMBOL is carried by a variable is one of the seven with a line-scoped "
           "assertion, and an eighth arrives as a failure — necessary, and NOT sufficient: see the "
           "wider enumeration below, which is the class this one is a subset of",
@@ -9537,7 +9542,7 @@ def main():
           sorted(_SYMBOL_MUTATION_VERIFIED) == sorted(_SYMBOL_PINNED))
 
     _multi = _multi_symbol_producers(read_or_empty(
-        os.path.join(REPO, ".game_loop", "bin", "game_loop")))
+        os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py")))
     check("every producer that can emit MORE THAN ONE symbol is on one of the two recorded lists "
           "— pinned, or owed. A new one fails here so somebody decides which, rather than it "
           "joining the majority by default",
@@ -9597,7 +9602,7 @@ def main():
         return got
 
     _gates = set()
-    for _bf in ("game_loop", "verify", "watchdog", "notify.py"):
+    for _bf in ("_gl_impl.py", "verify", "watchdog", "notify.py"):
         _gates |= _env_gates(read_or_empty(os.path.join(REPO, ".game_loop", "bin", _bf)))
     check("every environment variable a shipped program GATES on is one the suite controls — a "
           "condition whose value only production supplies runs green forever while never once "
@@ -9845,7 +9850,7 @@ def main():
                     break
         return sorted(set(_bad))
 
-    _log_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+    _log_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
     _wf = _whole_file_log_readers(_log_src)
     check("no reader of log.jsonl loses the WHOLE file to one torn line — the loop belongs inside "
           "the try, not the other way round, and an append-only file three programs write to has a "
@@ -9887,8 +9892,11 @@ def main():
     # Cheap enough to be a test rather than an audit: pure AST over the shipped modules plus a text
     # scan of the shell guards, no suite run, no judgement. That last part is why this one is a
     # standing check and the exclusion-reason audit is not — there is nothing here to decide.
+    # `_gl_impl.py` AND NOT `game_loop`: the entry point is a ~30-line door that imports it, so a
+    # scan pointed at the door reads thirty lines, finds nothing, and PASSES — vacuously. The room
+    # is where every shipped function lives.
     _SHIPPED_PY = [os.path.join(SRC_GAME_LOOP, "bin", f) for f in
-                   ("game_loop", "watchdog", "notify.py", "verify", "flair.py")]
+                   ("_gl_impl.py", "watchdog", "notify.py", "verify", "flair.py")]
     _SHIPPED_SH = [os.path.join(SRC_GAME_LOOP, "bin", f) for f in
                    ("guard-writes-impl.sh", "guard-mcp-impl.sh", "guard-writes.sh",
                     "guard-mcp.sh")] + [os.path.join(REPO, "install.sh")]
@@ -9897,7 +9905,7 @@ def main():
         _defs, _refs = {}, set()
         for _p in _SHIPPED_PY:
             _src = read_or_empty(_p)
-            if extra_def and _p.endswith("game_loop"):
+            if extra_def and _p.endswith("_gl_impl.py"):
                 _src += f"\n\ndef {extra_def}():\n    return None\n"
             _t = ast.parse(_src)
             for _f in ast.walk(_t):
@@ -10380,7 +10388,7 @@ def main():
                                         "message": {"model": m, "content": []}}) + "\n")
 
         _mld = importlib.machinery.SourceFileLoader(
-            "gl_m", os.path.join(mw, ".game_loop", "bin", "game_loop"))
+            "gl_m", os.path.join(mw, ".game_loop", "bin", "_gl_impl.py"))
         _g = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_m", _mld))
         _mld.exec_module(_g)
 
@@ -10460,7 +10468,7 @@ def main():
     lw2 = make_sandbox()
     try:
         _ld2 = importlib.machinery.SourceFileLoader(
-            "gl_lim", os.path.join(lw2, ".game_loop", "bin", "game_loop"))
+            "gl_lim", os.path.join(lw2, ".game_loop", "bin", "_gl_impl.py"))
         _gl2 = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lim", _ld2))
         _ld2.exec_module(_gl2)
 
@@ -10488,7 +10496,7 @@ def main():
 
         # ONLY THE SNAPSHOT MOVES. Sharing session state, the edited set, claims or authorizations
         # would collapse the isolation the worktree exists for.
-        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        _src = open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read()
         check("...and ONLY the snapshot moved: state, claims and authorizations still resolve under "
               "this tree's own ROOT, which is the isolation a worktree is for",
               'STATE_F = ' in _src and "os.path.join(ROOT" in _src)
@@ -10529,7 +10537,7 @@ def main():
         # carries a usable count or a null current_usage, and the only way to find out is to run a
         # probe. So this CAPTURES and asserts nothing about meaning.
         _ldp = importlib.machinery.SourceFileLoader(
-            "gl_probe", os.path.join(pw2, ".game_loop", "bin", "game_loop"))
+            "gl_probe", os.path.join(pw2, ".game_loop", "bin", "_gl_impl.py"))
         _glp = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_probe", _ldp))
         _ldp.exec_module(_glp)
         # NOT named _env: this suite already has an _env() helper that closures capture, and
@@ -10581,7 +10589,7 @@ def main():
         # THE INTERVAL SCALES WITH WHAT IS AT STAKE. A fixed one is wrong at both ends: far from the
         # limit it burns tokens to learn nothing, near it, it learns too late.
         _ld = importlib.machinery.SourceFileLoader(
-            "gl_lp", os.path.join(pw2, ".game_loop", "bin", "game_loop"))
+            "gl_lp", os.path.join(pw2, ".game_loop", "bin", "_gl_impl.py"))
         _glm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lp", _ld))
         _ld.exec_module(_glm)
         _pc = {"min_interval_sec": 300, "max_interval_sec": 3600}
@@ -10638,7 +10646,7 @@ def main():
               "skipping" in _peer.stdout and "account-scoped" in _peer.stdout)
         # A LEASE, NOT A LOCK HELD ACROSS THE SPAWN: the probe takes ~75s and the limits lock is
         # what every statusline refresh takes, so holding it would stall the whole checkout.
-        _gl_src = open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")).read()
+        _gl_src = open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")).read()
         check("...and the claim is a LEASE that expires, so a session dying mid-probe costs one "
               "duplicate rather than silencing every other session indefinitely",
               "PROBE_LEASE_SEC = 300" in _gl_src)
@@ -10775,7 +10783,7 @@ def main():
         # NESTED, not just top level: the key that would falsify this claim is the one whose real
         # shape put the windows under "windows", which already fooled one exercise in this file.
         _ldx = importlib.machinery.SourceFileLoader(
-            "gl_hook", os.path.join(xw, ".game_loop", "bin", "game_loop"))
+            "gl_hook", os.path.join(xw, ".game_loop", "bin", "_gl_impl.py"))
         _glx = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_hook", _ldx))
         _ldx.exec_module(_glx)
         check("the scan finds a rate-limit key NESTED in a payload, not only at the top level — a "
@@ -10872,7 +10880,7 @@ def main():
     # checked against is not the one running; ✓ says it is; · says nobody knows. Reading ✓ for
     # either of the others is how a stale claim about the host gets leaned on.
     _xl = importlib.machinery.SourceFileLoader(
-        "gl_claims", os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+        "gl_claims", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
     _xm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_claims", _xl))
     _xl.exec_module(_xm)
     _xdir = tempfile.mkdtemp(prefix="gameloop-claims-")
@@ -11409,7 +11417,7 @@ def main():
     # UNKNOWN IS AN EXPLICIT NULL WITH ITS REASON, never an omitted key: absent-because-unknowable
     # and absent-because-nobody-wrote-it are the pair this file exists to keep apart, and
     # `running_host_version()` already returns its own why-not.
-    _obs_src = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    _obs_src = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
     check("both observation writers record the host version beside the reading — a claim exercised "
           "live against a build nobody named is a date, not an attribution, and somebody has to "
           "rebuild it from mtimes",
@@ -11478,7 +11486,7 @@ def main():
                                  "nothing was established either way"))
     # A producer renamed out from under the sweep is the quiet failure it could most easily have:
     # neuter() would not find it, the entry would report nothing, and the count would look fine.
-    with open(os.path.join(SRC_GAME_LOOP, "bin", "game_loop")) as f:
+    with open(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")) as f:
         gl_src = f.read()
     # Keys are "<relpath>::<name>" now (#44): the denominator is every source file, not one, and a
     # bare-name namespace could not tell two implementations of one name apart.
@@ -11521,12 +11529,17 @@ def main():
 
     # BEHAVIOURAL: drive the real main() with the suite stubbed, and make completion order the
     # REVERSE of MUTANTS order. If the emit logic followed completion, this is what would catch it.
-    _fake = [("alpha -> x", ".game_loop/bin/game_loop::unpushed_warning", "    return None\n",
-              ["unpushed"], None, 0),
-             ("beta -> x", ".game_loop/bin/game_loop::aggregate_tell", "    return None\n",
-              ["aggregate"], None, 0),
-             ("gamma -> x", ".game_loop/bin/game_loop::ruled_out", "    return None\n",
-              ["ruled"], None, 0)]
+    # PRODUCERS IN A FILE THIS FIXTURE DOES NOT CARE ABOUT. It is testing REPORT ORDER, not the
+    # core, and pointing it at the core coupled it to where the core lives: renaming the entry point
+    # to a stub + `_gl_impl.py` broke this check for a reason that has nothing to do with ordering,
+    # because sweep.main() archives HEAD and the new name was not in it yet. bin/watchdog's
+    # producers are stable, real, and irrelevant to what is being asserted.
+    _fake = [("alpha -> x", ".game_loop/bin/watchdog::superseded", "    return False\n",
+              ["superseded"], None, 0),
+             ("beta -> x", ".game_loop/bin/watchdog::handed_off_quiet", "    return None\n",
+              ["handed off"], None, 0),
+             ("gamma -> x", ".game_loop/bin/watchdog::_age_sec", "    return None\n",
+              ["age"], None, 0)]
     _delays = {0: 0.45, 1: 0.25, 2: 0.05}     # first submitted finishes LAST
     _calls = []
 
@@ -11823,7 +11836,7 @@ def main():
     said = []
     real_found = sweep.all_candidates()
     orphaned = dict(real_found)
-    orphaned[".game_loop/bin/game_loop::gl_test_undecided_producer"] = (
+    orphaned[".game_loop/bin/_gl_impl.py::gl_test_undecided_producer"] = (
         ".game_loop/bin/game_loop", "gl_test_undecided_producer")
     rc_bad = sweep.coverage_gate(orphaned, out=said.append)
     rc_good = sweep.coverage_gate(real_found, out=said.append)
@@ -11863,7 +11876,8 @@ def main():
     # now comes from git rather than from anyone's memory.
     _srcs = sweep.source_files()
     check("the source set is asked of git and spans the whole repo, not one file",
-          len(_srcs) > 1 and ".game_loop/bin/game_loop" in _srcs)
+          len(_srcs) > 1 and ".game_loop/bin/_gl_impl.py" in _srcs
+          and ".game_loop/bin/game_loop" in _srcs)
     # AND IT DOES NOT COLLAPSE WHERE GIT CANNOT ANSWER. An EXTRACTED tree — the shape a packager
     # gates, with no .git — used to fall back to the single file, so the accounting reported
     # "0 unaccounted" over a set of one, silently, exactly where it mattered most. That is #44
@@ -11979,7 +11993,7 @@ def main():
                         ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
                                                       "upstream.json", "config.local.json"))
         _uld = importlib.machinery.SourceFileLoader(
-            "gl_up", os.path.join(_uh, "bin", "game_loop"))
+            "gl_up", os.path.join(_uh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _uh
         _u = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_up", _uld))
         _uld.exec_module(_u)
@@ -12178,7 +12192,7 @@ def main():
                         ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d"))
-        _l3 = importlib.machinery.SourceFileLoader("gl_u3", os.path.join(_u3h, "bin", "game_loop"))
+        _l3 = importlib.machinery.SourceFileLoader("gl_u3", os.path.join(_u3h, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _u3h
         _g3 = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_u3", _l3))
         _l3.exec_module(_g3)
@@ -12330,7 +12344,7 @@ def main():
                         ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d"))
-        _rl = importlib.machinery.SourceFileLoader("gl_rn", os.path.join(_rnh, "bin", "game_loop"))
+        _rl = importlib.machinery.SourceFileLoader("gl_rn", os.path.join(_rnh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _rnh
         _gr = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rn", _rl))
         _rl.exec_module(_gr)
@@ -12382,7 +12396,7 @@ def main():
                         ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d"))
-        _mpl = importlib.machinery.SourceFileLoader("gl_mp", os.path.join(_mph, "bin", "game_loop"))
+        _mpl = importlib.machinery.SourceFileLoader("gl_mp", os.path.join(_mph, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _mph
         _gm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_mp", _mpl))
         _mpl.exec_module(_gm)
@@ -12508,7 +12522,7 @@ def main():
         # the reporter's own first cut matched the marker inside a PARSE ERROR and called a dead
         # anchor live, which is the exact confusion these reasons exist to prevent.
         _gml = importlib.machinery.SourceFileLoader(
-            "gl_ml", os.path.join(SRC_GAME_LOOP, "bin", "game_loop"))
+            "gl_ml", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
         _mlm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_ml", _gml))
         _gml.exec_module(_mlm)
         _MARK = _mlm._MUTATE_MARKER
@@ -12686,7 +12700,7 @@ def main():
                         ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d"))
-        _rl = importlib.machinery.SourceFileLoader("gl_rr", os.path.join(_rrh, "bin", "game_loop"))
+        _rl = importlib.machinery.SourceFileLoader("gl_rr", os.path.join(_rrh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _rrh
         _grr = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rr", _rl))
         _rl.exec_module(_grr)
@@ -12734,7 +12748,7 @@ def main():
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d",
                                                       "UPSTREAM_LEDGER.md"))
-        _cl = importlib.machinery.SourceFileLoader("gl_ct", os.path.join(_cth, "bin", "game_loop"))
+        _cl = importlib.machinery.SourceFileLoader("gl_ct", os.path.join(_cth, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _cth
         _gc = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_ct", _cl))
         _cl.exec_module(_gc)
@@ -12823,7 +12837,7 @@ def main():
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d",
                                                       "UPSTREAM_LEDGER.md"))
-        _dl = importlib.machinery.SourceFileLoader("gl_df", os.path.join(_dfh, "bin", "game_loop"))
+        _dl = importlib.machinery.SourceFileLoader("gl_df", os.path.join(_dfh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _dfh
         _gd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_df", _dl))
         _dl.exec_module(_gd)
@@ -12887,7 +12901,7 @@ def main():
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d",
                                                       "UPSTREAM_LEDGER.md"))
-        _f3l = importlib.machinery.SourceFileLoader("gl_f3", os.path.join(_f3h, "bin", "game_loop"))
+        _f3l = importlib.machinery.SourceFileLoader("gl_f3", os.path.join(_f3h, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _f3h
         _gf = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_f3", _f3l))
         _f3l.exec_module(_gf)
@@ -13110,7 +13124,7 @@ def main():
             subprocess.run(_rg + ["add", "-A"], check=True)
             subprocess.run(_rg + ["commit", "-q", "-m", msg], check=True)
 
-        _rdl = importlib.machinery.SourceFileLoader("gl_rd", os.path.join(_rdh, "bin", "game_loop"))
+        _rdl = importlib.machinery.SourceFileLoader("gl_rd", os.path.join(_rdh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _rdh
         _grd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rd", _rdl))
         _rdl.exec_module(_grd)
@@ -13212,7 +13226,7 @@ def main():
 
     # ---- #85: a run that selected ZERO tests is not a result in either direction ----
     _sl = importlib.machinery.SourceFileLoader(
-        "gl_sel", os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+        "gl_sel", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
     _gsel = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_sel", _sl))
     _sl.exec_module(_gsel)
     check("#85: a runner reporting zero selected is READ as zero, across the shapes runners use",
@@ -13325,7 +13339,7 @@ def main():
                                                       "upstream.json", "config.local.json",
                                                       "triggers.json", "triggers.d",
                                                       "UPSTREAM_LEDGER.md", ".game_loop_self"))
-        _pdl = importlib.machinery.SourceFileLoader("gl_pd", os.path.join(_pdh, "bin", "game_loop"))
+        _pdl = importlib.machinery.SourceFileLoader("gl_pd", os.path.join(_pdh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _pdh
         _gpd = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_pd", _pdl))
         _pdl.exec_module(_gpd)
@@ -13431,7 +13445,7 @@ def main():
                                                       "triggers.json", "triggers.d",
                                                       "UPSTREAM_LEDGER.md", ".game_loop_self"))
         os.makedirs(os.path.join(_lkh, "triggers.d"), exist_ok=True)
-        _lkl = importlib.machinery.SourceFileLoader("gl_lk", os.path.join(_lkh, "bin", "game_loop"))
+        _lkl = importlib.machinery.SourceFileLoader("gl_lk", os.path.join(_lkh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _lkh
         _glk = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_lk", _lkl))
         _lkl.exec_module(_glk)
@@ -13844,7 +13858,10 @@ def main():
         which is the moment this check exists for.
         """
         opts, keys = set(), set()
-        for _rel in (".game_loop/bin/game_loop", ".game_loop/bin/watchdog",
+        # `_gl_impl.py` is where every add_argument lives now; the entry point is a door. A scan
+        # pointed at the door finds no options and the check fails LOUDLY here — but the same
+        # mistake in a scan phrased as an absence would have passed in silence.
+        for _rel in (".game_loop/bin/_gl_impl.py", ".game_loop/bin/watchdog",
                      ".game_loop/bin/notify.py", "install.sh"):
             _src = read_or_empty(os.path.join(REPO, _rel))
             opts |= set(re.findall(r'add_argument\(\s*"(--[a-z][a-z0-9-]*)"', _src))
@@ -13941,7 +13958,7 @@ def main():
         shutil.copytree(os.path.join(REPO, ".game_loop", "bin"), os.path.join(_rgh, "bin"))
         for _f in ("config.json", "verify.yaml", "INVARIANTS.md"):
             shutil.copy(os.path.join(REPO, ".game_loop", _f), os.path.join(_rgh, _f))
-        _rgl = importlib.machinery.SourceFileLoader("gl_rg", os.path.join(_rgh, "bin", "game_loop"))
+        _rgl = importlib.machinery.SourceFileLoader("gl_rg", os.path.join(_rgh, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = _rgh
         _grg = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_rg", _rgl))
         _rgl.exec_module(_grg)
@@ -14195,7 +14212,7 @@ def main():
     # the watchdog live — and the chat transport's own doctor said no wake had landed. I hit the
     # identical thing the same week, for 303 minutes.
     _wk = importlib.machinery.SourceFileLoader(
-        "gl_wk", os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+        "gl_wk", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
     os.environ["GAME_LOOP_HOME"] = os.path.join(REPO, ".game_loop")
     _gwk = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_wk", _wk))
     _wk.exec_module(_gwk)

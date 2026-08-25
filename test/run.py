@@ -8724,10 +8724,27 @@ def main():
           "category reads as 'nothing is owed' rather than as a check with nothing to look at",
           _gaps({"a::b": "KNOWN GAP. owed a floor", "c::d": "a loader; None is the ordinary answer"})
           == ["a::b"])
-    check("...and THIS repo declares no KNOWN GAP today — seven were closed by measuring them, and "
-          "the next one anybody adds shows up here. Measured, and a fact about today rather than a "
-          "guarantee: " + (", ".join(_gaps(_ns)) or "none"),
-          _gaps(_ns) == [])
+    # THE QUEUE WENT FROM EMPTY BACK TO FIVE, and this check is why that is a decision rather than a
+    # drift. It read "no KNOWN GAP today" until 2026-08-25, when `_returns_nothing` started counting
+    # `""` as a nothing and thirteen producers became candidates for the first time — not swept, not
+    # excluded, never enumerated until then. Eight are the suite's own helpers and are excluded with
+    # a reason; five are product producers that SHOULD be swept and are not yet, so they are declared
+    # here instead of sitting invisible. An empty queue was the outcome to aim for and it was also
+    # true only of the producers anybody had thought to enumerate.
+    _expected_gaps = [
+        ".game_loop/bin/flair.py::assist",
+        ".game_loop/bin/game_loop::_closing",
+        ".game_loop/bin/game_loop::run_verify_check",
+        ".game_loop/bin/verify::duplicate_key_tail",
+        ".game_loop/bin/verify::unchecked_tail",
+    ]
+    check("...and THIS repo's declared KNOWN GAPs are exactly the five the empty-string detector "
+          "surfaced — a fact about today, and the next one anybody adds or closes shows up HERE "
+          "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
+          _gaps(_ns) == _expected_gaps)
+    check("...and every one of them owes a FLOOR rather than an argument — each is a producer this "
+          "repo ships, not a helper the suite happens to use",
+          all(g.startswith(".game_loop/bin/") for g in _gaps(_ns)))
 
     print("a tree's FIRST retro counts its chapter, rather than reporting nothing (#77):")
     # "No previous retro" returned "this is the first" and counted NOTHING, so everything encoded
@@ -11156,6 +11173,31 @@ def main():
     _slk = [("a", 24, "ok", 1), ("b", 10, "ok", 9), ("c", None, "ok", 3),
             ("d", 12, sweep.NOT_MEASURED, 0), ("e", 8, "ok", 4)]
     _flagged = {n for _f, _k, n in sweep.stale_low_floors(_slk)}
+    # THE REPORT THAT MAKES A TOLERATED MERGE SAFE, and nothing had ever exercised it. #105 chose
+    # to MERGE a manifest key declared twice rather than refuse — right for a gate, because it fails
+    # toward running more checks than intended. That choice is only safe because the next writer is
+    # TOLD, and `duplicate_key_tail` is the telling. It had no assertion anywhere: the tolerance was
+    # tested, the signal that justifies it was not. (A sibling's rule: any tolerance that is safe
+    # only in a file's current state is a trap armed for the next writer.)
+    _vsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "verify"))
+    _vmod = {}
+    exec(compile(_vsrc[_vsrc.index("DUPLICATE_KEYS = {}"):_vsrc.index("def load_manifest")],
+                 "verify-slice", "exec"), _vmod)
+    _vmod["DUPLICATE_KEYS"].clear()
+    check("no duplicate key means NO tail at all — the notice is the exception, not a banner on "
+          "every run",
+          _vmod["duplicate_key_tail"]() == "")
+    _vmod["DUPLICATE_KEYS"][".game_loop/bin/guard-writes-impl.sh"] = 2
+    _dt = _vmod["duplicate_key_tail"]()
+    check("a key declared twice is REPORTED, so a merge nobody was told about cannot happen twice",
+          "DUPLICATE RULE KEY" in _dt)
+    check("...and it names the path and the count, which is what a reader needs to go fix the "
+          "manifest rather than to feel warned",
+          "guard-writes-impl.sh" in _dt and "declared 2x" in _dt)
+    check("...and it says what the OLD behaviour was — a repeated key used to discard the rule "
+          "declared first, in silence — because that is the bug this tolerance replaced",
+          "DISCARD" in _dt and "silence" in _dt)
+
     check("a floor that would permit losing more than HALF of what is measured is reported — the "
           "bound states the size of the blind spot rather than an opinion about drift",
           "a" in _flagged)

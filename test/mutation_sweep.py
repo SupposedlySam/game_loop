@@ -1122,6 +1122,42 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
+    # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not
+    # excluded, NEVER ENUMERATED. Same hole as the tuple-payload one, different shape. They are
+    # decided here rather than left to appear as a silent gap.
+    #
+    # THE SUITE'S OWN HELPERS. Neutering one of these does not measure whether anything asserts its
+    # behaviour — it measures HOW MANY ASSERTIONS USE IT, which is a popularity count wearing a
+    # coverage verdict. `read_or_empty` alone would redden hundreds and report as the best-covered
+    # producer in the repo while proving nothing about itself. That is the collateral-kill problem
+    # with no genuine kills left underneath it.
+    "test/run.py::read_or_empty": "a suite helper: neutering it reddens every assertion that reads "
+        "a file, which counts users rather than coverage of the helper",
+    "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "
+        "than split, so a renamed heading fails HERE) is asserted directly elsewhere",
+    "test/run.py::why": "a suite helper for rendering a refusal reason in a message",
+    "test/run.py::_ssctx": "a suite fixture helper",
+    "test/run.py::_ask": "a suite fixture helper",
+    "test/run.py::_pol": "a suite fixture helper",
+    "test/run.py::_guard_note": "a suite fixture helper that reads a guard's additionalContext",
+    "test/run.py::_guard_block": "a suite fixture helper that reads a guard's refusal",
+    #
+    # KNOWN GAPs — product producers that SHOULD be swept and are not yet. Declared so the run
+    # reports them every time rather than letting the number sit at a comfortable 0 undecided.
+    ".game_loop/bin/verify::duplicate_key_tail": "KNOWN GAP — the report that warns the next writer "
+        "a manifest key was declared twice and MERGED. It is the reason this whole class was found: "
+        "nothing had ever exercised it, so the signal that makes a tolerated merge safe was itself "
+        "unproven. Assertions added 2026-08-25; a floor is owed at the next full sweep.",
+    ".game_loop/bin/verify::unchecked_tail": "KNOWN GAP — the coverage tail naming files no rule "
+        "claims. Same shape as duplicate_key_tail and unmeasured for the same reason.",
+    ".game_loop/bin/game_loop::run_verify_check": "KNOWN GAP — and the most load-bearing of the "
+        "five: it answers whether a gated file's checks have run since it changed, which is what "
+        "the commit gate refuses on. Returns \"\" for 'nothing stale', so it was invisible.",
+    ".game_loop/bin/game_loop::_closing": "KNOWN GAP — renders the closing line of a refusal.",
+    ".game_loop/bin/flair.py::assist": "KNOWN GAP — flair only, and the one file where fun lives, "
+        "so its silence costs a joke rather than a verdict.",
+
     "test/run.py::dig": "walks a nested structure and returns None at the first missing key, "
             "inside the suite. It exists so a guarded read whose result is SUBSCRIPTED fails one "
             "assertion instead of ending the run — the crash that kept six producers outside this "
@@ -1401,6 +1437,15 @@ def _returns_nothing(ret):
     if isinstance(v, ast.Constant) and (v.value is None or v.value is False):
         return True
     if isinstance(v, ast.List) and not v.elts:        # `return []`
+        return True
+    # AND THE EMPTY STRING, which is how every REPORT in this project says "nothing to report":
+    # duplicate_key_tail, unchecked_tail, run_verify_check, _closing. Thirteen producers whose
+    # nothing is `""` sat outside the denominator entirely — not swept, not excluded, never
+    # enumerated — which is the same hole this function closed for tuples one lesson ago, in a
+    # different shape. Found 2026-08-25 from a sibling's rule about tolerances that are safe only in
+    # a file's current state; `duplicate_key_tail` is the report that WARNS the next writer about a
+    # merged duplicate key, and nothing anywhere had ever exercised it.
+    if isinstance(v, ast.Constant) and isinstance(v.value, str) and v.value == "":
         return True
     # AND INSIDE A TUPLE, IN THE PAYLOAD SLOT (#76 fallout). A producer whose contract is
     # `(finding, why)` or `(allow, reason, log)` reports its nothing in the FIRST position —

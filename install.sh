@@ -894,6 +894,12 @@ if [ "$CENTRAL" = 1 ]; then
      "$SRC/templates/central-shims/guard-writes.sh" "$SRC/templates/central-shims/guard-mcp.sh" \
      "$SRC/templates/central-shims/verify" \
      "$TARGET/.game_loop/bin/"
+  # A door without its room would be a broken install — but it cannot reach here. The payload
+  # completeness probe above (`game_loop owned --porcelain`, ~line 737) runs the payload's OWN
+  # entry point, so a stub whose module is missing dies on ImportError there and the install
+  # refuses with "payload looks incomplete" before any copy happens. A second refusal at this
+  # point was written and then removed: it never fired, and a guard that cannot fire reads as
+  # protection while providing none (#111).
   chmod +x "$TARGET/.game_loop/bin/game_loop" "$TARGET/.game_loop/bin/watchdog" \
            "$TARGET/.game_loop/bin/guard-writes.sh" "$TARGET/.game_loop/bin/guard-mcp.sh" \
            "$TARGET/.game_loop/bin/verify"
@@ -916,7 +922,16 @@ else
   # _gl_impl.py IS THE TOOL; bin/game_loop is a ~30-line door that imports it (so Python caches the
   # bytecode instead of re-parsing 10k lines on all 3,126 spawns a suite makes). Ship the door
   # without the room and every install is a stub importing a module that is not there.
-  cp "$SRC/.game_loop/bin/game_loop" "$SRC/.game_loop/bin/_gl_impl.py" \
+  #
+  # COPIED ONLY IF THE PAYLOAD HAS IT (#111), and this is a VERSION-SKEW fix rather than a nicety.
+  # The documented provisioning shape pins the payload by ref and fetches THIS INSTALLER FROM MAIN,
+  # so a new installer meets an old payload by construction. Every stable-* tag predates the split,
+  # so an unconditional `cp` of this path aborted the whole install with
+  #     cp: .../payload/.game_loop/bin/_gl_impl.py: No such file or directory
+  # — a hard failure, on a payload that was perfectly installable a commit earlier.
+  IMPL=""
+  [ -f "$SRC/.game_loop/bin/_gl_impl.py" ] && IMPL="$SRC/.game_loop/bin/_gl_impl.py"
+  cp "$SRC/.game_loop/bin/game_loop" ${IMPL:+"$IMPL"} \
      "$SRC/.game_loop/bin/watchdog" \
      "$SRC/.game_loop/bin/guard-writes.sh" "$SRC/.game_loop/bin/guard-writes-impl.sh" \
      "$SRC/.game_loop/bin/guard-mcp.sh" "$SRC/.game_loop/bin/guard-mcp-impl.sh" \

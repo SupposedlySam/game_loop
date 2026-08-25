@@ -9688,26 +9688,41 @@ def cmd_stepback(s, a):
             "→ turn-end is open. It is in the log, so an empty chapter reads as a call somebody",
             "  made rather than a retro that quietly produced nothing.")
         return
-    if not a.notes:
+    # READING IS NOT RETROSPECTING (#112). Everything below this point is longer than one screen,
+    # and the only way to read it was to RUN it -- which logged a stepback, zeroed the counters and
+    # armed a fresh `retro_owes_harden`. So paging through the output with head/sed/tail opened a new
+    # retro per page and silently discarded the harden that had already paid for the last one: the
+    # message then said "NOTHING WAS HARDENED since the last retro", which reads as "you did not do
+    # the work" when the truth is "your receipt was thrown away by the act of reading this".
+    #
+    # Measured here: a harden at 18:34:48, a stepback at 18:34:57, and the next run reporting
+    # 0 hardened since 18:34:57 -- the boundary being the very refusal that asked for the harden.
+    # A diagnostic must not change what it diagnoses, so --show is the read and the bare verb is the
+    # act. Triggers do not fire either: they deliver other agents' learnings and mark them consumed,
+    # which is a side effect a reader has not asked for.
+    _show = getattr(a, "show", False)
+    if not a.notes and not _show:
         die("stepback needs --notes — a REAL retro: what WORKED (repeat it)? where did I DEVIATE? "
             "did I assert before reading? AND which recurring learning gets ENCODED (harden), not "
             "written down?")
     # Others' learnings arrive BEFORE the reflection, not after it — arriving afterwards would make
     # them a reading exercise rather than an input to the thinking they are supposed to inform.
-    incoming = fire_triggers(s, "stepback", {
+    incoming = [] if _show else fire_triggers(s, "stepback", {
         "event": "stepback", "notes": a.notes, "project": config().get("project_name"),
         "session": SESSION, "trans_since": s.get("trans_since_stepback", 0),
         "work_since": s.get("work_since_stepback", 0)})
     prior = retro_outcome()          # BEFORE the new line lands, or it finds itself and reports zero
-    logline({"kind": "stepback", "notes": a.notes})
-    s["trans_since_stepback"] = 0
-    s["work_since_stepback"] = 0
+    if not _show:
+        logline({"kind": "stepback", "notes": a.notes})
+        s["trans_since_stepback"] = 0
+        s["work_since_stepback"] = 0
     # THE RETRO NOW OWES ITS OWN ENCODING. Everything printed below is an instruction, and a
     # consumer ran this verb, produced a full reflection and hardened nothing — the failure this
     # verb exists to prevent, committed by the verb that teaches it. The Stop gate holds turn-end
     # until a harden lands or the agent declines on the record.
-    s["retro_owes_harden"] = now()
-    save(s)
+    if not _show:
+        s["retro_owes_harden"] = now()
+        save(s)
     if incoming:
         out(*incoming)
     # THE RETRO IS WHERE THIS BELONGS (#78). It already counts hardens since the last one, and it is
@@ -9715,6 +9730,10 @@ def cmd_stepback(s, a):
     # defect was that?" is answerable and cheap. Asked at any other moment it is an interruption.
     if (_up := upstream_review_nudge(s)):
         out("", _up, "")
+    if _show:
+        out("=== A READ, NOT A RETRO — nothing was recorded ===",
+            "  No stepback line was logged, the counters still stand, and no harden is owed for",
+            "  reading this. Run the verb WITHOUT --show, with --notes, when the retro is real.", "")
     out("=== WHAT THE LAST RETRO YIELDED ===", *prior, "")
     out("=== STEP-BACK — invariants re-injected ===")
     try:
@@ -9958,6 +9977,9 @@ def main():
                          "log so an empty chapter is a decision rather than a silence.")
     sb.add_argument("--reason", help="why there is nothing to encode (with --nothing-to-harden)")
     sb.add_argument("--notes")
+    sb.add_argument("--show", action="store_true",
+                    help="print what a retro would show and record NOTHING — this verb's output is "
+                         "longer than a screen, and re-reading it used to open a new retro each time")
 
     tr = sub.add_parser("trans")
     tr.add_argument("--tier", help="T0 read · T1 subagents · T2 build · T3 the human's attention")

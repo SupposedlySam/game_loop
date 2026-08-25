@@ -7132,7 +7132,7 @@ def main():
             # booleans — no text at all can reach them
             "--clear", "--dry-run", "--force", "--interval-only", "--json", "--list", "--merge",
             "--nothing-to-harden", "--park", "--porcelain", "--probe", "--resume", "--reviewed",
-            "--test",
+            "--show", "--test",
             # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
             # silently — the opposite of prose, where the corruption is indistinguishable
             "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file", "--handoff",
@@ -9298,6 +9298,64 @@ def main():
     check("...and the NEXT harden pays it, so the arm above is about ordering rather than a gate "
           "that has stopped being satisfiable",
           _gate("sess-r1").returncode == 0)
+
+    # READING IS NOT RETROSPECTING (#112). The retro's output is longer than a screen, so the only
+    # way to read it was to RUN it — and every run logged a stepback, zeroed the counters and armed
+    # a fresh debt. Paging through with head/sed therefore opened a retro per page and discarded the
+    # harden that had already paid for the last one, while reporting "NOTHING WAS HARDENED", which
+    # reads as an accusation rather than as a receipt being thrown away. Measured on this repo's own
+    # log before the fix: harden 18:34:48, stepback 18:34:57, next run "0 hardened since 18:34:57".
+    def _sb_lines(proj):
+        n = 0
+        try:
+            with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+                for _l in f:
+                    try:
+                        n += json.loads(_l).get("kind") == "stepback"
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+        return n
+    # ITS OWN SANDBOX, not the shared one. Every stepback here zeroes trans/work counters, and the
+    # nudge-threshold assertions further down READ those counters — running these in `rw` failed two
+    # unrelated checks, which is this repo's own hardened lesson about state a fixture adds being
+    # state another fixture is reading, arriving as a bill rather than a memory.
+    r112 = make_sandbox()
+
+    def _gate112(sid):
+        return subprocess.run([os.path.join(r112, ".game_loop", "bin", "game_loop"), "stopgate"],
+                              cwd=r112, input=json.dumps({"session_id": sid}),
+                              capture_output=True, text=True, env=_env(r112, sid=sid))
+
+    _art112 = os.path.join(r112, ".game_loop", "config.json")
+    gl(r112, "harden", "--learning", "paid before the read", "--artifact", _art112,
+       "--mechanism", "z3", "--rung", "3", sid="sess-r2")
+    gl(r112, "stepback", "--notes", "the real chapter", sid="sess-r2")
+    gl(r112, "harden", "--learning", "encoded from the read chapter", "--artifact", _art112,
+       "--mechanism", "z4", "--rung", "3", sid="sess-r2")
+    check("#112: the debt is paid and the gate is open before any reading happens",
+          _gate112("sess-r2").returncode == 0)
+    _before = _sb_lines(r112)
+    _show = gl(r112, "stepback", "--show", sid="sess-r2")
+    check("#112: --show RECORDS NOTHING — no stepback line, so reading cannot move the boundary "
+          "that decides whether this chapter encoded anything",
+          _sb_lines(r112) == _before)
+    check("#112: ...and it SAYS it recorded nothing, because output identical to a real retro's "
+          "would leave a reader unable to tell which one they just ran",
+          "A READ, NOT A RETRO" in _show.stdout)
+    check("#112: ...and it still shows the thing worth reading — what the last retro yielded",
+          "WHAT THE LAST RETRO YIELDED" in _show.stdout)
+    check("#112: ...and the debt it already paid STAYS paid, which is the whole defect: a read "
+          "used to re-arm it and demand a second harden for the same chapter",
+          _gate112("sess-r2").returncode == 0)
+    check("#112: ...while a real retro (no --show) DOES record and re-arm, so the read-only mode "
+          "is an addition rather than a hole in the gate",
+          (lambda _: gl(r112, "stepback", "--notes", "a second real chapter", sid="sess-r2")
+           and _sb_lines(r112) == _before + 1 and _gate112("sess-r2").returncode == 2)(None))
+    check("#112: ...and --show needs no --notes, since demanding a reflection to READ one is the "
+          "same trap in a different place",
+          _show.returncode == 0)
 
     # THE NUDGE ITSELF, escalating. A printed nudge is a thing to remember; agents pass over it and
     # never re-check. It stays advice for a whole threshold, then closes.

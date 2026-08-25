@@ -54,3 +54,4 @@ NEXT_SESSION.md
 # per-machine section wall times, written by test/prun.py --time. A balance hint,
 # not a fact about the code: it is measured on ONE box and is wrong on every other.
 test/.section-times.json
+test/sweep-sections.json

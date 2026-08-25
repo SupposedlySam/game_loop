@@ -66,6 +66,30 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
 
 _Questions still outstanding. What would close each one._
 
+- **A docstring that makes a DISTINCTION is a claim about its callers, and nothing checks it.**
+  Audited 2026-08-25 after writing this defect twice in one day. Fourteen functions across
+  `bin/game_loop`, `bin/watchdog` and `bin/verify` have docstrings that assert what a caller must do
+  ("callers keep them apart", "callers must treat it as allow, never as nothing happened"). Of the
+  ones with a multi-meaning `None` and live callers, **every long-standing one honours its claim** —
+  `work_since_last_block` branches on `is False` rather than truthiness, so its unanswerable `None`
+  falls through to allow exactly as promised; `_statusline_claim_live`'s caller prints "this cannot
+  tell which, and does not pretend to"; `waiting_verdict` implements all four of its stated
+  constraints. The two that failed were both mine, both written that day: `_proc_start` said "the
+  callers keep them apart" while its only caller mapped `None` to `False`, and a suite gate was
+  named "every flag verify.yaml INVOKES" while scanning prose.
+
+  **The correlation is with FRESHNESS, not age.** The prose was not stale documentation of an older
+  design — it was a correct description of a design not yet implemented fifteen lines further down.
+  So "check the docs against the code" is the wrong drill; the drill is that the CALLER is a
+  different artifact from the function, and the moment to check is when you write the caller.
+
+  **Both were safe by luck and therefore invisible.** `False` meant "do not signal", every test
+  passed, the sweep floor was met. A sentence that is wrong in the SAFE direction has no behavioural
+  signature at all, so nothing in this repo can catch it — which is why both were found by a
+  sibling's message rather than by the suite. Not encodable as a gate: the general case needs
+  reading the claim, and a naive check (flag every docstring saying "never") fires on prose the way
+  the connective scan did at 68%. Recorded as a reading habit with a measured population instead.
+
 - **Has the fresh-session token floor doubled, or has this machine's MCP surface grown?** Measured
   2026-08-24 at 2.1.241: a probe spawn's own render carried **63,943 input tokens** (2 fresh, 3,162
   cache-creation, 60,779 cache-read) against the ~31.5k recorded at 2.1.223 for a spawn of the same

@@ -322,27 +322,81 @@ def handed_off_quiet(state):
     return None
 
 
-def superseded():
+# THE PIDFILE CARRIES AN IDENTITY, NOT JUST A NUMBER. Nothing removes this file when a watchdog
+# exits — no atexit, no finally — so a stale pid is the NORMAL state here rather than the rare one,
+# and a pid the OS has recycled onto an unrelated process is indistinguishable from ours by number
+# alone. Both readers of this file go on to SIGTERM what they find in it. The start time tells them
+# apart: it belongs to a process INSTANCE, so a recycled pid reads as the different process it is.
+# Mirrored in bin/game_loop's disarm_watchdog() — two files, one convention; if either moves, both
+# move. Observed shape, not hypothesised: game_loop#102.
+def _proc_start(pid):
+    """The process's start time as ps reports it, or None if it could not be read — the pid is gone,
+    or ps is unavailable. None means CANNOT TELL and never 'not ours'; the callers keep them apart."""
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout or "").strip() or None
+
+
+def read_pidfile():
+    """(pid, recorded_start) from the pidfile. recorded_start is None for a file written before this
+    format existed, which is UNVERIFIABLE — a third outcome, and not the same as 'it matches'."""
     try:
         with open(PID_PATH) as f:
-            return int(f.read().strip()) != os.getpid()
-    except (OSError, ValueError):
+            parts = f.read().strip().split(None, 1)
+        return int(parts[0]), (parts[1].strip() or None if len(parts) > 1 else None)
+    except (OSError, ValueError, IndexError):
+        return None, None
+
+
+def pid_is_ours(pid, recorded):
+    """True / False / None-for-cannot-tell.
+
+    None when the pidfile predates this format. The caller MUST NOT signal on None: 'I could not
+    check' and 'I checked and it is ours' are exactly the two outcomes that must never share a
+    consequence, and here the consequence is a SIGTERM.
+    """
+    if recorded is None:
+        return None
+    live = _proc_start(pid)
+    if live is None:
         return False
+    return live == recorded
+
+
+def superseded():
+    pid, _ = read_pidfile()
+    return pid is not None and pid != os.getpid()
 
 
 def claim_pidfile():
-    """Newest watchdog wins: kill any previously armed one and record ourselves. False if we can't."""
-    try:
-        with open(PID_PATH) as f:
-            old = int(f.read().strip())
-        if old != os.getpid():
-            os.kill(old, 15)
-    except (OSError, ValueError, ProcessLookupError):
-        pass
+    """Newest watchdog wins: kill any previously armed one and record ourselves. False if we can't.
+
+    It signals only a pid it can PROVE wrote this file. An unverifiable one is left alone and said
+    so in the log: two watchdogs ringing one session is a bad day, but SIGTERMing a stranger holding
+    a recycled pid is somebody else's process dying for our bookkeeping. Between a bad day and that,
+    the bad day is the one we take — and it is bounded, because this rewrites the file in the new
+    format on the way past, so a session pays it at most once.
+    """
+    old, recorded = read_pidfile()
+    if old is not None and old != os.getpid():
+        ours = pid_is_ours(old, recorded)
+        if ours:
+            try:
+                os.kill(old, 15)
+            except OSError:
+                pass
+        elif ours is None:
+            logline({"kind": "watchdog_pid_unverifiable", "pid": old,
+                     "note": "pidfile carries no start time (written before that format), so this "
+                             "pid could not be shown to be the watchdog that wrote it — NOT "
+                             "signalled, because a recycled pid is somebody else's process"})
     try:
         os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
         with open(PID_PATH, "w") as f:
-            f.write(str(os.getpid()))
+            f.write("%d %s" % (os.getpid(), _proc_start(os.getpid()) or ""))
         return True
     except OSError:
         return False

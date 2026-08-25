@@ -1382,9 +1382,17 @@ def main():
         succ_cfg("saggar-agent")
         # A REAL armed watchdog to stand down. The kill is proved against a live process, because a
         # pid removed from a file is not a process that stopped.
+        #
+        # THE PIDFILE CARRIES THE PROCESS'S IDENTITY, not just its number — written here the way
+        # bin/watchdog writes it, because a test that hand-builds the old shape would be asserting
+        # against a format nothing produces any more. Nothing deletes this file when a watchdog
+        # exits, so the pid in it is normally dead, and a recycled one must not be signalled.
+        def _start_of(pid):
+            return subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                  capture_output=True, text=True).stdout.strip()
         sleeper = subprocess.Popen(["sleep", "60"])
         with open(hpid, "w") as f:
-            f.write(str(sleeper.pid))
+            f.write("%d %s" % (sleeper.pid, _start_of(sleeper.pid)))
         r = gl(proj, "successor", sid=hsid,
                PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
         to = re.search(r"successor session id : (\S+)", r.stdout).group(1)
@@ -1398,6 +1406,7 @@ def main():
             time.sleep(0.1)
         check("...and the watchdog already sleeping is killed, not merely flagged",
               sleeper.poll() is not None and not os.path.exists(hpid))
+
 
         def wd_hand(**envx):
             return run_watchdog(wd_bin, {"session_id": hsid, "transcript_path": tpath},
@@ -1422,6 +1431,43 @@ def main():
         r = gl(proj, "status", sid=hsid)
         check("status says the session is retired instead of showing a live-looking mandate",
               "HANDED OVER to" in r.stdout and "STOOD DOWN" in r.stdout)
+
+        # THE OTHER DIRECTION, which is the one with teeth: a pid that is alive but is NOT the
+        # process that was armed. The OS recycles pids, and this file outlives the watchdog that
+        # wrote it, so "alive" and "ours" are different questions — answered by the same number
+        # until the identity was recorded. Proved against a live process for the same reason the
+        # kill above is: a stranger left running is the whole claim.
+        stranger = subprocess.Popen(["sleep", "60"])
+        try:
+            gl(proj, "mandate", "--set", "still driving", sid=hsid)
+            with open(hpid, "w") as f:
+                f.write("%d Thu Jan  1 00:00:00 1970" % stranger.pid)
+            r = gl(proj, "successor", sid=hsid,
+                   PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
+            time.sleep(0.5)
+            check("a live pid whose identity does not match is NOT signalled — a recycled number is "
+                  "somebody else's process",
+                  stranger.poll() is None)
+            check("...and the handover says it did not kill it, rather than reporting a stop that "
+                  "never happened",
+                  "NOT the watchdog that wrote this file" in r.stdout)
+            check("...and the flag that actually stands the engine down is still written",
+                  (json.load(open(hstate)).get("handed_off") or {}).get("to"))
+            # A pidfile with no identity at all — every one written before this format. Unverifiable
+            # is a THIRD outcome: it must not be signalled, and it must not read as a kill either.
+            gl(proj, "mandate", "--set", "still driving", sid=hsid)
+            with open(hpid, "w") as f:
+                f.write(str(stranger.pid))
+            r = gl(proj, "successor", sid=hsid,
+                   PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
+            time.sleep(0.5)
+            check("a pidfile too old to carry an identity is left alone, not signalled on faith",
+                  stranger.poll() is None)
+            check("...and says WHY it could not check, which is not the same sentence as 'stopped'",
+                  "could NOT be shown to be this session's watchdog" in r.stdout)
+        finally:
+            stranger.kill()
+            stranger.wait()
 
         gl(proj, "mandate", "--clear", "--notes", "the successor has it", sid=hsid)
         gl(proj, "mandate", "--set", "actually I am driving again", sid=hsid)
@@ -6372,7 +6418,9 @@ def main():
             for _ in range(200):
                 try:
                     with open(_spid) as f:
-                        if f.read().strip().isdigit():
+                        # FIRST FIELD, because the pidfile is "<pid> <start time>" now — a probe
+                        # that waits for digits-only waits forever and the steal never happens.
+                        if (f.read().strip().split(None, 1) or [""])[0].isdigit():
                             break
                 except OSError:
                     pass
@@ -6413,6 +6461,92 @@ def main():
         except (NameError, OSError):
             pass
         shutil.rmtree(sp, ignore_errors=True)
+
+    print("a watchdog signals the pid it can PROVE it armed, and no other (#102):")
+    # THE SWEEP FOUND THIS ONE THE SAME WAY IT FOUND `superseded` above: watchdog::_proc_start
+    # neutered killed NOTHING out of a 1592-assertion baseline. The identity check was written and
+    # nothing anywhere asserted it, so a broken one would have silently gone back to SIGTERMing
+    # whatever number was in the file — the exact bug it was added to fix, undetectably.
+    #
+    # Nothing deletes this pidfile when a watchdog exits, so the pid in it is normally dead already
+    # and the OS is free to hand that number to anybody. "Alive" and "ours" are different questions,
+    # and until the start time was recorded beside the pid, the same number answered both.
+    sq = make_sandbox()
+    _kept = _gone = None
+    try:
+        _qsd = os.path.join(sq, ".game_loop", "sessions", "sess-pid")
+        os.makedirs(_qsd, exist_ok=True)
+        _qpid = os.path.join(_qsd, ".watchdog.pid")
+        _qlog = os.path.join(sq, ".game_loop", "log.jsonl")
+        _qtp = os.path.join(sq, "transcript.jsonl")
+        with open(_qtp, "w") as f:
+            f.write("{}\n")
+
+        def _idle_state():
+            with open(os.path.join(_qsd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                           "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+
+        def _wd():
+            return run_watchdog(os.path.join(sq, ".game_loop", "bin", "watchdog"),
+                                {"session_id": "sess-pid", "transcript_path": _qtp},
+                                WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+
+        def _lstart(pid):
+            return subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                  capture_output=True, text=True).stdout.strip()
+
+        # A pid recorded WITH its identity is this watchdog's own, and is signalled — the newest
+        # watchdog still wins, which is the property the identity check must not have cost.
+        _gone = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+        _idle_state()
+        with open(_qpid, "w") as f:
+            f.write("%d %s" % (_gone.pid, _lstart(_gone.pid)))
+        _wd()
+        for _ in range(60):
+            if _gone.poll() is not None:
+                break
+            time.sleep(0.1)
+        check("the previously armed watchdog IS signalled when the pidfile's identity matches it — "
+              "newest-wins survives the check that made it safe",
+              _gone.poll() is not None)
+
+        # The same shape, one field different: alive, but NOT the process that was armed.
+        open(_qlog, "w").close()
+        _kept = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+        _idle_state()
+        with open(_qpid, "w") as f:
+            f.write("%d Thu Jan  1 00:00:00 1970" % _kept.pid)
+        _wd()
+        time.sleep(0.5)
+        check("...while a LIVE pid whose recorded identity does not match is left alone — a "
+              "recycled number is a stranger's process, not a watchdog to stand down",
+              _kept.poll() is None)
+
+        # And the third outcome, which is the one a bare number cannot express: every pidfile
+        # written before the identity existed. Unverifiable must not be signalled on faith, and
+        # must not pass silently either — a check nobody could run is not a check that passed.
+        open(_qlog, "w").close()
+        _idle_state()
+        with open(_qpid, "w") as f:
+            f.write(str(_kept.pid))
+        _wd()
+        time.sleep(0.5)
+        with open(_qlog) as f:
+            _ql = f.read()
+        check("a pidfile with no identity at all is NOT signalled — the format predates the check, "
+              "which is 'could not tell' and never 'it is ours'",
+              _kept.poll() is None)
+        check("...and it is LOGGED as unverifiable, so the one case that cannot be checked is "
+              "countable rather than silent",
+              '"watchdog_pid_unverifiable"' in _ql)
+    finally:
+        for _p in (_kept, _gone):
+            try:
+                _p.kill()
+            except (AttributeError, OSError):
+                pass
+        shutil.rmtree(sq, ignore_errors=True)
 
     print("prose arrives unmangled, or it does not arrive (#58):")
     pw = make_sandbox()

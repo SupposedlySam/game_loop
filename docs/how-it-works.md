@@ -71,6 +71,12 @@ hasn't grown in `idle_sec` seconds — the session is parked)*, that is a contra
 Guardrails on the watchdog itself:
 
 - **Newest wins** — a pidfile ensures only one watchdog is armed; a superseded one exits quietly.
+  The file records the process's *start time* beside its pid, and nothing signals a pid whose
+  identity does not match. Nothing deletes that file when a watchdog exits, so a stale pid is
+  the normal case rather than the rare one; if the OS has recycled it, the number alone cannot
+  tell this session's watchdog from a stranger, and what follows the read is a SIGTERM. A pid
+  that cannot be *shown* to be the watchdog is left alone and said so — "could not check" and
+  "checked, it is ours" must not share a consequence when the consequence is killing something.
 - **Settle before measuring** — it waits `settle_sec` for the harness to finish flushing the turn
   before taking a transcript baseline, so it doesn't mistake a just-ended turn for activity.
 - **Ring cap** — after `ring_cap` *consecutive unproductive* rings it stands down (a nag that never

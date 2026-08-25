@@ -10823,6 +10823,30 @@ def main():
           and sweep.verdict(sweep.THIN_AT) == sweep.OK)
     check("THIN and UNPROTECTED are distinct verdicts — thin argues, only zero blocks",
           sweep.THIN != sweep.UNPROTECTED and sweep.OK not in (sweep.THIN, sweep.UNPROTECTED))
+
+    # THE LINE THAT EXPLAINS A FLOOR, or says nobody has. Driven, not grepped: the two checks far
+    # below read the source for a header string, which was all that was available while this
+    # renderer lived inside main(). It is at module level now — the same lift `probed_verdict` and
+    # `killers` got, for the same reason — so the decision can be exercised instead of described.
+    check("an entry that carries a note renders it under the header its verdict earns",
+          sweep.note_line(sweep.THIN, "both directions measured")
+          == "  why it is thin: both directions measured"
+          and sweep.note_line(sweep.OK, "both directions measured")
+          == "  what it covers: both directions measured")
+    check("a THIN entry with NO note says NOT STATED — an unexplained floor must not render as an "
+          "explained one, which is the substitution this file refuses everywhere else",
+          "NOT STATED" in (sweep.note_line(sweep.THIN, None) or ""))
+    check("...and an UNPROTECTED one says so under its OWN header, because 'thin' and 'nothing "
+          "kills it' are different findings and shared wording is how two findings become one",
+          "why it is unprotected" in (sweep.note_line(sweep.UNPROTECTED, None) or "")
+          and "why it is thin" in (sweep.note_line(sweep.THIN, None) or ""))
+    check("...while a producer that owes no explanation gets no line at all — the notice is the "
+          "exception, not a banner every healthy entry carries",
+          sweep.note_line(sweep.OK, None) is None)
+    _undesc = [t[1] for t in sweep.MUTANTS if t[5] < sweep.THIN_AT and not t[4]]
+    check("...and THIS repo's undescribed low floors are non-empty, so the line above is a verdict "
+          "about real debt rather than a branch nothing in the tree reaches",
+          len(_undesc) > 0 and all("::" in k for k in _undesc))
     # UNPROTECTED WAS TWO FINDINGS IN ONE WORD (lamp-owner, 2026-08-23, from their own catalogues
     # before I looked for it here). A value mutation that kills nothing means either "the producer
     # runs and nothing asserts it" or "nothing runs it" — same green, opposite repairs, and writing

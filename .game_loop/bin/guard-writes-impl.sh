@@ -477,10 +477,19 @@ for n in ("config.json", "INVARIANTS.md", "verify.yaml"):
         print(n)
         break
 else:
-    # THE LOCAL OVERRIDE: denied whether or not it exists. Its keys MERGE WITH UNION semantics, so
-    # anything written here is strictly additive and cannot be narrowed by the project's own config
-    # — which is correct for a machine-wide file a human maintains and exactly wrong for a file the
-    # session can author. Nothing in game_loop writes it, so there is no provisioning arm to keep.
+    # THE LOCAL OVERRIDE: denied whether or not it exists. THE TRUST LISTS THIS GUARD READS merge
+    # with UNION semantics — the seven in UNION_KEYS above, read_roots / allow_write_roots /
+    # deploy_verbs / generated_globs / the three mcp_* — so a grant written here is strictly
+    # additive and cannot be narrowed by the project's own config. Correct for a machine-wide file
+    # a human maintains, exactly wrong for a file the session can author. Nothing in game_loop
+    # writes it, so there is no provisioning arm to keep.
+    #
+    # "ITS KEYS" MEANS THOSE SEVEN, NOT EVERY KEY, and the unqualified version of this sentence
+    # cost a reviewer real time: #101 measured that a local `limits` block REPLACES the tracked one
+    # whole (config() layers with a shallow top-level update -- "nested keys are replaced whole
+    # rather than merged", its own words), and that reads as a flat contradiction of a comment
+    # claiming union. Two readers, two rules: this guard unions its trust lists, config() replaces
+    # everything else. Both make writing here dangerous, which is why the conclusion never moved.
     if real == os.path.join(d, "config" + ".local.json"):
         print("config" + ".local.json")
 PY

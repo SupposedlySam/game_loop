@@ -66,6 +66,23 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
 
 _Questions still outstanding. What would close each one._
 
+- **Does showrunner still have no usage or session-size awareness on the spawn path?** Verified
+  2026-08-25 by reading showrunner's own source, and it is load-bearing: #106's spawn brake lives on
+  game_loop's limitgate *because* of this, and it would be the wrong place if showrunner ever grew
+  the awareness itself. What was read — `lib/showrunner/harness.py:86` is the tree's only occurrence
+  of `limits.json`, an ignore-list entry naming files not copied into a worktree; and `cmd_spawn`
+  (`lib/showrunner/cli.py:1416`, 104 lines) mentions limits, usage, tokens and threshold zero times.
+  So "showrunner kept going after game_loop said the limit was hit" was never two tools disagreeing:
+  nothing was ever asking showrunner to stop.
+
+  **Filed as a QUESTION rather than a claim, because there is nowhere else to put it.**
+  `claims.json` carries one subject block and version-compares every block against the running
+  Claude Code build, so a showrunner entry would read as permanently stale against a release number
+  — #107. Until that is decided this fact lives here and in one docstring, which means **nothing
+  will notice when it stops being true**. Closed by: re-reading those two paths, or by #107 making
+  the registry multi-subject so it can go stale loudly instead. Source: the paths above, read at
+  showrunner's checkout on this machine, 2026-08-25.
+
 - **A docstring that makes a DISTINCTION is a claim about its callers, and nothing checks it.**
   Audited 2026-08-25 after writing this defect twice in one day. Fourteen functions across
   `bin/game_loop`, `bin/watchdog` and `bin/verify` have docstrings that assert what a caller must do

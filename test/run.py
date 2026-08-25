@@ -11248,6 +11248,29 @@ def main():
     check("...while a producer that owes no explanation gets no line at all — the notice is the "
           "exception, not a banner every healthy entry carries",
           sweep.note_line(sweep.OK, None) is None)
+    # THE MARKS ARE WHAT SEPARATES A GENUINE KILL FROM COLLATERAL, and three of them had stopped
+    # doing it. `read_probe`'s marks matched 306 of 1626 assertion names against a floor of 3;
+    # `note_line`'s 287; `remote_has_ref`'s 279. At that breadth the question "does this kill name
+    # the producer's subject" answers yes for almost anything — a guard that agrees with whatever it
+    # is shown, which never fails and never helps. Narrowed to phrases: 306→8, 287→12, 279→18.
+    # Thirty-two entries still match ≥20 names against a floor ≤3, so the sweep reports them rather
+    # than leaving the next reader to re-derive the measurement.
+    _names = ["a note about the thing", "notes on the other", "why it is thin", "unrelated name"]
+    _m1, _bad1 = sweep.overbroad_marks(["why it is thin"], _names, 3)
+    check("a mark that names the producer's SUBJECT matches few names and is not flagged — the "
+          "report is about breadth, not about having marks at all",
+          _m1 == 1 and _bad1 is False)
+    _m2, _bad2 = sweep.overbroad_marks(["note"], _names * 20, 1)
+    check("...while a common word matched as a substring is flagged, because it answers yes for "
+          "almost any kill and so cannot tell collateral from genuine",
+          _bad2 is True and _m2 == 40)
+    check("...and a SMALL producer is not flagged for being small: 20 matches is the floor on the "
+          "count, so a floor of 1 with a handful of matches stays quiet",
+          sweep.overbroad_marks(["note"], _names * 3, 1)[1] is False)
+    check("...and the bound is a RATIO against the recorded floor, so a producer that genuinely "
+          "pins 30 assertions may carry a mark matching 100 without being called broad",
+          sweep.overbroad_marks(["note"], _names * 30, 30)[1] is False)
+
     # A FLOOR NOBODY EVER RAISES STOPS BEING A TRIPWIRE. The drift check fails when coverage drops
     # BELOW the floor; nothing watched the floor going stale-low, and nothing ever raises one.
     # Measured at 8172f90 by a full sweep: 58 of 98 producers score above their recorded floor, and

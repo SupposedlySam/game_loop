@@ -172,6 +172,30 @@ _PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
 NOT_MEASURED = "NOT MEASURED"
 
 
+def overbroad_marks(marks, names, floor):
+    """How many of `names` a mark set matches, and whether that breadth makes it undiscriminating.
+
+    Returns (matched, is_overbroad). Pure, and at module level for the reason every selector here is:
+    a rule that lives inside main() cannot be driven by the suite.
+
+    THE MARKS ARE WHAT SEPARATES A GENUINE KILL FROM COLLATERAL — `killers()` asks whether a killed
+    assertion's NAME carries one. Measured 2026-08-25 across 1626 assertion names, `read_probe`'s
+    marks matched 306 of them against a floor of 3, `note_line`'s 287, `remote_has_ref`'s 279. At
+    that breadth the question answers YES for almost any kill, so the check that exists to catch
+    collateral agrees with whatever it is shown. The cause was short marks under substring matching —
+    "ref" is inside refuse, "note" is in a third of these names — and NOT the matcher: exactly 8
+    marks lose every match under a word-boundary rule, and 7 of those are deliberate stems (refut,
+    supersed, attach, exhaust, dogfood) that the rule would break to fix an unrelated problem.
+
+    THE BOUND IS A RATIO, not a count: a mark set that matches more than ten times its floor is
+    claiming a subject far wider than the coverage it records. Twenty is the floor on the count so a
+    producer with a floor of 1 and 11 matches does not fire — that is a small producer, not a broad
+    mark.
+    """
+    matched = sum(1 for n in names if any(m.lower() in n.lower() for m in marks))
+    return matched, (matched >= 20 and matched > 10 * max(floor, 1))
+
+
 def stale_low_floors(verdicts):
     """[(floor, killed, name)] for producers whose floor would permit losing MORE THAN HALF of what
     they measure today. Pure, and at module level so the suite can drive it — the same lift
@@ -2077,6 +2101,22 @@ def main():
     # about drift, it explains itself in the line, and it does not fire on the ±1 churn that normal
     # assertion edits produce. NOT FATAL — a conservative floor has never broken anything, and a run
     # that fails on good news teaches people to raise floors without measuring them.
+    wide = []
+    for _lbl, _key, _b, _marks, _n, _fl in MUTANTS:
+        _m, _bad = overbroad_marks(_marks, baseline, _fl)
+        if _bad:
+            wide.append((_m, _fl, _key.split("::")[-1]))
+    if wide:
+        wide.sort(reverse=True)
+        print(f"MARKS TOO BROAD TO DISCRIMINATE ({len(wide)}) — these match far more assertion "
+              "names than they record coverage for:")
+        print("  " + " · ".join(f"{k} ({m} matched, floor {f})" for m, f, k in wide[:10])
+              + (" · …" if len(wide) > 10 else ""))
+        print("  `killers()` uses these to tell a GENUINE kill from collateral. A set this wide")
+        print("  answers yes for almost anything, so the distinction stops discriminating without")
+        print("  ever failing. Narrow them to phrases that name the producer's subject — a common")
+        print("  word matched as a substring is the usual cause. Not fatal: a broad mark has never")
+        print("  broken a run, it has only ever made a report agree with you.")
     slack = stale_low_floors(verdicts)
     if slack:
         print(f"FLOOR IS STALE-LOW ({len(slack)}) — measured well above what is recorded, so the "

@@ -76,22 +76,34 @@ _Questions still outstanding. What would close each one._
   tools and MCP — which separates the host's floor from what this project adds. Source:
   `.game_loop/probe/context-window.json`, recorded by our own limit probe, read 2026-08-24.
 
-- **How do you re-read `statusline-config-keys` at 2.1.241?** The method that worked at 2.1.223 —
-  reading the schema out of the running binary — does not reproduce. The install is now a single
-  325MB native build (`bin/claude.exe`) rather than a readable `cli.js`, and `strings` recovers
-  `refreshInterval` / `refreshIntervalMs` as bare tokens with no surrounding schema; the only two
-  windows carrying both `padding` and `refreshInterval` are coincidental hits in unrelated minified
-  code. So the claim is neither re-verified nor refuted, and status will keep flagging it ⚠ until
-  somebody says which.
+- **RESOLVED 2026-08-25 — how to re-read `statusline-config-keys` on a native build.** It DOES
+  reproduce. Two things were wrong before, and only one of them was the method.
 
-  **Stated precisely, because an empty search is evidence about the SEARCH** (lamp-owner, 2026-08-24,
-  from a case where deleting a branch would have been "a change justified by not having found
-  something"): what is established is that **`strings -a` plus grep no longer recovers it** — ONE
-  method, on a compiled artifact that may hold the schema in a form that method cannot see. "The
-  instrument is gone" is the reading I first wrote here and it claims more than one negative search
-  supports. Closed by: a re-read against the published statusline doc, or any method that survives a
-  native build — and a second method returning empty would be worth more than this one did. Source:
-  `bin/claude.exe` at 2.1.241, read 2026-08-24 (`strings -a`, grepped, not eyeballed).
+  **The artifact was wrong.** `bin/claude.exe` is an npm install (now 2.1.243). This session is
+  served by a *different installation* — `.vscode/extensions/anthropic.claude-code-2.1.241-darwin-arm64/
+  resources/native-binary/claude`, found with `lsof -p <live pid>`. `which claude` does not name the
+  running build, and `running_host_version()` already says so in its own docstring: "the first
+  obvious answer is wrong". So the earlier search was reading a build nobody here was running.
+
+  **The method was anchored on tokens that move.** The 2.1.223 reading quoted `M().min(1)`; `M` is a
+  minified helper name and it is *different in every build* (it is `Je` in 2.1.241, `M` in 2.1.243).
+  Searching for it finds nothing and the absence looks like the schema being gone. Anchor on the
+  parts the minifier cannot rename — the KEY names and the structural punctuation — and it comes
+  straight back:
+
+      grep -ao 'refreshInterval:[a-zA-Z_$]*()\.min([0-9])[^,]\{0,80\}' <binary>
+      grep -ao '.\{0,150\}refreshInterval:Je().min(1)' <binary>     # widen once the helper is known
+
+  which recovers the whole object: `statusLine:ye({type:Ct("command"),command:H(),padding:Je().optional(),
+  refreshInterval:Je().min(1)...`, plus an independent confirmation of the floor at the consumption
+  site (`Math.max(1,t)*1000`).
+
+  **The earlier entry was right to refuse to conclude.** It said what was established was that ONE
+  method returned empty, and declined to read that as "the instrument is gone" — and that caution is
+  what left the question answerable instead of closed wrong. The generalisation is narrower than
+  "search harder": on a minified artifact, **anchor on the identifiers the minifier is forbidden to
+  rename**. Object keys crossing a JSON/config boundary are exactly those. Source:
+  the extension binary at 2.1.241, read 2026-08-25 via `lsof` on the live pid.
 
 - **Does a Stop hook fire on the turn a rate-limit error kills?** Unconfirmed either way; the park
   design deliberately doesn't depend on it (the watchdog armed by the *previous* turn-end reads

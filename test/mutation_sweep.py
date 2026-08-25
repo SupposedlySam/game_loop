@@ -1079,6 +1079,33 @@ MUTANTS += [
      ["handover", "handed over", "boot grace", "stands down", "successor"], None, 3),
 ]
 
+# THE FAN-OUT BRAKE'S TWO PRODUCERS, MEASURED AGAINST THE WORKING TREE rather than against HEAD —
+# said here because a floor whose provenance is unstated is a number. Neither exists in HEAD yet, so
+# the archive main() builds could not carry them; the run used this file's own neuter() and run()
+# over the tracked working copy, with the assertions held still. Baseline 1674 named assertions
+# passing (11 failing in a tree with no .git, outside the denominator for the usual reason: they
+# cannot flip). The next full sweep re-measures both in the ordinary way, and THOSE numbers
+# supersede these.
+#
+# BOTH FLIP THE SAME SIX, and that is a fact about the call graph rather than a coincidence:
+# binding_spawn_block asks _spawn_verb_hit which verb was typed, so neutering either one removes the
+# refusal entirely. Reported as two producers because they fail independently — a broken matcher and
+# a broken threshold are different bugs with the same symptom.
+#
+# The six are the six worth having: the refusal itself, the handoff NOT opening it, both threshold
+# orders, the configured verb list, and the interpreter-argument match. The fail-open assertions
+# deliberately do NOT flip — a neutered producer returns None, which is ALLOW, and "not denied" is
+# what allow already means. That is the safe direction by design, and the same shape as
+# handed_off_quiet above.
+MUTANTS += [
+    ("_spawn_verb_hit -> no command ever names a configured fan-out verb",
+     ".game_loop/bin/game_loop::_spawn_verb_hit", "    return None\n",
+     ["spawn", "fan-out", "brake", "verb", "cap"], None, 6),
+    ("binding_spawn_block -> a session of any size may keep starting Crawlers",
+     ".game_loop/bin/game_loop::binding_spawn_block", "    return None\n",
+     ["spawn", "fan-out", "brake", "handoff", "cap"], None, 6),
+]
+
 
 NOT_SWEPT = {
     "test/run.py::dig": "walks a nested structure and returns None at the first missing key, "

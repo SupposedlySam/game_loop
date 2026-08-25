@@ -1119,6 +1119,90 @@ def main():
         # for — the test equivalent of the default this feature deliberately ships with.
         ctx_enable(False)
 
+        print("limit gate (fan-out brake — no new spawns from a big session):")
+
+        def spawn_enable(on, threshold=300000, block=True, spawn_threshold=None, verbs=None):
+            c = json.load(open(ctx_cf))
+            ctxc = {"enabled": on, "threshold_tokens": threshold, "block_spawn": block}
+            if spawn_threshold is not None:
+                ctxc["spawn_threshold_tokens"] = spawn_threshold
+            if verbs is not None:
+                ctxc["spawn_verbs"] = verbs
+            c["limits"] = {"context": ctxc}
+            json.dump(c, open(ctx_cf, "w"))
+
+        def spawn_call(sid, cmd="./.showrunner/bin/showrunner spawn some-leaf --launch"):
+            return dict(bash_rm, session_id=sid, tool_input={"command": cmd})
+
+        spawn_enable(True)
+        turn_end("sess-spawn", ctx_record(120000))
+        check("under the cap a spawn is allowed",
+              not denied(limitgate(spawn_call("sess-spawn"))))
+        turn_end("sess-spawn", ctx_record(350000))
+        r = limitgate(spawn_call("sess-spawn"))
+        check("over the cap the spawn verb is refused",
+              denied(r) and "showrunner spawn" in r.stdout and "350K" in r.stdout)
+        check("the spawn deny names the successor as the way out",
+              "game_loop successor" in r.stdout)
+        # THE WHOLE POINT (observed 2026-08-24): the context gate closed, a handoff was written, the
+        # gate OPENED, and the session went straight back to spawning Crawlers out of the context it
+        # had just declared too expensive. A handoff records where a run got to; it must not buy the
+        # right to start new work. If this check ever passes by allowing, the fix has been undone.
+        hsp = os.path.join(proj, ".game_loop", "sessions", "sess-spawn", "HANDOFF.md")
+        with open(hsp, "w") as f:
+            f.write("# handing over\nwhere I was, what is next\n")
+        check("a hand-written handoff opens ORDINARY work over the cap",
+              not denied(limitgate(dict(bash_rm, session_id="sess-spawn"))))
+        check("...but the SAME handoff does NOT open a spawn",
+              denied(limitgate(spawn_call("sess-spawn"))))
+        # Refusing the fan-out must not refuse the campaign. A Crawler already running has to be able
+        # to finish, and this session has to be able to reconcile and integrate it — a brake that
+        # stranded live work would be worse than the spend it saves.
+        for verb in ("reconcile", "close some-leaf", "check", "integrate", "status"):
+            check(f"showrunner {verb.split()[0]} is untouched by the brake",
+                  not denied(limitgate(spawn_call("sess-spawn",
+                                                  f"./.showrunner/bin/showrunner {verb}"))))
+        # Boundary match, both sides — #51's lesson, ported. A verb that matched as a substring would
+        # refuse ordinary English, name a verb nobody typed, and train people to work around it.
+        check("a word merely CONTAINING the verb does not trip it",
+              not denied(limitgate(spawn_call("sess-spawn", "echo respawning the runner"))))
+        check("the verb inside an interpreter argument still trips it",
+              denied(limitgate(spawn_call("sess-spawn",
+                                          "python3 -c 'run(\"showrunner spawn x\")'"))))
+        # Independent thresholds: the handoff nudge should be able to come early and the brake late.
+        spawn_enable(True, threshold=300000, spawn_threshold=600000)
+        check("a reading between the two caps owes a handoff but may still spawn",
+              not denied(limitgate(spawn_call("sess-spawn"))))
+        turn_end("sess-spawn", ctx_record(700000))
+        check("...and past the higher cap the spawn is refused again",
+              denied(limitgate(spawn_call("sess-spawn"))))
+        # A spawn cap BELOW the handoff cap is the case that would have re-introduced the bug had the
+        # brake been computed from binding_context: there, ctx is None on exactly the calls this must
+        # refuse, and the gate's early return would let every one of them through.
+        spawn_enable(True, threshold=900000, spawn_threshold=400000)
+        check("the brake fires below the handoff cap, where the context trigger itself is silent",
+              denied(limitgate(spawn_call("sess-spawn")))
+              and not denied(limitgate(dict(bash_rm, session_id="sess-spawn"))))
+        spawn_enable(True, threshold=300000, verbs=["mytool fanout"])
+        check("a configured verb list replaces the default",
+              denied(limitgate(spawn_call("sess-spawn", "mytool fanout --all")))
+              and not denied(limitgate(spawn_call("sess-spawn"))))
+        # Fail-open, three ways. None of these is evidence the session is large.
+        spawn_enable(True, threshold=300000, block=False)
+        check("block_spawn:false removes the brake and nothing else",
+              not denied(limitgate(spawn_call("sess-spawn"))))
+        spawn_enable(False)
+        check("the trigger off takes the brake with it",
+              not denied(limitgate(spawn_call("sess-spawn"))))
+        spawn_enable(True)
+        check("a session with no reading at all may spawn (fail open)",
+              not denied(limitgate(spawn_call("sess-spawn-none"))))
+        check("a non-Bash tool is never the fan-out rail",
+              not denied(limitgate(dict(bash_rm, session_id="sess-spawn",
+                                        tool_name="Write",
+                                        tool_input={"file_path": "showrunner spawn"}))))
+        ctx_enable(False)
+
         print("the successor verb:")
         r = gl(proj, "successor", "--dry-run", sid="sess-succ")
         check("successor refuses when there is nothing to hand over",
@@ -13577,6 +13661,10 @@ def main():
         "cross_tree": "a stop-gate log record field, not config",
         "setter": "a log/state field recording who wrote a permission, not config",
         "writer_unknown": "a stop-gate log record field, not config",
+        # The timestamp on a recorded context READING, read back off `rec` in binding_spawn_block
+        # to say when the size it refused on was observed. State, never config — the same
+        # `c\.get` arm matching `rec.get` that catches the two above.
+        "observed_at": "the stamp on a recorded context reading, not config",
     }
 
     def _code_surface():

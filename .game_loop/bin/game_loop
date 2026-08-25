@@ -268,7 +268,9 @@ DEFAULT_CONFIG = {
     # and parks until the window resets; handoff_file resolves relative to .game_loop/.
     # Three NESTED sub-dicts are read by their own helpers rather than listed here, because
     # limits_cfg() is a shallow merge and a partial override would silently drop the keys it did not
-    # name: "probe" (probe_cfg), "context" (context_cfg — the context-size trigger on the same gate)
+    # name: "probe" (probe_cfg), "context" (context_cfg — the context-size trigger on the same gate,
+    # which also carries the FAN-OUT BRAKE: block_spawn / spawn_threshold_tokens / spawn_verbs,
+    # refusing `showrunner spawn` out of an over-large session in a way no handoff satisfies)
     # and "successor" (successor_cfg — how the next session is started). The first two default
     # OFF/inert; "successor" defaults to "auto", which is inert until somebody RUNS the verb and
     # then reads the terminal rather than a config key. Its one non-mode key,
@@ -1097,6 +1099,13 @@ def context_cfg():
     Default-OFF, like probe_cfg() and for the same reason: it interrupts a run somebody is watching,
     which should be a decision they made rather than one they inherited.
 
+    IT CARRIES A SECOND VERB (`block_spawn`), because the first one did not hold. Demanding a handoff
+    and then OPENING is the whole failure this repo watched happen: the gate closed, the agent wrote
+    the handoff, the gate opened, and the orchestrator went straight back to spawning Crawlers out of
+    a session that was already the expensive part. A handoff answers "is this written down"; it
+    cannot answer "should this session be starting new work", and nothing was asking the second
+    question. `block_spawn` asks it, and no handoff satisfies it — only a smaller session does.
+
     It reads its own sub-dict with its own defaults instead of joining DEFAULT_CONFIG["limits"],
     because limits_cfg() is a SHALLOW merge — a user who set only `threshold_tokens` there would
     silently lose every key they did not name.
@@ -1107,7 +1116,26 @@ def context_cfg():
         thr = int(c.get("threshold_tokens", 300000) or 300000)
     except (TypeError, ValueError):
         thr = 300000                    # a threshold nobody can parse is not a threshold
-    return {"enabled": bool(c.get("enabled", False)), "threshold_tokens": thr}
+    # THE SPAWN CAP IS A SECOND, HIGHER BAR ON THE SAME READING. The handoff demand and the
+    # spawn refusal want different points on one curve: "write down where you are" is cheap and
+    # should come early, while "you may not start new work" is disruptive and should come late. One
+    # threshold cannot be both, so `spawn_threshold_tokens` defaults to threshold_tokens and is
+    # raised by anyone who wants the handoff nudge long before the brake.
+    try:
+        sthr = int(c.get("spawn_threshold_tokens", thr) or thr)
+    except (TypeError, ValueError):
+        sthr = thr
+    # DENYLIST, and it defaults NON-EMPTY unlike deploy_verbs — because the cost of the two misses
+    # runs opposite ways. A deploy verb nobody listed fires once and is irreversible, so that rail
+    # must not guess; a fan-out verb nobody listed merely keeps spending, and the one verb every
+    # install of this harness ships beside is `showrunner spawn`. Listing it is not a guess.
+    verbs = c.get("spawn_verbs")
+    if not isinstance(verbs, list) or not verbs:
+        verbs = ["showrunner spawn"]
+    return {"enabled": bool(c.get("enabled", False)), "threshold_tokens": thr,
+            "block_spawn": bool(c.get("block_spawn", True)),
+            "spawn_threshold_tokens": sthr,
+            "spawn_verbs": [str(v) for v in verbs if str(v).strip()]}
 
 
 def handoff_path():
@@ -1364,6 +1392,82 @@ def binding_context(s):
     return dict(rec, tokens=tokens, threshold_tokens=cc["threshold_tokens"])
 
 
+def _spawn_verb_hit(cmd, verbs):
+    """The configured fan-out verb this command line runs, or None.
+
+    Same whole-word-both-sides match `deploy_verbs` settled on in #51, and reused rather than
+    reinvented for the reason that bug taught: a substring match refuses ordinary English, the
+    refusal names a verb nobody typed, and the natural response is to rephrase and never learn the
+    guard was wrong. The boundary class includes quotes so a verb nested in an interpreter argument
+    still counts, and `\\s+` between words so `showrunner   spawn` is the same verb.
+
+    WHAT IT STILL MATCHES, said plainly (INV6): the verb as a whole word in PROSE — a commit message
+    quoting `showrunner spawn` trips it. That trade is deliberate and identical to the deploy rail's:
+    narrowing to command position would miss a real spawn nested in an interpreter argument.
+    """
+    for v in verbs:
+        words = [w for w in str(v).split() if w]
+        if not words:
+            continue
+        # THE LEADING CLASS CARRIES `/` AND THE DEPLOY RAIL'S DOES NOT, which is not an oversight in
+        # either place. `npm publish` is typed as a bare command; the verbs THIS rail blocks are
+        # harness entrypoints invoked by path — `./.showrunner/bin/showrunner spawn` is the form
+        # every install of this repo actually uses, and without `/` in the class the brake matched
+        # nothing at all while looking completely correct. The trailing class keeps no `/`: a verb
+        # followed by a slash is a longer word, not this verb.
+        pat = (r"(^|[\s;&|'\"/])" + r"\s+".join(re.escape(w) for w in words)
+               + r"($|[\s;&|'\"])")
+        if re.search(pat, cmd or ""):
+            return v
+    return None
+
+
+def binding_spawn_block(s, payload):
+    """This session's reading if it forbids STARTING NEW WORK on this call, else None.
+
+    Returns a dict carrying the reading, the cap and the verb that tripped it, or None.
+
+    WHY THE BRAKE IS HERE AND NOT IN SHOWRUNNER, which is the first place anyone looks. Read
+    2026-08-24: showrunner has no usage or session-size awareness anywhere. Its whole tree contains
+    one occurrence of `limits.json` (lib/showrunner/harness.py:86, an ignore-list entry naming a file
+    NOT copied into a worktree), and cmd_spawn (lib/showrunner/cli.py:1416) refuses for exactly one
+    reason, a harness gap — account usage and context size are consulted on no path. So "showrunner
+    kept going after game_loop said the limit was hit" was never two tools disagreeing: nothing was
+    ever asking showrunner to stop. It stays unmodified and unaware, and the brake rides the gate
+    that already has the reading.
+
+    WHY THIS IS NOT JUST ANOTHER BRANCH OF binding_context. That one answers "is a handoff owed",
+    and its answer is CANCELLED by writing a handoff. This one must not be: the failure it exists to
+    stop is a session that wrote the handoff and then kept fanning out. So it is computed
+    independently, checked BEFORE the handoff exemption in _limitgate_verdict, and reads its own
+    threshold — which may sit above the handoff cap, in which case binding_context is None on the
+    very calls this must refuse. Sharing the predicate would have re-introduced the bug.
+
+    Fail-OPEN wherever the signal is missing (INV5): the trigger off, block_spawn off, no reading
+    recorded yet, a reading that will not parse, a tool that is not Bash, a command naming no
+    configured verb. None of those is evidence that this session is large, and a gate that blocks on
+    absent evidence blocks its own fix.
+    """
+    cc = context_cfg()
+    if not cc["enabled"] or not cc["block_spawn"]:
+        return None
+    if (payload.get("tool_name") or "") != "Bash":
+        return None                     # the rail is the Bash verb; see the coverage note in status
+    rec = s.get("context_reading") or {}
+    try:
+        tokens = int(rec.get("tokens") or 0)
+    except (TypeError, ValueError):
+        return None
+    if tokens < cc["spawn_threshold_tokens"]:
+        return None
+    hit = _spawn_verb_hit((payload.get("tool_input") or {}).get("command") or "",
+                          cc["spawn_verbs"])
+    if not hit:
+        return None
+    return {"tokens": tokens, "cap": cc["spawn_threshold_tokens"], "verb": hit,
+            "observed_at": rec.get("observed_at")}
+
+
 def _fmt_reset(epoch):
     try:
         dt = datetime.datetime.fromtimestamp(float(epoch))
@@ -1516,7 +1620,48 @@ def cmd_statusline(s, a, payload):
     # a gate whose first appearance is a refused tool call is a gate nobody saw coming.
     if binding_context(s):
         row += "  ⚠ CONTEXT OVER CAP — HAND OFF"
+    # The spawn cap gets its own marker for the same reason the row above exists, and it is a
+    # SEPARATE marker because it can bind when that one does not: the caps are independent, and a
+    # session sitting between them is refused fan-out while owing no handoff at all.
+    cc = context_cfg()
+    if cc["enabled"] and cc["block_spawn"]:
+        try:
+            _tok = int((s.get("context_reading") or {}).get("tokens") or 0)
+        except (TypeError, ValueError):
+            _tok = 0
+        if _tok >= cc["spawn_threshold_tokens"]:
+            row += "  ⛔ NO NEW SPAWNS"
     print(row)
+
+
+def _spawn_block_reason(s, sb):
+    """The refusal a blocked fan-out verb prints. Its job is to be ACTED ON, not merely understood —
+    so it names the successor command, and says outright that writing a handoff will not help, since
+    that is precisely what the agent will otherwise try next."""
+    hp = handoff_path()
+    m = s.get("mandate") or {}
+    return (
+        f"NO NEW WORK — this session is too big to be starting Crawlers.\n\n"
+        f"  refused    : {sb['verb']}\n"
+        f"  context    : {sb['tokens'] / 1000:.0f}K tokens on the last turn, over the "
+        f"{sb['cap'] / 1000:.0f}K spawn cap\n\n"
+        "Every call this session makes re-sends that whole context, and orchestrating a fan-out is\n"
+        "all calls: a brief per Crawler, a reconcile per wave, an integration at the end. Spawning\n"
+        "from here does not spend the fan-out's tokens, it spends THIS context once per Crawler, and\n"
+        "the bill lands on the week rather than on the turn you can see.\n\n"
+        "WRITING A HANDOFF WILL NOT OPEN THIS. The usage gate above it works that way and this one\n"
+        "deliberately does not — a handoff says where you got to, it does not make the next call\n"
+        "cheaper. The only thing that clears this is a SMALLER SESSION:\n\n"
+        f"  1. write the handoff, if you have not:  {hp}\n"
+        "  2. start the successor:                 ./.game_loop/bin/game_loop successor\n"
+        "  3. spawn from THERE — a fresh session orchestrates the same fan-out at a fraction of the\n"
+        "     per-call cost, and it inherits the campaign through showrunner, not through context.\n\n"
+        f"  mandate in flight: {m.get('text') or '(none bound)'}\n\n"
+        "Work already claimed here is NOT affected — running Crawlers finish and close normally, and\n"
+        "you may still reconcile, check and integrate. Only STARTING more is refused.\n\n"
+        "If this cap is simply set too low for the campaign, that is the human's call to make in\n"
+        ".game_loop/config.local.json -> limits.context.spawn_threshold_tokens (or block_spawn:false\n"
+        "to remove the brake). Do not route around it by invoking the verb another way.")
 
 
 def _limitgate_verdict(s, payload, now_epoch):
@@ -1543,6 +1688,20 @@ def _limitgate_verdict(s, payload, now_epoch):
     this gate nudges the handoff into existence, it is not a security boundary; the write guard still
     owns what may be mutated.
     """
+    # ── FIRST, and above the handoff exemption on purpose ────────────────────────────────────────
+    #
+    # Everything below this block can be satisfied by writing a file. This cannot, and that is the
+    # entire reason it sits here rather than three lines further down. The observed failure: the
+    # context trigger closed the gate, the agent wrote a handoff, the gate opened, and the very next
+    # thing the session did was spawn more Crawlers out of the context that had just been declared
+    # too expensive to keep using. A handoff records where a run got to; it does not make the run
+    # cheaper, and it must not buy the right to start new work.
+    #
+    # It is also ahead of the `if not over and not ctx` early return, because the spawn cap may sit
+    # ABOVE the handoff cap — in which case ctx is None on exactly the calls this must refuse.
+    sb = binding_spawn_block(s, payload)
+    if sb:
+        return False, _spawn_block_reason(s, sb)
     snap = load_limits()
     lc = limits_cfg()
     over = binding_windows(snap, float(lc["threshold_pct"]), now_epoch) if snap else []
@@ -1640,10 +1799,13 @@ def cmd_limitgate(s, a, payload):
     allow, reason = _limitgate_verdict(s, payload, time.time())
     if allow:
         sys.exit(0)
-    # WHICH trigger closed it, in the log: two triggers share this gate, and a block count that
-    # cannot say which one fired cannot tell "the cap is set too low" from "the account ran dry".
+    # WHICH trigger, in the log — three of them now. A block count that cannot separate "the
+    # account ran dry" from "the cap is set too low" from "a fan-out was refused" cannot tell an
+    # operator which knob to turn, and the spawn refusal is the one most likely to be mis-set.
+    sb = binding_spawn_block(s, payload)
     logline({"kind": "limit_gate_block", "tool": payload.get("tool_name"),
-             "context_bound": bool(binding_context(s))})
+             "context_bound": bool(binding_context(s)),
+             "spawn_blocked": bool(sb), "spawn_verb": (sb or {}).get("verb")})
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
         "permissionDecisionReason": reason}}))
@@ -8122,6 +8284,29 @@ def coverage_report(s):
     lines.append("           A deploy verb nobody listed is NOT blocked — this is the one rail here "
                  "that defaults to")
     lines.append('           ALLOW. Add yours: config.json → "deploy_verbs".')
+    # The fan-out brake, stated whether or not it is armed — an OFF rail that says nothing reads
+    # exactly like an ON one that has not fired yet, and this one is off by default.
+    _cc = context_cfg()
+    if not _cc["enabled"]:
+        lines.append("  spawn  : NOT ARMED — limits.context.enabled is false, so a session of any "
+                     "size may keep")
+        lines.append("           starting Crawlers. Nothing here is watching the fan-out.")
+    elif not _cc["block_spawn"]:
+        lines.append("  spawn  : NOT ARMED — block_spawn is false. The context cap demands a "
+                     "handoff and then OPENS,")
+        lines.append("           which does not stop a big session spawning more work.")
+    else:
+        _tok = (s.get("context_reading") or {}).get("tokens")
+        _now = f"now {int(_tok) / 1000:.0f}K" if _tok else "no reading yet — fails OPEN"
+        lines.append(f"  spawn  : DENYLIST — {len(_cc['spawn_verbs'])} fan-out verb(s) refused over "
+                     f"{_cc['spawn_threshold_tokens'] / 1000:.0f}K of context "
+                     f"({', '.join(_cc['spawn_verbs'])}; {_now}).")
+        lines.append("           It matches the BASH VERB and nothing else: the same spawn through "
+                     "an MCP tool, a shell")
+        lines.append("           alias, a python -c, or a Crawler spawning its own children is NOT "
+                     "seen here. Nor are")
+        lines.append("           Crawlers ALREADY running — this brake stops the fleet growing, it "
+                     "never shrinks one.")
     # The rails above are what this repo controls. The claims below are what it does not, and a
     # coverage report that names only the first half implies the second half is settled.
     lines += external_claims_report()

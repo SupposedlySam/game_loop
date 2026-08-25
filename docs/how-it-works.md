@@ -363,6 +363,32 @@ condition on the *same* gate rather than a second gate beside it: same handoff k
 allow-list, same fail-open, same refusal to be satisfied by the auto-generated handoff. It is
 **off unless you turn it on**, like the probe, because it interrupts a run somebody is watching.
 
+**A third condition, and the one a handoff cannot buy off: the fan-out brake.** Both triggers above
+end the same way — write a handoff, and the gate opens. That is right for ordinary work and wrong for
+one verb. Observed on this account: the context trigger closed the gate, the agent wrote the handoff,
+the gate opened, and the very next thing the session did was `showrunner spawn` — starting new
+Crawlers out of the context it had just declared too expensive to keep using. A handoff records where
+a run got to; it does not make the next call cheaper, and it must not buy the right to start new
+work.
+
+So `limits.context.block_spawn` (default **true** wherever the context trigger is on) refuses a
+configured fan-out verb — `spawn_verbs`, defaulting to `showrunner spawn` — once the reading passes
+`spawn_threshold_tokens`. Three things make it different from everything else on this gate:
+
+- **No handoff satisfies it.** It is checked *before* the handoff exemption, and the only thing that
+  clears it is a smaller session (`game_loop successor`).
+- **Its own threshold.** `spawn_threshold_tokens` defaults to `threshold_tokens` but is meant to sit
+  above it: "write down where you are" should come early and cheap, "you may not start new work"
+  late and disruptive. One number cannot be both. It is computed independently of `binding_context`
+  precisely so it still fires when the spawn cap sits *below* the handoff cap — where the context
+  trigger itself is silent.
+- **It brakes, it does not stop.** Crawlers already running finish and close normally, and
+  `reconcile`, `check` and `integrate` are untouched. Only *starting* more is refused.
+
+What it does not see, stated rather than implied: it matches the **Bash verb**. The same spawn through
+an MCP tool, a shell alias, a `python3 -c`, or a Crawler spawning its own children is invisible to it,
+and it never shrinks a fleet that is already running.
+
 **The installer asks, once, and remembers the answer.** `install.sh` puts the question at the end of
 a run (`--context-cap[=N]` / `--no-context-cap` answer it without being asked) and caches the reply
 for 15 days in `~/.game_loop/install-answers.json`. The memory is the point rather than a

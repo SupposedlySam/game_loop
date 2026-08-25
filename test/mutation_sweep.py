@@ -869,6 +869,14 @@ MUTANTS += [
      ["duplicate", "declared", "merge", "manifest"],
      "5, and one of them is not mine: `--coverage says it too` was already asserting this report "
      "through a different door, which is why the producer was covered while being invisible.", 5),
+    ("_closing -> the stop gate reads an empty closing, so nothing is ever a promise",
+     ".game_loop/bin/game_loop::_closing", '    return ""\n',
+     ["closing", "tail", "quoted", "past-tense"],
+     "5 of 6, and the sixth CANNOT flip: it asserts the empty input returns empty, which a neuter "
+     "to `return \"\"` satisfies by definition. Worth the entry because the first version of these "
+     "six scored 1 — five were written as ABSENCES (`marker not in result`), and an absence is the "
+     "cheapest thing a broken producer gives you. Rewritten to pin what SURVIVES, same six "
+     "assertions, 1 -> 5.", 5),
     ("unchecked_tail -> files no rule claims are never named",
      ".game_loop/bin/verify::unchecked_tail", '    return ""\n',
      ["unchecked", "coverage", "no rule"], None, 2),
@@ -1176,9 +1184,7 @@ NOT_SWEPT = {
         "an assertion would mean asserting an outcome the code cannot produce. Excluded until #108 "
         "decides whether the check should read the COMMIT's diff instead, or whether the clean-tree "
         "gate is doing all the work and the text should say so.",
-    ".game_loop/bin/game_loop::_closing": "KNOWN GAP — renders the closing line of a refusal, and "
-        "measured at 0 kills on 2026-08-25: nothing asserts it. Unlike run_verify_check above this "
-        "one IS reachable, so it is a genuine unasserted producer rather than a dead branch.",
+
     
 
     "test/run.py::dig": "walks a nested structure and returns None at the first missing key, "

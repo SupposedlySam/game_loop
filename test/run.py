@@ -5164,6 +5164,49 @@ def main():
     # refused, and it is refused for the right reason. The unreachable branch is NOT pinned: a test
     # that asserted "the staleness gate stays silent" would have to be deleted by whoever fixes
     # #108, which is how a suite starts defending a bug.
+    # THE LAST DECLARED KNOWN GAP, closed by measuring it rather than arguing it was fine.
+    # `_closing` is what `_promised_to_continue` actually reads: the tail of a closing message with
+    # quoted spans removed and past-tense narration dropped. It measured 0 kills on 2026-08-25 — a
+    # genuinely unasserted producer, unlike run_verify_check beside it, which is unreachable (#108).
+    # Both of its protections are failure modes somebody paid for: scanning the WHOLE message flags
+    # a mid-prose mention the ending contradicts, and a guard that fires on an agent QUOTING a
+    # marker phrase while writing the postmortem is a guard that gets switched off.
+    print("the closing a stop gate reads is the TAIL, unquoted and present-tense:")
+    _gsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "game_loop"))
+    _cm = {"re": re}
+    exec(compile(_gsrc[_gsrc.index("def _closing(text, lines=4):"):
+                       _gsrc.index("def _promised_to_continue(text):")],
+                 "closing-slice", "exec"), _cm)
+    _cl = _cm["_closing"]
+    # EVERY ONE OF THESE ASSERTS WHAT SURVIVES, not what is absent. The first version asked
+    # `"continuing" not in _cl(...)` five times out of six — and a producer neutered to `return ""`
+    # satisfies an absence for free, so it measured 1 kill from 6 assertions. An absence is the
+    # cheapest thing a broken function can give you. Pinning the RESULT catches both halves: the
+    # stripping AND the keeping.
+    check("no text is an empty closing, not a match — nothing said cannot be a promise to continue",
+          _cl("") == "" and _cl(None) == "")
+    _tail = _cl("I am continuing to the next step.\n" + "\n".join(
+        "line %d here" % i for i in range(1, 9)))
+    check("only the TAIL is read — the last four lines survive and the opening line does NOT, so a "
+          "mid-prose mention the ending contradicts cannot fire the gate",
+          "line 8 here" in _tail and "line 5 here" in _tail
+          and "line 4 here" not in _tail and "continuing" not in _tail)
+    _q = _cl('The phrase "moving on to the next step" is what tripped it.')
+    check("...and a QUOTED marker is stripped while the sentence around it REMAINS — an agent must "
+          "be able to write the postmortem, and a guard that strips everything is not stripping",
+          "phrase" in _q and "tripped" in _q and "moving on" not in _q)
+    _b = _cl("Here is the marker: `onward to the next one` — that is the shape.")
+    _e = _cl("Here it is: **onward to the next one** — that is the shape.")
+    check("...backticks and bold too, and the prose around them still comes back",
+          "marker" in _b and "onward" not in _b and "shape" in _e and "onward" not in _e)
+    _p = _cl("I said I was continuing and then stopped. The work is done.")
+    check("...and PAST-TENSE narration is dropped while the present-tense sentence beside it is "
+          "kept — 'I said I was continuing' is a report about the failure, not a commission of it",
+          "the work is done" in _p and "continuing" not in _p)
+    check("...while a plain PRESENT-tense closing survives all of it, which is the arm that fails "
+          "if the stripping ever becomes a way to never fire at all",
+          "next batch" in _cl("Wrapping up here. Moving on to the next batch now."))
+
     print("a mark refuses an unclean tree, and says which gate did it (#108):")
     sv = make_sandbox()
     try:
@@ -8772,12 +8815,13 @@ def main():
     # a reason; five are product producers that SHOULD be swept and are not yet, so they are declared
     # here instead of sitting invisible. An empty queue was the outcome to aim for and it was also
     # true only of the producers anybody had thought to enumerate.
-    # FIVE BECAME ONE, by measuring rather than by deciding they were fine. Three had real floors
-    # (5, 2, 2) and moved into MUTANTS. `run_verify_check` measured 0 and is excluded with the
-    # reason, because its finding branch is unreachable (#108) — asserting it would mean asserting
-    # an outcome the code cannot produce. `_closing` measured 0 and IS reachable, so it stays a
-    # declared gap: a genuine unasserted producer, which is what this queue is for.
-    _expected_gaps = [".game_loop/bin/game_loop::_closing"]
+    # FIVE BECAME NONE, by measuring every one rather than deciding they were fine. Four had real
+    # floors and moved into MUTANTS; `run_verify_check` is excluded with its reason, because its
+    # finding branch is unreachable (#108) and asserting it would mean asserting an outcome the code
+    # cannot produce. An empty queue is the outcome this list exists to drive toward — and it is
+    # empty of the producers ANYBODY HAS ENUMERATED, which is the caveat that made the last "no
+    # KNOWN GAP today" true right up until the detector learned to see `""`.
+    _expected_gaps = []
     check("...and THIS repo's declared KNOWN GAPs are exactly the five the empty-string detector "
           "surfaced — a fact about today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),

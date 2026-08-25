@@ -426,6 +426,22 @@ def main():
         check("...while a fully RESOLVED out-of-repo target keeps the other refusal's wording",
               denied(_res) and "could not be RESOLVED" not in _res.stdout)
 
+        # THE BLIND SPLIT MUST NOT COME BACK (#110). The seven checks above pin the BEHAVIOUR, but
+        # the defect was one call, it is one call to reintroduce, and its symptom in the allowing
+        # direction is silence — a redirect outside the repo that nobody is told about. So this
+        # reads the source and pins the shape too: the segment loops go through shell_segments,
+        # and the quote-blind regex survives ONLY as that function's documented unbalanced-quote
+        # fallback. Counting rather than grepping for absence, because the fallback is a legitimate
+        # use of the very pattern being banned everywhere else.
+        _gsrc = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh"))
+        check("no segment loop splits a command with a quote-blind regex",
+              "for seg in re.split(" not in _gsrc)
+        check("...both loops go through the quote-aware splitter instead",
+              _gsrc.count("for seg in shell_segments(cmd):") == 2)
+        check("...and the blind regex survives only as shell_segments' own parse-failure fallback",
+              _gsrc.count('re.split(r"&&') == 2
+              and _gsrc.count("def shell_segments(cmd):") == 2)
+
         # #8: a malformed guard must FAIL OPEN, never exit-2 block — otherwise a broken guard blocks
         # its own repair. The shim `bash -n`s the impl and allows the tool when the impl won't parse.
         impl_f = os.path.join(proj, ".game_loop", "bin", "guard-writes-impl.sh")

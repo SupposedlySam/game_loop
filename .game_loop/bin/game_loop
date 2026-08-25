@@ -1091,6 +1091,17 @@ def watchdog_pidfile():
     return os.path.join(ROOT, ".watchdog.pid")
 
 
+def watchdog_pid_identity(pid):
+    """The start time ps reports for a pid, or None if it could not be read. Mirrors bin/watchdog's
+    _proc_start() — see the note on watchdog_pidfile(): two files, one convention."""
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout or "").strip() or None
+
+
 def disarm_watchdog():
     """SIGTERM the watchdog armed for THIS session and drop its pidfile. Returns (pid, note).
 
@@ -1102,20 +1113,43 @@ def disarm_watchdog():
     Only ever this session's own pid, read from this session's own pidfile. It never goes looking for
     watchdog processes by name: a scan cannot tell this project's from another's, and killing another
     project's autonomy engine is a far worse bug than the one being fixed.
+
+    AND ONLY A PID IT CAN PROVE IS THAT WATCHDOG. Nothing deletes a pidfile when a watchdog exits, so
+    the pid in it is usually dead already; if the OS has recycled it, the number alone cannot tell
+    this session's watchdog from a stranger, and what follows the read is a SIGTERM. The file records
+    the process's start time beside the pid, and a mismatch — or a file too old to carry one — means
+    NOT SIGNALLED, said in the returned note rather than passed off as a kill. game_loop#102.
     """
     f = watchdog_pidfile()
     try:
         with open(f) as fh:
-            pid = int(fh.read().strip())
-    except (OSError, ValueError):
+            parts = fh.read().strip().split(None, 1)
+        pid = int(parts[0])
+        recorded = (parts[1].strip() or None) if len(parts) > 1 else None
+    except (OSError, ValueError, IndexError):
         return None, "none was armed"
-    note = f"stopped pid {pid}"
-    try:
-        os.kill(pid, 15)
-    except ProcessLookupError:
-        note = f"pid {pid} had already exited"
-    except OSError as e:
-        note = f"could not signal pid {pid} ({e.__class__.__name__}) — the state flag still stands it down"
+    if recorded is None:
+        note = (f"pid {pid} was recorded without an identity (a pidfile older than that format), so "
+                "it could NOT be shown to be this session's watchdog — left alone rather than "
+                "signalled, because a recycled pid belongs to somebody else. The handed_off flag "
+                "still stands it down on its next wake.")
+    else:
+        live = watchdog_pid_identity(pid)
+        if live is None:
+            note = f"pid {pid} had already exited"
+        elif live != recorded:
+            note = (f"pid {pid} is NOT the watchdog that wrote this file — it exited and the OS gave "
+                    "its number to another process, which was therefore not signalled. The "
+                    "handed_off flag still stands the watchdog down.")
+        else:
+            note = f"stopped pid {pid}"
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                note = f"pid {pid} exited between the check and the signal"
+            except OSError as e:
+                note = (f"could not signal pid {pid} ({e.__class__.__name__}) — the state flag still "
+                        "stands it down")
     try:
         os.remove(f)
     except OSError:

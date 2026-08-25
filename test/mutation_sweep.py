@@ -788,6 +788,75 @@ MUTANTS = [
 # reported on unmeasured. Covering the report and not the reported thing is the trick every stamp in
 # this project hides behind — and I did it inside a fix for exactly that. Three direct assertions
 # against a real bare remote now exist; its floor is owed by the next sweep.
+# PROMOTED OUT OF NOT_SWEPT, where it arrived with #100 declaring "this is a producer that SHOULD
+# be swept and is not yet". The assertions that kill it exist now, so the debt is payable rather
+# than restatable.
+#
+# RAW 6, FLOOR 3, AND THE DIFFERENCE IS NOT ROUNDING. Three of the six kills are collateral and say
+# nothing about whether a handover stands a watchdog down:
+#
+#   ...names each planted orphan rather than only the first     ) all three are reachability
+#   ...and the check FINDS one when there is one                ) bookkeeping: the neutered body
+#   no shipped function is reachable ONLY from the suite        ) drops the only product caller of
+#                                                               ) watchdog_pid_identity, so it
+#                                                               ) reads as an orphan
+#
+# The three that are genuinely about this producer are the three that name its behaviour: the live
+# process is killed, the note does not claim a stop that never happened, and it says why it could
+# not check. A kill needs a named killer, and the name has to be about the guard — a count alone
+# would have recorded 6 here and called an orphan-detector's opinion coverage of a SIGTERM.
+MUTANTS += [
+    ("disarm_watchdog -> a handover signals nothing, and reports that it did",
+     ".game_loop/bin/game_loop::disarm_watchdog", "    return None, \"none was armed\"\n",
+     ["#102", "disarm", "handover", "watchdog", "signalled"],
+     "raw 6, genuine 3 — the other three are reachability assertions firing because the neutered "
+     "body orphans watchdog_pid_identity, not because they know anything about handovers.", 3),
+]
+
+# ── THE WATCHDOG PIDFILE CARRIES AN IDENTITY (#102) ──────────────────────────────────────────
+# MEASURED AT THE WORKING TREE, not at HEAD, and said here because a floor whose provenance is
+# unstated is a number. These producers did not exist in HEAD when measured, so the archive the
+# sweep normally runs could not carry them; the run used this file's own neuter(), run() and
+# in_a_copy_of() over the tracked working copy. Baseline 1596 named assertions passing. The next
+# full sweep re-measures them the ordinary way and THAT number supersedes these.
+#
+# THE BODIES ARE NOT ALL `return None`, ON PURPOSE. For a predicate whose None means "could not
+# tell", neutering to None collapses onto the SAFE direction — do not signal — which is what most
+# of these assertions already expect, so almost nothing can flip. Both directions were measured
+# rather than argued:
+#
+#   pid_is_ours -> None    1 kill    only the positive newest-wins assertion flips
+#   pid_is_ours -> True    3 kills   every "left alone" assertion flips
+#
+# `return True` is the mutant worth keeping: it is the direction that DOES harm — signalling a pid
+# nothing proved was ours, which is the bug this producer exists to prevent. A floor taken against
+# the None mutant would have recorded 1 and called the safe direction thin coverage, when what it
+# actually measured was that the failure mode is fail-safe.
+MUTANTS += [
+    ("pid_is_ours -> every pid in the file is treated as ours, and is signalled",
+     ".game_loop/bin/watchdog::pid_is_ours", "    return True\n",
+     ["#102", "identity", "recycled", "unverifiable", "signalled"],
+     "the opposite neuter (`return None`) scores 1, not 3: None IS the safe direction here, so it "
+     "flips only the newest-wins kill. Both were measured; this body is the harmful direction.", 3),
+    ("read_pidfile -> the pidfile never yields a pid, so nothing is ever stood down",
+     ".game_loop/bin/watchdog::read_pidfile", "    return None, None\n",
+     ["#102", "pidfile", "superseded", "identity"], None, 4),
+    ("_proc_start -> no process has a readable start time, so no pid can be identified",
+     ".game_loop/bin/watchdog::_proc_start", "    return None\n",
+     ["#102", "identity", "start time", "ps"],
+     "one kill, and it is the RIGHT one. A start time nobody can read makes every pid "
+     "unverifiable, and unverifiable means NOT SIGNALLED — so the three assertions about leaving a "
+     "process alone still pass, because they were already expecting that outcome. Only the paired "
+     "positive (a matching identity IS signalled) can flip, and it does. Thin here measures the "
+     "shape of the fallback, not a gap in it.", 1),
+    ("watchdog_pid_identity -> game_loop's side can never identify a pid either",
+     ".game_loop/bin/game_loop::watchdog_pid_identity", "    return None\n",
+     ["#102", "identity", "disarm", "handover"],
+     "same fail-safe shape as _proc_start above, one file over: an unreadable start time reads as "
+     "'that pid had already exited', so the handover declines to signal and says so. The two that "
+     "flip are the live kill and the note that must not claim a stop that never happened.", 2),
+]
+
 MUTANTS += [
     ("_stop_verdict -> the stop gate always allows the turn to end",
      ".game_loop/bin/game_loop::_stop_verdict", "    return True, \"\", None\n",
@@ -1056,19 +1125,7 @@ NOT_SWEPT = {
             "assert the handover is recorded behind it. That proves the branch is wired, and it "
             "still proves nothing about the app — the stated gap is now the app half only.",
 
-    ".game_loop/bin/game_loop::disarm_watchdog": "SIGTERMs the watchdog armed for this session at "
-            "handover, returning (pid, note). IT IS NOT THE GATE and must not be read as one: a "
-            "Stop hook arms a fresh watchdog at every turn-end, so what actually stands the engine "
-            "down is `handed_off` in state, which bin/watchdog reads and which IS swept. This is "
-            "the latency — it stops the one process already sleeping from waking once more to learn "
-            "what the flag already says. Its effect is asserted directly and against a LIVE "
-            "process: the suite arms a real `sleep`, records its pid in the pidfile, hands over, "
-            "and requires that the process is dead and the pidfile gone. A mutant that returned "
-            "without signalling is killed by that assertion, which is to say this is a producer "
-            "that SHOULD be swept and is not yet — it arrived with the handover work and has no "
-            "measured floor. Naming that is the point; pretending it is out of scope would not be.",
-
-    ".game_loop/bin/watchdog::_age_sec": "seconds since an ISO stamp. Its None is 'that stamp does "
+        ".game_loop/bin/watchdog::_age_sec": "seconds since an ISO stamp. Its None is 'that stamp does "
             "not parse', a mechanical outcome and not a finding withheld. Its one caller is "
             "handed_off_quiet, which turns None into the LOUD direction — fall through and ring, "
             "with `watchdog_handover_gone` in the log — and both of that caller's arms are asserted "

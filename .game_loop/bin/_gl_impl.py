@@ -8016,7 +8016,20 @@ def external_claims_report():
             # outlives its loop, and the first version of this leaked the per-claim date into the
             # block line below — which then reported one re-reading as though it were all six.
             _cv, _con = c["verified_against"], c.get("verified_on", "?")
-            if run and _cv != run:
+            # ONLY THE HOST BLOCK IS COMPARED TO THE HOST'S VERSION (#107). `running_host_version()`
+            # answers "which Claude Code is serving this session", and comparing a claim about some
+            # OTHER subject to it asks a question with no true answer: a claim verified against
+            # "saggar's installed bridge, 2026-08-19" can never equal "2.1.241", so it reads ⚠
+            # FOREVER — a warning nobody can clear, which is how a report earns being ignored.
+            #
+            # Live the moment a second subject appeared: a `saggar` block landed on 2026-08-25 and
+            # its one claim went permanently stale against a Claude Code release number. The report
+            # still SAYS what it was verified against; it just stops pretending it can judge it.
+            if _k != "claude_code":
+                lines.append(f"           · '{c['id']}' re-read {_con} against {_cv}. NOT compared "
+                             "to the running host: this claim is about a different subject, and "
+                             "nothing here knows that subject's version.")
+            elif run and _cv != run:
                 lines.append(f"           ⚠ '{c['id']}' was re-read {_con} against {_cv}; RUNNING "
                              f"{run} ({how}) — re-read it.")
             elif run:
@@ -8028,7 +8041,13 @@ def external_claims_report():
         if redone and len(redone) < len(claims):
             lines.append(f"           the other {len(claims) - len(redone)} have NOT been re-read "
                          "since the original reading below.")
-        if against and run and against != run:
+        # THE BLOCK STAMP, under the same rule as the per-claim ones above (#107): only the host
+        # block is judged against the host's version. Any other subject is REPORTED and not graded,
+        # because nothing here can read that subject's version to compare it with.
+        if _k != "claude_code" and against:
+            lines.append(f"           verified against {against} — not compared to the running "
+                         "host, which is a different subject.")
+        elif against and run and against != run:
             lines.append(f"           ⚠ VERIFIED AGAINST {against}, RUNNING {run} ({how}) — re-read "
                          "them; the subject moved.")
         elif against and run:

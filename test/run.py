@@ -10952,11 +10952,23 @@ def main():
     try:
         _xf = os.path.join(_xdir, "claims.json")
         with open(_xf, "w") as f:
-            json.dump({"host": {"subject": "the host", "verified_on": "2026-08-01", "claims": [
+            # THE KEY IS `claude_code` AND THAT IS NOW LOAD-BEARING (#107). Only the host block is
+            # graded against `running_host_version()`; a block about any other subject is REPORTED,
+            # because a claim verified against "saggar's bridge, 2026-08-19" can never equal
+            # "2.1.241" and would read ⚠ forever. This fixture said "host", which was a stand-in
+            # name back when the key meant nothing — and it took the non-host path the moment the
+            # key started meaning something.
+            json.dump({"claude_code": {"subject": "the host", "verified_on": "2026-08-01",
+                                       "claims": [
                 {"id": "stale-one", "says": "x", "breaks": "y",
                  "verified_on": "2026-08-01", "verified_against": "2.1.100", "verified_how": "h"},
                 {"id": "current-one", "says": "x", "breaks": "y",
                  "verified_on": "2026-08-02", "verified_against": "2.1.222", "verified_how": "h"},
+            ]},
+                "saggar": {"subject": "a different subject entirely", "verified_on": "2026-08-01",
+                           "verified_against": "some other thing, 2026-08-19", "claims": [
+                {"id": "other-subject", "says": "x", "breaks": "y", "verified_on": "2026-08-01",
+                 "verified_against": "some other thing, 2026-08-19", "verified_how": "h"},
             ]}}, f)
         _xm.CLAIMS_F = _xf
         _xm.running_host_version = lambda: ("2.1.222", "from a stub")
@@ -10990,6 +11002,17 @@ def main():
               "through all of them rather than on three claims that might differ for other reasons",
               len({_sym(_xlines, "current-one"), _sym(_xlines, "stale-one"),
                    _sym(_xnone, "current-one")}) == 3)
+    # THE FOURTH ARM (#107): a claim about a subject that is NOT the host is reported, never graded.
+    # Grading it means comparing its version to the running Claude Code build, which no claim about
+    # another subject can ever match — so it would carry ⚠ forever, and a warning nobody can clear
+    # is how a report earns being ignored. It went live the day a `saggar` block was added.
+        check("a claim about a DIFFERENT subject is reported and NOT graded — its version cannot "
+              "equal the running host's, so grading it would mean a ⚠ nobody can ever clear",
+              not _pick(_xlines, "other-subject").strip().startswith(("⚠", "✓"))
+              and "NOT compared to the running host" in _pick(_xlines, "other-subject"))
+        check("...and the HOST block is still graded beside it, so the exemption is scoped to the "
+              "subject rather than turning the check off",
+              _sym(_xlines, "stale-one") == "⚠" and _sym(_xlines, "current-one") == "✓")
     finally:
         shutil.rmtree(_xdir, ignore_errors=True)
 

@@ -8847,6 +8847,23 @@ def main():
     # suite drove main() programmatically, refusing a subset run with 76 passing checks above it.
     # That is #110's shape — a check whose subject is a command string it does not own — so both
     # arms are pinned here.
+    # THE ADVICE AND THE DATA IT NEEDS MUST SHIP TOGETHER. The sweep tells you to narrow a mark
+    # that "matches far more assertion names than it records coverage for", and the report renders
+    # `targeted[:3]` — so the input that advice requires is computed and then thrown away. Narrowing
+    # from three sampled names is how a set silently loses a real killer, and the floor tripwire
+    # then fires on the next run for a reason nobody can reconstruct. A rendered report is not a
+    # data structure; this repo has paid for that sentence twice.
+    check("the COMPLETE killer sets are persisted, not just the three the report renders — a mark "
+          "cannot be narrowed safely against a sample of the names it has to keep matching",
+          "_write_killers()" in _msrc and "sweep-killers.json" in _msrc)
+    check("...and they come from KILL_NAMES, the measured sets, rather than from the rendered text",
+          "KILL_NAMES.items()" in _msrc[_msrc.index("def _write_killers"):])
+    check("...and the overbroad-marks advisory NAMES that file, so the instruction and the data it "
+          "requires are not one screen apart",
+          "sweep-killers.json, written by this run" in _msrc)
+    check("...and it is written only on a FULL sweep, beside the section map — a trimmed run has "
+          "not observed what it did not execute, and would ratchet the sets toward its own subset",
+          "_write_section_map(base)\n        _write_killers()" in _msrc)
     check("the sweep parses argv at the ENTRY POINT, never inside main(), so a caller that drives "
           "main() programmatically is not judged by its own command line",
           "_parse_argv(sys.argv[1:])" in _msrc

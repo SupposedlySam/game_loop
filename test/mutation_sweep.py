@@ -197,6 +197,36 @@ def overbroad_marks(marks, names, floor):
     return matched, (matched >= 20 and matched > 10 * max(floor, 1))
 
 
+def _write_killers():
+    """Persist the COMPLETE killer set per producer, because the report renders only three of them.
+
+    The sweep's own advisory tells you to narrow a mark that "matches far more assertion names than
+    it records coverage for" — and then gives you nothing to narrow it WITH. `targeted[:3]` is what
+    reaches the screen, so the input the advice requires is computed, rendered down to a third of a
+    line, and dropped. Deriving new marks from those three is how a set silently loses a real killer
+    and the floor tripwire fires on the next run for a reason nobody can reconstruct.
+
+    A rendered report is not a data structure. This writes the sets themselves, so a proposed mark
+    can be tested against every name that actually killed the producer instead of against a sample.
+
+    Full sweeps only, and for the same reason the section map is: a trimmed run has not observed
+    what it did not execute, and letting it rewrite this would ratchet the sets toward whatever ran
+    last.
+    """
+    if not KILL_NAMES:
+        return
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "sweep-killers.json"), "w") as f:
+            json.dump({k: sorted(v) for k, v in KILL_NAMES.items()}, f, indent=1, sort_keys=True)
+        sizes = sorted(len(v) for v in KILL_NAMES.values())
+        print("wrote sweep-killers.json: %d producers, %d killer name(s) in total, median %d each "
+              "— the set a mark must keep matching if it is narrowed"
+              % (len(KILL_NAMES), sum(sizes), sizes[len(sizes) // 2]))
+    except OSError:
+        pass
+
+
 def _write_section_map(tree):
     """Write {producer: [section, ...]} from the COMPLETE killer sets this run measured.
 
@@ -2223,6 +2253,7 @@ def main():
     # returned SILENTLY. A full sweep ran for 50 minutes and wrote no map, and nothing said so.
     if not FAST:
         _write_section_map(base)
+        _write_killers()
     shutil.rmtree(base, ignore_errors=True)
 
     # RECORDED, so this argument is never had from memory again -- #59 was filed on a figure I had
@@ -2295,6 +2326,8 @@ def main():
         print("  ever failing. Narrow them to phrases that name the producer's subject — a common")
         print("  word matched as a substring is the usual cause. Not fatal: a broad mark has never")
         print("  broken a run, it has only ever made a report agree with you.")
+        print("  The names to narrow AGAINST are in test/sweep-killers.json, written by this run:"
+              "\n  every assertion that actually killed each producer, not the three shown above.")
     slack = stale_low_floors(verdicts)
     if slack:
         print(f"FLOOR IS STALE-LOW ({len(slack)}) — measured well above what is recorded, so the "

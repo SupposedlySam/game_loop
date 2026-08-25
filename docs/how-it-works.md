@@ -430,6 +430,39 @@ the auto-generated handoff, this accepts it and says so — the gate is asking t
 account, while this is the last act of a run that may be out of road, and the generated floor beats
 starting the successor blind.
 
+**The prompt opens with a subject line, and it is the one exception to "never copies state".** It is an
+exception because what it fixes is not a gap in the *successor's* knowledge — the successor reads the file —
+but a gap in the **human's**. `Read /repo/.game_loop/sessions/8aae5d8f/HANDOFF.md in full` is the first line
+of the new session, the command written into the tab config, and the row a person scans in a screen of eight
+terminals asking which one is doing the thing they care about. It answers that with a UUID.
+
+So the subject is a **label** — never an instruction, never a status, never a next step, all of which live in
+the file the prompt already points at — and it is **derived rather than authored**, which is precisely what
+keeps it from becoming the second copy the rule forbids. A label lifted out of a document cannot disagree with
+that document; a label composed freshly could. It leads the prompt rather than trailing it, because everything
+that displays a prompt displays its front: a tab row truncates, a terminal list prints one line, and the
+successor's own opening message starts there. It is capped at 100 characters and truncated rather than
+refused — a label that will not fit a terminal row has already failed at its job, and refusing the handover
+over it would be the wrong trade at the moment this verb exists for.
+
+**The derivation order is the interesting part, because game_loop knows something the handoff file does not:**
+
+1. `--about "<one line>"`, when a human said what this is about. `--about ""` turns the subject off entirely.
+2. The document's own `# ` heading, with its kind prefix stripped — `# Handoff — the flaky golden tests`
+   yields `the flaky golden tests`. This gives that heading a second job: write it for a stranger reading a
+   terminal row.
+3. **The bound mandate.** The *generated* handoff's heading is boilerplate — `# HANDOFF — written
+   automatically at every turn-end` describes when it was written, not what the run is doing — so it is
+   skipped rather than used, and a session running under a mandate has already been told in a human's own
+   words what it is for. That is a better subject than any heading, and it is the case that matters most: an
+   unattended run hands over at 3am, which is exactly when nobody was there to write a heading.
+4. The phase, when there is no mandate but the run said what it was doing.
+5. Nothing. No subject beats an invented one, and a heading with no description after it (`# Handoff`) yields
+   none rather than a fake one.
+
+**Do not justify it by saying it names the terminal.** It does not — see below. It earns its place by being
+*read*: the successor's opening message, the printed command, and the `about` line in this verb's own report.
+
 **A handover stands the predecessor's watchdog down.** Observed, not imagined: in a sibling project on
 2026-08-18 the limit gate closed, `successor` started the next session, and nothing stopped the old
 session's watchdog. It rang the retired session back into a mandate the new one already owned — both
@@ -490,11 +523,22 @@ and `saggar-agent` is an override for completeness rather than one anybody shoul
 
 **What the saggar path cannot carry**, stated because the Warp path carries it: `saggar agent` takes a
 provider and a *task*, not argv, so it builds its own claude invocation. The successor's session id does not
-reach it, and saggar names the terminal from the task, so `--task`/`--title` do not reach it either — the
-terminal ends up named after the prompt. It also starts in the calling terminal's directory rather than
-`--cwd`. All three are named in the output every time, and the portable command is printed in **every** mode
-precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is a
-call to a running app, so unlike `warp-tab` it writes nothing anywhere.
+reach it, `--task`/`--title` do not reach it either, and it starts in the calling terminal's directory rather
+than `--cwd`. All three are named in the output every time, and the portable command is printed in **every**
+mode precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is
+a call to a running app, so unlike `warp-tab` it writes nothing anywhere.
+
+**Nothing here names the terminal — and this page said otherwise until it was measured.** The correction is
+worth keeping rather than quietly overwriting, because the wrong version was load-bearing: it was the reason
+to believe `--title` was worth routing through saggar somehow, and it is the justification a subject line
+would most naturally have reached for. What saggar displays is `session_name` out of Claude Code's **own
+status-line payload**, which `~/.saggar/claude-status-bridge.sh` mirrors into
+`~/.saggar/chat-info/<SAGGAR_SESSION>.json` — Claude's auto-generated *conversation title*, not a string
+saggar or this verb supplies. Two live handovers on 2026-08-25 both came out named `HANDOFF-<timestamp>
+continuation`, the second one *after* its prompt led with the subject `confirm saggar names the terminal from
+the subject line`; the titler keyed off the handoff **filename** both times, as did a third sample on the
+machine (`DELEGATION-barbell`, from a doc whose filename carried a slug). So the lever on a saggar terminal's
+name is what the handoff file is CALLED, and no argument to this verb is a substitute for naming it well.
 
 **The successor can be launched with permission prompts bypassed** — `limits.successor.skip_permissions`,
 default `false`. A handover happens at the worst moment there is: the gate closed, the context full, the

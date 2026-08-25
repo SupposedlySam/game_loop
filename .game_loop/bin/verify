@@ -120,9 +120,13 @@ NOT_SOURCE = [".game_loop/sessions/*", ".game_loop/edited.txt", ".game_loop/log.
 UNCHECKED_SHOWN = 10
 
 
+DUPLICATE_KEYS = {}             # glob -> how many times the manifest declared it
+
+
 def load_map():
     """Tiny YAML subset: '<glob>:' then '  - <command>' lines. No third-party dependency."""
     out, key = {}, None
+    DUPLICATE_KEYS.clear()
     try:
         f = open(MAP_F)
     except OSError:
@@ -134,10 +138,37 @@ def load_map():
                 continue
             if not s.startswith(" ") and s.rstrip().endswith(":"):
                 key = s.rstrip()[:-1].strip().strip('"')
-                out[key] = []
+                # A REPEATED KEY USED TO RESET THE LIST, so the rule declared FIRST vanished with no
+                # output anywhere. This repo declared `.game_loop/bin/guard-writes-impl.sh` twice —
+                # once owing the suite, once owing the behaviour gate — and the second silently won.
+                # The 1621-line write guard therefore owed the suite in the manifest and did not owe
+                # it in fact. `--coverage` could not see it either: a rule DID claim that path, so it
+                # reported the file CHECKED. A hole shaped exactly like coverage.
+                #
+                # Accumulate instead. That fails toward running MORE checks than intended rather than
+                # fewer, which is the only safe direction for a gate — and it is said out loud below,
+                # because a merge nobody is told about is the same silence one level up.
+                if key in out:
+                    DUPLICATE_KEYS[key] = DUPLICATE_KEYS.get(key, 1) + 1
+                out.setdefault(key, [])
             elif key and s.lstrip().startswith("- "):
-                out[key].append(s.lstrip()[2:].strip().strip('"'))
+                cmd = s.lstrip()[2:].strip().strip('"')
+                if cmd not in out[key]:      # a key repeated with the same command owes it once
+                    out[key].append(cmd)
     return out
+
+
+def duplicate_key_tail():
+    """A merged duplicate is still a manifest somebody should repair, so it never merges quietly."""
+    if not DUPLICATE_KEYS:
+        return ""
+    lines = ["\nDUPLICATE RULE KEY(S) — declared more than once, and MERGED: every command listed "
+             "under\nany copy is owed. A repeated key used to DISCARD the rule declared first, in "
+             "silence."]
+    for k, n in DUPLICATE_KEYS.items():
+        lines.append(f"    {k}   declared {n}x")
+    lines.append("  → give each path ONE entry that lists every command it owes.")
+    return "\n".join(lines)
 
 
 def load_manifest():
@@ -323,6 +354,8 @@ def report_coverage(staged=False, porcelain=False):
     project's first commit — the exact regression this repo already fixed once.
     """
     mapping, exclusions = load_manifest()
+    if (_dup := duplicate_key_tail()):
+        print(_dup)
     files = staged_files() if staged else changed_files()
     checked, excluded, unchecked = coverage(files, mapping, exclusions)
 
@@ -421,6 +454,8 @@ def main():
         return report_coverage(staged="--staged" in sys.argv, porcelain="--porcelain" in sys.argv)
 
     mapping, exclusions = load_manifest()
+    if (_dup := duplicate_key_tail()):
+        print(_dup)
     files = changed_files()
     if not mapping:
         print("verify: no rules in .game_loop/verify.yaml — nothing owes a check.")
@@ -501,20 +536,46 @@ def main():
             print(tail)
         return 0
 
-    failed = False
-    for pattern, changed, _, _, _ in stale:
+    # ONE RUN PER DISTINCT COMMAND. Every gate file in this repo owes `python3 test/run.py`, and
+    # this loop was per RULE — so a change touching four gate files ran that one command four
+    # times: same string, same cwd, against a tree that cannot change between the passes. One suite
+    # is six minutes, so the tool whose whole purpose is making a check cheap was charging
+    # twenty-four minutes for six minutes of evidence.
+    #
+    # Note which way it failed. The old loop broke out on the first failure, so the duplication was
+    # billed ONLY when every command passed — the all-green run was the slow one, and the cost was
+    # invisible to anyone whose checks were still red.
+    #
+    # The per-rule RECORD is what made this look structural, and it is separable. Run each distinct
+    # command once, then stamp every rule whose commands all passed. A rule is still stamped on
+    # evidence and only on evidence; the evidence is simply no longer re-gathered per rule.
+    order, ran = [], {}
+    for pattern, _, _, _, _ in stale:
         for cmd in mapping[pattern]:
-            print(f"\n=== {pattern}: {cmd}")
-            r = subprocess.run(cmd, shell=True, cwd=REPO)
-            if r.returncode != 0:
-                print(f"FAILED: {cmd}")
-                failed = True
-                break
-        else:
+            if cmd not in order:
+                order.append(cmd)
+
+    failed = False
+    for cmd in order:
+        owed_by = [p for p, _, _, _, _ in stale if cmd in mapping[p]]
+        print(f"\n=== {cmd}")
+        print(f"    owed by: {owed_by[0]}" if len(owed_by) == 1 else
+              f"    owed by {len(owed_by)} rules, RUN ONCE: " + ", ".join(owed_by))
+        r = subprocess.run(cmd, shell=True, cwd=REPO)
+        ran[cmd] = r.returncode
+        if r.returncode != 0:
+            print(f"FAILED: {cmd}")
+            failed = True
+            break                       # fail fast, exactly as before
+
+    # STOPPING EARLY MUST LEAVE THE UNRUN RULES UNSTAMPED. `ran` holds only what actually
+    # executed, so a rule whose command never ran cannot satisfy this and stays stale — the next
+    # run gathers its evidence instead of inheriting a stamp nobody earned. A rule that owes no
+    # commands is stamped, which is what the old for/else did too.
+    for pattern, _, _, _, _ in stale:
+        if all(ran.get(c) == 0 for c in mapping[pattern]):
             rec.setdefault(pattern, {})["at"] = time.time()
             rec[pattern]["cmds"] = mapping[pattern]
-            continue
-        break
 
     with open(REC_F, "w") as f:
         json.dump(rec, f, indent=2)

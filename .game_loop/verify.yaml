@@ -40,60 +40,132 @@
 
 # THIS repo's own rules (NOT shipped to installs): game_loop dogfoods itself — the gates are the
 # product, so a change to any of them owes the test suite.
+# THE ONES THAT KEEP THE WHOLE SUITE, AND THE COUNT THAT SAYS WHY. Every other rule below names
+# sections instead; these were measured the same way and the number came back too close to 1605 to
+# be worth the hand-maintained list, or the file is one a subset cannot honestly cover:
+#
+#   bin/game_loop     the 9k-line core, reached by nearly every section. A subset here would be
+#                     dishonest rather than fast.
+#   test/run.py       the suite itself, and the selector inside it. A subset of the thing deciding
+#                     what a subset means is circular.
+#   bin/watchdog      30 sections mention it. Selecting them costs the shared-fixture prefix twice
+#                     over and lands within noise of the full run.
+#   bin/verify        8 sections RUN it, one of them near the end of the fixture block -- so the
+#                     prefix rule alone pulls in that whole block, and pinned dispatch adds 300 more.
+#   install.sh        29 sections. It is the widest file here after the core.
+#   the two SHIMS     guard-writes.sh and guard-mcp.sh are 23 and 19 lines, and every write-guard
+#                     test reaches the impl THROUGH the shim (`guard()` invokes the shim, not the
+#                     impl). So a shim owes its impl's sections PLUS the pin-dispatch and
+#                     central-install sections that are about the shim's own job -- roughly 1000 of
+#                     1605. Rarely edited, structurally load-bearing, and INV5's fail-closed path:
+#                     the wrong file to buy two minutes on.
+#
+# These are decisions, not omissions, and each is re-checkable with `--list-sections`.
 ".game_loop/bin/game_loop":
   - "python3 test/run.py"
 ".game_loop/bin/watchdog":
   - "python3 test/run.py"
 ".game_loop/bin/guard-writes.sh":
   - "python3 test/run.py"
+# A SMALLER COMMAND THAN "EVERYTHING", AND WHAT IT COSTS. These two files are edited often and
+# each edit used to gate on all 1596 checks -- 5:19, nearly all of it about code the change did not
+# touch. That is the kind of tax that gets a rule deleted rather than obeyed, so the rule names the
+# sections that are ABOUT these files instead.
+#
+# WHAT THIS SKIPS, said out loud because a subset gates on less than the whole: any section whose
+# NAME does not match the patterns below but which exercises these guards anyway. `--section` closes
+# over names, not over the filesystem, and it cannot know that some unnamed section calls guard().
+# The list was read off `--list-sections` by hand, so it goes out of date the way every hand list
+# does -- if you add a guard section, add it here or it stops gating this file.
+#
+# The behaviour gate still runs in full: it is seconds, and it is the one that notices a REFUSAL
+# changing without a record entry.
 ".game_loop/bin/guard-writes-impl.sh":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'write guard' --section deploy --section 'authorize recurrence' --section 'unreadable commit target' --section 'unharnessed tree' --section "POLICY is not the session's" --section 'EMBEDDED in the shell guards' --section 'guard nothing calls' --section 'config paths'"
+  - "python3 test/behaviour_gate.py"
 ".game_loop/bin/guard-mcp.sh":
   - "python3 test/run.py"
 ".game_loop/bin/guard-mcp-impl.sh":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'MCP guard' --section 'MCP writes' --section 'guard nothing calls' --section 'EMBEDDED in the shell guards'"
+  - "python3 test/behaviour_gate.py"
 ".game_loop/bin/verify":
   - "python3 test/run.py"
+# WHAT THIS SKIPS: the sections that name flair are the flair section itself, the default-deny over
+# what bin/ ships, and the orphan scan that would notice nothing calling it. A caller that renders a
+# banner without the word "flair" anywhere in its section name is not covered here. 178 checks, 37s.
 ".game_loop/bin/flair.py":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section flair --section 'every executable in bin/' --section 'guard nothing calls'"
+# WHAT THIS SKIPS: notify is reached from the paging path, the user-level config fallback, the
+# watchdog's three forwarding cases and the session GC, and every one of those names itself. What it
+# does NOT cover is a caller that sends without saying so in its section name — the reply POLL, for
+# one, is asserted in "the suite cannot hang on the watchdog's reply poll" and is deliberately not
+# selected, because that section is about the suite's own bound rather than about notify's behaviour.
+# 453 checks, 63s.
 ".game_loop/bin/notify.py":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'slack paging' --section 'notify config falls back' --section 'watchdog forwards' --section 'slack-paged arm survives' --section 'session GC' --section 'every executable in bin/' --section 'guard nothing calls' --section 'site config has a gitignored home' --section 'silently not run is worse' --section 'pinned dispatch'"
 # The suite IS the guarantee, and the manifest decides what a change owes: both are gates, so both
-# owe the suite. Named because `verify --coverage` reported them unchecked — the report working.
+# owe a check. Named because `verify --coverage` reported them unchecked — the report working. Only
+# the suite owes the WHOLE of itself; the manifest's own rule names a section, further down.
 "test/run.py":
   - "python3 test/run.py"
 # The sweep decides whether the suite's silence-shaped assertions are worth anything (#42), and it
 # now FAILS a run rather than only printing. Its verdict line and its list of producers are checked
 # by the suite — cheaply, without running the sweep, which is one full pass per producer.
+# WHAT THIS SKIPS: the sweep's verdicts, its default-deny over the producers it can find, its
+# working-tree restore, and the wording rule over its exclusions all name themselves. What is NOT
+# covered is the sweep as it is actually RUN — one full pass per producer, which nothing in the
+# suite does and no rule here could afford. That was already true of the full-suite command this
+# replaces. 68 checks, 7s.
 "test/mutation_sweep.py":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'producer mutation sweep' --section 'sweep cannot strand a mutation' --section 'mutation sweep coverage' --section 'exclusion cannot become invisible' --section 'guard nothing calls'"
 # The claims record is DATA the tool reads and ships, like behaviour.json — and a malformed one
 # degrades to silence: external_claims_report returns nothing and status simply stops mentioning the
 # host, which looks exactly like a harness with no external claims to make. That is the failure this
-# repo keeps paying for, so the shipped file owes the suite too. The suite also holds the
-# default-deny that ties each entry to its LEDGER heading, so editing either without the other fails.
+# repo keeps paying for, so the shipped file owes a check too. The suite holds the default-deny
+# that ties each entry to its LEDGER heading, so editing either without the other fails -- and that
+# is the section the rule below names, rather than all 1605 checks.
 # A change to what game_loop REFUSES owes an entry in the behaviour record, or an explicit decision
 # that nobody would notice. The mechanism existed and the discipline lapsed silently — twelve
 # refusal-touching commits after the record's only entry, four of them qualifying — so it is a gate
 # now rather than a habit. It fires only when a refusal LINE moves, not on every edit.
-".game_loop/bin/guard-writes-impl.sh":
-  - "python3 test/behaviour_gate.py"
-".game_loop/bin/guard-mcp-impl.sh":
-  - "python3 test/behaviour_gate.py"
+# The behaviour_gate command for the two impl scripts is listed with them in the bin block above,
+# NOT repeated here. It used to be declared a second time at this spot, and a repeated key silently
+# discarded the earlier `python3 test/run.py` rule -- so the write guard owed the suite on paper and
+# owed nothing in fact. verify now MERGES a repeated key and says so out loud; this file should not
+# need that mercy.
+# WHAT THIS SKIPS: the gate has exactly one section about it, and the coverage section's mention of
+# the STRING "test/behaviour_gate.py" is an assertion about verify.yaml's contents, not about this
+# file — so it belongs to the manifest's rule below and not to this one. 10 checks, 1s.
 "test/behaviour_gate.py":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'behaviour gate'"
+# WHAT THIS SKIPS: three sections read the shipped record — the update notice that renders it, the
+# contract a consumer pins to, and the gate that refuses an unrecorded refusal. A fourth reader that
+# named itself something else would not be selected. 208 checks, 44s.
 ".game_loop/behaviour.json":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'update check' --section 'behaviour record is a contract' --section 'behaviour gate'"
 # The probe is executable code that spends the human's tokens and writes the snapshot three gates
-# read. It owes the suite like every other script here.
+# read. It owes a check like every other script here.
+# WHAT THIS SKIPS: the probe writes a snapshot three gates READ, so the limit gate sections are
+# selected alongside the probe's own. Not covered: a reader of that snapshot whose section name says
+# neither "limit gate" nor "limit probe" — the watchdog's usage park is one, and it keeps its cover
+# through the watchdog rule below, which still owes the whole suite. 162 checks, 32s.
 ".game_loop/bin/limit-probe.sh":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'the limit probe' --section 'every executable in bin/' --section 'limit gate'"
+# ONE COMMAND FOR BOTH, so a commit editing a claim and its LEDGER heading — which is the only way
+# either is supposed to be edited — runs it once rather than twice. The default-deny that ties each
+# claims.json entry to a real LEDGER heading is the check that matters, and it reads both files.
+# WHAT THIS SKIPS: any other reader of either file. 33 checks, 4s — the cheapest rule here.
 ".game_loop/claims.json":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'claim about the HOST'"
 ".game_loop/LEDGER.md":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'claim about the HOST'"
+# THE MANIFEST GATES ITSELF. The coverage section is the one that reads THIS file and asserts about
+# it: no path declared twice, and the write guard's impl still owing both of its commands. It sits
+# deep in the shared-fixture block, so selecting it costs that block's whole prefix — 479 of 1605
+# checks, 96s. Half the suite to edit a rule is still half of what it was.
+# WHAT THIS SKIPS: everything after the fixture block that reads no rule of this file.
 ".game_loop/verify.yaml":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'what the checks manifest is NOT looking at'"
 # install.sh was deliberately unlisted while it only copied files — nothing could fail. It now DECIDES
 # something (issue #30: adopt a linked worktree's project rules, or refuse), and a wrong decision
 # there hands a tree a harness that gates nothing. That is behaviour, the suite drives the real
@@ -101,27 +173,33 @@
 "install.sh":
   - "python3 test/run.py"
 # The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --
-# the notice would report nothing and look exactly like an install with nothing to report. That is
-# the failure class this repo keeps paying for, so the shipped file owes the suite too.
-".game_loop/behaviour.json":
-  - "python3 test/run.py"
 
 # THE TWO DOCUMENTS A CONSUMER OPERATES FROM. Added after editing both and being told "nothing
 # changed that owes a check" -- while test/run.py asserts, over every tracked file, that the house
-# word appears nowhere. A doc edit really can fail the suite, so it owes the suite. Only these two:
+# word appears nowhere. A doc edit really can fail the suite, so it owes that scan. Only these two:
 # gating a LICENSE edit on a three-minute run is the kind of tax that gets a rule deleted rather
 # than obeyed, and these are the ones that actually change.
+# ONE COMMAND FOR BOTH. They are the two files the CLI-option assertion reads as a single body of
+# text, and they are edited together; a shared command means a commit touching both pays for it once.
+# The union is over-gating for either one alone -- llms.txt does not define the shell function -- and
+# over-gating is the safe direction, unlike the other kind of imprecision this file can have.
+# WHAT THIS SKIPS: the whole shared-fixture block, which reads neither file. 317 checks, 43s.
 "README.md":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'shell function two shipped files' --section 'moment nobody can find' --section 'arrived blind' --section 'pinned dispatch'"
 "llms.txt":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'shell function two shipped files' --section 'moment nobody can find' --section 'arrived blind' --section 'pinned dispatch'"
 # THE ONE TRACKED FILE WHOSE CONTENTS EXECUTE IN SOMEBODY ELSE'S CHECKOUT. It sat in unchecked-ok
 # under "covered for exactly one property -- the house word", which was true until this repo grew
 # assertions about what is IN it: no home-anchored path, every hook anchored to $CLAUDE_PROJECT_DIR.
 # A home path here was reported once, the installer was fixed, and nothing stopped it returning.
 # Third entry in that list found stale today; the list is right and its membership goes out of date.
+# WHAT THIS SKIPS: four sections read this repo's own settings.json -- the mcp__.* registration, the
+# statusline tap's absence notice, the no-home-anchored-path scan, and pinned dispatch's assertion
+# that every hook goes through the pin check. The first of those is inside the shared-fixture block,
+# so this rule pays that block's prefix: 676 of 1605 checks, 125s. It is the most expensive rule
+# below the full suite, and it is still less than half of one.
 ".claude/settings.json":
-  - "python3 test/run.py"
+  - "python3 test/run.py --section 'house voice' --section 'MCP guard (wired in' --section 'statusline tap announces its own absence' --section 'one tracked file whose contents EXECUTE' --section 'pinned dispatch'"
 
 # Deliberately unchecked for their CONTENT, and it stays visible here. Prose, licence text, editor
 # config and the payload copied verbatim into other projects: no command exists that fails when what

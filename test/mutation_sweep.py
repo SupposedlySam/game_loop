@@ -1094,6 +1094,32 @@ NOT_SWEPT = {
                                "case existed. Mutating the instrument voids the reading rather "
                                "than measuring it",
 
+    "test/run.py::_segments": "the selector's own index of sections, inside the suite. Neutered "
+            "to an empty list, every --section matches nothing and the selector REFUSES with exit "
+            "2 rather than running zero checks and reporting success — and that is asserted "
+            "directly beside it, in both directions: a real selection must exit 0 and print its "
+            "summary, a nonsense one must exit 2. Mutating the instrument voids those readings "
+            "rather than measuring them.",
+
+    "test/run.py::_stale": "the scan for --section patterns in verify.yaml that no longer match a "
+            "section, inside the suite. Its empty list is the ordinary answer — the manifest is "
+            "clean — and like _vanishing it is asserted through its OWN positive control standing "
+            "next to it: the very next check calls it on a pattern naming no section and requires "
+            "that pattern back. Neutered to always-empty that control fails; neutered to "
+            "always-nonempty the clean check fails. Mutating the instrument voids both readings "
+            "rather than measuring them.",
+
+    "test/run.py::_scope": "the selector's free-variable analysis — which names a run of "
+            "statements binds, and which it reads from an enclosing scope. Neutered to two empty "
+            "sets the closure finds NO dependencies and every subset shrinks to the sections "
+            "literally named, which is the unsound direction and exactly the kind of quiet "
+            "shrinkage this file exists to catch. It is caught directly beside it instead: the "
+            "two assertions on the closure read BOTH arms of the answer — a free name that must "
+            "be present (OUTER) and bound names that must be absent (a helper's parameters, a "
+            "comprehension target) — so an empty answer fails on the first and a saturated one "
+            "fails on the second. Inside the suite, and mutating the instrument voids those "
+            "readings rather than measuring them.",
+
     "test/run.py::json_text": "the same guard as json_or_none for the other door — a JSON STRING "
                               "rather than a path. Its None arm is the honest answer for a hook "
                               "that printed nothing, which is what a neutered producer makes them "

@@ -386,6 +386,46 @@ def main():
         check("still denies an out-of-repo redirect inside a bash (code) heredoc body",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+        # #110: THE GUARD'S SUBJECT IS THE COMMAND TEXT, so its splitting has to respect shell
+        # quoting. re.split on the separators is quote-BLIND, and that one fact broke this guard in
+        # BOTH directions at once — which is why the false positive and the bypass are asserted
+        # together here rather than in separate places.
+        #
+        # Every command below puts an ABSOLUTE OUT-OF-REPO path where the old code would find one.
+        # That is deliberate: with a bare relative target these all resolve INSIDE the sandbox and
+        # pass whether the bug is present or not, and a check that cannot fail is not a check.
+        check("a jq filter's quoted > is DATA, even when a quoted | precedes it",
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "jq -r '.a | select(.p > \"/etc/passwd\")' f.json"}}))
+        check("...and a quoted | does not hide a REAL redirect in the tail from the guard",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo 'a | b' > /etc/passwd"}})))
+        check("a backslash-escaped quote does not close the string and expose a redirect",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'echo "a \\" b" > /etc/passwd'}})))
+        # TWO OF THE SEVEN BELOW ARE TRIPWIRES, NOT KILLS, and saying so is cheaper than letting
+        # a later reader assume otherwise: this one and the "keeps the other refusal's wording" one
+        # pass against HEAD too. The first guards the FALLBACK added with the quote-aware splitter
+        # (drop it and an unbalanced quote swallows the rest of the command, checking nothing); the
+        # second pins the separation between the two refusals. The other five fail against HEAD.
+        check("an unbalanced quote falls back to the blind split rather than stopping the checks",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'echo "a ; rm -rf /etc/passwd'}})))
+        # THREE OUTCOMES, NOT TWO. A target holding a variable the guard cannot expand is UNKNOWN,
+        # and #110 was reported partly because the refusal printed the unexpanded string joined onto
+        # a directory and asserted it as the target. Same decision, different words — and the two
+        # refusals must not share bytes, or "could not tell" is indistinguishable from "known bad".
+        _unres = guard(proj, {"tool_name": "Bash", "tool_input": {
+            "command": "cd ~/development/$r && echo hi > out.txt"}})
+        check("an unexpandable target is refused AS UNRESOLVED, not as a resolved path",
+              denied(_unres) and "could not be RESOLVED" in _unres.stdout)
+        check("...and it never asserts the half-substituted string as the target",
+              "as far as I got" in _unres.stdout)
+        _res = guard(proj, {"tool_name": "Bash",
+                            "tool_input": {"command": "echo hi > ~/evil.txt"}})
+        check("...while a fully RESOLVED out-of-repo target keeps the other refusal's wording",
+              denied(_res) and "could not be RESOLVED" not in _res.stdout)
+
         # #8: a malformed guard must FAIL OPEN, never exit-2 block — otherwise a broken guard blocks
         # its own repair. The shim `bash -n`s the impl and allows the tool when the impl won't parse.
         impl_f = os.path.join(proj, ".game_loop", "bin", "guard-writes-impl.sh")

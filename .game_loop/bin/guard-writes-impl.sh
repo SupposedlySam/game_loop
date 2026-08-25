@@ -945,7 +945,72 @@ def tree_of(path):
     return os.path.realpath(out) if r.returncode == 0 and out else ""
 
 
-for seg in re.split(r"&&|\|\||;|\||\n", cmd):
+def shell_segments(cmd):
+    """Split CMD on shell separators (&&, ||, ;, |, newline), QUOTE-AWARE.
+
+    A plain re.split is quote-BLIND, and that one fact broke this guard in BOTH directions
+    (#110). A jq filter like '[.[] | select(.a > "x")]' is one argument, but splitting on the
+    `|` inside it left the opening quote in the previous segment, so the `>` in the next one
+    looked UNQUOTED and the string after it looked like a redirect target: a refusal aimed at a
+    command that writes nothing. The same cut also handed out a BYPASS -- in
+    `echo 'a | b' > <path outside the repo>` the tail segment begins mid-quote, so a REAL
+    redirect was read as quoted data and allowed. That direction was found by testing this fix,
+    not by the report.
+    So quote-awareness here is what makes redirect_targets' own quote-awareness mean anything:
+    that function is careful, and was being handed segments whose quoting had already been
+    destroyed.
+
+    Unbalanced quotes fall back to the naive split. The command cannot be parsed, and between a
+    reading that keeps checking and one that stops, the guard takes the one that keeps checking.
+    """
+    segs, buf, i, n, q = [], [], 0, len(cmd), None
+    while i < n:
+        c = cmd[i]
+        if q is not None:
+            if c == chr(92) and q == chr(34) and i + 1 < n:
+                buf.append(c)
+                buf.append(cmd[i + 1])
+                i += 2
+                continue
+            buf.append(c)
+            if c == q:
+                q = None
+            i += 1
+            continue
+        if c == chr(92) and i + 1 < n:
+            buf.append(c)
+            buf.append(cmd[i + 1])
+            i += 2
+            continue
+        if c == "'" or c == chr(34):
+            q = c
+            buf.append(c)
+            i += 1
+            continue
+        if c == ";" or c == chr(10):
+            segs.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        if c == "&" and i + 1 < n and cmd[i + 1] == "&":
+            segs.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        if c == "|":
+            segs.append("".join(buf))
+            buf = []
+            i += 2 if (i + 1 < n and cmd[i + 1] == "|") else 1
+            continue
+        buf.append(c)
+        i += 1
+    segs.append("".join(buf))
+    if q is not None:
+        return re.split(r"&&|\|\||;|\||\n", cmd)
+    return segs
+
+
+for seg in shell_segments(cmd):
     seg = seg.strip()
     if not seg:
         continue
@@ -1575,8 +1640,20 @@ def redirect_targets(seg):
     while i < n:
         c = seg[i]
         if q:
+            # A BACKSLASH-ESCAPED QUOTE DOES NOT CLOSE THE STRING, and reading it as if it did
+            # handed out a bypass: in `echo "a \\" b" > <path outside the repo>` the escaped quote
+            # was taken as the closing one, the next quote was read as an OPENING one, and the real
+            # redirect after it looked like quoted data -- so the write was allowed. Found by
+            # testing the #110 fix rather than reported. Only double quotes take escapes; inside
+            # single quotes a backslash is a literal character, which is why q is tested.
+            if c == chr(92) and q == chr(34) and i + 1 < n:
+                i += 2
+                continue
             if c == q:
                 q = None
+        elif c == chr(92) and i + 1 < n:
+            i += 2
+            continue
         elif c in "'\"":
             q = c
         elif c == ">":
@@ -1616,9 +1693,93 @@ def redirect_targets(seg):
 
 offenders = []
 policy_hits = []
+unresolved = []
+
+
+def unexpandable(raw, cwd):
+    """The path this target would resolve to, if it still holds a variable this guard cannot expand.
+
+    The guard reads the command TEXT and never runs a shell, so `$r` is a name with no value here.
+    Joining it onto a directory produces a STRING SHAPED LIKE A PATH that names no file on this
+    machine, and the refusal then asserted that string as the target -- the report in #110 quoted
+    `/Users/.../development/$r/2026-08-18` and had to explain that no such thing existed.
+
+    A sum is not a distribution, and a guess is not a verdict. The decision does not change (an
+    unexpanded variable can name anything, out-of-repo included, so refusing stays right); what
+    changes is that "could not tell" stops being printed in the words of "here is the file".
+    """
+    p = os.path.expanduser(raw.replace("$HOME", home))
+    if not os.path.isabs(p):
+        p = os.path.join(cwd, p)
+    return p if "$" in p else None
 # Split on shell separators AND newlines. Omitting \n would collapse a multi-line command into one
 # segment whose verb is its first token, so a mutating later line would never be checked.
-for seg in re.split(r"&&|\|\||;|\||\n", cmd):
+def shell_segments(cmd):
+    """Split CMD on shell separators (&&, ||, ;, |, newline), QUOTE-AWARE.
+
+    A plain re.split is quote-BLIND, and that one fact broke this guard in BOTH directions
+    (#110). A jq filter like '[.[] | select(.a > "x")]' is one argument, but splitting on the
+    `|` inside it left the opening quote in the previous segment, so the `>` in the next one
+    looked UNQUOTED and the string after it looked like a redirect target: a refusal aimed at a
+    command that writes nothing. The same cut also handed out a BYPASS -- in
+    `echo 'a | b' > <path outside the repo>` the tail segment begins mid-quote, so a REAL
+    redirect was read as quoted data and allowed. That direction was found by testing this fix,
+    not by the report.
+    So quote-awareness here is what makes redirect_targets' own quote-awareness mean anything:
+    that function is careful, and was being handed segments whose quoting had already been
+    destroyed.
+
+    Unbalanced quotes fall back to the naive split. The command cannot be parsed, and between a
+    reading that keeps checking and one that stops, the guard takes the one that keeps checking.
+    """
+    segs, buf, i, n, q = [], [], 0, len(cmd), None
+    while i < n:
+        c = cmd[i]
+        if q is not None:
+            if c == chr(92) and q == chr(34) and i + 1 < n:
+                buf.append(c)
+                buf.append(cmd[i + 1])
+                i += 2
+                continue
+            buf.append(c)
+            if c == q:
+                q = None
+            i += 1
+            continue
+        if c == chr(92) and i + 1 < n:
+            buf.append(c)
+            buf.append(cmd[i + 1])
+            i += 2
+            continue
+        if c == "'" or c == chr(34):
+            q = c
+            buf.append(c)
+            i += 1
+            continue
+        if c == ";" or c == chr(10):
+            segs.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        if c == "&" and i + 1 < n and cmd[i + 1] == "&":
+            segs.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        if c == "|":
+            segs.append("".join(buf))
+            buf = []
+            i += 2 if (i + 1 < n and cmd[i + 1] == "|") else 1
+            continue
+        buf.append(c)
+        i += 1
+    segs.append("".join(buf))
+    if q is not None:
+        return re.split(r"&&|\|\||;|\||\n", cmd)
+    return segs
+
+
+for seg in shell_segments(cmd):
     try:
         argv = shlex.split(seg)
     except ValueError:
@@ -1650,7 +1811,15 @@ for seg in re.split(r"&&|\|\||;|\||\n", cmd):
     for raw in check:
         bad = offends(raw, cwd)
         if bad:
-            offenders.append(bad)
+            # Only when it would have been REFUSED anyway. A variable that resolves lexically to
+            # somewhere inside the repo is allowed today, and turning those into refusals would
+            # break ordinary work (`> $TMP/x`) on a guess. The gap that leaves -- a variable whose
+            # real value points outside -- is the one already named under "WHAT THIS CANNOT SEE".
+            fab = unexpandable(raw, cwd)
+            if fab:
+                unresolved.append(raw + chr(9) + fab)
+            else:
+                offenders.append(bad)
         # THE POLICY FILES, ON THE BASH PATH TOO (#86). Registered on Write/Edit only, the gate that
         # bounds the session was a suggestion against `>>` — and because nothing was refused,
         # nothing was logged either, which removes the very evidence #65 exists to preserve.
@@ -1664,11 +1833,14 @@ for o in dict.fromkeys(offenders):
     print(o)
 for p_ in dict.fromkeys(policy_hits):
     print("POLICY\t" + p_)
+for u_ in dict.fromkeys(unresolved):
+    print("UNRESOLVED\t" + u_)
 PY
 )
 
     pol_line=$(printf '%s' "$offender" | grep '^POLICY\t' | head -1)
-    offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | head -1)
+    unres_line=$(printf '%s' "$offender" | grep '^UNRESOLVED\t' | head -1)
+    offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | grep -v '^UNRESOLVED\t' | head -1)
     if [ -n "$pol_line" ]; then
       pol_name=$(printf '%s' "$pol_line" | cut -f2)
       pol_real=$(printf '%s' "$pol_line" | cut -f3)
@@ -1717,6 +1889,30 @@ Report the refusal upward instead — whoever briefed you is who must ask.
 If a HUMAN has explicitly authorized this specific path, quote them and try again:
   $GAMELOOP_DIR/bin/game_loop authorize --path <prefix> --reason \"<their exact words>\" [--uses N]
 One authorization, one mutation, logged permanently. That is the only escape hatch, by design."
+    fi
+
+    # THE THIRD OUTCOME (#110). A target holding a variable this guard cannot expand is neither
+    # "known bad" nor "fine" -- it is UNKNOWN, and the two refusals must not share their wording.
+    # The old message printed the unexpanded string joined onto a directory and called it the
+    # target, so the reporter was handed `/Users/.../development/$r/2026-08-18`: a path that names
+    # nothing, cannot be checked, and cannot be authorized. Same decision, honest sentence.
+    if [ -n "${unres_line:-}" ]; then
+      unres_raw=$(printf '%s' "$unres_line" | cut -f2)
+      unres_fab=$(printf '%s' "$unres_line" | cut -f3)
+      deny "BLOCKED: a mutating target could not be RESOLVED — it still contains a shell variable.
+
+    written as       : $unres_raw
+    as far as I got  : $unres_fab
+
+This guard reads the command TEXT and never runs a shell, so that variable is a name with no value
+here. The second line is NOT a claim about a file: it is how far the substitution got before it hit
+something with no value, and no such path need exist.
+
+Refused rather than allowed, because an unexpanded variable can name anything — including a path
+outside this repo — and COULD NOT TELL is not NOTHING TO REPORT. If the write is meant to land in
+this repo, run it with the variable expanded and the guard can check what you actually mean. If it
+is meant to land outside and a HUMAN authorized that, quote them against the RESOLVED path:
+  \$GAMELOOP_DIR/bin/game_loop authorize --path <the real prefix> --reason \"<their exact words>\""
     fi
 
     # LAST, deliberately: these warnings are the only non-blocking output here, so they are emitted

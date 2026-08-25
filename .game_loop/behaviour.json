@@ -362,6 +362,15 @@
       "change": "a rule whose COMMAND LIST changed is stale even when no file it gates has moved. The recorded command set is compared alongside the timestamp, and the refusal says which of the two reasons applies.",
       "consequence": "the commit that ADDS a gate to verify.yaml and changes nothing else now refuses until you run `verify` once, where it used to pass immediately. If you script `verify --check` in CI, expect one extra run after any verify.yaml edit. The failure this prevents is worse than the friction: before, that gate went green having never executed, and its first real run was some later commit that happened to touch a gated file.",
       "why_it_qualifies": "adding a guard and having the tool report success without running it is the reassuring direction of a silent failure — you commit believing the guard passed."
+    },
+    {
+      "seq": 37,
+      "sha": "pending",
+      "notice": true,
+      "verb": "guard-writes",
+      "change": "the write guard splits a command into segments QUOTE-AWARE. A shell operator inside quotes is data: a jq or awk filter carrying a pipe or a comparison is no longer cut mid-quote, so the operator after it is no longer read as a redirect. The same change closes the opposite hole, where a real redirect sitting after a quoted pipe (or after a backslash-escaped quote inside double quotes) was read as quoted data and ALLOWED. A third refusal is added: a target still holding a shell variable is refused as UNRESOLVED instead of being reported as a resolved path.",
+      "why_it_qualifies": "Both directions are visible to somebody who changed nothing. A command that was REFUSED now runs, and a command that was ALLOWED is now refused -- the second is the one that matters, because anything relying on it was writing outside the repo through a hole in this guard. The third refusal wording is new text a consumer can meet, and it deliberately does not name a path.",
+      "consequence": "commands that were refused and wrote nothing now run -- notably `gh ... -q '[.[] | select(.a > \"x\")]'` and `awk '$3 > 5 {print}'`. Commands that WROTE OUTSIDE THE REPO and were allowed are now refused: if you relied on `echo 'a | b' > <outside path>` or an escaped quote before a redirect getting through, that was a bug in this guard and it is closed. Anyone parsing the refusal text should know there is now a third wording -- 'could not be RESOLVED' -- which is a refusal, not an allow, and does not name a real path."
     }
   ],
   "schema": 1

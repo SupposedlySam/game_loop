@@ -8840,6 +8840,27 @@ def main():
     # executes the thing it is asking a question about is paying that thing's full cost to read one
     # dict.
     _msrc = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
+    # ASKING THE SWEEP WHAT IT DOES MUST NOT COST AN HOUR. It parsed no arguments at all, so
+    # `--help` — the first thing anyone types — silently started a full ~70-minute run that prints
+    # nothing for minutes, which is indistinguishable from a hang. And the parser that fixed it
+    # belongs at the ENTRY POINT: put inside main(), it judged test/run.py's own flags when the
+    # suite drove main() programmatically, refusing a subset run with 76 passing checks above it.
+    # That is #110's shape — a check whose subject is a command string it does not own — so both
+    # arms are pinned here.
+    check("the sweep parses argv at the ENTRY POINT, never inside main(), so a caller that drives "
+          "main() programmatically is not judged by its own command line",
+          "_parse_argv(sys.argv[1:])" in _msrc
+          and _msrc.index("_parse_argv(sys.argv[1:])") > _msrc.index('if __name__ == "__main__":'))
+    _mshelp = subprocess.run([sys.executable, os.path.join(REPO, "test", "mutation_sweep.py"),
+                              "--help"], capture_output=True, text=True, timeout=120)
+    check("...and --help ANSWERS instead of sweeping — it says the run takes about an hour and "
+          "gates nothing, which is the fact that decides whether you wait on it",
+          _mshelp.returncode == 0 and "hour" in _mshelp.stdout and "gates nothing" in _mshelp.stdout)
+    _msbad = subprocess.run([sys.executable, os.path.join(REPO, "test", "mutation_sweep.py"),
+                             "--not-a-flag"], capture_output=True, text=True, timeout=120)
+    check("...and an unknown flag is REFUSED rather than ignored, because ignoring one costs an "
+          "hour of sweeping for something the script does not do",
+          _msbad.returncode == 2 and "no arguments" in _msbad.stderr)
     _tree = ast.parse(_msrc)
     _ns = {}
     for _node in _tree.body:

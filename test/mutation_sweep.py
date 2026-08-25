@@ -1908,6 +1908,37 @@ def passing(out):
     return [m.group(1) for m in re.finditer(r"^  ok   (.*)$", out, re.M)]
 
 
+def _parse_argv(argv):
+    """Refuse what this script does not understand, INSTEAD OF running for an hour anyway.
+
+    There was no argument handling at all, so every flag was silently ignored — including the one
+    everybody tries first. `python3 test/mutation_sweep.py --help` did not print help: it started a
+    full sweep, ~70 minutes, with no output for the first several minutes, which is
+    indistinguishable from a script that has hung. Asking a tool what it does should never be the
+    most expensive thing you can do to it.
+
+    argparse is not used here on purpose: this takes no options, and adding a parser to reject
+    arguments would invite the reading that some exist.
+    """
+    if not argv:
+        return
+    if any(x in ("-h", "--help") for x in argv):
+        print(__doc__.strip() if __doc__ else "mutation_sweep — the full mutation sweep.")
+        print()
+        print("usage: python3 test/mutation_sweep.py")
+        print()
+        print("Takes NO arguments. One mode: sweep every producer in MUTANTS against the suite.")
+        print("Expect roughly an hour on 14 cores. It gates nothing — no commit, no verify rule")
+        print("waits on it — so run it detached and read it when it lands.")
+        raise SystemExit(0)
+    print(f"mutation_sweep takes no arguments; got: {' '.join(argv)}", file=sys.stderr)
+    print("Refusing rather than sweeping, because this run costs about an hour and an ignored",
+          file=sys.stderr)
+    print("flag means you asked for something this script does not do. `--help` lists the one mode.",
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
 def main():
     base = tempfile.mkdtemp(prefix="sweep-base-")
     subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {base}", shell=True, check=True)
@@ -2316,4 +2347,12 @@ def main():
 
 
 if __name__ == "__main__":
+    # ARGV BELONGS TO THE ENTRY POINT, NOT TO main(). Putting this inside main() made the sweep
+    # judge somebody ELSE'S command line: test/run.py drives main() programmatically, so a subset
+    # run like `--section 'producer mutation sweep'` reached this parser as unrecognised flags and
+    # refused, taking the whole suite down with exit 2 and 76 passing checks above it.
+    #
+    # Which is #110's defect wearing different clothes, committed the same day I fixed it: a check
+    # whose SUBJECT is a command string it did not own. The lesson generalises past shell quoting.
+    _parse_argv(sys.argv[1:])
     sys.exit(main())

@@ -5542,9 +5542,24 @@ def _stop_verdict(s, payload):
     asking = _asked_the_user(text)
 
     if armed and not armed.get("spent"):
+        # A T3 SOMEBODY ELSE ARMED (#94). `arm` writes a PERMISSION the same way `checkpoint` does,
+        # and this is where it is SPENT -- the turn-end that carries the question to the human. So
+        # this is the last moment anybody could notice the question is not theirs, which is the same
+        # argument that put the checkpoint notice at its own spend rather than at its write.
+        #
+        # The issue was answered "there is no equivalent moment to print at, because a T3 is
+        # consumed by a human". That was wrong about this code: a human answers the question, but
+        # the GATE is what spends the arm, right here, and it runs in the tree that will be
+        # interrupted. Recording the mark and never surfacing it left the record for nobody.
+        _as = armed.get("setter") or {}
+        _a_unknown = not _as.get("cwd")
+        _a_cross = (not _a_unknown
+                    and os.path.realpath(_as["cwd"]) != os.path.realpath(os.getcwd()))
         return True, "T3 armed — spending it now", {
             "kind": "t3_spend", "question": armed.get("question"),
-            "read": armed.get("read"), "predict": armed.get("predict")}
+            "read": armed.get("read"), "predict": armed.get("predict"),
+            "setter": _as or None, "arm_cross_tree": bool(_a_cross),
+            "arm_writer_unknown": bool(_a_unknown)}
 
     if asking:
         return False, (
@@ -5893,6 +5908,29 @@ def cmd_stopgate(s, a, payload):
                 "  A dispatched subagent inherits this session id, so its checkpoint lands here and\n"
                 "  clears YOUR gate. If those words are not yours, the turn-end you just spent was\n"
                 "  not either — and the work you were mandated to do is still open.\n"
+                "  Give a subagent its own state: GAME_LOOP_SESSION=<unique> game_loop ..\n"
+                "  BLIND SPOT: an in-process subagent in the SAME tree shares this cwd and cannot be\n"
+                "  told apart here at all. The words are the only tell, which is where #88 landed too.")
+        # THE ARM HALF OF #94, with its own words on purpose: a turn-end somebody else BOUGHT and a
+        # question somebody else ARMED are different events with different consequences, and one
+        # wording covering both would make the record useless exactly where it is needed.
+        if isinstance(rec, dict) and rec.get("arm_writer_unknown") and rec.get("kind") == "t3_spend":
+            notices.append(
+                "⚠ THE T3 QUESTION BEING SPENT HERE RECORDS NO WRITER.\n"
+                f"    asks : {(rec.get('question') or '')[:160]!r}\n"
+                "  It predates the writer mark, so whether it was armed in THIS tree cannot be\n"
+                "  established — which is not the same as knowing it was. The next `arm` records one.")
+        if isinstance(rec, dict) and rec.get("arm_cross_tree"):
+            _at = rec.get("setter") or {}
+            notices.append(
+                "⚠ THE T3 QUESTION BEING SPENT HERE WAS ARMED IN ANOTHER TREE.\n"
+                f"    armed in : {_at.get('cwd')}\n"
+                f"    at       : {_at.get('at')}\n"
+                f"    asks     : {(rec.get('question') or '')[:160]!r}\n"
+                "  A dispatched subagent inherits this session id, so its `arm` lands here and it is\n"
+                "  YOUR turn-end that spends it. If that question is not yours, the human is about to\n"
+                "  be interrupted with somebody else's — and the work you were mandated to do is\n"
+                "  still open, because spending the arm is what ends this turn.\n"
                 "  Give a subagent its own state: GAME_LOOP_SESSION=<unique> game_loop ..\n"
                 "  BLIND SPOT: an in-process subagent in the SAME tree shares this cwd and cannot be\n"
                 "  told apart here at all. The words are the only tell, which is where #88 landed too.")

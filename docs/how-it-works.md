@@ -1154,10 +1154,25 @@ Words you do not recognise are the tell. That is deliberately the same answer `m
 and for the same reason: the two callers are indistinguishable by identity, so there is nothing to
 check but the content.
 
-**What it cannot see (INV6):** an in-process subagent in the *same* tree. It shares the session id
-*and* the working directory, so nothing mechanical separates it from the parent, and this notice
-will not fire. `arm` records the same mark, but a T3 is consumed by a human rather than by a gate,
-so there is no equivalent moment to print at — the record is there for whoever reads it.
+**`arm` names its crossing at the same place**, and this paragraph used to say it could not. The
+claim was that a T3 is consumed by a human rather than by a gate, so there was no equivalent moment
+to print at. That is wrong about this code: the human *answers* the question, but the Stop gate is
+what *spends* the arm, and it does so running in the tree that is about to be interrupted. So the
+mark was being recorded and never shown — a record kept for nobody:
+
+```
+⚠ THE T3 QUESTION BEING SPENT HERE WAS ARMED IN ANOTHER TREE.
+    armed in : /…/worktree-b
+    asks     : 'worker: which schema wins on conflict?'
+```
+
+Its own words, not the checkpoint's. A turn-end somebody *bought* and a question somebody *armed*
+are different events with different consequences, and one wording covering both would blur the
+record exactly where it is needed.
+
+**What neither can see (INV6):** an in-process subagent in the *same* tree. It shares the session id
+*and* the working directory, so nothing mechanical separates it from the parent, and neither notice
+will fire. Words you do not recognise remain the only tell.
 
 ### Running the harness from a pinned checkout
 

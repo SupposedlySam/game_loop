@@ -13796,6 +13796,38 @@ def main():
             check("#94: ...and it says the next checkpoint stops it, so a legacy state file costs "
                   "one line and not a permanent banner",
                   "this stops" in _sg3.stderr)
+
+            # THE ARM HALF (#94), which the first pass left recorded and never surfaced. `arm`
+            # writes a permission exactly as `checkpoint` does, and I closed the code half saying
+            # "a T3 is consumed by a human, so there is no equivalent moment to print at". That was
+            # wrong about this code: the human ANSWERS the question, but the GATE spends the arm,
+            # here, running in the tree that is about to be interrupted. A mark recorded and never
+            # shown is a record kept for nobody.
+            _cread = os.path.join(_cproj, "read-this.txt")
+            with open(_cread, "w") as f:
+                f.write("the doc that did not answer it\n")
+            _c(["mandate", "--set", "LEAD: finish the migration"], _cproj)
+            _c(["arm", "--question", "worker: which schema wins on conflict?",
+                "--read", _cread, "--predict", "they will say the newer one"], _cother)
+            _sg5 = _c(["stopgate"], _cproj, '{"last_assistant_message":"asking the human"}')
+            check("#94: a T3 ARMED IN ANOTHER TREE says so at the moment it is SPENT — the arm is "
+                  "the other permission a subagent can write into its parent's state",
+                  "ARMED IN ANOTHER TREE" in _sg5.stderr)
+            check("#94: ...and quotes the QUESTION, since a question you do not recognise is the "
+                  "same and only tell the checkpoint notice relies on",
+                  "which schema wins on conflict" in _sg5.stderr)
+            check("#94: ...and the turn still ends: a notice, not a gate that strands a run",
+                  _sg5.returncode == 0)
+            check("#94: ...and it does NOT borrow the checkpoint's words — a turn-end somebody "
+                  "BOUGHT and a question somebody ARMED are different events",
+                  "BOUGHT BY A CHECKPOINT" not in _sg5.stderr)
+            _c(["mandate", "--set", "LEAD: finish the migration"], _cproj)
+            _c(["arm", "--question", "mine: which schema wins?", "--read", _cread,
+                "--predict", "the newer one"], _cproj)
+            _sg6 = _c(["stopgate"], _cproj, '{"last_assistant_message":"asking"}')
+            check("#94: ...while a T3 armed in THIS tree is silent, so the notice stays the "
+                  "exception rather than a banner on every question",
+                  _sg6.returncode == 0 and "ANOTHER TREE" not in _sg6.stderr)
         finally:
             shutil.rmtree(_c94, ignore_errors=True)
 
@@ -13991,6 +14023,11 @@ def main():
         # its `c\.get` arm also matches `rec.get`, which is the price of deriving the list from the
         # code rather than maintaining one by hand, and the cheaper error of the two.
         "cross_tree": "a stop-gate log record field, not config",
+        # The ARM half of the same pair, added when the recorded mark finally got surfaced at the
+        # spend. Named apart from the checkpoint's fields on purpose: the two notices must not be
+        # able to fire on each other's record.
+        "arm_cross_tree": "a stop-gate log record field, not config",
+        "arm_writer_unknown": "a stop-gate log record field, not config",
         "setter": "a log/state field recording who wrote a permission, not config",
         "writer_unknown": "a stop-gate log record field, not config",
         # The timestamp on a recorded context READING, read back off `rec` in binding_spawn_block

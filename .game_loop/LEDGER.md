@@ -107,10 +107,19 @@ _Questions still outstanding. What would close each one._
                          renders that as COULD NOT TELL rather than as zero.
 
   So the shipped code has no instance; the only one was my own scratch analysis, where nothing checks
-  the number. **The exposure is prose, not code** — a measurement improvised for a commit message or
-  a status line is the half with no suite. Before improvising one, ask which of this repo's own tools
-  already performs it: `stale_low_floors`, `killers`, `probed_verdict` and `note_line` all take the
-  tool's structures for exactly this reason.
+  the number. **The exposure is prose, not code** — and the mechanism is sharper than "prose has no
+  tests": *a sentence has no consumer that can disagree with it*. My selector took `verdicts` and
+  would have gone on working forever; "49 of 86" had nothing downstream to contradict it. Code that
+  consumes a bad measurement usually gets caught. A sentence carrying one just gets believed.
+
+  **THE TRIGGER IS NOT "WHEN CHOOSING AN INSTRUMENT."** That was my first wording and it does not
+  fire, because the choice never surfaces as a choice — I was not weighing a regex against
+  `stale_low_floors`, I was looking at output. The trigger that is actually observable from outside:
+  **when a number is about to leave your hands** — into a commit message, a comment, a status line, a
+  reply — ask where it came from, and whether the tool that produced the result would hand you the
+  same number from its own structure. `stale_low_floors`, `killers`, `probed_verdict` and `note_line`
+  are all at module level so that the answer is yes. If a tool will not hand you one, that is a gap
+  in the tool worth fixing rather than routing around.
 
 - **A docstring that makes a DISTINCTION is a claim about its callers, and nothing checks it.**
   Audited 2026-08-25 after writing this defect twice in one day. Fourteen functions across

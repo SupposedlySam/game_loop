@@ -365,7 +365,7 @@
     },
     {
       "seq": 37,
-      "sha": "pending",
+      "sha": "50b7c58",
       "notice": true,
       "verb": "guard-writes",
       "change": "the write guard splits a command into segments QUOTE-AWARE. A shell operator inside quotes is data: a jq or awk filter carrying a pipe or a comparison is no longer cut mid-quote, so the operator after it is no longer read as a redirect. The same change closes the opposite hole, where a real redirect sitting after a quoted pipe (or after a backslash-escaped quote inside double quotes) was read as quoted data and ALLOWED. A third refusal is added: a target still holding a shell variable is refused as UNRESOLVED instead of being reported as a resolved path.",

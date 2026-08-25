@@ -61,12 +61,21 @@
 #                     the wrong file to buy two minutes on.
 #
 # These are decisions, not omissions, and each is re-checkable with `--list-sections`.
+# THE SEVEN FILES THAT KEEP THE WHOLE SUITE RUN IT IN PARALLEL. `test/prun.py` shards the suite's
+# own top-level sections across processes using the SAME `--section` selector the rules below use,
+# so it inherits the soundness this manifest already depends on rather than inventing its own.
+# Measured 2026-08-25 on 14 cores: 292s serial -> 103s, and a change to bin/game_loop went from a
+# 286-second verify to about 100. It is `--verify`-able against a serial run, and was: 1719 outcomes
+# both ways, 0 absent, 0 extra, 0 differing. That check earned itself immediately — the first
+# sharding lost ten assertions while reporting MORE outcomes than the suite has.
+#
+# The SECTIONED rules below are untouched: they are already the surgical path and already fast.
 ".game_loop/bin/game_loop":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 ".game_loop/bin/watchdog":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 ".game_loop/bin/guard-writes.sh":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 # A SMALLER COMMAND THAN "EVERYTHING", AND WHAT IT COSTS. These two files are edited often and
 # each edit used to gate on all 1596 checks -- 5:19, nearly all of it about code the change did not
 # touch. That is the kind of tax that gets a rule deleted rather than obeyed, so the rule names the
@@ -84,12 +93,12 @@
   - "python3 test/run.py --section 'write guard' --section deploy --section 'authorize recurrence' --section 'unreadable commit target' --section 'unharnessed tree' --section "POLICY is not the session's" --section 'EMBEDDED in the shell guards' --section 'guard nothing calls' --section 'config paths'"
   - "python3 test/behaviour_gate.py"
 ".game_loop/bin/guard-mcp.sh":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 ".game_loop/bin/guard-mcp-impl.sh":
   - "python3 test/run.py --section 'MCP guard' --section 'MCP writes' --section 'guard nothing calls' --section 'EMBEDDED in the shell guards'"
   - "python3 test/behaviour_gate.py"
 ".game_loop/bin/verify":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 # WHAT THIS SKIPS: the sections that name flair are the flair section itself, the default-deny over
 # what bin/ ships, and the orphan scan that would notice nothing calling it. A caller that renders a
 # banner without the word "flair" anywhere in its section name is not covered here. 178 checks, 37s.
@@ -107,7 +116,7 @@
 # owe a check. Named because `verify --coverage` reported them unchecked — the report working. Only
 # the suite owes the WHOLE of itself; the manifest's own rule names a section, further down.
 "test/run.py":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 # The sweep decides whether the suite's silence-shaped assertions are worth anything (#42), and it
 # now FAILS a run rather than only printing. Its verdict line and its list of producers are checked
 # by the suite — cheaply, without running the sweep, which is one full pass per producer.
@@ -171,7 +180,7 @@
 # there hands a tree a harness that gates nothing. That is behaviour, the suite drives the real
 # installer through its real interface, so it owes the suite like every other gate.
 "install.sh":
-  - "python3 test/run.py"
+  - "python3 test/prun.py"
 # The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --
 
 # THE TWO DOCUMENTS A CONSUMER OPERATES FROM. Added after editing both and being told "nothing

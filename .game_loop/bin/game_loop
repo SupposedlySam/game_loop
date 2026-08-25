@@ -5308,8 +5308,23 @@ def _scan_transcript(path):
                 if not isinstance(rec, dict):
                     stats["skipped"] += 1
                     continue
-                for kind in _denial_kinds(rec):
-                    stats["denials"][kind] = stats["denials"].get(kind, 0) + 1
+                # A PRE-FILTER ON THE RAW LINE, and it changes no verdict. Profiled 2026-08-25:
+                # `status` cost 1.08s, of which _scan_transcript was 1.665s of a 1.99s exec and
+                # _denial_kinds was called 2,395,704 times — a depth-12 walk of EVERY record in the
+                # transcript, on a session that has none. The suite spawns this binary constantly,
+                # so that walk was most of the suite's wall time and most of the sweep's.
+                #
+                # THE FIELD CANNOT BE PRESENT IF THE KEY IS NOT IN THE BYTES. JSON writes object
+                # keys literally, so a record carrying `toolDenialKind` has that substring in its
+                # line — UNLESS the encoder escaped it, which requires a backslash. So a line with
+                # neither the key nor a backslash provably has no such field and is skipped without
+                # walking. Everything else is walked exactly as before, and STRUCTURE still decides:
+                # this is a cheap NECESSARY condition in front of the sufficient one, never a
+                # replacement for it. The docstring's point stands — presence-of-string is not
+                # evidence — and nothing here treats it as evidence.
+                if "toolDenialKind" in line or "\\u" in line:
+                    for kind in _denial_kinds(rec):
+                        stats["denials"][kind] = stats["denials"].get(kind, 0) + 1
                 tail.append(rec)
     except OSError as e:
         return list(tail), stats, f"transcript unreadable: {e}"

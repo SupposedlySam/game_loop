@@ -477,6 +477,40 @@ def main():
         check("a Write spend is logged as authorized_write",
               '"authorized_write"' in log and "authztest-write" in log)
 
+        # A GRANT SPENT IN SILENCE (#103). Single-use bounds HOW MANY times a hatch may be spent,
+        # never WHAT FOR — so a grant armed for one purpose is indistinguishable from one armed for
+        # whatever eventually spends it, and the permanent entry then reads as human-sanctioned
+        # under a reason that never described the act. Found the hard way: a probe of the write rail
+        # came back ALLOWED while a standing grant happened to be armed, which reads exactly like a
+        # bypass of a guard that was in fact working. The log had the answer and nothing else did.
+        print("a spent grant says so at the moment it is spent (#103):")
+        gl(proj, "authorize", "--path", os.path.expanduser("~/authz-loud"),
+           "--reason", "go ahead and wire up the notify channel")
+        _pl = {"tool_name": "Bash", "tool_input": {"command": "touch ~/authz-loud/x"}}
+        _spend = guard(proj, _pl)
+        check("the spend is ALLOWED, exactly as before — this notice is not a decision",
+              not denied(_spend))
+        check("...and it SAYS a standing grant is what allowed it, rather than letting the call "
+              "read as a guard that permits this",
+              "AUTHORIZATION SPENT" in _spend.stdout)
+        check("...and quotes the REASON being spent, which is the only thing that can show the "
+              "grant was armed for something else",
+              "wire up the notify channel" in _spend.stdout)
+        check("...and says a probe of the rail did not find a hole, since that is the reading this "
+              "silence produced and it is the expensive one to get wrong",
+              "did not fail" in _spend.stdout)
+        check("...and the notice arrives as CONTEXT, carrying no permissionDecision — a warning "
+              "that changed the permission flow would be a different feature",
+              "additionalContext" in _spend.stdout
+              and '"permissionDecision"' not in _spend.stdout)
+        check("a SPENT grant denies again — the notice does not leave the path open behind it",
+              denied(guard(proj, _pl)))
+        _ord = guard(proj, {"tool_name": "Bash",
+                            "tool_input": {"command": "touch " + os.path.join(proj, "ordinary.txt")}})
+        check("...and an ordinary allowed write says NOTHING — the notice is the exception, not a "
+              "banner on every call the guard lets through",
+              not denied(_ord) and "AUTHORIZATION SPENT" not in _ord.stdout)
+
         # THE HATCH USED AS A CONFIG SUBSTITUTE. Observed in this repo's own log: 22 grants under
         # ONE identical reason, one per repo, against 4 spends in the whole file. LOUD, never a
         # refusal — a human may legitimately re-authorize a path, and INV5 forbids a guard that

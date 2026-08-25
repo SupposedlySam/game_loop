@@ -384,6 +384,31 @@ PY
 # the spend logged — one authorization buys one mutation, whichever tool performs it. Shared by the
 # Write/Edit and Bash branches so the escape hatch behaves identically on both paths. No env
 # override: it cannot be set without writing a permanent log entry carrying the human's own words.
+# WHAT A SPENT GRANT SAYS OUT LOUD (game_loop#103). The hatch's whole value is that the log means
+# something later, and that survives only if the act and the reason describe each other. A grant
+# armed for one purpose is indistinguishable from one armed for the purpose that eventually spends
+# it -- single-use bounds HOW MANY, never WHAT FOR -- so the moment of spending is the only place
+# the mismatch is visible to anyone who could still stop it.
+#
+# It also stops a working guard from looking broken. A probe of this rail while a grant happens to
+# be armed comes back allowed, which reads exactly like a bypass; that is how #103 was found, and
+# reading the log afterwards is luck rather than a process.
+consumed_note() {
+  printf 'AUTHORIZATION SPENT -- this call consumed a standing `authorize` grant, and was allowed
+because of it rather than because the guard permits it.
+
+  path        : %s
+  granted for : %s
+  uses left   : %s
+
+IF THAT REASON DOES NOT DESCRIBE WHAT YOU ARE DOING, you have just spent a grant that was
+made for something else. It is in log.jsonl permanently, attributed to those words. Say so rather than
+letting the record stand: the entry cannot be un-written, but it can be corrected next to.
+
+AND IF YOU WERE TESTING THIS GUARD: it did not fail. The grant is why the call went through.
+' "$1" "$2" "$3"
+}
+
 consume_authorization() {
   OFFENDER="$1" GAMELOOP_DIR="$GAMELOOP_DIR" STATE_F="$STATE_F" SID="$SID" python3 <<'PY'
 import json, os, sys, datetime
@@ -414,7 +439,13 @@ for a in st.get("authorized", []):
                 f.write(json.dumps(rec) + "\n")
         except OSError:
             sys.exit(0)
+        # LINE 1 IS THE VERDICT, LINE 2 IS WHAT WAS SPENT. The callers announce the second one:
+        # a grant consumed in silence is game_loop#103 -- a standing authorization for one purpose
+        # gets spent by the next unrelated write to that path, and the permanent record then reads
+        # as human-sanctioned under a reason that never described the act.
         print("yes")
+        print((a.get("reason") or "").replace("\n", " ").strip())
+        print(a.get("uses_left", 0))
         break
 PY
 }
@@ -456,10 +487,13 @@ PY
 )
     if [ -n "$policy_hit" ]; then
       pol_real=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$fp" 2>/dev/null)
-      consumed=$(consume_authorization "$pol_real")
+      consumed_raw=$(consume_authorization "$pol_real")
+      consumed=$(printf '%s\n' "$consumed_raw" | sed -n '1p')
       if [ "$consumed" = "yes" ]; then
         record_edit "$fp"
-        exit 0
+        note "$(consumed_note "$pol_real" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
       fi
       deny "BLOCKED: .game_loop/$policy_hit is the PROJECT'S POLICY, not this session's.
 
@@ -615,8 +649,12 @@ PYMEM
       exit 0
     fi
     if [ -n "$verdict" ]; then
-      consumed=$(consume_authorization "$verdict")
-      [ "$consumed" = "yes" ] && exit 0
+      consumed_raw=$(consume_authorization "$verdict")
+      if [ "$(printf '%s\n' "$consumed_raw" | sed -n '1p')" = "yes" ]; then
+        note "$(consumed_note "$verdict" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
+      fi
     fi
     deny "BLOCKED: write outside this repo → $fp
 
@@ -1582,10 +1620,13 @@ PY
     if [ -n "$pol_line" ]; then
       pol_name=$(printf '%s' "$pol_line" | cut -f2)
       pol_real=$(printf '%s' "$pol_line" | cut -f3)
-      consumed=$(consume_authorization "$pol_real")
+      consumed_raw=$(consume_authorization "$pol_real")
+      consumed=$(printf '%s\n' "$consumed_raw" | sed -n '1p')
       if [ "$consumed" = "yes" ]; then
         record_edit "$pol_real"
-        exit 0
+        note "$(consumed_note "$pol_real" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
       fi
       deny "BLOCKED: .game_loop/$pol_name is the PROJECT'S POLICY, and a shell write is still a write.
 
@@ -1607,8 +1648,12 @@ own hash is the detection this does not yet do."
     fi
 
     if [ -n "$offender" ]; then
-      consumed=$(consume_authorization "$offender")
-      [ "$consumed" = "yes" ] && exit 0
+      consumed_raw=$(consume_authorization "$offender")
+      if [ "$(printf '%s\n' "$consumed_raw" | sed -n '1p')" = "yes" ]; then
+        note "$(consumed_note "$offender" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
+      fi
       deny "BLOCKED: mutating command targets a path outside this repo → $offender
 
 Everything outside this project is READ-ONLY by default. READING elsewhere is fine, and so is copying

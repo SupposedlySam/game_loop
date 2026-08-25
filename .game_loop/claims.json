@@ -48,7 +48,7 @@
     "PER-CLAIM VERIFICATION, because the block stamp could not express a partial re-read. This file",
     "promised that the first re-verification would fill in the null and make THAT entry checkable.",
     "With one stamp for six claims, filling it in would have asserted six re-readings where one",
-    "happened — so the promise was unkeepable as written, which is a small instance of exactly what",
+    "happened \u2014 so the promise was unkeepable as written, which is a small instance of exactly what",
     "this file exists to catch. Each claim now carries its own verified_on/verified_against, and the",
     "block values remain the original reading for entries nobody has revisited."
   ],
@@ -70,7 +70,7 @@
         "exercisable_why": "exercised: a snapshot in the expected shape IS the claim, and the missing-field arm is its positive control",
         "verified_on": "2026-08-24",
         "verified_against": "2.1.241",
-        "verified_how": "EXERCISED: read .game_loop/limits.json, a snapshot captured 2026-08-24 from a real statusline render — five_hour and seven_day each with used_percentage and resets_at. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_how": "EXERCISED: read .game_loop/limits.json, a snapshot captured 2026-08-24 from a real statusline render \u2014 five_hour and seven_day each with used_percentage and resets_at. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "statusline-config-keys",
@@ -80,9 +80,9 @@
         "ledger": "statusLine config keys",
         "exercisable": "no",
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
-        "verified_on": "2026-08-13",
-        "verified_against": "2.1.223",
-        "verified_how": "re-read in the running binary: type:literal(\"command\"), command:string(), padding:number().optional(), refreshInterval:number().min(1).optional() — all four keys and the 1s floor, from the client's own schema rather than from the docs page the claim cites"
+        "verified_on": "2026-08-25",
+        "verified_against": "2.1.241",
+        "verified_how": "re-read in THE BINARY THIS SESSION IS ACTUALLY RUNNING, found via lsof on the live pid: .vscode/extensions/anthropic.claude-code-2.1.241-darwin-arm64/resources/native-binary/claude. It reads statusLine:ye({type:Ct(\"command\"),command:H(),padding:Je().optional(),refreshInterval:Je().min(1)... \u2014 all four keys and the 1s floor, from the client's own schema rather than the docs page this claim cites, and the floor confirmed a second time at the consumption site (Math.max(1,t)*1000). Unchanged from the 2.1.223 reading. I FIRST READ THE WRONG BINARY: `which claude` resolves to an npm install at 2.1.243, which is a DIFFERENT installation and not what runs this session. Same schema in both, so the answer was unaffected and the method was still wrong. Verify against the pid, never against PATH."
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -95,7 +95,7 @@
         "verified_on": "2026-08-24",
         "verified_against": "2.1.241",
         "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked",
-        "verified_how": "EXERCISED: read probe/claims-observed.json, a real Stop-hook payload recorded 2026-08-24 — 11 top-level keys, zero rate_limit keys, and `control: true` because session_id was present, which is what makes the empty result a reading rather than a payload that never arrived. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_how": "EXERCISED: read probe/claims-observed.json, a real Stop-hook payload recorded 2026-08-24 \u2014 11 top-level keys, zero rate_limit keys, and `control: true` because session_id was present, which is what makes the empty result a reading rather than a payload that never arrived. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "no-headless-usage-flag",
@@ -119,7 +119,7 @@
         "exercisable_why": "unconditional: nothing local produces the headers, so no run can discriminate",
         "verified_on": "2026-07-29",
         "verified_against": null,
-        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists — but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
+        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists \u2014 but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
       },
       {
         "id": "no-weekly-opus-window",
@@ -132,7 +132,7 @@
         "exercised_by": "a known window present in limits.json (the control) with no third window beside it (the claim)",
         "verified_on": "2026-08-24",
         "verified_against": "2.1.241",
-        "verified_how": "EXERCISED: the same 2026-08-24 snapshot carries EXACTLY two windows and no third — the absence is paired with a positive control (both known windows present), so 'no weekly window' is a reading and not a failed fetch. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_how": "EXERCISED: the same 2026-08-24 snapshot carries EXACTLY two windows and no third \u2014 the absence is paired with a positive control (both known windows present), so 'no weekly window' is a reading and not a failed fetch. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
       },
       {
         "id": "fresh-session-token-floor",
@@ -144,19 +144,19 @@
         "verified_against": "2.1.223",
         "verified_how": "three probes at 2.1.223 reading usage from --output-format json: baseline 31,547 / --strict-mcp-config 30,323 / plus 13 tools disabled 24,377. Decomposed rather than estimated, because a single number cannot say what is trimmable.",
         "exercisable": "yes-not-yet",
-        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage — read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone."
+        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage \u2014 read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone."
       },
       {
         "id": "statusline-context-window",
-        "says": "the statusline payload's context_window carries ABSOLUTE token counts — total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} — alongside used_percentage/remaining_percentage",
+        "says": "the statusline payload's context_window carries ABSOLUTE token counts \u2014 total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} \u2014 alongside used_percentage/remaining_percentage",
         "source": "read in the running binary at 2.1.223 (the client's own embedded payload schema)",
         "breaks": "the harness reads only used_percentage, so every absolute token question is currently answered by inference or by spawning something. If these fields moved, any future usage work resting on them silently loses its measurement",
         "ledger": "The statusline payload exposes only a PERCENTAGE of context used",
         "exercisable": "yes",
-        "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one — which is exactly what closed it.",
+        "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one \u2014 which is exactly what closed it.",
         "verified_on": "2026-08-24",
         "verified_against": "2.1.241",
-        "verified_how": "EXERCISED, not stamped: read .game_loop/probe/context-window.json, a real reading the limit probe recorded at 2.1.241. Every field the claim names is present — total_input_tokens 63943, total_output_tokens 673, context_window_size 1000000, current_usage with all four token counts, used_percentage 6 and remaining_percentage 94. Checked field by field against the recorded JSON rather than by eye."
+        "verified_how": "EXERCISED, not stamped: read .game_loop/probe/context-window.json, a real reading the limit probe recorded at 2.1.241. Every field the claim names is present \u2014 total_input_tokens 63943, total_output_tokens 673, context_window_size 1000000, current_usage with all four token counts, used_percentage 6 and remaining_percentage 94. Checked field by field against the recorded JSON rather than by eye."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

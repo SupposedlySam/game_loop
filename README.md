@@ -567,6 +567,16 @@ Load-bearing facts about Claude Code that the limit machinery rests on, each rec
 carries `verified_on` and `verified_against` — the host version it was last re-read against. `null`
 means nobody has re-read it, and `status` says exactly that rather than implying agreement.
 
+**Re-reading one: ask the PID, never PATH.** `verified_against` is the host version the claim was
+last read against, so a re-read has to happen in *the binary actually serving your session* — and
+`which claude` is not reliably that. On the machine this was written on, PATH resolved to an npm
+install at 2.1.243 while the session was being served by a VSCode extension's bundled binary at
+2.1.241: two separate installations, two different files. `status` gets this right (it reads the
+running process's execpath, not PATH), and it will keep showing ⚠ if you stamp a claim against the
+wrong one — which is the check working. Find the real file with `lsof -p <pid>` on the live process
+and read the schema out of that. Both builds happened to agree here, so the answer survived a wrong
+method; the method was still wrong, and the next divergence will not be so forgiving.
+
 Where a fact can be **provoked** rather than stamped, it is: `exercisable` is `yes` / `yes-not-yet` /
 `no`, and `exercised_by` names the live evidence. An exercise checks the claim on *your* machine
 every run and cannot go stale; a stamp records that the author checked it on theirs. Some facts are

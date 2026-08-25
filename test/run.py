@@ -13357,6 +13357,29 @@ def main():
             check("#94: ...while a checkpoint written in THIS tree is silent — the notice is the "
                   "exception, not a banner on every turn-end",
                   _sg2.returncode == 0 and "ANOTHER TREE" not in _sg2.stderr)
+
+            # THE THIRD STATE, which used to read as the second (lamp-owner, 2026-08-25). A
+            # checkpoint written before the writer mark existed carries no setter, and the cwd
+            # comparison was then falsy — byte-identical to "written right here". The distinction
+            # survived the function that made it and died where a MISSING KEY met a default, one hop
+            # downstream, which is the multi-hop erasure their audit describes.
+            _c(["mandate", "--set", "LEAD: finish the migration"], _cproj)
+            _c(["checkpoint", "--notes", "legacy: written by an older build"], _cproj)
+            _sf = os.path.join(_cproj, ".game_loop", "sessions", "sess-94", "state.json")
+            _stj = json.load(open(_sf))
+            _stj.pop("stop_ok_setter", None)          # exactly what an older build left behind
+            with open(_sf, "w") as f:
+                json.dump(_stj, f, indent=2)
+            _sg3 = _c(["stopgate"], _cproj, '{"last_assistant_message":"done"}')
+            check("#94: a checkpoint recording NO writer says so — 'nobody wrote down who bought "
+                  "this' is not the same answer as 'it was written here'",
+                  _sg3.returncode == 0 and "RECORDS NO WRITER" in _sg3.stderr)
+            check("#94: ...and it does NOT claim another tree, because an absent mark is the "
+                  "absence of an answer rather than a negative one",
+                  "ANOTHER TREE" not in _sg3.stderr)
+            check("#94: ...and it says the next checkpoint stops it, so a legacy state file costs "
+                  "one line and not a permanent banner",
+                  "this stops" in _sg3.stderr)
         finally:
             shutil.rmtree(_c94, ignore_errors=True)
 
@@ -13553,6 +13576,7 @@ def main():
         # code rather than maintaining one by hand, and the cheaper error of the two.
         "cross_tree": "a stop-gate log record field, not config",
         "setter": "a log/state field recording who wrote a permission, not config",
+        "writer_unknown": "a stop-gate log record field, not config",
     }
 
     def _code_surface():

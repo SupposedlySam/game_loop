@@ -5439,8 +5439,20 @@ def _stop_verdict(s, payload):
         # else. A dispatched subagent inherits the session id, so its checkpoint lands here and buys
         # THIS session a turn-end nobody here asked for. Naming the crossing costs one line and only
         # when there IS one -- the same shape as the spent-grant notice on the write guard.
+        # THREE STATES, AND THE ABSENT ONE USED TO READ AS THE REASSURING ONE (lamp-owner,
+        # 2026-08-25). A checkpoint written before this build carries no setter at all, and
+        # `_cs.get("cwd")` is then falsy — byte-identical to "written right here, nothing to see".
+        # That is the multi-hop erasure they describe: the distinction survives the function that
+        # makes it and dies where a MISSING KEY is read as a default, in a different function. I got
+        # this right for the pidfile's legacy format the same morning and wrong here, which is the
+        # freshness correlation rather than the age one.
+        #
+        # Bounded and self-healing: `checkpoint` always writes the mark now, so a tree pays this at
+        # most once per checkpoint that predates the change.
         _cs = s.get("stop_ok_setter") or {}
-        _cross = (_cs.get("cwd") and os.path.realpath(_cs["cwd"]) != os.path.realpath(os.getcwd()))
+        _unknown_writer = not _cs.get("cwd")
+        _cross = (not _unknown_writer
+                  and os.path.realpath(_cs["cwd"]) != os.path.realpath(os.getcwd()))
         # WHAT THIS CANNOT SEE (INV6): an in-process subagent in the SAME tree. It shares the
         # session id and the cwd, so nothing mechanical separates it from this session — #88 reached
         # the same wall and answered it the same way, by showing the WORDS. Words you do not
@@ -5449,6 +5461,7 @@ def _stop_verdict(s, payload):
         return True, "checkpoint declared — reporting, not asking", {
             "kind": "checkpoint", "notes": s.get("stop_ok_notes"),
             "setter": _cs or None, "cross_tree": bool(_cross),
+            "writer_unknown": bool(_unknown_writer),
             "checked_question": why_not is None, "unchecked_because": why_not}
 
     # Circuit breaker. A guard that can trap the session forever is worse than the bug it prevents,
@@ -5669,6 +5682,13 @@ def cmd_stopgate(s, a, payload):
         # subagent inherits the session id, so its checkpoint lands in THIS state file and clears
         # THIS gate. It goes on `notices` rather than into the verdict because a passing gate is
         # silent by design: the reason is logged, and stderr is the only thing a run actually reads.
+        if isinstance(rec, dict) and rec.get("writer_unknown"):
+            notices.append(
+                "⚠ THIS TURN-END WAS BOUGHT BY A CHECKPOINT THAT RECORDS NO WRITER.\n"
+                f"    its words  : {(rec.get('notes') or '')[:160]!r}\n"
+                "  It predates the writer mark, so whether it was written in THIS tree cannot be\n"
+                "  established — which is not the same as knowing it was. Said once; the next\n"
+                "  checkpoint records a writer and this stops.")
         if isinstance(rec, dict) and rec.get("cross_tree"):
             _st = rec.get("setter") or {}
             notices.append(

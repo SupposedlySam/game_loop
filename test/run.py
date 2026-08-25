@@ -13545,6 +13545,37 @@ def main():
           len(_opts) > 40 and len(_keys) > 10)
     _missing_o = sorted(o for o in _opts if o not in _front)
     _missing_k = sorted(k for k in _keys if k not in _front)
+
+    # THE MANIFEST'S OWN FLAGS, which the scan above cannot see. It looks for `add_argument` in the
+    # four SHIPPED entry points; `test/run.py` is not one of them (it is the suite, not a verb) and
+    # it parses `--section` by hand rather than through argparse, so neither half of that check
+    # reaches it. #105 added `--section` / `--list-sections`, wired them all through verify.yaml,
+    # and they were documented in ZERO of README, llms.txt, how-it-works and CLAUDE.md.
+    #
+    # verify.yaml is the right subject: it is a file consumers READ and edit, so a flag appearing
+    # there is a flag somebody has to look up. Derived from the manifest rather than listed, for the
+    # same reason as the scan above — a hand list goes stale toward a false pass exactly when a flag
+    # is added.
+    _man = read_or_empty(os.path.join(REPO, ".game_loop", "verify.yaml"))
+    # THE COMMAND LINES ONLY, and against all three consumer-facing docs. The first version scanned
+    # every byte of the manifest and checked against README+llms alone; it reported `--coverage`
+    # missing, which was wrong twice. That flag appears only in verify.yaml PROSE and in no command
+    # it runs, and it IS documented -- in docs/how-it-works.md, which the check was not reading. So
+    # the name "every flag verify.yaml INVOKES" described something the body did not do: the same
+    # overclaiming-name defect this suite caught in three other places today, written an hour later
+    # by the person fixing them. A flag in a comment is a different question from a flag in a rule.
+    _man_cmds = "\n".join(l for l in _man.splitlines() if l.lstrip().startswith("- "))
+    _man_flags = {f for f in re.findall(r"(?<![\w-])(--[a-z][a-z0-9-]+)", _man_cmds)}
+    _docs_all = _front + "\n" + read_or_empty(os.path.join(REPO, "docs", "how-it-works.md"))
+    _man_missing = sorted(f for f in _man_flags if f not in _docs_all)
+    check("every flag verify.yaml INVOKES is named in README.md, llms.txt or docs/how-it-works.md "
+          "— the manifest is a file consumers read, so a flag in a rule is one somebody has to look "
+          "up, and all three of those are places they would look"
+          + (" · MISSING: " + " ".join(_man_missing) if _man_missing else ""),
+          not _man_missing)
+    check("...and the manifest really does invoke flags, so the check above is a verdict rather "
+          "than an empty set passing quietly",
+          len(_man_flags) > 0)
     check("every CLI option the code defines is NAMED in README.md or llms.txt — the two files a "
           "human and an agent start from"
           + (" · MISSING: " + " ".join(_missing_o) if _missing_o else ""),

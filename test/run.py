@@ -11149,7 +11149,7 @@ def main():
           sweep.note_line(sweep.OK, None) is None)
     # A FLOOR NOBODY EVER RAISES STOPS BEING A TRIPWIRE. The drift check fails when coverage drops
     # BELOW the floor; nothing watched the floor going stale-low, and nothing ever raises one.
-    # Measured at 8172f90 by a full sweep: 49 of 86 producers score above their recorded floor, and
+    # Measured at 8172f90 by a full sweep: 58 of 98 producers score above their recorded floor, and
     # `upstream_check` records 0 while killing 15 — a tripwire that would sit silent through a total
     # loss. Reported, never fatal: a run that fails on good news teaches people to raise floors
     # without measuring them, which is the opposite of what the number is for.

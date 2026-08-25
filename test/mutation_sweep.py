@@ -1985,10 +1985,18 @@ def main():
         print("THIN — reported, not fatal: " + " · ".join(thin))
     # A FLOOR SO FAR BELOW THE MEASUREMENT THAT IT WOULD NOT NOTICE A COLLAPSE. The drift check
     # above catches coverage going DOWN past the floor; nothing catches the floor itself going
-    # stale, and nothing ever raises one. Measured 2026-08-25 at 8172f90: 49 of 86 producers score
+    # stale, and nothing ever raises one. Measured 2026-08-25 at 8172f90: 58 OF 98 producers score
     # above their recorded floor, and `upstream_check` records 0 while killing 15 — so its tripwire
     # would sit silent through a total loss of coverage. The recorded number stops being a tripwire
     # and becomes a souvenir of the day somebody measured it.
+    #
+    # THOSE FIGURES ARE THE CORRECTED ONES, and how they were wrong is the reason this comment says
+    # so. The first pass reported 49 of 86, from a regex hand-rolled over this report's RENDERED
+    # OUTPUT — and `^([a-z_][a-z0-9_]*) ->` silently dropped every dotted producer, so the twelve in
+    # bin/verify, bin/watchdog and bin/notify.py (verify.owed, watchdog.claim_pidfile, notify.send …)
+    # were never in the denominator. A short denominator, measured by improvising an instrument for a
+    # measurement this file already performs, in the file whose oldest lesson is the short
+    # denominator. The function below takes `verdicts` — the tool's own structure — for that reason.
     #
     # THE BOUND IS THE HALVING, not a round number: reported when the floor would permit losing MORE
     # THAN HALF of what is measured today. That is a statement about the blind spot rather than

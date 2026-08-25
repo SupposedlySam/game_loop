@@ -83,6 +83,23 @@ _Questions still outstanding. What would close each one._
   So "check the docs against the code" is the wrong drill; the drill is that the CALLER is a
   different artifact from the function, and the moment to check is when you write the caller.
 
+  **SECOND PASS, for the multi-hop variant** (lamp-owner's sharpening: the distinction survives the
+  function that makes it and dies where an ABSENT KEY meets a default, one hop downstream). Searched
+  `bin/game_loop` and `bin/watchdog` for reads of a persisted optional key with an `or <empty>`
+  default: 99 sites, which is the wrong instrument — for most of them absence and empty are the same
+  answer, and a missing `mandate` genuinely means no mandate. Narrowed to keys that record
+  PROVENANCE or EVIDENCE, where absence ≠ empty by construction: 16 distinct keys. **All sound.**
+  `probe_started_at or 0` is right because no claim and an expired claim really are one answer;
+  `captured_at or 0` gives a huge age, so no snapshot reads as "a probe is due", the safe direction;
+  the claims display already prints `verified_against: null` as "nobody has re-read it". The file
+  states the rule itself three lines below one of them: "COULD NOT LOOK. Never folded into 'no
+  limits data': a caller that treats them the same reports a broken probe as an account with no
+  windows, forever."
+
+  What that establishes is narrow and worth stating as such: **the shipped code handles this; the
+  three failures were all in code written in the preceding two days**, and all three are fixed. The
+  search was one pattern over two files, so it is evidence about that pattern, not about the class.
+
   **Both were safe by luck and therefore invisible.** `False` meant "do not signal", every test
   passed, the sweep floor was met. A sentence that is wrong in the SAFE direction has no behavioural
   signature at all, so nothing in this repo can catch it — which is why both were found by a

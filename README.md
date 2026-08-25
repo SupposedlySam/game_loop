@@ -419,6 +419,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `retro_overdue_factor` | How far past the retro interval counts as *overdue* (the gate, as opposed to the nudge). |
 | `limits.rate_limits`, `limits.threshold_tokens` | The usage-limit readings the handoff gate and the park are measured against. |
 | `limits` | Usage-limit thresholds for the handoff gate and the park. |
+| `limits.context.block_spawn` | The **fan-out brake**. Once the last turn's reading passes `limits.context.spawn_threshold_tokens` (defaults to the handoff cap, and is meant to sit above it), a verb in `limits.context.spawn_verbs` — defaulting to `showrunner spawn` — is refused. **No handoff opens this one**; only a smaller session does. It matches the Bash verb and nothing else, and it never shrinks a fleet already running. `false` removes the brake. |
 | `update_check`, `update_repo` | Whether to check for a newer game_loop, and where from. `update_api_base` / `update_raw_base` retarget those lookups (GitHub Enterprise, a mirror, or a test). |
 | *(not config)* `.game_loop/installed-by.json` | Written by a **packager**, not by you — see below. |
 | `session_start` | `false` disables the status block injected at session start and after compaction. |

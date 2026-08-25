@@ -3280,6 +3280,46 @@ def main():
                   _owes_both(_own.get(".game_loop/bin/guard-writes-impl.sh", [])))
             check("...and so does the mcp guard's impl, which had the same duplicate",
                   _owes_both(_own.get(".game_loop/bin/guard-mcp-impl.sh", [])))
+
+            # A STALE --section PATTERN NARROWS A GATE IN SILENCE. The selector refuses only when
+            # EVERY pattern matches nothing; one dud among five still selects the other four and
+            # exits 0, so a renamed section quietly stops gating the file whose rule named it. That
+            # is the failure this repo keeps paying for, and eleven rules below are now hand-written
+            # lists of section names — the comment on the first two admitted they "go out of date
+            # the way every hand list does" and left it at that. Enforced here instead.
+            _secs = [sg["name"] for sg in
+                     _segments(_main_node(ast.parse(read_or_empty(
+                         os.path.join(REPO, "test", "run.py")))))]
+
+            def _stale(cmds):
+                out = []
+                for c in cmds:
+                    toks = shlex.split(c)
+                    out += [toks[i + 1] for i, t in enumerate(toks)
+                            if t == "--section" and i + 1 < len(toks)
+                            and not any(toks[i + 1].lower() in n.lower() for n in _secs)]
+                return out
+
+            _allpats, _dud = [], []
+            for _rule, _cs in _own.items():
+                _toks = [shlex.split(c) for c in _cs]
+                _allpats += [t[i + 1] for t in _toks for i, x in enumerate(t)
+                             if x == "--section" and i + 1 < len(t)]
+                _dud += [(_rule, p) for p in _stale(_cs)]
+            check("every --section pattern this manifest names still matches a section — a renamed "
+                  "section leaves the pattern selecting nothing, and the run exits 0 on whatever "
+                  "the other patterns matched",
+                  not _dud)
+            if _dud:
+                print("       stale: " + ", ".join(f"{r} -> {p!r}" for r, p in _dud[:6]))
+            check("...and the rule can FIRE: a pattern naming no section is reported, so the clean "
+                  "answer above is a verdict rather than a scan matching nothing",
+                  _stale(["python3 test/run.py --section 'no-such-section-anywhere'"])
+                  == ["no-such-section-anywhere"])
+            check(f"...and it EXAMINED the patterns ({len(_allpats)} across "
+                  f"{sum(1 for cs in _own.values() for c in cs if '--section' in c)} commands) — an "
+                  "empty pattern list satisfies the first check while looking at nothing",
+                  len(_allpats) > 20 and len(_secs) > 50)
         finally:
             shutil.rmtree(cv, ignore_errors=True)
 
@@ -13412,6 +13452,33 @@ def main():
           and any(isinstance(_mainf.body[i], ast.Return) for i in _epi)
           and any(isinstance(_mainf.body[i], ast.Expr) for i in _epi))
 
+    # AN EMPTY PREFIX IS A LEGAL PREFIX. The shared-fixture block's first statement IS its first
+    # section header, so selecting none of its 50 sections leaves `try:` with an empty body and the
+    # run died on `ValueError: empty body on Try` before one check ran. Loud, not vacuous — but it
+    # made every honest docs/payload/install subset unusable, which is most of what the manifest
+    # wants to point at. The selection below is deliberately top-level-only.
+    _outside = _sel("--section", "house voice")
+    check("a selection naming NO section of the shared-fixture block still RUNS — an empty prefix "
+          "is a legal prefix, not a crash before the first check",
+          _outside.returncode == 0 and re.search(r"\n\d+ passed, \d+ failed", _outside.stdout)
+          and "empty body" not in _outside.stderr)
+
+    # THE CLOSURE MUST NOT INVENT DEPENDENCIES. A nested helper's parameter is bound by its caller,
+    # but a flat walk saw it loaded and never stored and called it a free read — so the closure went
+    # looking for whatever earlier section last assigned a variable of that name. All nine of
+    # `pinned dispatch`'s "dependencies" were its own helpers' parameters, and through the prefix
+    # rule they cost 44 extra sections: 712 checks instead of 300.
+    _snip = ast.parse(
+        "def _helper(path, out):\n"
+        "    return path + out + OUTER\n"
+        "_r = [q for q in _helper(1, 2)]\n").body
+    _sd, _su = _scope(_snip)     # _scope, not _names: a section above binds a local of that name
+    check("the closure does not follow a nested helper's PARAMETER to an earlier section — a "
+          "parameter is bound by the call, and a spurious edge costs a whole prefix",
+          "path" not in _su and "out" not in _su and "OUTER" in _su)
+    check("...nor a comprehension target, which does not leak out of the comprehension either",
+          "q" not in _su and "_helper" in _sd and "_r" in _sd)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
@@ -13484,18 +13551,85 @@ def _segments(mainfn):
     return segs
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _params(a):
+    """Every name an argument list binds — the ones a call supplies, not a section."""
+    got = {q.arg for q in a.posonlyargs + a.args + a.kwonlyargs}
+    for extra in (a.vararg, a.kwarg):
+        if extra:
+            got.add(extra.arg)
+    return got
+
+
+def _scope(nodes):
+    """(binds, frees) for ONE scope: what it binds, and what it reads from an enclosing one.
+
+    SCOPE-AWARE, because a flat `ast.walk` here does not merely over-approximate — it INVENTS
+    dependencies, and the prefix rule then multiplies each one into dozens of sections. A nested
+    helper's parameter is bound by its call, but a flat walk sees `path` loaded and never stored,
+    calls it a free read, and the closure hunts backwards for any earlier section that happened to
+    assign something of that name. Measured on this file: all nine of `pinned dispatch`'s
+    "dependencies" (`after`, `path`, `root`, `tree`, `n`, `nm`, `out`, `rel`, `sweep`) were
+    parameters of its own local helpers, and following them dragged in 44 shared-fixture sections —
+    712 checks and 2:14 to run a section that depends on nothing at all.
+
+    Narrowing a closure is the UNSOUND direction in general, so the rule here is not "fewer edges is
+    better": an edge is dropped only where the binding is provably local — a parameter, a
+    comprehension target, an except-alias. Every mapping in verify.yaml is still checked the same
+    way, by running the subset and diffing its outcomes against a full run.
+    """
+    binds, frees = set(), set()
+
+    def visit(n):
+        if isinstance(n, _SCOPES):
+            if not isinstance(n, ast.Lambda):
+                binds.add(n.name)                       # the def NAME lands in THIS scope
+                for dec in n.decorator_list:
+                    visit(dec)
+            for dflt in list(n.args.defaults) + [x for x in n.args.kw_defaults if x]:
+                visit(dflt)                             # defaults evaluate in the enclosing scope
+            body = n.body if isinstance(n.body, list) else [n.body]
+            inner_binds, inner_frees = _scope(body)
+            frees.update(inner_frees - inner_binds - _params(n.args))
+            return
+        if isinstance(n, ast.ClassDef):
+            binds.add(n.name)
+            for x in n.bases + list(n.keywords) + n.decorator_list:
+                visit(x)
+            frees.update(_scope(n.body)[1])             # a class body does not shadow for us
+            return
+        if isinstance(n, _COMPS):
+            targets, sub = set(), []
+            for g in n.generators:
+                targets |= {x.id for x in ast.walk(g.target) if isinstance(x, ast.Name)}
+                sub.append(g.iter)
+                sub.extend(g.ifs)
+            sub += [n.key, n.value] if isinstance(n, ast.DictComp) else [n.elt]
+            inner_binds, inner_frees = _scope(sub)
+            frees.update(inner_frees - targets)         # a comprehension target does not leak
+            return
+        if isinstance(n, ast.Name):
+            (binds if isinstance(n.ctx, (ast.Store, ast.Del)) else frees).add(n.id)
+            return
+        if isinstance(n, ast.ExceptHandler) and n.name:
+            binds.add(n.name)
+        elif isinstance(n, ast.alias):
+            binds.add((n.asname or n.name).split(".")[0])
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            binds.update(n.names)
+        for c in ast.iter_child_nodes(n):
+            visit(c)
+
+    for n in nodes:
+        visit(n)
+    return binds, frees
+
+
 def _names(stmts):
-    d, u = set(), set()
-    for st in stmts:
-        for x in ast.walk(st):
-            if isinstance(x, ast.Name):
-                (d if isinstance(x.ctx, (ast.Store, ast.Del)) else u).add(x.id)
-            elif isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                d.add(x.name)
-            elif isinstance(x, ast.ExceptHandler) and x.name:
-                d.add(x.name)
-            elif isinstance(x, ast.alias):
-                d.add((x.asname or x.name).split(".")[0])
+    d, u = _scope(stmts)
     return d, u - d
 
 
@@ -13589,6 +13723,16 @@ def _run_cli(argv):
         if body is mainfn.body:
             drop -= _epilogue(body)          # the report is not a section's to take with it
         body[:] = [st for i, st in enumerate(body) if i not in drop]
+        # AN EMPTY PREFIX IS A LEGAL PREFIX, and the compiler has to be told so. The shared-fixture
+        # block's FIRST statement is its first section header, so a selection naming none of its 50
+        # sections drops the whole body and `try:` is left with nothing in it — ValueError: empty
+        # body on Try, before a single check runs. It failed loudly rather than passing vacuously,
+        # which is the safe direction, but it made a whole class of honest selections unusable: any
+        # subset about the docs, the payload or the install, none of which live in that block. The
+        # `finally` still tears the sandbox down, so a body of `pass` is exactly the length-0 slice
+        # the prefix rule already permits.
+        if not body:
+            body.append(ast.Pass())
     ast.fix_missing_locations(tree)
 
     picked = sorted(keep)

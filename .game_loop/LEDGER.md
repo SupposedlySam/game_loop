@@ -83,6 +83,35 @@ _Questions still outstanding. What would close each one._
   the registry multi-subject so it can go stale loudly instead. Source: the paths above, read at
   showrunner's checkout on this machine, 2026-08-25.
 
+- **A rendered report is not a data structure — and the siblings, named before one of them bites.**
+  2026-08-25: computing how many sweep floors were stale, I hand-rolled `^([a-z_][a-z0-9_]*) ->`
+  over the sweep's own printed output. It drops every DOTTED producer name, so twelve — `verify.owed`,
+  `watchdog.claim_pidfile`, `notify.send` and the rest of the non-`game_loop` files — never entered
+  the denominator. Published 49 of 86; the truth is 58 of 98. A short denominator, produced while
+  analysing the file whose oldest lesson is the short denominator, by improvising an instrument for a
+  measurement that file already performs on its own structure. (lamp-owner's rule: hand-rolling a
+  one-off version of a measurement you have tooling for does not skip the tool's overhead, it skips
+  the tool's HARDENING.)
+
+  **Siblings enumerated deliberately, including the ones that have never gone wrong**, because a rule
+  filed under its one example gets remembered as a fact about that example. Every place this repo
+  parses captured output — 13 sites — and why each is sound:
+
+      bin/verify (3)     git --porcelain -uall / --name-only / ls-files. MACHINE formats, chosen for
+                         that, and `-uall` carries a comment about why plain --porcelain is wrong here.
+      bin/watchdog (2)   same family.
+      bin/game_loop (6)  mostly first-line-of-stderr for a message, not a measurement.
+      _test_count (1)    the real heuristic: reads a test runner's human output. There IS no
+                         universal structured alternative, and it says so — returns "no recognised
+                         test-count line (mocha, pytest, unittest, go, flutter, TAP)" and its caller
+                         renders that as COULD NOT TELL rather than as zero.
+
+  So the shipped code has no instance; the only one was my own scratch analysis, where nothing checks
+  the number. **The exposure is prose, not code** — a measurement improvised for a commit message or
+  a status line is the half with no suite. Before improvising one, ask which of this repo's own tools
+  already performs it: `stale_low_floors`, `killers`, `probed_verdict` and `note_line` all take the
+  tool's structures for exactly this reason.
+
 - **A docstring that makes a DISTINCTION is a claim about its callers, and nothing checks it.**
   Audited 2026-08-25 after writing this defect twice in one day. Fourteen functions across
   `bin/game_loop`, `bin/watchdog` and `bin/verify` have docstrings that assert what a caller must do

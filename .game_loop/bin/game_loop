@@ -7257,11 +7257,17 @@ def cmd_confidence(s, a):
             "beta means THE SUITE PASSED ON THIS TREE. Run `./.game_loop/bin/verify`, then mark.")
     pin = pinned_sha()
     if a.mark == "stable" and (not pin or not sha.startswith(pin[:8])):
-        die("stable means the owning agent has been RUNNING on this commit, and it is not.\n"
+        die("stable is for a commit the owning agent runs, and THE PIN DOES NOT NAME THIS ONE.\n"
             f"  pinned : {pin[:8] if pin else '(nothing pinned)'}\n"
             f"  this   : {sha[:8]}\n"
-            "Run `game_loop self --pin " + sha[:8] + "`, work on it, then mark it stable. "
-            "Dogfooding is the evidence; there is no way to assert it without doing it.")
+            "Run `game_loop self --pin " + sha[:8] + "`, work on it, then mark it stable.\n\n"
+            "WHAT THIS CHECK ESTABLISHES, exactly: that the recorded pin equals this commit. It is\n"
+            "a value comparison. It does NOT establish that anything ran under that pin — no\n"
+            "elapsed time, no observed turn, and not even that the pinned checkout is WIRED (`self`\n"
+            "reports that separately, and an unwired pin changes nothing about what executes).\n"
+            "`self --pin` followed immediately by this verb satisfies it; that has happened here,\n"
+            "27 seconds apart, which is why this paragraph exists (#104).\n"
+            "Dogfooding is still the evidence — the pin is how you DECLARE it, not proof you did it.")
     tag = f"{a.mark}-{sha[:8]}"
     lines = [f"{a.mark} — marked {now()}",
              "",
@@ -7270,6 +7276,8 @@ def cmd_confidence(s, a):
              "  verify: every owed check had run since the last change to a gated file"]
     if a.mark == "stable":
         lines.append("  dogfooded: the owning agent's own harness was pinned to this commit")
+        lines.append("            (a DECLARED pin, not observed running — see #104: the gate is a "
+                     "value comparison)")
     if a.notes:
         lines += ["", "notes: " + a.notes]
     lines += ["", "this says what was CHECKED, never that the code is correct."]

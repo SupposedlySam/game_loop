@@ -4976,10 +4976,21 @@ def main():
         check("alpha cannot be marked at all: it IS the absence of a mark, so marking it would say "
               "nothing",
               _conf("--mark", "alpha").returncode != 0)
-        check("stable is refused while the owning agent is NOT running on this commit — dogfooding "
-              "is the evidence, and there is no way to assert it without doing it",
-              _conf("--mark", "stable").returncode != 0
-              and "pinned" in _conf("--mark", "stable").stderr)
+        # RENAMED TO WHAT IT CHECKS (#104). This read "dogfooding is the evidence, and there is no
+        # way to assert it without doing it" — a conclusion the assertion underneath cannot support
+        # and, as it turns out, a false one: the gate compares the recorded pin to HEAD, so
+        # `self --pin <sha>` followed immediately by the mark satisfies it. That happened while
+        # publishing this repo, 27 seconds apart, with the pinned checkout never even wired.
+        _stab = _conf("--mark", "stable")
+        check("stable is refused when the recorded pin does not name this commit — which is the "
+              "comparison the gate performs, not a claim that anything ran",
+              _stab.returncode != 0 and "pinned" in _stab.stderr)
+        check("...and the refusal SAYS that is all it establishes: a value comparison, with no "
+              "elapsed time and no observed turn behind it",
+              "value comparison" in _stab.stderr and "does NOT establish" in _stab.stderr)
+        check("...and names the loophole outright rather than leaving it to be discovered, since a "
+              "gate that overstates itself is worse than one that is narrow and honest (INV6)",
+              "followed immediately by this verb satisfies it" in _stab.stderr)
 
         # THE PERMITTING ARMS. A gate nothing can satisfy is as broken as one nothing can fail.
         _r = _conf("--mark", "beta", "--notes", "the parser landed")

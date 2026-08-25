@@ -100,8 +100,13 @@ _Questions still outstanding. What would close each one._
       bin/verify (3)     git --porcelain -uall / --name-only / ls-files. MACHINE formats, chosen for
                          that, and `-uall` carries a comment about why plain --porcelain is wrong here.
       bin/watchdog (2)   same family.
-      bin/game_loop (6)  mostly first-line-of-stderr for a message, not a measurement.
-      _test_count (1)    the real heuristic: reads a test runner's human output. There IS no
+      bin/game_loop (8)  mostly first-line-of-stderr for a message, not a measurement — INCLUDING
+                         `_test_count` below, which is one of the eight rather than a fourteenth.
+                         (First written as "(6)" with `_test_count` listed apart, which does not add
+                         to 13. The total was right and the attribution was not: same defect as the
+                         entry it sits in, one paragraph later.)
+      _test_count        the real heuristic, and one of game_loop's eight: reads a test runner's
+                         human output. There IS no
                          universal structured alternative, and it says so — returns "no recognised
                          test-count line (mocha, pytest, unittest, go, flutter, TAP)" and its caller
                          renders that as COULD NOT TELL rather than as zero.

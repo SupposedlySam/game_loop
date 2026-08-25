@@ -172,6 +172,27 @@ _PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
 NOT_MEASURED = "NOT MEASURED"
 
 
+def note_line(v, thin_note):
+    """The one line that explains a floor — or says that nobody has. Pure, and at module level for
+    the same reason `probed_verdict` and `killers` are: a renderer nested in main() cannot be driven
+    by the suite, and this one decides whether debt is visible.
+
+    AN UNEXPLAINED LOW FLOOR MUST NOT READ AS AN EXPLAINED ONE. The MUTANTS header says a thin
+    number with no reason attached "invites the one bad fix: un-isolating a test to move the count".
+    Nothing said so when the note was simply ABSENT: the line vanished, and a floor nobody had ever
+    explained rendered identically to one somebody had thought about and accepted. Same shape as the
+    verdicts this file keeps apart everywhere else, arriving in its own report. 15 entries were in
+    that state when this was written, 11 of them at zero.
+    """
+    if thin_note:
+        return f"  {'why it is thin' if v == THIN else 'what it covers'}: {thin_note}"
+    if v in (THIN, UNPROTECTED):
+        return (f"  {'why it is thin' if v == THIN else 'why it is unprotected'}: NOT STATED — "
+                "nobody has written down why this floor is what it is, so this is undescribed debt "
+                "rather than an accepted number.")
+    return None
+
+
 def verdict(killed):
     """How a producer's kill count should be read. Pure, so the suite can check this line itself."""
     if killed == 0:
@@ -811,6 +832,16 @@ MUTANTS += [
      ["#102", "disarm", "handover", "watchdog", "signalled"],
      "raw 6, genuine 3 — the other three are reachability assertions firing because the neutered "
      "body orphans watchdog_pid_identity, not because they know anything about handovers.", 3),
+]
+
+MUTANTS += [
+    ("note_line -> a floor nobody explained renders exactly like one somebody accepted",
+     "test/mutation_sweep.py::note_line", "    return None\n",
+     ["thin", "NOT STATED", "unprotected", "note"],
+     "4 kills, and one of them is weaker than the other three: the header check reads this file's "
+     "SOURCE for the phrase rather than calling the function, so it would flip for any edit that "
+     "moved that text. The other three drive the function. Measured against the working tree at a "
+     "1601 baseline — this producer is not in HEAD yet, so the archive could not carry it.", 4),
 ]
 
 # ── THE WATCHDOG PIDFILE CARRIES AN IDENTITY (#102) ──────────────────────────────────────────
@@ -1776,8 +1807,9 @@ def main():
         #
         # A record that looks stale is sometimes a record that is mislabelled. Read it before
         # believing the first diagnosis, especially when the first diagnosis is "delete".
-        if thin_note:
-            lines.append(f"  {'why it is thin' if v == THIN else 'what it covers'}: {thin_note}")
+        _nl = note_line(v, thin_note)
+        if _nl:
+            lines.append(_nl)
         # A KILL NEEDS A NAMED KILLER, AND THE NAME HAS TO BE ABOUT YOUR GUARD (lamp-owner,
         # 2026-08-23). A mutation that breaks something ELSE reddens the suite and reports the same
         # word as one the guard actually caught — collateral and genuine wear the identical verdict

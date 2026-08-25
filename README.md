@@ -352,6 +352,13 @@ project, and `confidence` tells you how to re-check rather than trust the tag.
 Full design in **[docs/how-it-works.md](docs/how-it-works.md)**; the guarantees as runnable checks in
 **[`test/run.py`](test/run.py)**.
 
+The suite runs everything by default and takes a few minutes. It also takes `--list-sections`, and
+`--section <name>` (repeatable) to run a subset — which is how `verify.yaml` gates a change on what
+it actually touches rather than on the whole suite, so a one-line edit is not priced like a rewrite.
+A `--section` matching nothing **exits 2 rather than passing**: zero checks and exit 0 is
+byte-identical to a suite that ran and agreed with you, and those must never look the same.
+
+
 - **Claim gate** — no assertion about a dependency, a harness, or another repo without naming the real
   file that backs it.
 - **Write guard** — an allowlist: the repo, the OS temp dir, and roots you configure. Everything else

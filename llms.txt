@@ -413,4 +413,7 @@ from `.claude/settings.json` (the installer *adds* game_loop's hooks; it does no
 - `docs/how-it-works.md` — the full design: the autonomy engine and every guardrail.
 - `.game_loop/INVARIANTS.md` — the project's non-negotiables.
 - `.game_loop/LEDGER.md` — VERIFIED / RULED-OUT / OPEN findings (reference, not a gate).
-- `test/run.py` — the guarantees, as runnable checks.
+- `test/run.py` — the guarantees, as runnable checks. `--list-sections` and `--section <name>`
+  (repeatable) run a subset; this is what `verify.yaml` uses to gate a change on what it
+  touches. A `--section` matching nothing exits 2 — zero checks and exit 0 would be
+  byte-identical to a suite that ran and passed.

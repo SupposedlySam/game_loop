@@ -172,6 +172,20 @@ _PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
 NOT_MEASURED = "NOT MEASURED"
 
 
+def stale_low_floors(verdicts):
+    """[(floor, killed, name)] for producers whose floor would permit losing MORE THAN HALF of what
+    they measure today. Pure, and at module level so the suite can drive it — the same lift
+    `probed_verdict`, `killers` and `note_line` got, for the same reason.
+
+    The bound is the halving rather than a round number: it states the size of the BLIND SPOT rather
+    than an opinion about drift, and it does not fire on the ±1 churn ordinary assertion edits make.
+    NOT_MEASURED is excluded because it has no reading to compare against — a producer nobody could
+    score is not a producer with a generous floor.
+    """
+    return sorted((fl, k, fn) for fn, k, v, fl in verdicts
+                  if k is not None and v != NOT_MEASURED and fl < k / 2)
+
+
 def note_line(v, thin_note):
     """The one line that explains a floor — or says that nobody has. Pure, and at module level for
     the same reason `probed_verdict` and `killers` are: a renderer nested in main() cannot be driven
@@ -1969,6 +1983,29 @@ def main():
         print("Each should be swept and is not yet, with its reason recorded beside it.")
     if thin:
         print("THIN — reported, not fatal: " + " · ".join(thin))
+    # A FLOOR SO FAR BELOW THE MEASUREMENT THAT IT WOULD NOT NOTICE A COLLAPSE. The drift check
+    # above catches coverage going DOWN past the floor; nothing catches the floor itself going
+    # stale, and nothing ever raises one. Measured 2026-08-25 at 8172f90: 49 of 86 producers score
+    # above their recorded floor, and `upstream_check` records 0 while killing 15 — so its tripwire
+    # would sit silent through a total loss of coverage. The recorded number stops being a tripwire
+    # and becomes a souvenir of the day somebody measured it.
+    #
+    # THE BOUND IS THE HALVING, not a round number: reported when the floor would permit losing MORE
+    # THAN HALF of what is measured today. That is a statement about the blind spot rather than
+    # about drift, it explains itself in the line, and it does not fire on the ±1 churn that normal
+    # assertion edits produce. NOT FATAL — a conservative floor has never broken anything, and a run
+    # that fails on good news teaches people to raise floors without measuring them.
+    slack = stale_low_floors(verdicts)
+    if slack:
+        print(f"FLOOR IS STALE-LOW ({len(slack)}) — measured well above what is recorded, so the "
+              "tripwire has slack:")
+        print("  " + " · ".join(f"{fn} ({fl}→{k})" for fl, k, fn in slack[:12])
+              + (" · …" if len(slack) > 12 else ""))
+        print("  Each of these would pass a run that lost more than half its coverage. Raising a")
+        print("  floor is recording a MEASUREMENT, not tightening a screw: take the number from a")
+        print("  full sweep of the tree it describes, the same rule the drift check asks for in the")
+        print("  other direction. Not fatal, because a low floor has never broken a run — it has")
+        print("  only ever failed to catch one.")
     if drifted:
         print("BELOW THE RECORDED FLOOR: " + " · ".join(drifted))
         print("Coverage that existed is gone — OR the floor is not comparable. CHECK THAT FIRST:")

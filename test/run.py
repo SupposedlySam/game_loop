@@ -11147,6 +11147,27 @@ def main():
     check("...while a producer that owes no explanation gets no line at all — the notice is the "
           "exception, not a banner every healthy entry carries",
           sweep.note_line(sweep.OK, None) is None)
+    # A FLOOR NOBODY EVER RAISES STOPS BEING A TRIPWIRE. The drift check fails when coverage drops
+    # BELOW the floor; nothing watched the floor going stale-low, and nothing ever raises one.
+    # Measured at 8172f90 by a full sweep: 49 of 86 producers score above their recorded floor, and
+    # `upstream_check` records 0 while killing 15 — a tripwire that would sit silent through a total
+    # loss. Reported, never fatal: a run that fails on good news teaches people to raise floors
+    # without measuring them, which is the opposite of what the number is for.
+    _slk = [("a", 24, "ok", 1), ("b", 10, "ok", 9), ("c", None, "ok", 3),
+            ("d", 12, sweep.NOT_MEASURED, 0), ("e", 8, "ok", 4)]
+    _flagged = {n for _f, _k, n in sweep.stale_low_floors(_slk)}
+    check("a floor that would permit losing more than HALF of what is measured is reported — the "
+          "bound states the size of the blind spot rather than an opinion about drift",
+          "a" in _flagged)
+    check("...and a floor just under its measurement is NOT — otherwise the ±1 churn of ordinary "
+          "assertion edits fills the report and the report gets deleted",
+          "b" not in _flagged)
+    check("...and EXACTLY half is not MORE than half, so the boundary is a boundary rather than a "
+          "slope",
+          "e" not in _flagged)
+    check("...and a producer with no reading is excluded: NOT MEASURED has nothing to compare "
+          "against, and is not a producer with a generous floor",
+          "c" not in _flagged and "d" not in _flagged)
     _undesc = [t[1] for t in sweep.MUTANTS if t[5] < sweep.THIN_AT and not t[4]]
     check("...and THIS repo's undescribed low floors are non-empty, so the line above is a verdict "
           "about real debt rather than a branch nothing in the tree reaches",

@@ -858,6 +858,27 @@ MUTANTS += [
      "1601 baseline — this producer is not in HEAD yet, so the archive could not carry it.", 4),
 ]
 
+# THE EMPTY-STRING PRODUCERS, MEASURED. Surfaced when `_returns_nothing` learned that "" is a
+# nothing; measured 2026-08-25 against the working tree (they were not in HEAD as candidates when
+# measured) at a 1696 baseline, via this file's own neuter()/run()/in_a_copy_of(). Two of the five
+# came back at ZERO and stay out with their reasons above — one of them because its branch is
+# unreachable (#108), which is a different finding from being unasserted.
+MUTANTS += [
+    ("duplicate_key_tail -> a manifest key declared twice merges in SILENCE",
+     ".game_loop/bin/verify::duplicate_key_tail", '    return ""\n',
+     ["duplicate", "declared", "merge", "manifest"],
+     "5, and one of them is not mine: `--coverage says it too` was already asserting this report "
+     "through a different door, which is why the producer was covered while being invisible.", 5),
+    ("unchecked_tail -> files no rule claims are never named",
+     ".game_loop/bin/verify::unchecked_tail", '    return ""\n',
+     ["unchecked", "coverage", "no rule"], None, 2),
+    ("assist -> the flair line for a verb is always empty",
+     ".game_loop/bin/flair.py::assist", '    return ""\n',
+     ["flair", "assist"],
+     "2, and flair is the one file where fun lives — a low floor here costs a joke, not a verdict.",
+     2),
+]
+
 # ── THE WATCHDOG PIDFILE CARRIES AN IDENTITY (#102) ──────────────────────────────────────────
 # MEASURED AT THE WORKING TREE, not at HEAD, and said here because a floor whose provenance is
 # unstated is a number. These producers did not exist in HEAD when measured, so the archive the
@@ -1145,18 +1166,20 @@ NOT_SWEPT = {
     #
     # KNOWN GAPs — product producers that SHOULD be swept and are not yet. Declared so the run
     # reports them every time rather than letting the number sit at a comfortable 0 undecided.
-    ".game_loop/bin/verify::duplicate_key_tail": "KNOWN GAP — the report that warns the next writer "
-        "a manifest key was declared twice and MERGED. It is the reason this whole class was found: "
-        "nothing had ever exercised it, so the signal that makes a tolerated merge safe was itself "
-        "unproven. Assertions added 2026-08-25; a floor is owed at the next full sweep.",
-    ".game_loop/bin/verify::unchecked_tail": "KNOWN GAP — the coverage tail naming files no rule "
-        "claims. Same shape as duplicate_key_tail and unmeasured for the same reason.",
-    ".game_loop/bin/game_loop::run_verify_check": "KNOWN GAP — and the most load-bearing of the "
-        "five: it answers whether a gated file's checks have run since it changed, which is what "
-        "the commit gate refuses on. Returns \"\" for 'nothing stale', so it was invisible.",
-    ".game_loop/bin/game_loop::_closing": "KNOWN GAP — renders the closing line of a refusal.",
-    ".game_loop/bin/flair.py::assist": "KNOWN GAP — flair only, and the one file where fun lives, "
-        "so its silence costs a joke rather than a verdict.",
+    
+    
+    ".game_loop/bin/game_loop::run_verify_check": "MEASURED AT 0 AND THAT IS NOT A COVERAGE GAP "
+        "(#108). It answers whether a gated file's checks are stale, and its only caller reaches it "
+        "three lines AFTER `--mark` has already died on an unclean tree — so the input it reads "
+        "(changed_files, 'what a commit would actually carry') is empty by construction and it can "
+        "only ever return \"\". Not unasserted: its finding branch has no reachable caller. Writing "
+        "an assertion would mean asserting an outcome the code cannot produce. Excluded until #108 "
+        "decides whether the check should read the COMMIT's diff instead, or whether the clean-tree "
+        "gate is doing all the work and the text should say so.",
+    ".game_loop/bin/game_loop::_closing": "KNOWN GAP — renders the closing line of a refusal, and "
+        "measured at 0 kills on 2026-08-25: nothing asserts it. Unlike run_verify_check above this "
+        "one IS reachable, so it is a genuine unasserted producer rather than a dead branch.",
+    
 
     "test/run.py::dig": "walks a nested structure and returns None at the first missing key, "
             "inside the suite. It exists so a guarded read whose result is SUBSCRIPTED fails one "

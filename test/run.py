@@ -5153,6 +5153,47 @@ def main():
     # included, and nothing distinguishes "half-landed feature" from "the commit I run my own agent
     # on". A self-declared level would be prose — the thing this project refuses everywhere else —
     # so each level is an artifact the marker cannot fabricate.
+    # THE TWO GATES PARTITION THE SPACE, and the second one gets nothing (#108). `--mark` dies on
+    # an unclean tree at bin/game_loop:7479; three lines later it asks `run_verify_check()` whether
+    # any gated file's checks are stale — and that answer is derived from `changed_files()`, "what a
+    # commit would actually carry", which is EMPTY on the clean tree 7479 just guaranteed. So the
+    # staleness refusal ("beta means THE SUITE PASSED ON THIS TREE") cannot fire from its only
+    # caller. I found it by writing the obvious assertion and watching it fail.
+    #
+    # What is asserted here is the behaviour that IS true and IS wanted — the unclean tree is
+    # refused, and it is refused for the right reason. The unreachable branch is NOT pinned: a test
+    # that asserted "the staleness gate stays silent" would have to be deleted by whoever fixes
+    # #108, which is how a suite starts defending a bug.
+    print("a mark refuses an unclean tree, and says which gate did it (#108):")
+    sv = make_sandbox()
+    try:
+        def _sg(*a):
+            return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *a],
+                                  cwd=sv, capture_output=True, text=True)
+        _sg("init", "-q", ".")
+        with open(os.path.join(sv, ".gitignore"), "w") as f:
+            f.write("__pycache__/\n*.pyc\n.game_loop_self/\n"
+                    ".game_loop/log.jsonl\n.game_loop/sessions/\n.game_loop/state.json\n"
+                    ".game_loop/verified.json\n.game_loop/probe/\n.game_loop/HANDOFF.md\n"
+                    ".game_loop/triggers.json\n.game_loop/triggers.d/\n"
+                    ".game_loop/CONFIDENCE\n.game_loop/VERSION\n")
+        _sg("add", "-A"); _sg("commit", "-q", "-m", "base")
+        with open(os.path.join(sv, ".game_loop", "bin", "flair.py"), "a") as f:
+            f.write("\n# a change to a GATED file, left uncommitted\n")
+        _mk = subprocess.run([os.path.join(sv, ".game_loop", "bin", "game_loop"),
+                              "confidence", "--mark", "beta", "--notes", "should be refused"],
+                             cwd=sv, capture_output=True, text=True, env=_env(sv, sid="sess-stale"))
+        _txt = _mk.stdout + _mk.stderr
+        check("a gated file changed and uncommitted REFUSES the mark — a level describes a commit, "
+              "and this is not one yet",
+              _mk.returncode != 0)
+        check("...and it is the UNCLEAN-TREE gate that says so, not the staleness one — naming "
+              "which gate fired is what makes #108's unreachable branch visible rather than "
+              "inferred from a refusal that happens to arrive",
+              "uncommitted changes" in _txt and "owed checks have not run" not in _txt)
+    finally:
+        shutil.rmtree(sv, ignore_errors=True)
+
     print("a confidence level is an artifact, not a claim:")
     cd = make_sandbox()
     try:
@@ -8731,13 +8772,12 @@ def main():
     # a reason; five are product producers that SHOULD be swept and are not yet, so they are declared
     # here instead of sitting invisible. An empty queue was the outcome to aim for and it was also
     # true only of the producers anybody had thought to enumerate.
-    _expected_gaps = [
-        ".game_loop/bin/flair.py::assist",
-        ".game_loop/bin/game_loop::_closing",
-        ".game_loop/bin/game_loop::run_verify_check",
-        ".game_loop/bin/verify::duplicate_key_tail",
-        ".game_loop/bin/verify::unchecked_tail",
-    ]
+    # FIVE BECAME ONE, by measuring rather than by deciding they were fine. Three had real floors
+    # (5, 2, 2) and moved into MUTANTS. `run_verify_check` measured 0 and is excluded with the
+    # reason, because its finding branch is unreachable (#108) — asserting it would mean asserting
+    # an outcome the code cannot produce. `_closing` measured 0 and IS reachable, so it stays a
+    # declared gap: a genuine unasserted producer, which is what this queue is for.
+    _expected_gaps = [".game_loop/bin/game_loop::_closing"]
     check("...and THIS repo's declared KNOWN GAPs are exactly the five the empty-string detector "
           "surfaced — a fact about today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),

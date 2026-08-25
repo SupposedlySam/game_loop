@@ -13120,6 +13120,60 @@ def main():
               "road rather than a wall",
               _r4.returncode == 0 and "MANDATE bound" in _r4.stdout)
 
+        # ---- #94: the OTHER two verbs that write a permission ----
+        # #88 guards `mandate --set` and it is the only subagent-aware guard in the binary. But a
+        # dispatched subagent's `checkpoint` lands in the parent's state file too, and it BUYS THE
+        # PARENT A TURN-END: the next Stop gate the parent hits passes on a permission a different
+        # actor wrote. The mandate collision was at least loud after the fact; this one clears a
+        # gate and says nothing, which is the permissive direction.
+        #
+        # Driven with a real cwd, because the crossing IS the cwd — `gl()` runs everything from the
+        # suite's own directory and could not tell the two cases apart.
+        print("#94: a turn-end bought by a checkpoint from another tree says so:")
+        _c94 = tempfile.mkdtemp(prefix="gl-94-")
+        try:
+            _cproj = os.path.join(_c94, "proj")
+            _cother = os.path.join(_c94, "othertree")
+            os.makedirs(_cother, exist_ok=True)
+            shutil.copytree(os.path.join(REPO, ".game_loop"),
+                            os.path.join(_cproj, ".game_loop"))
+            shutil.rmtree(os.path.join(_cproj, ".game_loop", "sessions"), ignore_errors=True)
+            subprocess.run(["git", "init", "-q", "."], cwd=_cproj, capture_output=True)
+            _cbin = os.path.join(_cproj, ".game_loop", "bin", "game_loop")
+            _cenv = dict(os.environ)
+            _cenv["GAME_LOOP_SESSION"] = "sess-94"
+            _cenv.pop("CLAUDE_CODE_SESSION_ID", None)
+
+            def _c(args, cwd, stdin=None):
+                return subprocess.run([_cbin, *args], cwd=cwd, env=_cenv, input=stdin,
+                                      capture_output=True, text=True)
+
+            _c(["mandate", "--set", "LEAD: finish the migration"], _cproj)
+            _c(["checkpoint", "--notes", "worker: finished my slice"], _cother)
+            _sg = _c(["stopgate"], _cproj, '{"last_assistant_message":"done for now"}')
+            check("#94: the turn still ENDS — a checkpoint is a checkpoint and this is a notice, "
+                  "not a new gate that strands a run on somebody else's bookkeeping",
+                  _sg.returncode == 0)
+            check("#94: ...and it SAYS the turn-end was bought by a checkpoint from another tree, "
+                  "which is the last moment anybody could notice it was not theirs",
+                  "ANOTHER TREE" in _sg.stderr)
+            check("#94: ...and quotes the WORDS, because words you do not recognise are the only "
+                  "tell there is — the same wall #88 hit and answered the same way",
+                  "worker: finished my slice" in _sg.stderr)
+            check("#94: ...and names the remedy that gives a subagent its own state",
+                  "GAME_LOOP_SESSION" in _sg.stderr)
+            check("#94: ...and states the blind spot: a SAME-TREE in-process subagent shares this "
+                  "cwd and cannot be told apart here at all (INV6)",
+                  "BLIND SPOT" in _sg.stderr)
+            _c(["mandate", "--set", "LEAD: finish the migration"], _cproj)
+            _c(["checkpoint", "--notes", "mine: wrote the report"], _cproj)
+            _sg2 = _c(["stopgate"], _cproj, '{"last_assistant_message":"done"}')
+            check("#94: ...while a checkpoint written in THIS tree is silent — the notice is the "
+                  "exception, not a banner on every turn-end",
+                  _sg2.returncode == 0 and "ANOTHER TREE" not in _sg2.stderr)
+        finally:
+            shutil.rmtree(_c94, ignore_errors=True)
+
         # STATE IS SESSION-SCOPED, so it is under sessions/<id>/ whenever a session id is in the
         # environment — assuming the legacy path is how this test first failed.
         _cands = [os.path.join(_mdh, "state.json")] + [
@@ -13306,6 +13360,13 @@ def main():
         "uses_left": "authorization state", "session_id": "harness payload field",
         "tool_name": "harness payload field", "tool_input": "harness payload field",
         "resets_at": "a usage-window reading", "used_percentage": "a usage-window reading",
+        # #94. Both are fields of the stop-gate's own log RECORD, read back off `rec` to decide
+        # whether to print the cross-tree notice — never read from config, so documenting them as
+        # configuration would advertise a knob that does not exist. The scanner matches them because
+        # its `c\.get` arm also matches `rec.get`, which is the price of deriving the list from the
+        # code rather than maintaining one by hand, and the cheaper error of the two.
+        "cross_tree": "a stop-gate log record field, not config",
+        "setter": "a log/state field recording who wrote a permission, not config",
     }
 
     def _code_surface():

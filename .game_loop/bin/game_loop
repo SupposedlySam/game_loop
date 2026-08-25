@@ -298,6 +298,7 @@ DEFAULT_STATE = {
     "mandate": {},
     "stop_ok": False,
     "stop_ok_notes": None,
+    "stop_ok_setter": None,
     "watchdog_rings": 0,
     "t3_armed": None,
     "authorized": [],
@@ -1104,6 +1105,24 @@ def watchdog_pid_identity(pid):
     except (OSError, subprocess.SubprocessError):
         return None
     return (r.stdout or "").strip() or None
+
+
+def _writer_mark():
+    """Who wrote a permission into this state file, as far as anything here CAN know (#94).
+
+    checkpoint and arm both write a PERMISSION -- a turn-end the Stop gate will spend, and a T3 the
+    human will answer -- and an in-process subagent inherits CLAUDE_CODE_SESSION_ID, so both land in
+    the PARENT's state file. #88 guards `mandate --set` against exactly this and keys on the WORDS,
+    because the two callers are indistinguishable by identity: same session id, and the pid differs
+    on every CLI invocation including legitimate ones.
+
+    So this does not claim to identify anybody. It records what is mechanically true at the moment
+    of writing, and the CWD is the part that can actually differ: a subagent dispatched into its own
+    worktree writes from a different tree, and that crossing is nameable. A same-tree in-process
+    subagent is NOT distinguishable here and this must not be read as though it were -- what catches
+    that case is the same thing #88 relies on, the words being ones you do not recognise.
+    """
+    return {"pid": os.getpid(), "cwd": os.getcwd(), "at": now()}
 
 
 def disarm_watchdog():
@@ -2861,6 +2880,7 @@ def cmd_checkpoint(s, a):
                 "Deferring is a decision. Not noticing is not.")
     s["stop_ok"] = True
     s["stop_ok_notes"] = a.notes
+    s["stop_ok_setter"] = _writer_mark()
     save(s)
     if notify:
         notify.send("checkpoint", f"📍 checkpoint — {a.notes}")  # default-off event; opt in to page
@@ -2918,7 +2938,7 @@ def cmd_arm(s, a):
             "\nName the source you consulted before deciding to spend the human's attention. "
             "A question you cannot source is a question you haven't tried to answer.")
     s["t3_armed"] = {"question": a.question, "read": list(resolved.values()),
-                     "predict": a.predict, "at": now()}
+                     "predict": a.predict, "at": now(), "setter": _writer_mark()}
     s["stop_blocks"] = 0
     save(s)
     logline({"kind": "arm", "tier": "T3", "question": a.question,
@@ -5368,8 +5388,21 @@ def _stop_verdict(s, payload):
                 "message is neither."), {
                 "kind": "stop_gate_block", "reason": "checkpoint-names-next-action",
                 "mandate": m.get("text"), "phrase": _defer}
+        # WHOSE TURN-END IS BEING SPENT (#94). checkpoint writes a permission and this is where it
+        # is consumed, so this is the last moment anybody could notice it was bought by somebody
+        # else. A dispatched subagent inherits the session id, so its checkpoint lands here and buys
+        # THIS session a turn-end nobody here asked for. Naming the crossing costs one line and only
+        # when there IS one -- the same shape as the spent-grant notice on the write guard.
+        _cs = s.get("stop_ok_setter") or {}
+        _cross = (_cs.get("cwd") and os.path.realpath(_cs["cwd"]) != os.path.realpath(os.getcwd()))
+        # WHAT THIS CANNOT SEE (INV6): an in-process subagent in the SAME tree. It shares the
+        # session id and the cwd, so nothing mechanical separates it from this session — #88 reached
+        # the same wall and answered it the same way, by showing the WORDS. Words you do not
+        # recognise are the tell; there is no identity check underneath this and it must not be read
+        # as one.
         return True, "checkpoint declared — reporting, not asking", {
             "kind": "checkpoint", "notes": s.get("stop_ok_notes"),
+            "setter": _cs or None, "cross_tree": bool(_cross),
             "checked_question": why_not is None, "unchecked_because": why_not}
 
     # Circuit breaker. A guard that can trap the session forever is worse than the bug it prevents,
@@ -5585,6 +5618,24 @@ def cmd_stopgate(s, a, payload):
         # make the check vacuous — the attachment would fire once per continuation and never verify
         # that what it asked for happened. The consecutive bound is what makes that safe.
         notices = []
+        # A TURN-END SOMEBODY ELSE BOUGHT (#94). checkpoint writes a permission and this is where it
+        # is spent, so this is the last moment anyone could notice it was not theirs. A dispatched
+        # subagent inherits the session id, so its checkpoint lands in THIS state file and clears
+        # THIS gate. It goes on `notices` rather than into the verdict because a passing gate is
+        # silent by design: the reason is logged, and stderr is the only thing a run actually reads.
+        if isinstance(rec, dict) and rec.get("cross_tree"):
+            _st = rec.get("setter") or {}
+            notices.append(
+                "⚠ THIS TURN-END WAS BOUGHT BY A CHECKPOINT FROM ANOTHER TREE.\n"
+                f"    written in : {_st.get('cwd')}\n"
+                f"    at         : {_st.get('at')}\n"
+                f"    its words  : {(rec.get('notes') or '')[:160]!r}\n"
+                "  A dispatched subagent inherits this session id, so its checkpoint lands here and\n"
+                "  clears YOUR gate. If those words are not yours, the turn-end you just spent was\n"
+                "  not either — and the work you were mandated to do is still open.\n"
+                "  Give a subagent its own state: GAME_LOOP_SESSION=<unique> game_loop ..\n"
+                "  BLIND SPOT: an in-process subagent in the SAME tree shares this cwd and cannot be\n"
+                "  told apart here at all. The words are the only tell, which is where #88 landed too.")
         try:
             tblock = stop_trigger_block(s, payload, notices)
         except Exception as exc:  # noqa: BLE001 — belt beside the braces in _run_trigger

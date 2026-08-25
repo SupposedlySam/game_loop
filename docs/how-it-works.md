@@ -1069,6 +1069,26 @@ variable, so a worker that dispatches further must set a fresh one at every leve
 Reported by a consumer running a lead that dispatches in-process workers — observed live, not
 theorised.
 
+**`checkpoint` now names the crossing where the permission is SPENT** rather than where it is
+written. It records the tree and time it was checkpointed from, and if the Stop gate that consumes
+it is running in a different tree, the turn-end still ends — this is a notice, not a new gate — and
+stderr says so, quoting the checkpoint's own words:
+
+```
+⚠ THIS TURN-END WAS BOUGHT BY A CHECKPOINT FROM ANOTHER TREE.
+    written in : /…/worktree-b
+    its words  : 'worker: finished my slice'
+```
+
+Words you do not recognise are the tell. That is deliberately the same answer `mandate --set` gives,
+and for the same reason: the two callers are indistinguishable by identity, so there is nothing to
+check but the content.
+
+**What it cannot see (INV6):** an in-process subagent in the *same* tree. It shares the session id
+*and* the working directory, so nothing mechanical separates it from the parent, and this notice
+will not fire. `arm` records the same mark, but a T3 is consumed by a human rather than by a gate,
+so there is no equivalent moment to print at — the record is there for whoever reads it.
+
 ### Running the harness from a pinned checkout
 
 Only relevant if you are editing game_loop itself — or any project whose hooks run code that project

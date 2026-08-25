@@ -109,6 +109,16 @@ work. Three things worth checking before a long unattended run:
   logged failure and not a hypothetical. `status` shows a retired session as `⇢ HANDED OVER`.
   One thing does NOT travel: a T3 question armed before the handover. The arm lives in the old
   session's state, so put the question in the handoff file — `successor` says so when it sees one.
+  One thing does not travel by default either: **permission bypass**. An unattended successor that
+  opens on a permission prompt stalls where nobody is watching, and the flag is read at launch, so
+  the successor cannot grant it to itself. `limits.successor.skip_permissions: true` in
+  `.game_loop/config.local.json` — the GITIGNORED file, not the tracked one — puts
+  `--dangerously-skip-permissions` on the command `successor` builds. There is deliberately no flag
+  for it, and both write rails refuse that file, so a session that grants it must spend `authorize`
+  and leave a human's words in the log; set it in the tracked `config.json` and `successor` says so
+  and ignores it. That is a refused-by-default door with an audit trail, NOT prevention — a
+  `python3 -c` still writes any file here. It does NOT reach the `saggar-agent` mode, which builds
+  its own invocation and says so.
 
 ## Never
 

@@ -470,6 +470,52 @@ terminal ends up named after the prompt. It also starts in the calling terminal'
 precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is a
 call to a running app, so unlike `warp-tab` it writes nothing anywhere.
 
+**The successor can be launched with permission prompts bypassed** — `limits.successor.skip_permissions`,
+default `false`. A handover happens at the worst moment there is: the gate closed, the context full, the
+human asleep. A successor that opens on a permission prompt is a handover that stalls exactly where nobody
+is watching. `--dangerously-skip-permissions` is read at **launch** — the running claude refuses `Cannot set
+permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions`
+— so the command line is the only place the decision exists, and this verb builds the only command line there
+is. When it is on, the output says `permissions : BYPASSED` and names the key; when it is off it says nothing,
+because the exceptional state is the one worth a line.
+
+It is a **config key and not an argument**, deliberately, and `successor --skip-permissions` is refused. A
+session that could hand its own successor a bypass is a session widening its permissions across a handover and
+calling the result a new session.
+
+**And it is read from `.game_loop/config.local.json` only** — never from the tracked `config.json`. Two
+separate reasons, and it is worth being exact about which one each buys, because the first was overclaimed
+once already:
+
+- **Refused by default, and a grant leaves a record.** Both write rails refuse that file by name: `Write`/`Edit`
+  since #65, and the shell path — a redirect, `sed -i`, `tee`, a copy onto it — since #86. `config.local.json`
+  is refused *whether or not it exists*, so there is no provisioning arm to slip through. A session that wants
+  the bypass must therefore spend `authorize`, which writes a human's own words into `log.jsonl` permanently.
+  What that is worth is precise: the grant cannot happen **without leaving the record of who granted it**.
+- **What it is not.** It is not an unpickable lock, and the guard says so in its own refusal text: a `python3 -c`
+  that writes the file, a path built from a shell variable, and any MCP tool are all outside what it reads
+  (INV6). No choice of config *layer* closes those — `~/.game_loop/config.json` falls to the identical
+  one-liner. So the honest claim is a **refused-by-default, logged-when-granted door**, not prevention. The
+  earlier wording here said "only the human … may", which is a conclusion the check underneath it could not
+  support.
+- **It cannot travel.** `config.json` is tracked and is the seed a fresh install copies from (`install.sh:339`),
+  so a bypass granted there would be handed to everyone who clones the checkout and everyone who installs from
+  it. This project shipped exactly that leak once, for the length of one commit, about a different key. A
+  permission bypass has a stronger claim on the gitignored layer than the key that taught us did.
+
+Set it in the tracked file anyway and `successor` **says so and ignores it** — a key that reads as armed and
+is not is precisely the 3am stall this verb exists to prevent.
+
+One cost this creates, named because it is real: `config()` is a shallow top-level update, so adding the
+`limits` block the key lives in **replaces the tracked one whole**, dropping `mode`, `name`, `threshold_pct`,
+`exhausted_pct` and `handoff_file` if they were not restated. `successor` names the keys that went missing
+rather than letting them fail toward a default that looks deliberate.
+
+It does **not** reach `saggar-agent`, for the same reason the session id does not: `saggar agent <agent>
+<task…>` takes a task, not argv. That gap is the one that costs the most — the setting is bought precisely
+because nobody will be there — so it is printed beside the setting in every saggar run, dry or live, rather
+than left for a successor to discover by stalling on a prompt at 3am. Only `print` and `warp-tab` carry it.
+
 The tab is titled `<R> | <task>` — the repo's initial so a row of tabs stays readable, plus what that
 session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than
 letting a narrow tab truncate it; `--title` is the uncapped, verbatim override. This is the same

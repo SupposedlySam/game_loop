@@ -1195,6 +1195,134 @@ def main():
               in succ_mode(TERM_PROGRAM="WarpTerminal"))
         succ_cfg("auto")
 
+        # ── the bypass setting (limits.successor.skip_permissions) ────────────────────────────
+        #
+        # A handover happens at the worst moment there is — gate closed, context full, human
+        # asleep — and a successor that opens on a permission prompt is a handover that stalls
+        # where nobody is watching. The flag is read at LAUNCH (the running claude refuses
+        # "Cannot set permission mode to bypassPermissions because the session was not launched
+        # with --dangerously-skip-permissions"), so the command line is the only place it can be
+        # decided, and this verb builds the only command line there is.
+        # THE GRANT LIVES IN config.local.json, and these helpers are split so a test cannot
+        # accidentally prove the wrong one works. The tracked file is where the key USED to be read
+        # from, so it keeps a helper of its own -- what it must now produce is a refusal, not a
+        # bypass, and a check needs to be able to write it to say so.
+        ctx_cf_local = os.path.join(proj, ".game_loop", "config.local.json")
+
+        def succ_skip(v, mode="auto"):
+            json.dump({"limits": {"successor": {"mode": mode, "skip_permissions": v}}},
+                      open(ctx_cf_local, "w"))
+
+        def succ_skip_bare(v):
+            # What a human ACTUALLY types when told "put it in config.local.json": the one key,
+            # and nothing they were not asked to restate. That is the shape that loses the rest.
+            json.dump({"limits": {"successor": {"skip_permissions": v}}}, open(ctx_cf_local, "w"))
+
+        def succ_skip_tracked(v, mode="auto"):
+            c = json.load(open(ctx_cf))
+            lim = c.get("limits") or {}
+            lim["successor"] = {"mode": mode, "skip_permissions": v}
+            c["limits"] = lim
+            json.dump(c, open(ctx_cf, "w"))
+
+        def succ_skip_clear():
+            for f_ in (ctx_cf_local,):
+                if os.path.exists(f_):
+                    os.remove(f_)
+            c = json.load(open(ctx_cf))
+            if isinstance(c.get("limits"), dict):
+                c["limits"].pop("successor", None)
+            json.dump(c, open(ctx_cf, "w"))
+
+        # Read the COMMAND LINE, never the whole output. `in out` was the first shape of these
+        # checks and a mutation caught it: the run prints the flag's NAME in its own announcement,
+        # so two of them passed with the flag removed from argv — a check whose subject was the
+        # sentence about the thing rather than the thing.
+        def succ_cmdline(out):
+            m = re.search(r"^command +: (.*)$", out, re.M)
+            return m.group(1) if m else ""
+
+        check("the default carries NO bypass — an unset key never widens what the next session may do",
+              succ_cmdline(succ_mode(TERM_PROGRAM="Apple_Terminal")).startswith("claude --session-id")
+              and "--dangerously-skip-permissions"
+              not in succ_cmdline(succ_mode(TERM_PROGRAM="Apple_Terminal")))
+        succ_skip(True)
+        out_skip = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("skip_permissions puts --dangerously-skip-permissions in the successor's COMMAND",
+              "--dangerously-skip-permissions" in succ_cmdline(out_skip))
+        check("...before the prompt, so it is read as a flag and not as part of what to do",
+              re.search(r"^claude --session-id \S+ --dangerously-skip-permissions '",
+                        succ_cmdline(out_skip)))
+        check("...and it is SAID, not merely done — a bypass nobody announced is one nobody chose",
+              "permissions         : BYPASSED" in out_skip
+              and "limits.successor.skip_permissions" in out_skip)
+        check("...and it names the file the grant came FROM, which is the one a reader can go check",
+              "config.local.json" in out_skip)
+        # The two halves must agree. An announcement that outlives the flag it describes is worse
+        # than no announcement: it reads as proof to the one person checking before walking away.
+        check("...and the announcement never outlives the flag — it is printed IFF the command has it",
+              ("permissions         : BYPASSED" in out_skip)
+              == ("--dangerously-skip-permissions" in succ_cmdline(out_skip)))
+        # The gap that costs the most is the one the setting is bought for: nobody is watching.
+        # `saggar agent` takes a task, not argv, so this mode cannot carry the flag — and a mode
+        # that silently drops it is discovered by a successor stalling on a prompt at 3am.
+        check("saggar-agent says out loud that it does NOT carry the bypass it was configured with",
+              "MODE saggar-agent DOES NOT CARRY IT"
+              in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
+        check("...and names the two modes that do, rather than leaving the run to find out",
+              "\"print\" or \"warp-tab\"" in succ_mode(SAGGAR_SESSION="F1AC5B4E"))
+        check("no such warning where the mode DOES carry it — the notice is the exception, not noise",
+              "DOES NOT CARRY IT" not in out_skip)
+        # There is deliberately no --skip-permissions ARGUMENT. A session that could hand its
+        # successor a bypass is a session widening its own permissions across a handover and
+        # calling the result a new session; the config file is the artifact naming who chose it.
+        r = gl(proj, "successor", "--dry-run", "--skip-permissions", sid="sess-succ")
+        check("there is no --skip-permissions ARGUMENT — argv cannot carry the grant",
+              r.returncode != 0 and "unrecognized arguments" in (r.stdout + r.stderr))
+        # WHAT THE ABSENCE ABOVE DOES AND DOES NOT PROVE (PR #101 review). It used to be named
+        # "only the human ... may grant it", which absence cannot support: the key was read from
+        # the TRACKED config.json, and a Crawler editing that file granted itself the bypass in one
+        # edit. What is true is narrower and checkable -- the grant is read from ONE file, and that
+        # file is refused by both write rails, so a session that wants it must spend `authorize`
+        # and leave a human's words in log.jsonl.
+        succ_skip_clear()
+        succ_skip_tracked(True)
+        out_tracked = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("the reviewer's repro no longer works: skip_permissions in TRACKED config.json grants "
+              "nothing",
+              "--dangerously-skip-permissions" not in succ_cmdline(out_tracked))
+        check("...and it is not silent about it — a key that reads as armed and is not is the 3am "
+              "stall this verb exists to prevent",
+              "was IGNORED" in out_tracked and "config.local.json" in out_tracked)
+        check("...and it says WHY that file cannot carry it — tracked, and the seed a fresh install "
+              "copies from",
+              "TRACKED" in out_tracked and "clones this checkout" in out_tracked)
+        succ_skip_clear()
+        # The cost this change CREATED: config() is a shallow top-level update, so adding the
+        # `limits` block the grant lives in replaces the tracked one whole. Found by running it,
+        # not by reading -- a tree with mode "print" reported `configured "auto"`.
+        succ_skip_tracked(True, mode="print")
+        succ_skip_bare(True)
+        out_shadow = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("a local `limits` block NAMES the tracked keys it silently replaced, rather than "
+              "letting them fail toward a default that looks deliberate",
+              "config              : \u26a0" in out_shadow
+              and "successor.mode" in out_shadow)
+        check("...and says what to do about it, since restating them is the only fix",
+              "Restate the ones you still want" in out_shadow)
+        succ_skip_clear()
+        succ_skip(False)
+        off = succ_mode(TERM_PROGRAM="Apple_Terminal")
+        check("skip_permissions:false is the default said out loud, not a third state",
+              "--dangerously-skip-permissions" not in succ_cmdline(off)
+              and "permissions         : BYPASSED" not in off)
+        check("...and a tree with NO local file at all is the same answer, not a different one",
+              (succ_skip_clear() or True)
+              and "--dangerously-skip-permissions"
+              not in succ_cmdline(succ_mode(TERM_PROGRAM="Apple_Terminal")))
+        succ_skip_clear()
+        succ_cfg("auto")
+
         # The tab title. A tab is narrow, so the cap is a REFUSAL — prose guidance did not hold it in
         # the sibling launcher, which shipped `O | push and scope backups` into a truncating tab.
         check("the title defaults to `<R> | successor` — the repo's initial, so a row of tabs reads",

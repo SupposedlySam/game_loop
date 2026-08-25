@@ -6650,6 +6650,38 @@ def main():
             pass
         shutil.rmtree(sp, ignore_errors=True)
 
+    # TWO KINDS OF SILENCE, AND ONLY ONE IS AN ANSWER (lamp-owner, 2026-08-25, after reading a
+    # working agent as dead from quiet CPU and an empty log). "ps says no such process" is a FINDING
+    # about a process; "ps would not run" is a fact about this machine and says nothing about any
+    # process. They shared a return value here, and _proc_start's own docstring claimed the callers
+    # kept them apart while pid_is_ours mapped both to False. Safe by luck — False means do not
+    # signal — and the sentence above it was false, which is the half that misleads the next reader.
+    #
+    # Driven as functions rather than through a real watchdog, because the case that matters is ps
+    # being UNRUNNABLE and there is no honest way to stage that against a live process.
+    print("cannot-look and it-is-gone are different answers (#102):")
+    _wsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "watchdog"))
+    _blk = (_wsrc[_wsrc.index("PROC_GONE = "):_wsrc.index("def read_pidfile")]
+            + _wsrc[_wsrc.index("def pid_is_ours"):_wsrc.index("def superseded")])
+    _wm = {"subprocess": subprocess}
+    exec(compile(_blk, "watchdog-slice", "exec"), _wm)
+    check("a live pid reports a start time, so the instrument works at all before anything is "
+          "concluded from its silence",
+          _wm["_proc_start"](os.getpid()) not in (None, _wm["PROC_GONE"]))
+    check("...and a pid that cannot exist reports GONE — ps RAN and answered, which is a finding "
+          "about that process rather than an absence of one",
+          _wm["_proc_start"](999999) == _wm["PROC_GONE"])
+    check("a GONE pid is FALSE — an answer: there is nothing there to stand down",
+          _wm["pid_is_ours"](999999, "Thu Jan  1 00:00:00 1970") is False)
+    check("...and a LIVE pid whose identity differs is also False, by the same reading of the same "
+          "evidence",
+          _wm["pid_is_ours"](os.getpid(), "Thu Jan  1 00:00:00 1970") is False)
+    check("...and a matching identity is True, so False is discriminating rather than a default",
+          _wm["pid_is_ours"](os.getpid(), _wm["_proc_start"](os.getpid())) is True)
+    check("but a pidfile with NO recorded identity is None — could not check, which must never "
+          "share a consequence with 'checked, it is ours' when that consequence is a SIGTERM",
+          _wm["pid_is_ours"](os.getpid(), None) is None)
+
     print("a watchdog signals the pid it can PROVE it armed, and no other (#102):")
     # THE SWEEP FOUND THIS ONE THE SAME WAY IT FOUND `superseded` above: watchdog::_proc_start
     # neutered killed NOTHING out of a 1592-assertion baseline. The identity check was written and

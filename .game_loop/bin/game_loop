@@ -1129,6 +1129,9 @@ def watchdog_pidfile():
     return os.path.join(ROOT, ".watchdog.pid")
 
 
+PROC_GONE = "\x00gone"     # mirrors bin/watchdog: ps ran and there is no such process
+
+
 def watchdog_pid_identity(pid):
     """The start time ps reports for a pid, or None if it could not be read. Mirrors bin/watchdog's
     _proc_start() — see the note on watchdog_pidfile(): two files, one convention."""
@@ -1136,8 +1139,14 @@ def watchdog_pid_identity(pid):
         r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
                            capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return None
-    return (r.stdout or "").strip() or None
+        return None                      # could not look. NOT evidence about the process.
+    out = (r.stdout or "").strip()
+    if out:
+        return out
+    # ps RAN and reported nothing: that pid is gone, which is an ANSWER. Distinct from the None
+    # above, which is silence about a machine rather than about a process. See bin/watchdog's
+    # PROC_GONE — two files, one convention.
+    return PROC_GONE if r.returncode != 0 else None
 
 
 def _writer_mark():
@@ -1192,6 +1201,10 @@ def disarm_watchdog():
     else:
         live = watchdog_pid_identity(pid)
         if live is None:
+            # NOT "it exited" — that would be a claim about the process from a failure to look.
+            note = (f"could not check pid {pid} at all (ps did not run), so it was NOT signalled. "
+                    "The handed_off flag still stands the watchdog down on its next wake.")
+        elif live == PROC_GONE:
             note = f"pid {pid} had already exited"
         elif live != recorded:
             note = (f"pid {pid} is NOT the watchdog that wrote this file — it exited and the OS gave "

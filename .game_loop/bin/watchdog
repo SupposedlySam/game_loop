@@ -329,15 +329,33 @@ def handed_off_quiet(state):
 # apart: it belongs to a process INSTANCE, so a recycled pid reads as the different process it is.
 # Mirrored in bin/game_loop's disarm_watchdog() — two files, one convention; if either moves, both
 # move. Observed shape, not hypothesised: game_loop#102.
+# TWO KINDS OF SILENCE, AND ONLY ONE OF THEM IS AN ANSWER (lamp-owner, 2026-08-25, after they read
+# a working agent as dead from quiet CPU and an empty log). Signals that report ABSENCE OF OUTPUT --
+# ps not runnable, a log not written -- say nothing about whether the thing is alive. Signals that
+# report ABSENCE OF LIFE -- a reaped pid, a vanished process -- do. This file had them sharing a
+# return value: `_proc_start` gave None both when ps said "no such process" and when ps could not be
+# run at all, and its own docstring claimed "the callers keep them apart" while pid_is_ours mapped
+# None to False. The behaviour was safe by luck -- False means do not signal -- and the sentence
+# above it was false, which is the half that misleads the next reader.
+PROC_GONE = "\x00gone"          # ps ran and reported no such process: an ANSWER, not a silence
+
+
 def _proc_start(pid):
-    """The process's start time as ps reports it, or None if it could not be read — the pid is gone,
-    or ps is unavailable. None means CANNOT TELL and never 'not ours'; the callers keep them apart."""
+    """The process's start time as ps reports it · PROC_GONE if ps ran and there is no such process
+    · None if ps could not be run at all.
+
+    Three outcomes because there are three, and the middle one is a finding: a pid that is GONE is
+    genuinely not the watchdog we armed, and saying so is different from being unable to look.
+    """
     try:
         r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
                            capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return None
-    return (r.stdout or "").strip() or None
+        return None                      # could not look. NOT evidence about the process.
+    out = (r.stdout or "").strip()
+    if out:
+        return out
+    return PROC_GONE if r.returncode != 0 else None
 
 
 def read_pidfile():
@@ -352,17 +370,20 @@ def read_pidfile():
 
 
 def pid_is_ours(pid, recorded):
-    """True / False / None-for-cannot-tell.
+    """True / False / None-for-cannot-tell, and now the callers really do keep them apart.
 
-    None when the pidfile predates this format. The caller MUST NOT signal on None: 'I could not
-    check' and 'I checked and it is ours' are exactly the two outcomes that must never share a
-    consequence, and here the consequence is a SIGTERM.
+    None when the pidfile predates this format, OR when ps could not be run — both are "I could not
+    check", and the caller MUST NOT signal on either. False is reserved for an ANSWER: the pid is
+    gone, or it is alive and is somebody else's. 'I could not check' and 'I checked and it is ours'
+    are the two outcomes that must never share a consequence, and here the consequence is a SIGTERM.
     """
     if recorded is None:
         return None
     live = _proc_start(pid)
     if live is None:
-        return False
+        return None                      # ps unavailable: no answer, not a negative one
+    if live == PROC_GONE:
+        return False                     # an answer: nothing there to signal
     return live == recorded
 
 
@@ -390,9 +411,13 @@ def claim_pidfile():
                 pass
         elif ours is None:
             logline({"kind": "watchdog_pid_unverifiable", "pid": old,
-                     "note": "pidfile carries no start time (written before that format), so this "
-                             "pid could not be shown to be the watchdog that wrote it — NOT "
-                             "signalled, because a recycled pid is somebody else's process"})
+                     "why": ("no start time in the pidfile (written before that format)"
+                             if recorded is None else "ps could not be run, so nothing was looked at"),
+                     "note": "this pid could not be SHOWN to be the watchdog that wrote it — NOT "
+                             "signalled, because a recycled pid is somebody else's process. The two "
+                             "causes are recorded separately: an old pidfile is a fact about the "
+                             "file, an unrunnable ps is a fact about this machine, and only the "
+                             "second one means the check itself is broken"})
     try:
         os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
         with open(PID_PATH, "w") as f:

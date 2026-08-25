@@ -83,6 +83,32 @@ _Questions still outstanding. What would close each one._
   the registry multi-subject so it can go stale loudly instead. Source: the paths above, read at
   showrunner's checkout on this machine, 2026-08-25.
 
+- **An ABSENCE is the cheapest thing a broken producer gives you, and 15.3% of this suite asks for
+  one.** 2026-08-25: `_closing` measured 0 kills, so I wrote six assertions for it and it went to
+  ONE. Five of the six were phrased as absences — `"continuing" not in _cl(...)` — and a producer
+  neutered to `return ""` satisfies every one of them for free: there is no marker in an empty
+  string. The tests passed against a dead function and measured nothing.
+
+  **The rewrite is mechanical and the gain is large.** Pin what SURVIVES alongside what is stripped:
+  the last four lines come back AND the opening line does not; the sentence around a quoted marker
+  remains AND the marker does not; the present-tense clause is kept AND the past-tense one is
+  dropped. Same six assertions, same producer, **1 kill → 5**.
+
+  **Measured population, with the AST rather than a grep** (the instrument rule, applied): 253 of
+  1649 `check()` conditions are purely a negation or an emptiness — `not in`, `is not`, `not X`,
+  `== ""`. That is 15.3%, and it is a POPULATION, NOT A VERDICT: many are the legitimate negative
+  half of a pair, and the sweep is currently green with no producer unprotected. It says where this
+  technique would pay, not that those assertions are wrong.
+
+  **Where to spend it**: the producers the sweep reports THIN, since a low floor plus negative
+  assertions is exactly the `_closing` shape before the rewrite — `legacy_mandate_warning` (2),
+  `watchdog::superseded` (2), `pinned_sha` (2), `watchdog_pid_identity` (2), `_git_sha` (2). Each is
+  a candidate for the same 1→5, and each would be a MEASUREMENT rather than an argument.
+
+  One assertion in the rewritten six still cannot flip, and that is correct: it asserts empty input
+  returns empty, which a `return ""` neuter satisfies by definition. Said in the entry rather than
+  rounded up.
+
 - **A rendered report is not a data structure — and the siblings, named before one of them bites.**
   2026-08-25: computing how many sweep floors were stale, I hand-rolled `^([a-z_][a-z0-9_]*) ->`
   over the sweep's own printed output. It drops every DOTTED producer name, so twelve — `verify.owed`,

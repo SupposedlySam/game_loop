@@ -2026,7 +2026,21 @@ def main():
     # producer: the first buys speed with the denominator this file exists to defend (#44), and the
     # second changes what the number MEANS, since a kill count is a set difference over the whole
     # suite. Doing the same work at once is the only one of the three that costs nothing.
-    jobs = int(os.environ.get("GAME_LOOP_SWEEP_JOBS") or 0) or max(1, min(6, (os.cpu_count() or 2) // 2))
+    # THE CAP WAS 6 ON A 14-CORE MACHINE, and 6 was leaving half the box idle. Measured 2026-08-25
+    # by running N full suites at once and timing them, because the question is THROUGHPUT (producers
+    # per minute) and not latency (how long one suite takes):
+    #
+    #      6 concurrent full suites   wall 302s   per-run avg 298s   1.19 runs/min
+    #     12 concurrent full suites   wall 396s   per-run avg 390s   1.82 runs/min
+    #
+    # Six runs cost what ONE costs — there is almost no contention at that width, which is what
+    # `min(6, cpu//2)` was protecting against. Twelve makes each run 31% slower and the FLEET 53%
+    # faster, and a sweep is bound by the fleet: 102 producers goes from ~86 min to ~56.
+    #
+    # Still capped, and still `cpu - 2`: the suite spawns subprocesses of its own, so leaving two
+    # cores means the machine stays usable while an hour-long sweep runs — and an unusable machine
+    # is how a sweep gets abandoned, which is the failure the comment above is about.
+    jobs = int(os.environ.get("GAME_LOOP_SWEEP_JOBS") or 0) or max(1, min(12, (os.cpu_count() or 2) - 2))
     print(f"running {len(MUTANTS)} producers, {jobs} at a time "
           f"(GAME_LOOP_SWEEP_JOBS to change; each is one full suite run)\n", flush=True)
 

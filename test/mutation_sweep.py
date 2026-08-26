@@ -995,6 +995,45 @@ MUTANTS += [
 ]
 
 MUTANTS += [
+    ('_latest_version -> the source repo never appears to have a newer commit',
+     '.game_loop/bin/_gl_impl.py::_latest_version', '    return None\\n',
+     ['update check', 'newer commit', 'latest sha', 'update_cache'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('inv_oneline -> status carries no INV summary line at all',
+     '.game_loop/bin/_gl_impl.py::inv_oneline', '    return ""\\n',
+     ['INV:', 'INVARIANTS', 'inv summary', 'one-line INV'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('limits_summary -> the usage window is never summarised for status',
+     '.game_loop/bin/_gl_impl.py::limits_summary', '    return None\\n',
+     ['limits:', 'usage window', '5h ', '7d '],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('log_kinds -> the writable record kinds come back empty',
+     '.game_loop/bin/_gl_impl.py::log_kinds', '    return {}\\n',
+     ['kinds', 'log_kinds', 'dead kind', 'record kind'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('_accumulates_then_returns -> the accumulator shape is never recognised',
+     'test/mutation_sweep.py::_accumulates_then_returns', '    return False\\n',
+     ['accumulat', 'candidate', 'denominator', 'silence-on-pass'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('candidates -> the sweep finds no producers to account for',
+     'test/mutation_sweep.py::candidates', '    return []\\n',
+     ['candidate', 'denominator', 'unaccounted', 'producer'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('source_files -> the sweep sees no source to enumerate',
+     'test/mutation_sweep.py::source_files', '    return []\\n',
+     ['source set', 'tracked source', 'extensionless', 'denominator'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('prun.main -> the parallel runner always reports success',
+     'test/prun.py::main', '    return 0\\n',
+     ['silent shard', 'SUM OVER', 'distinct assertion', 'suite floor'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+    ('assertions_that_cannot_fail -> no assertion looks unfailable',
+     'test/run.py::assertions_that_cannot_fail', '    return []\\n',
+     ['falls back to a literal True', 'cannot fail', 'else True'],
+     "FLOOR OWED ON THE NEXT SWEEP. This producer entered the denominator with #115's widening of _accumulates_then_returns and has never been measured, so 0 is 'not yet measured' rather than a reading. It is declared rather than excluded deliberately: an entry in NOT_SWEPT is invisible to the instrument by construction, and the point of #115 was that these were already invisible. If the next sweep scores it ZERO, that is the UNPROTECTED verdict and a real finding, not this note being wrong.", 0),
+]
+
+MUTANTS += [
     ("floor_breaches -> a short run reports no breach, which is what a short run already looked like",
      "test/prun.py::floor_breaches", "    return []\n",
      ["floor", "breach", "down 1", "section group"],
@@ -1418,6 +1457,17 @@ NOT_SWEPT = {
             "denominator even after the read guards landed. Neutering it to a constant None makes "
             "every assertion that reads producer-written state fail at once, which those "
             "assertions catch directly.",
+    "test/run.py::_multi_symbol_producers": "the scan for producers whose literals can yield more "
+    "than one symbol, nested inside main(). Same ground as _vanishing and _writes_outside_tmp: it "
+    "is the instrument, so neutering it measures the suite's own scan rather than the tool. It "
+    "became visible to the candidate finder only with #115's widening — it always had this shape, "
+    "and `neuter` cannot reach it anyway, because that rewrites module-level defs and this one is "
+    "indented. A CANDIDATE THE MUTATOR CANNOT REACH is its own small gap: `candidates()` walks the "
+    "whole tree deliberately (a class's methods are not module level), while `neuter` matches "
+    "column zero, so the two disagree about what a producer is. Recorded here rather than left as "
+    "an anchor that silently reports NOT FOUND.",
+    "test/run.py::_whole_file_log_readers": "the scan for assertions that read a whole log file, "
+    "nested inside main() — same ground, same reach problem, same reason.",
     "test/run.py::_vanishing": "the scan for assertions that can silently not run, inside the "
                                "suite. Its empty list is the ordinary answer — the file has no "
                                "such site — and it is the one producer here whose OWN positive "
@@ -1766,8 +1816,22 @@ def _accumulates_then_returns(fn):
             for t in n.targets:
                 if isinstance(t, ast.Name):
                     empties.add(t.id)
-    return any(isinstance(n, ast.Return) and isinstance(n.value, ast.Name)
-               and n.value.id in empties for n in ast.walk(fn))
+    # THE RETURN EXPRESSION, WALKED — not the return NODE, type-checked. `isinstance(n.value,
+    # ast.Name)` was the whole of it, so `return sorted(acc)`, `set(acc)`, `list(acc)` or
+    # `sorted(set(acc))` hands back a Call rather than a Name and vanished from the candidate set.
+    # That is the same defect this function was WRITTEN for, one wrapper further out: the shape was
+    # widened and the SPELLING went on being pinned.
+    #
+    # Surfaced by the coverage gate staying silent for a producer ending `return sorted(set(out_))`
+    # after failing loudly, days earlier, for one ending `return out_` — two functions differing by
+    # a call wrapper. Measured: 163 candidates before, 173 after, and four of the ten newly visible
+    # are shipped payload functions that report findings to a consumer, plus this file's OWN
+    # `candidates` and `source_files`, which could not see themselves. (#115)
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Return) and n.value is not None:
+            if any(isinstance(x, ast.Name) and x.id in empties for x in ast.walk(n.value)):
+                return True
+    return False
 
 
 def candidates(src):

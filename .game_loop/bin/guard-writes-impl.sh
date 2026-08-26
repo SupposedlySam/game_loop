@@ -1867,6 +1867,19 @@ def redirect_targets(seg):
             # "which shell actually runs the commands this guard reads" had never been asked here.
             while j < n and seg[j] in "|!":
                 j += 1
+            # `>& file` IS A WRITE; `2>&1` IS NOT. csh-style `>&` and `>>&` send both streams to a
+            # FILE -- valid in zsh and in bash, where `>& f` means what `&> f` means -- and both
+            # were ALLOWED to an out-of-repo path, because `&` is in the terminator set below so
+            # the target parsed as empty. Verified they write: `echo hello >& f` created it and
+            # `>>&` appended.
+            #
+            # The `&` is only skipped when a FILENAME follows. `2>&1`, `>&2`, `>&-` are file
+            # descriptor duplication and name no file at all, so consuming the `&` there would
+            # invent a target called "1" and refuse an ordinary redirect.
+            if j < n and seg[j] == "&" and j + 1 < n and seg[j + 1] not in "0123456789-":
+                j += 1
+                while j < n and seg[j] in " \t":
+                    j += 1
             while j < n and seg[j] in " \t":
                 j += 1
             if j < n and seg[j] in "'\"":

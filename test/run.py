@@ -482,6 +482,21 @@ def main():
             check("a clobber-override redirect to an out-of-repo path is refused (%s)"
                   % _clob.split()[2],
                   denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+        # `>& file` IS A WRITE AND `2>&1` IS NOT, and the guard has to tell them apart. csh-style
+        # `>&` / `>>&` send both streams to a FILE — valid in zsh, and in bash `>& f` means what
+        # `&> f` means — and both were ALLOWED to an out-of-repo path because `&` terminated the
+        # target parse. Verified they write before fixing: `echo hello >& f` created it, `>>&`
+        # appended. Found by finishing the sweep the clobber overrides started rather than stopping
+        # at the forms I happened to think of first.
+        for _amp in ("echo x >& /Users/nobody/outside.txt", "echo x >>& /Users/nobody/outside.txt"):
+            check("a csh-style redirect to an out-of-repo path is refused (%s)" % _amp.split()[2],
+                  denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _amp}})))
+        check("...and file-descriptor DUPLICATION is untouched — `2>&1` names no file, so consuming "
+              "the `&` there would invent a target called 1 and refuse an ordinary redirect",
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "grep -q x f 2>&1"}})
+              and allowed(proj, {"tool_name": "Bash",
+                                 "tool_input": {"command": "echo oops >&2"}}))
         check("...while the SAME operator inside the repo is allowed — the fix reads past the "
               "override, it does not refuse the override",
               allowed(proj, {"tool_name": "Bash",

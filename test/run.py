@@ -13527,6 +13527,39 @@ def main():
             _absent.append(_key)
         elif _mut == _orig:
             _noops.append(_key)
+    # THE FINDER AND THE MUTATOR DISAGREE ABOUT WHAT A PRODUCER IS (#115). `candidates()` walks the
+    # whole tree deliberately — a class's methods are not module level, and that widening was
+    # prompted by `limits_lock`'s methods sitting outside the scan. `neuter()` matches `^def name(`
+    # at COLUMN ZERO. So a nested function, or a method, can be a candidate the mutator can never
+    # reach: declare one in MUTANTS and its anchor reports NOT FOUND on every sweep, forever. That
+    # renders as NOT MEASURED, which is the honest verdict — and a producer permanently NOT
+    # MEASURED looks decided while never being measured, which is the shape this file exists for.
+    #
+    # This does not fix the mismatch; making `neuter` indent-aware is the general fix and would let
+    # class methods be swept. It stops the mismatch being SILENT: an unreachable candidate must be
+    # excluded with a reason, never declared as a mutant that cannot run.
+    _reach_un = []
+    for _key in sweep.all_candidates():
+        _rel, _fnm = _key.split("::", 1)
+        _fsrc = read_or_empty(os.path.join(REPO, _rel))
+        if _fsrc and not re.search(r"^def " + re.escape(_fnm) + r"\(", _fsrc, re.M):
+            _reach_un.append(_key)
+    _mut_keys = {_m[1] for _m in sweep.MUTANTS}
+    _bad_reach = sorted(set(_reach_un) & _mut_keys)
+    check("no producer is declared as a MUTANT that `neuter` cannot reach — its anchor would "
+          "report NOT FOUND on every sweep, and a producer permanently NOT MEASURED looks decided "
+          "while never being measured: " + (", ".join(_bad_reach) or "none"),
+          not _bad_reach)
+    check("...and there ARE unreachable candidates, so the line above is a verdict rather than a "
+          "check with nothing to look at — %d of them, every one excluded WITH a reason"
+          % len(_reach_un),
+          len(_reach_un) > 5 and all(k in sweep.NOT_SWEPT for k in _reach_un))
+    check("...and the reach limit is real, not assumed: neuter finds a module-level def and misses "
+          "the identically-named nested one, which is the whole mismatch in two lines",
+          sweep.neuter("def f(x):\n    return 1\n", "f", "    return None")[1] is True
+          and sweep.neuter("class C:\n    def f(x):\n        return 1\n",
+                           "f", "    return None")[1] is False)
+
     check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
           "— so no producer is scored on a tree identical to the baseline: " +
           (("no-op: " + ", ".join(_noops)) if _noops else "") +

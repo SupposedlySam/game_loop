@@ -3541,14 +3541,28 @@ def authorize_recurrence(reason):
                     continue
                 if r.get("path"):
                     seen.append(r["path"])
+    except FileNotFoundError:
+        return []                        # no log yet is genuinely no prior grants
     except OSError:
-        return []
+        # A LOG THAT EXISTS AND CANNOT BE READ IS NOT AN EMPTY ONE, and here the difference is a
+        # bypass. Returning [] means "this reason has never bought a hatch", so a reason being spent
+        # for the fifth time reads exactly like a first-time grant and the loud block never prints.
+        # The hatch is the one escape from INV3 and the recurrence warning is what makes a pattern
+        # of spending it visible; going quiet is the failure mode, not a safe default.
+        return None                      # could not tell -- distinct from "none", see caller
     return seen
 
 
 def recurrence_lines(reason, real, raw_path):
     """The LOUD block when this reason has bought a hatch before, or [] when it has not."""
     prior = authorize_recurrence(reason)
+    if prior is None:
+        return ["",
+                "⚠ PRIOR GRANTS COULD NOT BE READ — the log exists and would not open, so whether "
+                "these",
+                "  exact words have bought a hatch before CANNOT be established. Absence of the "
+                "warning",
+                "  below is not evidence this is the first time."]
     if not prior:
         return []
     distinct = []

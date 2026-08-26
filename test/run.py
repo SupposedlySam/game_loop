@@ -607,6 +607,27 @@ def main():
         r4 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")
         check("an unrelated reason does not trip it", "BOUGHT A HATCH BEFORE" not in r4.stdout)
+        # AND THE THIRD ANSWER. `authorize_recurrence` returned [] when the log could not be OPENED,
+        # which is the same value as "this reason has never bought a hatch" — so a reason being
+        # spent for the fifth time would read exactly like a first grant and the loud block would
+        # never print. The hatch is the one escape from INV3 and this warning is what makes a
+        # pattern of spending it visible, so going quiet is the failure mode, not a safe default.
+        # Driven at the function: an unreadable log is awkward to stage as a file and trivial to
+        # state as a return value, and what is being asserted is the CALLER's handling of it.
+        _rec_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_recur", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _recm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_rec_spec)
+        _rec_spec.loader.exec_module(_recm)
+        _recm.authorize_recurrence = lambda reason: None
+        _cant = _recm.recurrence_lines("some reason", "/tmp/p", "/tmp/p")
+        check("a log that exists and will not open says the prior grants COULD NOT BE READ — "
+              "silence here would let a fifth grant wear the face of a first",
+              any("COULD NOT BE READ" in l for l in _cant)
+              and any("not evidence this is the first time" in l for l in _cant))
+        _recm.authorize_recurrence = lambda reason: []
+        check("...while genuinely NO prior grants stays silent, so the third answer did not turn "
+              "the first grant into a warning",
+              _recm.recurrence_lines("some reason", "/tmp/p", "/tmp/p") == [])
         # ONE path re-granted once is an ordinary retry and must stay silent; the third says config.
         r5 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")

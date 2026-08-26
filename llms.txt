@@ -179,7 +179,17 @@ reduces the damage, it does not remove the class.
   of them — and that is now a REFUSAL at the write, not a sentence you are asked to honour. They
   are the project's policy, not yours. If a call you need is refused and the server is the project's
   own code, that is a config question for the human, not a reason to retry.
-- **Writes outside this repo are denied.** Everything outside the project (other repos, your home dir,
+- **Writes outside this repo are denied — by a guard that reads your COMMAND TEXT, not your intent.**
+  It sees the Write/Edit/NotebookEdit tools by name, every redirect form in the shell grammar that
+  creates or truncates a file, and a NAMED set of write-capable verbs (`rm`, `mv`, `cp`, `tee`, `dd`,
+  `curl -o`, `wget -O`, `tar -C`, `unzip -d`, `rsync`, `install`, `patch -o`, `split`, `sed -i`,
+  `perl -i`, `git` writes). **What it does NOT see it says so in its own SCOPE block**: a `python3 -c`
+  that writes, a path built from a shell variable, a script that mutates once you run it, or any
+  program not on that list. Those are not permission to write outside the repo — they are places the
+  rule holds and the enforcement does not, which is INV3 asking you to keep it rather than the gate
+  making you. Until 2026-08-26 that list quietly omitted `>|`, `>!`, `>>!`, `>&`, `>>&`, `curl -o`,
+  `tar -C` and six other ordinary forms, all of which wrote outside the repo for weeks.
+  Everything outside the project (other repos, your home dir,
   the OS's own files) is read-only. Reading elsewhere is fine; copying *into* the repo (`cp <there> <here>`)
   is fine. If a HUMAN has explicitly authorized one write outside the repo, quote them and retry —
   it is single-use and logged:

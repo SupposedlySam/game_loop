@@ -13531,6 +13531,29 @@ def main():
     # CLAIMS it covers ("crashed, timed out, or was never applied") and the one cause it checked.
     # If a producer ever drifts into agreeing with its own mutant, this fails HERE, naming it,
     # instead of arriving as a coverage gap somebody spends an afternoon on.
+    # THE MARK SETS WERE MEASURED IN ONE DIRECTION ONLY. `overbroad_marks` asks how many assertion
+    # names a mark set matches; nothing asked whether it matches the producer's OWN KILLERS, which
+    # is what `killers()` uses it for. The two do not correlate, and the missing direction is the
+    # worse one: measured on this repo, 90 of 107 producers with both marks and killers matched
+    # FEWER killers than they have — `_git_sha` matched 0 of 2 while matching exactly ONE name in
+    # the whole suite, which reads as beautifully precise and is precisely wrong.
+    #
+    # A one-sided measurement reported as a clean bill is the shape that file exists to refuse, so
+    # finding it in its own advisory is the point rather than an aside.
+    _mmk = sweep.marks_missing_killers
+    check("a mark set naming every killer reports complete — the counterpart to breadth, and the "
+          "direction that was not measured at all",
+          _mmk(["alpha"], ["an alpha thing", "alpha again"]) == (2, 2))
+    check("...and one that misses a killer SAYS SO, which is the whole finding: it can be narrow "
+          "and wrong at the same time",
+          _mmk(["alpha"], ["an alpha thing", "a beta thing"]) == (1, 2))
+    check("...and NO killers is (0, 0) rather than a perfect score — a producer nothing killed has "
+          "no mark accuracy to report, and 100% of nothing is the reassuring answer",
+          _mmk(["alpha"], []) == (0, 0) and _mmk([], ["an alpha thing"]) == (0, 0))
+    check("...and the sweep REPORTS this direction, not only breadth",
+          "MARKS THAT MISS THEIR OWN KILLERS" in _msrc
+          and "marks_missing_killers" in source_flat(_msrc))
+
     _noops, _absent = [], []
     for _lbl, _key, _body, _mk, _tn, _fl in sweep.MUTANTS:
         _rel, _fn = _key.split("::", 1)

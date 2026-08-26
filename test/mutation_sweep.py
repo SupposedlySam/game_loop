@@ -173,6 +173,23 @@ _PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
 NOT_MEASURED = "NOT MEASURED"
 
 
+def marks_missing_killers(marks, killer_names):
+    """(matched, total) — how many of a producer's ACTUAL killers its mark set names.
+
+    The counterpart to `overbroad_marks`, and the direction that was missing. Breadth asks how many
+    assertions a mark set matches; this asks whether it matches the ones that MATTER, which is what
+    `killers()` uses it for. The two do not correlate: a set matching one name in the whole suite
+    reads as precise and can still match none of the killers.
+
+    At module level for the reason every selector here is: a rule that lives inside main() cannot be
+    driven by the suite, and a rule nobody can drive is one that gets believed rather than checked.
+    """
+    if not marks or not killer_names:
+        return 0, 0
+    hit = sum(1 for k in killer_names if any(w in k for w in marks))
+    return hit, len(killer_names)
+
+
 def overbroad_marks(marks, names, floor):
     """How many of `names` a mark set matches, and whether that breadth makes it undiscriminating.
 
@@ -409,7 +426,13 @@ MUTANTS = [
      ["ask", "checkpoint", "launder"], None, 3),
     ("binding_windows -> no usage window ever binds",
      ".game_loop/bin/_gl_impl.py::binding_windows", "    return []\n",
-     ["limit", "handoff", "gate"], None, 5),
+     # NARROWED FROM ["limit", "handoff", "gate"], which failed in BOTH directions: it matched 166
+     # of 1940 assertion names while naming only 3 of this producer's 5 actual killers. Measured
+     # against test/sweep-killers.json rather than chosen by eye — these five phrases match all 5
+     # killers and 5 names in the whole suite. Broad AND incomplete is the common case, not the
+     # exception: 90 of 107 mark sets here miss killers they own.
+     ["limit gate", "OWN handoff path", "ordinary work over the threshold",
+      "sibling session that wrote nothing", "arms for that editor-hosted"], None, 5),
     # legacy_mandate_warning had NOTHING exercising it — a mandate bound before state went
     # per-session sits in the repo-global file gating nobody, the stop gate and watchdog go quiet,
     # and this producer is the only thing that says so. Four arms written: the warning, both halves
@@ -2540,6 +2563,44 @@ def main():
         _m, _bad = overbroad_marks(_marks, baseline, _fl)
         if _bad:
             wide.append((_m, _fl, _key.split("::")[-1]))
+    # THE OTHER DIRECTION, AND IT IS THE WORSE ONE. Everything above measures how WIDE a mark set
+    # is. Nothing measured whether it matches the producer's OWN KILLERS — and `killers()` uses
+    # these marks for exactly that, to separate a genuine kill from collateral. A set that misses
+    # its own killers under-reports the producer's coverage while looking perfectly narrow.
+    #
+    # Measured on this repo when the check was written: 90 of 107 producers with both marks and
+    # killers matched FEWER killers than they have. `_git_sha`'s marks matched 0 of its 2.
+    # `pinned_report`'s matched 4 of 204. Those cannot be found by a breadth report, because they
+    # are not broad — `_git_sha` matches ONE name in the whole suite, which reads as beautifully
+    # precise and is in fact precisely wrong.
+    #
+    # A LOWER BOUND IS STILL HONEST — the per-producer line says so — but a lower bound of 4 out of
+    # 204 carries no information, and nothing in this report distinguished that from a producer
+    # genuinely covered by four assertions. So the one-sided measurement is the finding: this file's
+    # own advisory measured breadth and was silent about accuracy, which is the shape it exists to
+    # refuse. NOT FATAL, for the same reason breadth is not: a mark set has never broken a run.
+    blind = []
+    for _lbl, _key, _b, _marks, _n, _fl in MUTANTS:
+        _ks = KILL_NAMES.get(_key) or []
+        if not _ks or not _marks:
+            continue
+        _hit, _tot = marks_missing_killers(_marks, _ks)
+        if _hit < _tot:
+            blind.append((_tot - _hit, _hit, _tot, _key.split("::")[-1]))
+    if blind:
+        blind.sort(reverse=True)
+        print(f"MARKS THAT MISS THEIR OWN KILLERS ({len(blind)}) — the mark set does not match "
+              "every assertion")
+        print("  that actually killed the producer, so its 'name this producer's subject' count is "
+              "an\n  UNDER-report and the gap is invisible to the breadth check above:")
+        print("  " + " · ".join(f"{k} ({h}/{t})" for _d, h, t, k in blind[:10])
+              + (" · …" if len(blind) > 10 else ""))
+        print("  This is the other direction from breadth and it does not correlate with it — a set")
+        print("  matching ONE name in the whole suite reads as precise and can still match none of")
+        print("  the killers. The names to narrow TOWARD are in test/sweep-killers.json.")
+        print("  NOT FATAL, same as breadth: a mark set has never broken a run. What it costs is "
+              "the\n  per-producer 'at least N name its subject' line, which is a lower bound "
+              "either way —\n  but a lower bound of 4 out of 204 is not a bound anybody can use.")
     if wide:
         wide.sort(reverse=True)
         print(f"MARKS TOO BROAD TO DISCRIMINATE ({len(wide)}) — these match far more assertion "

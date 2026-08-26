@@ -29,8 +29,24 @@ import sys
 
 # Files whose diffs can change what a consumer is refused. Deliberately not every source file: the
 # gate must fire on refusal changes, not on every commit, or it becomes noise and gets disabled.
+# `_gl_impl.py` WAS MISSING AND THAT WAS 129 OF THE 163 REFUSAL LINES IN THIS PAYLOAD. #109 split
+# the binary into a thin stub plus an importable module for speed, every `die(` moved into the
+# module, and this tuple kept naming the stub — which now holds exactly one. So the gate answered
+# "no refusal line changed — nothing owed" for every mandate, status, confidence, arm and authorize
+# refusal since that split, and answered it in the confident voice of a check that ran.
+#
+# It is the failure this gate exists to catch, in the gate: a list of SPELLINGS that cannot report
+# what it is missing, with a default that reads its own silence as a pass. The suite now derives the
+# expected set from where refusals actually LIVE rather than trusting this tuple, so a new
+# refusal-bearing file fails there instead of being quietly unwatched here.
+# `verify` was the SECOND miss, and it was found by the derived check rather than by me — which is
+# the argument for deriving. Its refusals are the ones a consumer meets most often: the pinned-
+# checkout refusal, the two --scope refusals, and the one that stops a commit whose owed checks have
+# not run since the change.
 WATCHED = (".game_loop/bin/guard-writes-impl.sh",
            ".game_loop/bin/guard-mcp-impl.sh",
+           ".game_loop/bin/_gl_impl.py",
+           ".game_loop/bin/verify",
            ".game_loop/bin/game_loop")
 RECORD = ".game_loop/behaviour.json"
 

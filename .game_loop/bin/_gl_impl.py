@@ -2493,6 +2493,29 @@ def cmd_mandate(s, a):
         flair_out(s, "mandate_clear")
         return
     if not a.set:
+        # RECORDING A WAKE PATH MUST NOT COST THE MANDATE'S OWN HISTORY (#95). --wake-path was
+        # reachable only through --set, and --set stamps `since` with now() — so the only way to
+        # answer status's "MANDATE ARMED, AND NO EXTERNAL WAKE PATH IS RECORDED" warning on an
+        # already-bound mandate was to RE-BIND it, silently replacing the record of when the human
+        # actually said the words. That warning appears later than the binding by construction, so
+        # the broken case was the normal one, not an edge. Measured here: the field was unusable for
+        # its own purpose, and the honest move was to skip it and write the finding down elsewhere.
+        if getattr(a, "wake_path", None):
+            if not m.get("active"):
+                die("no mandate is bound here, so there is nothing to record a wake path for.\n"
+                    "A wake path answers 'how does a signal reach this session while it is idle' —\n"
+                    "which is only a question while something is waiting on it.")
+            m["wake_path"] = a.wake_path
+            save(s)
+            logline({"kind": "mandate_wake_path", "wake_path": a.wake_path, "text": m.get("text")})
+            out("✓ wake path recorded — DECLARED, never probed.",
+                f"  mandate : {m.get('text')}",
+                f"  wake    : {a.wake_path}",
+                "",
+                "This records a CLAIM that something outside can reach this session. Nothing here",
+                "tested it, and a declared path that has stopped delivering reads exactly like one",
+                "that works — which is the failure this field exists to make visible, not to fix.")
+            return
         die("mandate needs --set \"<the mandate, in the human's words>\", or one of\n"
             "  --park --reason \"<their words>\"   a human called a break (stays OPEN)\n"
             "  --resume                          they're back\n"
@@ -2526,7 +2549,14 @@ def cmd_mandate(s, a):
     if getattr(a, "wake_path", None):
         m["wake_path"] = a.wake_path
     m.pop("parked", None)   # a re-bind supersedes any break; the new words are the mandate now
-    m.update({"active": True, "text": a.set, "since": now(),
+    # AN IDENTICAL RE-BIND KEEPS THE ORIGINAL `since`. The refusal above explicitly allows
+    # re-setting the SAME words "so a retry or a re-bind after compaction costs nothing" — but it
+    # did cost something, silently: `since` moved to now(), so a mandate bound six hours ago read as
+    # bound just now, and every staleness judgement downstream of it was reset by a no-op re-bind.
+    # New words are a new mandate and correctly restamp.
+    _same_words = bool(m.get("active")) and (m.get("text") or "").strip() == (a.set or "").strip()
+    m.update({"active": True, "text": a.set,
+              "since": (m.get("since") or now()) if _same_words else now(),
               # Recorded even though it decides nothing here: their second suggestion is that a
               # COLLISION be visible, and it is worth having for a mandate that was allowed through.
               "setter": {"pid": os.getpid(), "ppid": os.getppid(),

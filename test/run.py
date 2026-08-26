@@ -3007,6 +3007,62 @@ def main():
         # the gate" or "fabricate a closure that reads forever as though the work was done". A park
         # keeps the mandate OPEN and attributes the break to the human — and, crucially, it is
         # SINGLE-USE, so it cannot be spent to disarm the gate permanently.
+        # #95: RECORDING A WAKE PATH MUST NOT COST THE MANDATE'S OWN HISTORY. `status` warns when a
+        # mandate is armed with no external wake path recorded — and that warning necessarily
+        # arrives AFTER the binding, because the binding is what arms it. But --wake-path was
+        # reachable only through --set, and --set stamps `since` with now(), so the only way to
+        # answer the warning was to re-bind and silently move the record of when the human spoke.
+        # The field was unusable for its own purpose in the normal case, not an edge one.
+        print("a wake path can be recorded without re-binding the mandate (#95):")
+        wk = "sess-wake95"
+        gl(proj, "mandate", "--set", "keep the crawl going", sid=wk)
+
+        def _mandate(sid):
+            for rel in (os.path.join(".game_loop", "sessions", sid, "state.json"),
+                        os.path.join(".game_loop", "state.json")):
+                d = json_or_none(os.path.join(proj, rel)) or {}
+                m = d.get("mandate") or {}
+                if m.get("active"):
+                    return m
+            return {}
+
+        _since0 = _mandate(wk).get("since")
+        check("a mandate records WHEN it was bound, which is the thing the rest of this protects",
+              bool(_since0))
+        time.sleep(1.1)                      # the stamp has second resolution; make a change visible
+        r = gl(proj, "mandate", "--wake-path", "a cron every 10 minutes", sid=wk)
+        _m = _mandate(wk)
+        check("--wake-path alone is accepted on a live mandate — no --set, so the human's words "
+              "are not retyped and cannot be paraphrased in passing",
+              r.returncode == 0 and _m.get("wake_path") == "a cron every 10 minutes")
+        check("...and the mandate's own text is untouched by it",
+              _m.get("text") == "keep the crawl going")
+        check("...and `since` still names when the mandate was BOUND, not when the wake path was "
+              "recorded — the whole defect was that answering the warning reset this",
+              _m.get("since") == _since0)
+        check("...and it is DECLARED, not probed, in the words the operator reads — a declared "
+              "path that has stopped delivering reads exactly like one that works",
+              "DECLARED" in r.stdout and "never probed" in r.stdout)
+        # The same protection on the documented allowance: the replace-refusal says re-setting the
+        # SAME words costs nothing, and it did cost `since` silently.
+        time.sleep(1.1)
+        gl(proj, "mandate", "--set", "keep the crawl going", sid=wk)
+        check("...and an IDENTICAL re-bind keeps `since` too — the refusal above promises a re-bind "
+              "after compaction costs nothing, and moving the stamp is a cost",
+              _mandate(wk).get("since") == _since0)
+        # THE NEGATIVE ARM. If `since` were simply never restamped, all of the above would pass and
+        # the field would be frozen at the first mandate a session ever had.
+        time.sleep(1.1)
+        gl(proj, "mandate", "--clear", "--notes", "done", sid=wk)
+        gl(proj, "mandate", "--set", "a genuinely different mandate", sid=wk)
+        check("...but DIFFERENT words restamp it: a new mandate is a new mandate, and this is what "
+              "says the checks above are preserving a value rather than freezing one",
+              _mandate(wk).get("since") != _since0)
+        r = gl(proj, "mandate", "--wake-path", "x", sid="sess-wake95-none")
+        check("--wake-path with NO mandate bound is refused, not silently stored — a wake path "
+              "answers a question only asked while something is waiting",
+              r.returncode != 0 and "nothing to record a wake path for" in (r.stderr + r.stdout))
+
         print("mandate park (a human-called break, #15):")
         pk = "sess-park15"
         gl(proj, "mandate", "--set", "ship the outcomes work", sid=pk)
@@ -12469,6 +12525,44 @@ def main():
           [k for k in _req if not _synthetic.get(k)] == ["consequence"])
     check("...and seq is unique and monotonic, since it is the ordering shas cannot provide",
           [e["seq"] for e in _bh["changes"]] == sorted({e["seq"] for e in _bh["changes"]}))
+
+    print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
+    # WHERE THE REFUSALS ACTUALLY LIVE, DERIVED — because the watch list is a list of SPELLINGS and
+    # a list of spellings cannot report what it is missing. WATCHED named the `game_loop` stub, and
+    # #109 had moved every `die(` out of it into the importable module for spawn speed. The stub
+    # kept ONE refusal line; the module holds 129. So for every mandate, status, confidence, arm and
+    # authorize refusal changed since that split, this gate reported "no refusal line changed —
+    # nothing owed", in the confident voice of a check that ran. A pass that is silence (INV8), in
+    # the gate built to stop exactly that.
+    #
+    # The fix that lasts is not "add the file" — it is asking the SOURCE where refusals are, and
+    # failing here when the answer and the tuple disagree. A new refusal-bearing file then fails a
+    # named assertion instead of being quietly unwatched.
+    _bg_src = read_or_empty(os.path.join(REPO, "test", "behaviour_gate.py"))
+    _refusal_rx = re.compile(r'(deny\s+"|p\.error\(|\bdie\(|BLOCKED:|REFUSED)')
+    _bindir = os.path.join(REPO, ".game_loop", "bin")
+    _bears, _unwatched = {}, []
+    for _fn in sorted(os.listdir(_bindir)):
+        _fp = os.path.join(_bindir, _fn)
+        if not os.path.isfile(_fp):
+            continue
+        _n = len(_refusal_rx.findall(read_or_empty(_fp)))
+        if _n < 5:               # a file with a stray match is not a refusal surface
+            continue
+        _bears[_fn] = _n
+        if (".game_loop/bin/" + _fn) not in _bg_src:
+            _unwatched.append(f"{_fn} ({_n} refusal lines)")
+    check("the behaviour gate WATCHES every file in bin/ that actually refuses things — the list is "
+          "spellings, so it is derived from the source rather than trusted: " +
+          (", ".join(_unwatched) if _unwatched else "none unwatched"),
+          not _unwatched)
+    check("...and that scan FOUND refusal surfaces, so an empty answer above is a verdict rather "
+          "than a walk that matched nothing: " + ", ".join(f"{k}={v}" for k, v in _bears.items()),
+          len(_bears) >= 3)
+    check("...and the module holding the most refusals is watched by NAME — the stub that replaced "
+          "it in this list carries one, and watching it read as covering the verb it fronts for",
+          ".game_loop/bin/_gl_impl.py" in _bg_src
+          and max(_bears, key=_bears.get) == "_gl_impl.py")
 
     print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
     # THE MECHANISM WAS BUILT AND THE DISCIPLINE LAPSED SILENTLY, which a consumer measured rather

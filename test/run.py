@@ -4052,17 +4052,31 @@ def main():
                   "commit that adds a gate and nothing else is the careful one",
                   _newgate.returncode != 0
                   and has(_newgate.stdout, "the rule itself changed"))
+            # EXIT 0 IS WHAT A STUBBED verify RETURNS. Both halves rested on it, so a
+            # `.game_loop/bin/verify` replaced by `sys.exit(0)` satisfied this — measured by
+            # pointing the positive control at verify itself, the last gating component I had not
+            # stubbed. The RECORD is the evidence: clearing a debt means verified.json now names
+            # the rule, which nothing that never ran can produce.
+            _cleared = vfy()
+            _after = vfy("--check")
             check("...and running it CLEARS the debt, so the new state is recorded rather than the "
                   "rule staying permanently stale — otherwise the fix trades a silent pass for a "
                   "refusal nobody can satisfy",
-                  vfy().returncode == 0 and vfy("--check").returncode == 0)
+                  _cleared.returncode == 0 and _after.returncode == 0
+                  and "src/**" in read_or_empty(os.path.join(cv, ".game_loop", "verified.json")))
             # THE CONTROL: an UNCHANGED rule must not report itself changed, or every run after
             # this fix refuses and the gate becomes the thing people bypass.
+            # EXIT 0 PLUS AN ABSENCE — and a stubbed verify supplies both, since it exits 0 and
+            # prints nothing at all. The next assertion already pins the POSITIVE wording for this
+            # state, so requiring it here costs nothing and makes "quiet" mean the tool said so
+            # rather than the tool being gone.
+            _quiet = vfy("--check")
             check("...and a rule whose commands are untouched is NOT stale on that account — the "
                   "check compares the recorded command set, so re-running with the same rules is "
-                  "quiet",
-                  vfy("--check").returncode == 0
-                  and not has(vfy("--check").stdout, "the rule itself changed"))
+                  "quiet, and the quiet is a SENTENCE rather than an empty stream",
+                  _quiet.returncode == 0
+                  and not has(_quiet.stdout, "the rule itself changed")
+                  and has(_quiet.stdout, "evidence is newer than the change"))
             check("...and `--check` agreed with the run path all along — it has always had its own "
                   "wording for this state, which is how the two halves of one tool were found "
                   "disagreeing about whether the distinction mattered",

@@ -383,7 +383,7 @@
     },
     {
       "seq": 39,
-      "sha": "pending",
+      "sha": "fac1877",
       "notice": true,
       "verb": "guard-writes (the write guard)",
       "change": "the clobber-override redirects are recognised as writes: `>|` (POSIX, works in bash), and `>!` / `>>!` (zsh). All three write exactly as `>` does and none of them was seen before — `>|` because the splitter cut the operator in two at the `|`, and `>!` / `>>!` because the target parser swallowed the `!` AS the target, which then resolved inside the repo and was allowed.",

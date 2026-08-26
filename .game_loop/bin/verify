@@ -97,6 +97,7 @@ def resolve_home(code_root, prog):
 ROOT = resolve_home(CODE_ROOT, "verify")            # .game_loop/ — the manifest and the record
 REPO = os.path.dirname(ROOT)                        # the tree whose files are checked
 MAP_F = os.path.join(ROOT, "verify.yaml")
+MAP_UNREADABLE = ""      # set by load_map(): why the rulebook could not be opened, "" if it was
 REC_F = os.path.join(ROOT, "verified.json")
 
 # The one reserved key in verify.yaml. Its list entries are GLOBS, not commands: paths a human has
@@ -125,11 +126,22 @@ DUPLICATE_KEYS = {}             # glob -> how many times the manifest declared i
 
 def load_map():
     """Tiny YAML subset: '<glob>:' then '  - <command>' lines. No third-party dependency."""
+    global MAP_UNREADABLE
     out, key = {}, None
     DUPLICATE_KEYS.clear()
+    MAP_UNREADABLE = ""
     try:
         f = open(MAP_F)
-    except OSError:
+    except OSError as exc:
+        # AN ABSENT RULEBOOK IS NOT AN EMPTY ONE. Both produce {} here, and every message downstream
+        # then said "no rules in .game_loop/verify.yaml" — a sentence that asserts the file was READ
+        # and found to declare nothing. Said of a file that does not exist, it sends whoever is
+        # debugging to inspect contents that are not there, while the real fault is a broken install,
+        # a GAME_LOOP_HOME pointing somewhere else, or a permission error.
+        #
+        # The refusal is unchanged and still loud: NOTHING IS CHECKED either way. What changes is
+        # that the two reasons stop sharing a sentence.
+        MAP_UNREADABLE = "%s: %s" % (exc.__class__.__name__, str(exc)[:70])
         return out
     with f:
         for line in f:
@@ -373,9 +385,15 @@ def report_coverage(staged=False, porcelain=False):
     print(f"  {scope} paths : {len(files)}  (checked {len(checked)} · excluded {len(excluded)} · "
           f"UNCHECKED {len(unchecked)})")
     if not mapping:
-        print("\n  NO RULES AT ALL — `verify` and the commit gate are no-ops here. That is the "
-              "shipped\n  default (game_loop does not know your project), and it is not the same "
-              "thing as safe.")
+        if MAP_UNREADABLE:
+            print("\n  THE RULEBOOK COULD NOT BE READ (%s). `verify` and the commit gate are "
+                  "no-ops\n  here, and this is NOT the shipped no-rules default — the file was "
+                  "never opened, so\n  nothing below describes what this project asks for."
+                  % MAP_UNREADABLE)
+        else:
+            print("\n  NO RULES AT ALL — `verify` and the commit gate are no-ops here. That is the "
+                  "shipped\n  default (game_loop does not know your project), and it is not the "
+                  "same thing as safe.")
     # EXEMPTIONS TOO, and this was the blind spot in my own version of this check: I shipped it
     # over RULES and left EXCLUSIONS unexamined, one field away. An exemption matching nothing is
     # WORSE than a vacuous rule — a rule that matches nothing merely fails to run, but an exemption
@@ -458,7 +476,12 @@ def main():
         print(_dup)
     files = changed_files()
     if not mapping:
-        print("verify: no rules in .game_loop/verify.yaml — nothing owes a check.")
+        if MAP_UNREADABLE:
+            print("verify: .game_loop/verify.yaml COULD NOT BE READ (%s) — so this run compared "
+                  "nothing\n  against nothing. That is not the same as a project that declares no "
+                  "rules." % MAP_UNREADABLE)
+        else:
+            print("verify: no rules in .game_loop/verify.yaml — nothing owes a check.")
         _, _, unchecked = coverage(files, mapping, exclusions)
         if unchecked:
             print(f"verify: which means NOTHING IS CHECKED — {len(unchecked)} changed path(s) owe "

@@ -3844,6 +3844,31 @@ def main():
             check("an empty manifest reports its own emptiness as a coverage fact",
                   "NO RULES AT ALL" in r.stdout and "not the same thing as safe" in r.stdout
                   and "lib/new_package.py" in r.stdout)
+            # AN ABSENT RULEBOOK IS NOT AN EMPTY ONE, and both produce the same {} internally.
+            # Every message downstream said "no rules in .game_loop/verify.yaml" — a sentence that
+            # asserts the file was READ and declared nothing. Said of a file that does not exist it
+            # sends whoever is debugging to inspect contents that are not there, when the real
+            # fault is a broken install, a GAME_LOOP_HOME pointing elsewhere, or a permission error.
+            # The refusal is unchanged and still loud; only the diagnosis stops being shared.
+            _yamlf = os.path.join(cv, ".game_loop", "verify.yaml")
+            _keep = read_or_empty(_yamlf)
+            os.remove(_yamlf)
+            _gone = vfy()
+            check("a MISSING verify.yaml says it could not be READ — never 'no rules in' a file "
+                  "that was never opened",
+                  "COULD NOT BE READ" in _gone.stdout
+                  and "no rules in .game_loop/verify.yaml" not in _gone.stdout)
+            check("...and it still says NOTHING IS CHECKED, so the honest diagnosis did not cost "
+                  "the loud one",
+                  _gone.returncode == 0 and "NOTHING IS CHECKED" in _gone.stdout)
+            check("...and --coverage distinguishes it from the shipped no-rules default too, "
+                  "because that default is a DECISION and this is a broken install",
+                  "THE RULEBOOK COULD NOT BE READ" in vfy("--coverage").stdout)
+            cvyaml(_keep)
+            check("...while a file that EXISTS and declares nothing keeps the original wording — "
+                  "the two outcomes are separated, not renamed",
+                  "no rules in .game_loop/verify.yaml" in vfy().stdout)
+            cvyaml("")
             r = vfy("--check")
             check("an empty manifest refuses nothing (--check stays a no-op)",
                   r.returncode == 0 and "VERIFY REFUSED" not in r.stdout)
@@ -8430,9 +8455,16 @@ def main():
         # load-bearing rather than decorative. Nothing else here would notice if it stopped being a
         # hole — and then the marker would be guarding nothing.
         naive = run("verify", "--check")
+        # GREEN is what this asserts, and green is what it still returns. The SENTENCE changed:
+        # the pinned directory holds no manifest at all, and `verify` no longer describes that as
+        # "no rules in verify.yaml" — a claim about a file it never opened. It now says the rulebook
+        # could not be READ, which makes this trap louder without closing it. The exit code is the
+        # hole, and the exit code is unchanged.
         check("a pinned copy told nothing about its home IS the trap — it reports green "
               "(passes in both states)",
-              naive.returncode == 0 and "nothing owes a check" in naive.stdout)
+              naive.returncode == 0
+              and ("nothing owes a check" in naive.stdout
+                   or "COULD NOT BE READ" in naive.stdout))
 
         with open(os.path.join(pincode, "PINNED"), "w") as f:
             f.write("{}\n")

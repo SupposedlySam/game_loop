@@ -663,7 +663,16 @@ MUTANTS = [
     ("verify.changed_files -> no file ever looks changed", ".game_loop/bin/verify::changed_files",
      "    return None\n", ["verify", "changed", "stale", "owes"], None, 81),
     ("verify.staged_files -> nothing is ever staged", ".game_loop/bin/verify::staged_files",
-     "    return []\n", ["staged", "blast", "commit"], None, 5),
+     "    return []\n", ["--staged", "the INDEX", "index scope"],
+     "2 kills, and the floor came DOWN from 5 with a reason rather than being quietly lowered. It "
+     "was measured UNPROTECTED — zero kills — by the sweep of 2026-08-26, having been probed and "
+     "found live: reachable code the suite had stopped driving, which is the tell that separates "
+     "'no assertion' from 'no test reaches it'. The 5 was a reading against an assertion set that "
+     "no longer exists, so it was not comparable to anything; the sweep says as much in its own "
+     "below-floor advice. These are new assertions, driving `verify --coverage --staged` against a "
+     "real index, and 2 is what they measure. Only two of the five CAN kill it: the other three "
+     "assert what the TREE scope reports and what the report LABELS itself, neither of which this "
+     "producer decides.", 2),
     ("notify.send -> a page is never actually sent", ".game_loop/bin/notify.py::send",
      "    return None\n", ["notify", "slack", "page", "send"], None, 11),
     ("watchdog.claim_pidfile -> the watchdog can never claim the pidfile",

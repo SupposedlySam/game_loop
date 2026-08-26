@@ -4727,6 +4727,64 @@ def main():
         # saw those files, defeating the gate's whole premise with evidence about a different tree.
         # Every guard() call below names the MAIN sandbox as the project, reproducing the live shape
         # exactly: the hook belongs to the main tree, the commit happens somewhere else.
+        # `--coverage --staged` ASKS THE INDEX, and nothing here asked it. Found by the mutation
+        # sweep, which is the only reason it was found: `verify::staged_files` came back UNPROTECTED
+        # — neutering it to return nothing killed ZERO assertions, down from a recorded floor of 5.
+        # The sweep also PROBED it and found it live, so this is reachable code the suite simply
+        # never drove: the tell that separates "no assertion" from "no test reaches it".
+        #
+        # It matters because the two scopes answer different questions. The tree scope asks what I
+        # have changed; the index scope asks what THIS COMMIT carries. A `staged_files()` that
+        # returned nothing would report a clean coverage bill for every commit — scanned 0, nothing
+        # unchecked — which reads exactly like a manifest that covers everything.
+        print("coverage --staged asks the INDEX, not the tree:")
+        sv = make_sandbox()
+
+        def _svy(*args):
+            return subprocess.run([os.path.join(sv, ".game_loop", "bin", "verify"), *args],
+                                  cwd=sv, capture_output=True, text=True, env=_env())
+
+        def _svgit(*args):
+            return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                   "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                   *args], cwd=sv, capture_output=True, text=True)
+
+        def _svwrite(rel):
+            _p = os.path.join(sv, rel)
+            os.makedirs(os.path.dirname(_p), exist_ok=True)
+            with open(_p, "w") as _f:
+                _f.write("x\n")
+
+        with open(os.path.join(sv, ".game_loop", "verify.yaml"), "w") as _f:
+            _f.write('"src/**":\n  - "true"\n')
+        _svgit("init", "-q")
+        _svgit("add", "-A")
+        _svgit("commit", "-q", "-m", "init")
+        _svwrite("lib/in_the_commit.py")      # staged: this commit carries it
+        _svgit("add", "lib/in_the_commit.py")
+        _svwrite("lib/only_in_the_tree.py")   # changed but NOT staged
+        _staged = _svy("--coverage", "--staged").stdout
+        _tree = _svy("--coverage").stdout
+        check("--staged reports the file the INDEX carries — the mutant that returns nothing "
+              "reports a clean bill for every commit, which reads like a manifest covering all of it",
+              "lib/in_the_commit.py" in _staged)
+        check("...and it does NOT report a file that is merely changed in the tree, or the two "
+              "scopes are one scope and the narrow question was never asked",
+              "lib/only_in_the_tree.py" not in _staged)
+        check("...while the TREE scope reports both, so the line above is a difference between two "
+              "questions rather than a report that never found anything",
+              "lib/in_the_commit.py" in _tree and "lib/only_in_the_tree.py" in _tree)
+        _sp = json_text(_svy("--coverage", "--staged", "--porcelain").stdout) or {}
+        _tp = json_text(_svy("--coverage", "--porcelain").stdout) or {}
+        check("...and the counts say it numerically: the index scope scans FEWER files than the "
+              "tree, and neither scans zero — scanned=%s staged, %s tree"
+              % (_sp.get("scanned"), _tp.get("scanned")),
+              isinstance(_sp.get("scanned"), int) and _sp["scanned"] > 0
+              and _sp["scanned"] < _tp.get("scanned", 0))
+        check("...and --coverage says WHICH question it answered, because the same report over two "
+              "different sets is otherwise indistinguishable",
+              "staged" in _staged and "changed" in _tree)
+
         print("write guard (the commit gate follows the tree the commit lands in — #28):")
         import time as _t
         wmain = make_sandbox()
@@ -10086,6 +10144,47 @@ def main():
     # sections should run" from the same scan that finds them is satisfied by finding none.
     _floor_path = os.path.join(REPO, "test", "suite-floor.json")
     _floor = json_or_none(_floor_path) or {}
+    # EVERY SECTION THE SUITE LISTS REACHES A SHARD — asserted as an IDENTITY, because a count of
+    # what the sharder found is satisfied by finding less. Two real defects were sitting here, both
+    # invisible while nobody compared the two sides:
+    #
+    #   1. `--list-sections` ends with "138 sections. Select with: …", which begins with a number
+    #      and matched the `<lineno> <name>` regex. A phantom section rode in the list, was handed
+    #      to a shard as a `--section` naming nothing, and counted in the group total — and whether
+    #      it landed as top-level depended on the indentation of whatever source line shared its
+    #      number, so the count moved for reasons unrelated to the suite.
+    #   2. Nested sections with NO preceding top-level one were dropped: `cur is None` until the
+    #      first indent<=4 section, and this suite's shared-fixture block opens first, so 57 of 138
+    #      were in no group, named by no shard, and absent from every count prun prints. They still
+    #      RAN — run.py extends a nested subset to a leading slice — which is the selector's
+    #      property, not the runner's, and prun's own docstring warns against assuming exactly that.
+    #
+    # The discriminator for the phantom is that a real section's name appears in its own source
+    # line, because that is where it is printed.
+    _sec_groups = _prun_mod.sections()
+    _sec_named = [n for _t, ns in _sec_groups for n in ns]
+    _ls = subprocess.run([sys.executable, os.path.join(REPO, "test", "run.py"), "--list-sections"],
+                         capture_output=True, text=True)
+    _ls_src = read_or_empty(os.path.join(REPO, "test", "run.py")).split("\n")
+    _ls_real = []
+    for _line in _ls.stdout.splitlines():
+        _m = re.match(r"^\s*(\d+)\s+(.*)$", _line)
+        if not _m:
+            continue
+        _ln, _nm = int(_m.group(1)), _m.group(2).rstrip()
+        _raw = _ls_src[_ln - 1] if 0 < _ln <= len(_ls_src) else ""
+        if _nm and _nm in _raw:
+            _ls_real.append(_nm)
+    check("every section the suite LISTS is named by some shard group — an identity, not a count, "
+          "because a sharder that finds fewer sections satisfies any count it computes itself "
+          "(%d listed, %d sharded)" % (len(_ls_real), len(_sec_named)),
+          len(_ls_real) > 50 and sorted(_ls_real) == sorted(_sec_named))
+    check("...and the LISTING's own trailer is not among them — it starts with a number and looked "
+          "exactly like a section to the parser that read the list",
+          not any("Select with" in n for n in _sec_named))
+    check("...and the sections that open the file before any top-level one are carried, not "
+          "dropped — they are the majority of this suite and were in no group at all",
+          len(_sec_groups[0][1]) > 10)
     check("the suite records a FLOOR outside the run — an expectation that shrinks with the code "
           "cannot report that the code shrank",
           isinstance(_floor.get("distinct"), int) and isinstance(_floor.get("groups"), int)

@@ -50,14 +50,52 @@ def sections():
             continue
         ln = int(m.group(1))
         raw = src[ln - 1] if 0 < ln <= len(src) else ""
-        listed.append((ln, m.group(2).rstrip(), len(raw) - len(raw.lstrip())))
+        name = m.group(2).rstrip()
+        # THE TRAILER IS NOT A SECTION. `--list-sections` ends with "138 sections. Select with: …",
+        # which starts with a number and therefore matched this regex — so a phantom section has
+        # been in this list all along, passed to a shard as a `--section` that names nothing, and
+        # counted in the group total. Whether it landed as a TOP-LEVEL group depended on the
+        # indentation of whichever source line happened to share its number, so the count moved for
+        # reasons having nothing to do with the suite.
+        #
+        # Found by the new floor on its first real use, which is the argument for the floor: the
+        # phantom cost nothing visible for as long as nobody compared the number to anything.
+        #
+        # The discriminator is that a REAL section's name appears in its own source line — it is
+        # printed there. Measured across the whole list: 138 of 138 real sections satisfy that, and
+        # the trailer is the only line that does not.
+        if not (name and name in raw):
+            continue
+        listed.append((ln, name, len(raw) - len(raw.lstrip())))
+    # NESTED SECTIONS WITH NO PRECEDING TOP-LEVEL ONE WERE DROPPED ON THE FLOOR. `cur is None`
+    # until the first indent<=4 section, and in this suite the shared-fixture block opens FIRST:
+    # 57 of 138 sections precede any top-level one, so they were in no group, named by no shard,
+    # and absent from every count this file prints. The docstring above promises a nested section is
+    # selected explicitly "in the same shard as the top-level section it sits under" — for these
+    # there is no such section, and the loop silently skipped them rather than saying so.
+    #
+    # They still RAN, which is why nothing noticed: run.py extends any subset of a nested sequence
+    # to a leading slice, so selecting anything in that block pulls them in. That is a property of
+    # the selector, not of this runner, and it is exactly the "the runner must not assume the
+    # selector's closure will reach it" the docstring warns about — with this file doing the
+    # assuming. `--verify` is the check that they still run; it is not a reason to leave them
+    # unnamed.
+    #
+    # They become ONE group: they share a fixture and the leading-slice rule means selecting the
+    # last pulls the rest anyway, so splitting them would buy no parallelism and pay the prefix
+    # cost repeatedly.
     groups, cur = [], None
+    leading = []
     for ln, name, indent in listed:
         if indent <= 4:
             cur = (name, [name])
             groups.append(cur)
         elif cur is not None:
             cur[1].append(name)
+        else:
+            leading.append(name)
+    if leading:
+        groups.insert(0, (leading[0], list(leading)))
     return groups
 
 

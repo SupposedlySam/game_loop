@@ -591,6 +591,55 @@ session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anyth
 letting a narrow tab truncate it; `--title` is the uncapped, verbatim override. This is the same
 convention as the `handoff` skill's `new-tab.sh`, which uses the same Warp mechanism.
 
+**With neither given, the tab falls back to the subject rather than to the word `successor`.** The tab row
+is the surface that shows eight things at once, and it was the one place the subject did not reach: a screen
+of tabs read `G | successor` eight times, which is the complaint the subject line exists to answer, still
+unanswered on the only display where the row *is* the interface. The derived label **trims** where `--task`
+**refuses**, and the asymmetry is deliberate — `--task` is a human naming the job, so too long is a
+correctable mistake worth teaching; a subject is derived from a mandate, and refusing a long one would break
+the handover of most sessions that have one. A gate that fires on the common case is not a gate, it is an
+outage. The ellipsis is load-bearing: `scope the backups and push` trimmed to `scope the backups` would name
+a different, smaller job with nothing to say so.
+
+### Handover chains — `game_loop threads`
+
+A handoff answers *what*. With more than one task in flight it stopped answering *which*: four tabs, four
+chains of successors, and no way to tell which handoff belonged to which piece of work without opening state
+files and matching UUIDs by eye. In a checkout that routinely holds twenty-eight sessions, nobody does that,
+so in practice the answer was "start again and hope".
+
+**The edges were already on disk and nothing joined them up.** `logline` stamps every record with the session
+that wrote it, and the `handed_off` record names the session it started — so `A → B → C` has always been three
+lines that happen to share endpoints. `threads` joins them. It deliberately does not write a second record of
+the chain: a chain file beside the log would be free to disagree with it, and the disagreement would surface
+in the one place nobody looks.
+
+What the join adds is an **identity**: a thread id plus a human label, minted once at the head of a chain and
+inherited unchanged by every successor down it. The label is the **first** hop's subject and stays that way.
+A name that drifts with every hop is not an identity, it is a status — and "which chain is this" is a
+question only a stable name answers. Where the work has genuinely moved on, the per-hop `about` records it
+and both are printed, so drift is *shown* rather than silently overwriting the name the human has been
+navigating by.
+
+The thread does not live in session state, and that is what keeps it correct across the two places that
+deliberately erase a handover: `mandate --set` and `mandate --resume` both pop `handed_off`, so a session
+being driven again re-arms its watchdog. Those pops are about an **engine** being stood down. A session
+being driven again does not unmake the chain it was part of, and a lineage that evaporated whenever somebody
+re-bound a mandate would be a chain that lies by omission.
+
+`threads` prints each chain's label, its hops in order, the head's liveness and the handoff it reads;
+`--json` emits the same as data. Liveness uses the **same** test `successor_seen` does — a state file, which
+is the only artefact a real SessionStart leaves — because a listing that reads "live" where the watchdog
+reads "nobody came" is the disagreement nobody would check.
+
+**What it does not see, stated rather than assumed.** A session dir pruned after `session_ttl_days` still has
+its edges in the log but no state file, so an old chain's head reads NOT SEEN YET — indistinguishable here
+from a successor that never started; age is the tell and this cannot make it for you. Handovers in another
+checkout are invisible, since the log is per-checkout, so a chain that crossed worktrees shows only its local
+half. And a takeover **by hand** — somebody reading the handoff and carrying on — records no edge at all, so
+it is not a chain as far as this is concerned. That last one is the common case in `print` mode, where the
+verb hands over a command rather than starting a session.
+
 ### The unpushed check — `checkpoint` / `mandate --clear`
 
 Agents commit constantly and push rarely, and committed-but-unpushed work is invisible to everyone

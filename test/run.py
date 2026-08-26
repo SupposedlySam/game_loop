@@ -1325,6 +1325,33 @@ def main():
         r = gl(proj, "successor", "--dry-run", "--about", "x" * 250, sid="sess-succ")
         check("an over-long subject is truncated — it is a label, not a summary",
               "\u2026" in r.stdout and ("x" * 200) not in r.stdout)
+
+        # ── and the subject reaches the TAB, which is the surface that shows eight at once ─────
+        #
+        # The subject landed in the prompt, the printed block and the saggar terminal's name, and
+        # stopped one short: the Warp tab kept its own default. So a row of eight tabs read
+        # "successor" eight times — the exact complaint the subject was answering, still unanswered
+        # on the only display where the row IS the interface. The mandate bound above is still the
+        # subject here.
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("with no --task the tab falls back to the SUBJECT, not to a noun true of every "
+              "session",
+              "| get the goldens\u2026" in r.stdout and "| successor" not in r.stdout)
+        # It TRIMS where --task REFUSES, and that asymmetry is deliberate: --task is a human naming
+        # the job, so too long is a correctable mistake; a subject is derived from a mandate, and
+        # refusing a long one would break the handover of most sessions that have one.
+        r = gl(proj, "successor", "--dry-run", "--about", "scope the backups and push them",
+               sid="sess-succ")
+        check("a subject far past the tab limit is TRIMMED, never refused",
+              r.returncode == 0 and "| scope the backups\u2026" in r.stdout)
+        check("...and the ellipsis is kept, so a trimmed label cannot read as a complete one",
+              "| scope the backups |" not in r.stdout)
+        r = gl(proj, "successor", "--dry-run", "--task", "goldens", sid="sess-succ")
+        check("an explicit --task still outranks the derived label",
+              "| goldens" in r.stdout)
+        r = gl(proj, "successor", "--dry-run", "--about", "", sid="sess-succ")
+        check("with the subject off there is nothing to derive, and the honest floor comes back",
+              "| successor" in r.stdout)
         gl(proj, "mandate", "--clear", sid="sess-succ")
         with open(hps, "w") as f:
             f.write("<!-- game_loop:auto -->\n# HANDOFF\n")   # AUTO_HANDOFF_MARK
@@ -1410,6 +1437,127 @@ def main():
               "mode                : warp-tab — Warp detected"
               in succ_mode(TERM_PROGRAM="WarpTerminal"))
         succ_cfg("auto")
+
+        # ── handover chains: which handoff is for which task ──────────────────────────────────
+        #
+        # THE EDGES WERE ALREADY ON DISK AND NOBODY JOINED THEM UP. `logline` stamps the writer and
+        # the handed_off record names the session it started, so A->B->C has always been three
+        # lines that share endpoints. What was missing was an identity to group them by and a verb
+        # to print them: with twenty-eight sessions in one checkout, "which of these tabs is the
+        # goldens one" was answerable only by opening state files and matching uuids by eye.
+        thproj = make_sandbox()
+        thlog = os.path.join(thproj, ".game_loop", "log.jsonl")
+
+        def th(*args, sid=None):
+            return gl(thproj, "threads", *args, sid=sid or "sess-th").stdout
+
+        def hop(t, frm, to, thread=None, about=None, handoff="/repo/H.md"):
+            r = {"t": t, "sid": frm, "kind": "handed_off", "to": to, "handoff": handoff}
+            if thread:
+                r["thread"] = thread
+            if about:
+                r["about"] = about
+            with open(thlog, "a") as f:
+                f.write(json.dumps(r) + "\n")
+
+        check("with nothing handed over, `threads` says so rather than printing an empty list — "
+              "a blank answer reads as 'no chains' and as 'the verb is broken' identically",
+              "no handover chains recorded" in th())
+        # ...and --json still answers, because the empty case is the one a consumer handles worst.
+        # This assertion found the bug by DYING on it: json.loads on that sentence raised, the suite
+        # stopped there, and 1554 later assertions vanished — which the mutation sweep would have
+        # read as a 1554-kill producer rather than as a crash.
+        check("--json answers in the EMPTY case too — a consumer told to parse JSON must not get a "
+              "sentence exactly when there is nothing to report",
+              json.loads(th("--json")) == [])
+        GOLD = {"id": "1a2b3c4d", "label": "get the goldens green",
+                "started": "2026-08-25T10:00:00Z"}
+        BACK = {"id": "9f8e7d6c", "label": "scope the backups",
+                "started": "2026-08-25T11:00:00Z"}
+        hop("2026-08-25T10:00:00Z", "aaaa1111", "bbbb2222-0000-0000-0000-0000000000ff",
+            GOLD, "get the goldens green", "/repo/a/HANDOFF.md")
+        hop("2026-08-25T12:30:00Z", "bbbb2222", "cccc3333-0000-0000-0000-0000000000ff",
+            GOLD, "chase the last flaky one", "/repo/b/HANDOFF.md")
+        hop("2026-08-25T11:00:00Z", "dddd4444", "eeee5555-0000-0000-0000-0000000000ff",
+            BACK, "scope the backups", "/repo/d/HANDOFF.md")
+        o = th()
+        check("two concurrent chains in ONE checkout list as two, each under its own label — the "
+              "whole question the human could not answer",
+              "thread 1a2b3c4d — get the goldens green" in o
+              and "thread 9f8e7d6c — scope the backups" in o
+              and "2 handover chain(s)" in o)
+        check("...and a chain is the HOPS, in order, not a count — a count cannot be argued with, "
+              "and two chains merged by an id collision would look like one long one",
+              "aaaa1111 → bbbb2222" in o and "bbbb2222 → cccc3333" in o)
+        # The label is the FIRST hop's subject and stays that way; the per-hop `about` carries where
+        # the work actually got to. Both are printed, so drift is shown rather than resolved by
+        # silently overwriting the name the human has been navigating by.
+        check("the thread keeps its ORIGINAL label while the hop that moved on shows its own "
+              "subject — drift is displayed, not hidden and not overwritten",
+              "thread 1a2b3c4d — get the goldens green" in o
+              and "about: chase the last flaky one" in o)
+        check("...and a hop whose subject still matches the chain label does not repeat it",
+              "about: scope the backups" not in o)
+        # An edge written before threads existed carries none. Walked from->to it is still exactly
+        # the chain it always described, and its missing identity is NAMED rather than invented.
+        hop("2026-08-24T09:00:00Z", "ffff6666", "aaaa9999-0000-0000-0000-0000000000ff")
+        o = th()
+        check("a chain recorded BEFORE threads existed is still walked, and its absent identity is "
+              "named as absent — an invented id is worse than a missing one",
+              "ffff6666 → aaaa9999" in o and "predates them" in o
+              and "unlabelled" in o)
+        check("the head's liveness uses the SAME test successor_seen does — a listing that reads "
+              "live where the watchdog reads 'nobody came' is the disagreement nobody would check",
+              "cccc3333 — NOT SEEN YET" in o)
+        os.makedirs(os.path.join(thproj, ".game_loop", "sessions",
+                                 "cccc3333-0000-0000-0000-0000000000ff"), exist_ok=True)
+        with open(os.path.join(thproj, ".game_loop", "sessions",
+                               "cccc3333-0000-0000-0000-0000000000ff", "state.json"), "w") as f:
+            f.write("{}")
+        check("...and it flips once that session has written state of its own, which is the only "
+              "artefact a real SessionStart leaves",
+              "cccc3333 — live (it has written state)" in th())
+        check("the listing states what it CANNOT see — a pruned predecessor, another checkout, and "
+              "a takeover by hand, which records no edge at all",
+              all(x in th() for x in ("WHAT THIS DOES NOT SEE", "pruned", "ANOTHER checkout",
+                                      "by hand"))) 
+        _j = json.loads(th("--json"))
+        check("--json emits the chains as data, so a viewer joins them without parsing prose",
+              isinstance(_j, list) and len(_j) == 3
+              and {c["thread"] for c in _j} >= {"1a2b3c4d", "9f8e7d6c"})
+
+        # ── minting and inheriting ────────────────────────────────────────────────────────────
+        #
+        # The identity has to be minted ONCE at the head of a chain and inherited unchanged after
+        # that, or it is a status rather than a name — and a name is the only thing that answers
+        # "which of these is which".
+        def succ_th(sid, heading):
+            sdir = os.path.join(thproj, ".game_loop", "sessions", sid)
+            os.makedirs(sdir, exist_ok=True)
+            with open(os.path.join(sdir, "HANDOFF.md"), "w") as f:
+                f.write(f"# Handoff — {heading}\nbody\n")
+            return gl(thproj, "successor", "--dry-run", sid=sid).stdout
+
+        o = succ_th("nnnn7777-0000-0000-0000-0000000000ff", "port the subject line")
+        check("a session nobody handed to MINTS a new chain, and says that is what it did",
+              "NEW chain, minted here" in o and "· port the subject line" in o)
+        o = succ_th("bbbb2222-0000-0000-0000-0000000000ff", "chase the last flaky one")
+        check("a session that WAS handed to inherits its chain — the id and the label both, so "
+              "hop three is still recognisably the same work as hop one",
+              "thread              : 1a2b3c4d · get the goldens green" in o
+              and "inherited, this continues an existing chain" in o)
+        check("...and the inherited label does NOT become the hop's subject: the chain is named by "
+              "where it started, the hop by where it is",
+              "about               : chase the last flaky one" in o)
+        # A session handed to TWICE is one somebody re-pointed, and the most recent pointing is the
+        # one that describes where it now sits. Asserted because the docstring claims it: an
+        # untested claim about which of two records wins is the kind that is wrong for months.
+        hop("2026-08-25T18:00:00Z", "aaaa1111", "bbbb2222-0000-0000-0000-0000000000ff",
+            BACK, "scope the backups", "/repo/re/HANDOFF.md")
+        o = succ_th("bbbb2222-0000-0000-0000-0000000000ff", "chase the last flaky one")
+        check("a session handed to TWICE takes the LATEST pointing — being re-pointed moves which "
+              "chain you are in, and the older edge must not out-vote the newer",
+              "thread              : 9f8e7d6c · scope the backups" in o)
 
         # ── the bypass setting (limits.successor.skip_permissions) ────────────────────────────
         #

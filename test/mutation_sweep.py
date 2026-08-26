@@ -1279,6 +1279,44 @@ MUTANTS += [
 ]
 
 
+# ── HANDOVER CHAINS ─────────────────────────────────────────────────────────────────────────────
+#
+# Floors measured 2026-08-25 against the working tree that introduced them, whole-suite on both
+# sides (no section map is generated in this checkout, so every reading here is the default
+# denominator rather than a subset).
+#
+# TWO OF THESE FIRST READ 1554, AND THE READING WAS A CRASH WEARING A COVERAGE NUMBER. The suite's
+# own --json assertion called json.loads on a verb that printed PROSE when there were no chains; it
+# raised, the run stopped there, and every later assertion vanished from the mutant's passing set —
+# which a set difference reports as kills. 1554 of 1757 is not a well-covered producer, it is the
+# collapsed baseline this file already warns about, arriving through a new door: not a crash in the
+# archived TREE this time, but one an assertion caused under a mutant. The fix was in the product
+# (--json now answers in the empty case, because a consumer told to expect JSON must not be handed a
+# sentence exactly when there is nothing to report) and the honest floors came back 10 and 8.
+MUTANTS += [
+    ("handover_edges -> the log yields no handovers, so no chain can be walked",
+     ".game_loop/bin/_gl_impl.py::handover_edges", "    return []\n",
+     ["chain", "thread", "hop", "handed"], None, 10),
+    ("handover_chains -> the edges never join into chains",
+     ".game_loop/bin/_gl_impl.py::handover_chains", "    return []\n",
+     ["chain", "thread", "hop", "listing"], None, 8),
+    ("thread_for -> a successor never finds the chain it was handed into",
+     ".game_loop/bin/_gl_impl.py::thread_for", "    return None\n",
+     ["chain", "thread", "inherit"], "THIN AT 2, and the two are the whole contract: a handed-to "
+     "session INHERITS its chain, and a session handed to twice takes the LATEST pointing. The "
+     "third branch — nobody handed to me, so mint — is asserted through successor_thread's output "
+     "rather than here, because from the outside 'returned None' and 'minted a new chain' are the "
+     "same observable and only the minting one is worth a name.", 2),
+    ("tab_label -> the tab never derives a label, and falls back to the noun",
+     ".game_loop/bin/_gl_impl.py::tab_label", '    return ""\n',
+     ["tab", "subject", "title"], "THIN AT 2 because the function is two decisions wide: trim to "
+     "the tab's width, and keep the ellipsis that stops a trimmed label reading as a complete "
+     "smaller job. Both are asserted. The third case — no subject at all, fall back to "
+     "'successor' — cannot kill this mutant, since the neutered form produces exactly that "
+     "fallback, and an assertion that passes under the mutation is not coverage of it.", 2),
+]
+
+
 NOT_SWEPT = {
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
     # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not

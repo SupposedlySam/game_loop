@@ -7199,9 +7199,41 @@ def successor_why(sc):
 TASK_MAX_WORDS, TASK_MAX_CHARS = 3, 20
 
 
-def successor_title(task=None, title=None, cwd=None):
+def tab_label(subject):
+    """A <=TASK_MAX_CHARS label for a tab, trimmed out of a subject that may be five times that.
+
+    IT TRIMS WHERE `--task` REFUSES, and the asymmetry is the point. `--task` is a human naming the
+    job, so too long is a correctable mistake and the refusal teaches the convention. A subject is
+    DERIVED — from a mandate, a heading, a phase — and refusing one would break the handover of
+    every session whose mandate runs past twenty characters, which is most of them. A gate that
+    fires on the common case is not a gate, it is an outage.
+
+    The ellipsis is load-bearing: a trimmed label must not read as a complete one. "scope the
+    backups and push" cut to "scope the backups" would name a DIFFERENT, smaller job and nothing
+    would say so; cut to "scope the backu\u2026" it cannot be mistaken for the whole.
+    """
+    words = " ".join(str(subject or "").split()).split()
+    if not words:
+        return ""
+    label = " ".join(words[:TASK_MAX_WORDS])
+    if len(label) > TASK_MAX_CHARS:
+        label = label[:TASK_MAX_CHARS - 1].rstrip() + "\u2026"
+    elif len(words) > TASK_MAX_WORDS:
+        label += "\u2026"
+    return label
+
+
+def successor_title(task=None, title=None, cwd=None, subject=None):
     """`<R> | <task>` — the repo's initial, so a row of tabs stays readable at a glance, plus what
     that session is actually doing. Same convention as the handoff skill's new-tab.sh.
+
+    THE TAB IS THE SURFACE THE HUMAN ACTUALLY SCANS, and until now it was the one place the subject
+    did not reach. #b6a0276 gave the successor's PROMPT a subject — derived from the mandate, the
+    heading, the phase — and put it in the printed block and the saggar terminal's name, but the
+    Warp tab kept its own default and went on reading `G | successor`. A row of eight tabs all
+    saying "successor" is the exact complaint that fix was answering, still unanswered on the one
+    display that shows eight things at once. So when nothing is named explicitly, the tab falls
+    back to the SUBJECT before it falls back to a noun that describes every session equally.
 
     The refusals differ from that script's on purpose, because the quoting does. new-tab.sh embeds
     the title in a single-quoted shell word inside a heredoc, so a single quote breaks it; here the
@@ -7222,7 +7254,10 @@ def successor_title(task=None, title=None, cwd=None):
                 "  scope backups\". Use --title to override verbatim.")
     if not title:
         initial = (os.path.basename(cwd or REPO_ROOT) or "?")[:1].upper() or "?"
-        title = f"{initial} | {task or 'successor'}"
+        # "successor" is the floor, not a description: it is true of every session this verb ever
+        # starts, so it distinguishes nothing. Reached only when there is no subject either — and
+        # then it is honest, because at that point the harness genuinely does not know the job.
+        title = f"{initial} | {task or tab_label(subject) or 'successor'}"
     if "\n" in title:
         die("--task/--title must be a single line — the tab config writes it on one.")
     if "{{" in title:
@@ -7283,6 +7318,162 @@ def _saggar_agent(cwd, prompt):
     return False, f"`saggar agent` exited {r.returncode}" + (f" ({hint})" if hint else "") + f": {msg}"
 
 
+THREAD_ID_CHARS = 8
+
+
+def handover_edges():
+    """Every handover this checkout has recorded, oldest first, read off the SHARED log.
+
+    THE EDGES WERE ALREADY ON DISK AND NOBODY JOINED THEM UP. `logline` stamps every record with
+    the session that wrote it (`sid`, truncated to 8) and the handed_off record names the session it
+    started (`to`, in full) — so A->B->C has always been three lines that happen to share endpoints.
+    This joins them. It deliberately does NOT write a second record of the chain: a chain file
+    beside the log would be free to disagree with it, and the disagreement would surface in the one
+    place nobody looks.
+    """
+    edges = []
+    try:
+        with open(LOG_F) as f:
+            for ln in f:
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("kind") == "handed_off" and r.get("to") and r.get("sid"):
+                    edges.append(r)
+    except OSError:
+        pass
+    return edges
+
+
+def thread_for(session, edges=None):
+    """The thread `session` is already part of, read off the edge that STARTED it — or None.
+
+    Matched on the SHORT id, because `logline` records the writer as SESSION[:8] while `to` is a
+    full uuid; the join has to happen at the narrower of the two. Eight hex characters inside one
+    checkout's log is a 32-bit space, so a collision needs two sessions in the same repo sharing a
+    prefix. If that ever happens the symptom is two chains printed as one, which the hop list makes
+    VISIBLE rather than silent — that is the reason the hops are printed and not just counted.
+
+    The LAST matching edge wins. A session handed to twice is a session somebody re-pointed, and
+    the most recent pointing is the one that describes where it now sits.
+    """
+    if not session:
+        return None
+    short = str(session)[:8]
+    for r in reversed(edges if edges is not None else handover_edges()):
+        if str(r.get("to"))[:8] == short and isinstance(r.get("thread"), dict):
+            return r["thread"]
+    return None
+
+
+def successor_thread(subject):
+    """The thread this handover belongs to, and whether it was inherited or minted here.
+
+    MINTED ONCE, AT THE HEAD OF A CHAIN, AND INHERITED UNCHANGED AFTER THAT. The label is the
+    subject of the FIRST handover, not the latest, and that is deliberate: a name that drifts with
+    every hop is not an identity, it is a status, and the human's complaint was that they could not
+    tell which chain was which — which is a question only a stable name answers. Where the work has
+    genuinely moved on, the per-hop `about` records it and `threads` prints both, so drift is shown
+    rather than hidden or overwritten.
+
+    IT IS NOT KEPT IN SESSION STATE, and that is what keeps it correct across the two places that
+    deliberately erase a handover (`mandate --set` and `mandate --resume`, which pop `handed_off` so
+    a re-driven session's watchdog re-arms). Those pops are about an ENGINE being stood down. A
+    session being driven again does not unmake the chain it was part of, and a lineage that
+    evaporated when somebody re-bound a mandate would be a chain that lies by omission.
+    """
+    th = thread_for(SESSION)
+    if th:
+        return th, True
+    return {"id": uuid.uuid4().hex[:THREAD_ID_CHARS], "label": subject or "",
+            "started": now()}, False
+
+
+def handover_chains():
+    """The recorded handovers, walked into chains: [{thread, label, hops, head}], newest last.
+
+    Walked as a GRAPH rather than grouped by thread id, so this reads a log written before threads
+    existed. Those edges carry no thread and would group into one meaningless bucket; followed
+    from -> to they still form exactly the chains they always described. A chain that predates
+    threads is printed with its identity named as absent, never invented.
+    """
+    edges = handover_edges()
+    by_from = {}
+    targets = set()
+    for r in edges:
+        by_from.setdefault(str(r["sid"])[:8], []).append(r)
+        targets.add(str(r["to"])[:8])
+    chains = []
+    for root in [f for f in by_from if f not in targets]:
+        hops, cur, guard = [], root, 0
+        while cur in by_from and guard < 200:
+            guard += 1
+            r = by_from[cur][-1]           # the latest pointing from this session
+            hops.append(r)
+            cur = str(r["to"])[:8]
+        if not hops:
+            continue
+        th = next((h["thread"] for h in hops if isinstance(h.get("thread"), dict)), None)
+        label = (th or {}).get("label") or ""
+        chains.append({"thread": (th or {}).get("id"), "label": label, "hops": hops,
+                       "head": str(hops[-1]["to"])})
+    chains.sort(key=lambda c: c["hops"][-1].get("t") or "")
+    return chains
+
+
+def cmd_threads(s, a):
+    """Which handover chain is which — the verb that answers "which handoff is for which task".
+
+    THE QUESTION WAS ALREADY ANSWERABLE AND COST TOO MUCH TO ASK. Every hop was recorded; joining
+    them meant opening one state file per session in a checkout that routinely holds twenty-eight,
+    and matching uuids by eye. Nobody does that, so in practice the answer was "start again and
+    hope". A chain is only useful at a glance, so this prints it at a glance.
+    """
+    chains = handover_chains()
+    # --json ANSWERS FIRST, INCLUDING THE EMPTY CASE. Emitting the prose here and the JSON only when
+    # there was something to say is the shape that makes a consumer crash on exactly the state it is
+    # least able to handle: `json.loads` on a sentence. Found by this suite's own --json assertion,
+    # which died on it and took 1554 later assertions with it — turning a 7-kill producer into a
+    # 1554-kill reading indistinguishable from a catastrophic regression.
+    if a.json:
+        out(json.dumps(chains, indent=2))
+        return
+    if not chains:
+        out("no handover chains recorded in this checkout.",
+            "  Nothing has run `successor` here yet — or every hop predates the log this reads.")
+        return
+    out(f"{len(chains)} handover chain(s) in this checkout, oldest first:")
+    for c in chains:
+        ident = c["thread"] or "(no thread id — this chain predates them)"
+        label = c["label"] or "(unlabelled — no subject was recorded at the first handover)"
+        out("", f"thread {ident} — {label}",
+            f"  {len(c['hops'])} hop(s) · first {c['hops'][0].get('t')} · "
+            f"last {c['hops'][-1].get('t')}")
+        for h in c["hops"]:
+            about = h.get("about") or ""
+            drift = f"   about: {about}" if about and about != c["label"] else ""
+            out(f"    {str(h['sid'])[:8]} → {str(h['to'])[:8]}   {h.get('t')}{drift}")
+        # The SAME test successor_seen uses, and it must stay the same one: a listing that reads
+        # "live" where the watchdog reads "nobody came" is the disagreement nobody would check.
+        seen = successor_seen(c["head"])
+        out(f"  head : {c['head'][:8]} — "
+            + ("live (it has written state)" if seen else "NOT SEEN YET — no state file of its own"),
+            f"  reads: {c['hops'][-1].get('handoff') or '(not recorded)'}")
+    out("", "WHAT THIS DOES NOT SEE — a rail goes quiet exactly where it is blind:",
+        f"  · a session dir pruned by `status` after {SESSION_TTL_DAYS} days still has its EDGES in "
+        "the log, but no",
+        "    state file — so an old chain's head reads NOT SEEN YET, which is indistinguishable "
+        "here from a",
+        "    successor that never started. Age is the tell; this cannot make it for you.",
+        "  · handovers in ANOTHER checkout. The log is per-checkout, so a chain that crossed "
+        "worktrees shows",
+        "    only the half that happened here.",
+        "  · a session that took over by hand — somebody reading the handoff and carrying on — "
+        "records no edge",
+        "    at all, and is not a chain as far as this is concerned.")
+
+
 def cmd_successor(s, a):
     """Start the session that takes over from this one — the capability the handoff never had.
 
@@ -7326,13 +7517,20 @@ def cmd_successor(s, a):
         argv.append(SKIP_PERMISSIONS_FLAG)
     argv.append(prompt)
     cmd = " ".join(shlex.quote(x) for x in argv)
-    title = successor_title(a.task, a.title, cwd)
+    thread, inherited = successor_thread(subject)
+    title = successor_title(a.task, a.title, cwd, subject)
     why = successor_why(sc)
     sid_note = (f"{sid}  (the printed command's — `saggar agent` mints its own)"
                 if sc["mode"] == "saggar-agent" else sid)
     lines = [f"successor session id : {sid_note}"]
     if subject:
         lines.append(f"about               : {subject}")
+    # WHICH CHAIN THIS IS. The `about` line says what the work is; this says which running thread of
+    # work it belongs to, which is the question a human with four tabs open actually has.
+    lines.append(f"thread              : {thread['id']} · "
+                 + (thread["label"] or "(unlabelled)")
+                 + ("  — inherited, this continues an existing chain" if inherited
+                    else "  — NEW chain, minted here"))
     lines += [f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
              f"working directory   : {cwd}",
              f"tab title           : {title}",
@@ -7460,7 +7658,8 @@ def cmd_successor(s, a):
     # `handed_off` in this session's state, which bin/watchdog reads on every arm and again after
     # every sleep. The kill just stops the one already sleeping from waking up to learn it.
     if handed:
-        s["handed_off"] = {"to": sid, "at": now(), "handoff": hp, "mode": sc["mode"]}
+        s["handed_off"] = {"to": sid, "at": now(), "handoff": hp, "mode": sc["mode"],
+                           "thread": thread}
         save(s)
         pid, note = disarm_watchdog()
         lines += ["", "handover recorded    : this session's watchdog is STOOD DOWN — "
@@ -7468,8 +7667,10 @@ def cmd_successor(s, a):
                   f"                       armed watchdog: {note}.",
                   "                       It will not ring you back into work you just handed over.",
                   "                       Binding a NEW mandate here re-arms it (`mandate --set`)."]
+        # The thread and the hop's own subject ride the LOG record, because the log is the only
+        # per-checkout, append-only, shared thing here — which is exactly the shape a chain needs.
         logline({"kind": "handed_off", "to": sid, "mode": sc["mode"], "watchdog_pid": pid,
-                 "watchdog": note})
+                 "watchdog": note, "thread": thread, "about": subject})
         if (m := s.get("mandate") or {}).get("active"):
             lines.append(f"                       still-open mandate  : {m.get('text')}")
         if s.get("t3_armed"):
@@ -7497,6 +7698,7 @@ def cmd_successor(s, a):
                   "turn before",
                   "  the successor starts, because it is the only part nothing can reconstruct."]
     logline({"kind": "successor", "session_id": sid, "handoff": hp, "mode": sc["mode"],
+             "thread": thread["id"], "thread_inherited": inherited,
              "configured_mode": sc["configured"], "warp_detected": sc["detected"],
              "host": sc["host"], "title": title,
              "skip_permissions": sc["skip_permissions"],
@@ -9405,9 +9607,13 @@ def cmd_status(s, a):
         # the difference is the whole story: nothing here rings any more. Say it on the line where
         # the mandate is, or the next reader spends a turn wondering why the engine is silent.
         seen = successor_seen(ho.get("to"))
+        _th = ho.get("thread") if isinstance(ho.get("thread"), dict) else {}
         mandate_line += (f"\n  ⇢ HANDED OVER to {str(ho.get('to'))[:8]} at {ho.get('at')} — this "
                          "session's watchdog is STOOD DOWN.\n"
-                         f"    successor  : {'live (it has written state)' if seen else 'NOT SEEN YET — no state file of its own'}\n"
+                         + (f"    thread     : {_th.get('id')} · "
+                            f"{_th.get('label') or '(unlabelled)'}"
+                            "   (`game_loop threads` for the whole chain)\n" if _th else "")
+                         + f"    successor  : {'live (it has written state)' if seen else 'NOT SEEN YET — no state file of its own'}\n"
                          f"    it reads   : {ho.get('handoff')}\n"
                          "    → this session is retired. `mandate --set \"..\"` re-arms it if you "
                          "are driving again.")
@@ -10124,6 +10330,9 @@ def main():
     lp.add_argument("--force", action="store_true",
                     help="run it even though limits.probe.enabled is false — it costs ~24k input "
                          "tokens, so the default is off")
+    th = sub.add_parser("threads")
+    th.add_argument("--json", action="store_true",
+                    help="emit the chains as JSON — the form a viewer or another harness reads")
     sc = sub.add_parser("successor")
     sc.add_argument("--handoff", help="the file the successor should read (default: this session's "
                                       "handoff)")
@@ -10187,7 +10396,7 @@ def main():
      "confidence": cmd_confidence,
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model,
-     "successor": cmd_successor, "contribute": cmd_contribute,
+     "successor": cmd_successor, "threads": cmd_threads, "contribute": cmd_contribute,
      "kinds": cmd_kinds}[a.cmd](s, a)
 
 

@@ -374,6 +374,10 @@ successor [--handoff <path>] [--task ".."] [--title ".."] [--about ".."] [--cwd 
 #   --about is the one-line SUBJECT that leads the successor's prompt, so the row a human
 #   scans says what the run is about instead of naming a UUID. Derived from the handoff's
 #   heading, or the bound mandate, when omitted; --about "" leaves it out.
+threads [--json]
+#   which handoff is for which task: the handover chains in this checkout, each under the
+#   label it was minted with, with its hops in order and whether its head is live. The
+#   edges were always in the log -- this joins them rather than recording them twice.
 ```
 
 **The `proved` moment.** `fix --prove`, `effector --prove` and `mutate --prove` each fire a

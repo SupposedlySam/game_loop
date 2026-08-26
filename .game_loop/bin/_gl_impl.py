@@ -6942,13 +6942,22 @@ SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes
 SUBJECT_MAX = 100
 
 
-# A heading is a subject only when it NAMES THE WORK. These two spellings name a SESSION instead
-# — `# Handoff — session 6acce140` and `# Handoff — 6acce140-e2c3-4cb0-badb-8d90585d9713` — and both
-# are written by this harness's own conventions, which is why the check lives here rather than in
-# advice about writing better headings. Anchored whole: `session 6acce140 — merge into main` names
-# the work and survives, because the id in front of a description is a prefix, not the label.
+# A heading is a subject only when it NAMES THE WORK. These spellings name a SESSION instead —
+# `# Handoff — session 6acce140`, `# Handoff — 6acce140-e2c3-4cb0-badb-8d90585d9713`, `# Handoff —
+# session verify-e2e` — and all of them are written by this harness's own conventions, which is why
+# the check lives here rather than in advice about writing better headings.
+#
+# THE SECOND ARM CAME FROM THE LIVE RUN THAT VERIFIED THE FIRST. A real handover through saggar on
+# 2026-08-25 carried `# Handoff — session verify-e2e`: not hex, so the id rule let it through, and
+# the terminal Claude titled off that prompt came out "Verify e2e" — the same nothing, spelled
+# differently. `session <one token>` names a session whatever the token is; only a description
+# after it says what the session is DOING.
+#
+# Anchored whole, in both arms: `session 6acce140 — merge into main` survives, because an id in
+# front of a description is a prefix and the description is the label.
 ID_LABEL_RE = re.compile(r"^(?:session\s+)?[0-9a-f]{8}"
-                         r"(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$", re.I)
+                         r"(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+                         r"|^session\s+\S+$", re.I)
 
 
 def _is_id_label(text):

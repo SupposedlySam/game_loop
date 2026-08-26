@@ -1911,6 +1911,13 @@ def main():
               "about               : cut the release branch"
               in gl(proj, "successor", "--dry-run", "--handoff", subj_h, sid="sess-succ").stdout)
         with open(subj_h, "w") as f:
+            f.write("# Handoff — session verify-e2e\n\nreads\n")
+        check("...and a session named by something other than a uuid is the same nothing — found "
+              "by the live run that verified the uuid arm, whose terminal came out titled "
+              "\"Verify e2e\"",
+              "about               : cut the release branch"
+              in gl(proj, "successor", "--dry-run", "--handoff", subj_h, sid="sess-succ").stdout)
+        with open(subj_h, "w") as f:
             f.write("# Handoff — session 6acce140 — merge into main\n\nreads\n")
         check("an id in FRONT of a description is a prefix, not a label — that heading survives, "
               "because refusing it would throw away the only thing that names the work",

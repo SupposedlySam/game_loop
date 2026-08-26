@@ -12542,7 +12542,6 @@ def main():
     check("...and seq is unique and monotonic, since it is the ordering shas cannot provide",
           [e["seq"] for e in _bh["changes"]] == sorted({e["seq"] for e in _bh["changes"]}))
 
-    print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
     # WHERE THE REFUSALS ACTUALLY LIVE, DERIVED — because the watch list is a list of SPELLINGS and
     # a list of spellings cannot report what it is missing. WATCHED named the `game_loop` stub, and
     # #109 had moved every `die(` out of it into the importable module for spawn speed. The stub
@@ -12579,6 +12578,61 @@ def main():
           "it in this list carries one, and watching it read as covering the verb it fronts for",
           ".game_loop/bin/_gl_impl.py" in _bg_src
           and max(_bears, key=_bears.get) == "_gl_impl.py")
+
+    # #91.3: A REFUSAL IS DISTINGUISHABLE FROM A SUCCESS, AND `2>/dev/null` CANNOT SWALLOW IT.
+    # Reported by a consumer who lost three refuted claims in one evening because a refusal read as
+    # success — it exited like a typo does, and its reason lived on the stream a quiet hook
+    # discards. They wrote a 36-line wrapper to recover the distinction. I have now told them to
+    # delete it, which turns a current behaviour into a CONTRACT, and a contract nothing asserts is
+    # a memory.
+    #
+    # Driven over SEVERAL verbs. The property belongs to `die()`, so one verb passing says only that
+    # one call site is right; what this must catch is a verb added tomorrow that refuses some other
+    # way. The exit code is read from the source rather than written here, or the two drift and the
+    # test agrees with whichever it was taught.
+    print("#91: a refusal is distinguishable from a success, on both streams:")
+    _p91 = make_sandbox()          # its own tree: `proj` above belongs to a torn-down section
+    _impl_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+    _m_exit = re.search(r"^REFUSED_EXIT\s*=\s*(\d+)", _impl_src, re.M)
+    _refused_exit = int(_m_exit.group(1)) if _m_exit else -1
+    check("the refusal exit code is a NAMED constant in the payload, so this section and the tool "
+          "cannot disagree about what a refusal looks like",
+          _refused_exit > 1)
+    _ref_cases = [
+        ("claim --read naming a path that does not exist",
+         ["claim", "--assert", "x", "--read", "/nonexistent/gl91/probe"]),
+        ("confidence --mark alpha (not a level)", ["confidence", "--mark", "alpha"]),
+        ("mandate --wake-path with no mandate bound", ["mandate", "--wake-path", "x"]),
+    ]
+    _wrong_code, _one_stream = [], []
+    for _lbl, _args in _ref_cases:
+        _r = gl(_p91, *_args, sid="sess-die91")
+        if _r.returncode != _refused_exit:
+            _wrong_code.append(f"{_lbl} -> exit {_r.returncode}")
+        if not ("GAMELOOP" in _r.stdout and "GAMELOOP" in _r.stderr):
+            _one_stream.append(f"{_lbl} -> stdout={len(_r.stdout)}B stderr={len(_r.stderr)}B")
+    check("every refusal exits %d — not 0, which IS success, and not 1, which is what a crash and a "
+          "typo both give: %s" % (_refused_exit, "; ".join(_wrong_code) or "all three"),
+          not _wrong_code)
+    check("...and the reason reaches BOTH streams, so a hook quietened with 2>/dev/null still shows "
+          "why — the half the consumer's wrapper existed for: " +
+          ("; ".join(_one_stream) or "all three"),
+          not _one_stream)
+    # THE CONTROL. Every row above passes on a binary that exits 3 and prints GAMELOOP whatever you
+    # ask it, which is the shape this repo keeps finding in its own checks.
+    _ok_r = gl(_p91, "status", sid="sess-die91")
+    check("...while an ordinary SUCCESS exits 0 with a silent stderr — so the rows above are a "
+          "verdict about refusals rather than a description of every invocation",
+          _ok_r.returncode == 0 and not _ok_r.stderr.strip())
+    # THE SOURCE HALF. The docstring of the function that DEFINES a refusal described a different
+    # design from the one it implements — "reason on STDOUT, one line on stderr", above code that
+    # duplicates in full, plus a paragraph arguing against the duplication the code does. A reader
+    # goes there to learn the contract, and would have learned the wrong one.
+    _die_doc = (_impl_src.split("def die(msg, code=REFUSED_EXIT):", 1)[-1].split('"""')[1]
+                if "def die(msg, code=REFUSED_EXIT):" in _impl_src else "")
+    check("die()'s docstring describes the streams it actually writes — the function that defines "
+          "what a refusal IS must not document a design it no longer has",
+          "BOTH stdout and stderr" in _die_doc and "one line on stderr saying" not in _die_doc)
 
     print("a change to what game_loop REFUSES cannot go unrecorded (behaviour gate):")
     # THE MECHANISM WAS BUILT AND THE DISCIPLINE LAPSED SILENTLY, which a consumer measured rather

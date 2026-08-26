@@ -487,17 +487,24 @@ REFUSED_EXIT = 3   # a GATE said no. 2 stays what argparse and unhandled errors 
 
 
 def die(msg, code=REFUSED_EXIT):
-    """A refusal: exit 3, reason on STDOUT, one line on stderr saying where it went.
+    """A refusal: exit 3, and the FULL reason on BOTH stdout and stderr.
 
     Both halves are a consumer's report. Three refuted claims in one evening went unrecorded
     because a refusal read as success: it exited 2 exactly like a typo does, and its reason was on
     the one stream a quiet hook discards. They wrote a 36-line wrapper to recover the distinction,
     which is every consumer paying for something this can decide once.
 
-    NOT DUPLICATED ONTO BOTH STREAMS. A twenty-line refusal printed twice is one people skim, and
-    skimming a refusal is how it becomes a success. stderr keeps a single line so a watcher of that
-    stream still learns something was refused; stdout carries the reason so `2>/dev/null` cannot
-    swallow it.
+    THIS DOCSTRING USED TO DESCRIBE A DESIGN THIS FUNCTION NO LONGER HAS -- "reason on STDOUT, one
+    line on stderr", and a paragraph arguing NOT to duplicate. The code below duplicates in full,
+    and the comment inside it explains why that argument lost. The prose above the code and the
+    comment inside it disagreed, in the one function that defines what a refusal IS, and a reader
+    who trusted the docstring would have believed stderr carries a pointer rather than the reason.
+    Corrected rather than deleted: the argument it made is real, and losing it would invite someone
+    to re-make it.
+
+    The cost is duplication on a terminal. That is smaller than either failure it sits between --
+    stderr-only is swallowed by `2>/dev/null`, and stdout-only breaks every consumer already
+    reading stderr.
     """
     text = "GAMELOOP ✗ " + msg
     # BOTH STREAMS, which is what the reporter asked for and I first talked myself out of on

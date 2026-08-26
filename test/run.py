@@ -16159,10 +16159,40 @@ def main():
     finally:
         shutil.rmtree(_vt, ignore_errors=True)
 
-    check("and THIS repo currently has no vacuous rule — measured, not assumed, and it is a fact "
-          "about today rather than a guarantee",
-          _gvr.vacuous_rules(REPO, load_manifest_for_test())[0] == []
-          if "load_manifest_for_test" in dir() else True)
+    # THIS ASSERTION WAS ITSELF VACUOUS, WHICH IS THE FUNNIEST PLACE FOR IT AND THE WORST. It read
+    # `... if "load_manifest_for_test" in dir() else True`, and `load_manifest_for_test` is defined
+    # NOWHERE in this repo — its only two occurrences were the call and the guard string. So the
+    # condition was always false, the ternary always yielded True, and a check whose name says
+    # "measured, not assumed" had never measured anything. The guard was presumably added to stop a
+    # NameError; it stopped the check instead, and left the reassuring sentence behind.
+    #
+    # Same shape as the SCOPE guard keyed on a word that occurs zero times: a fallback that always
+    # fires is invisible for exactly as long as the check keeps passing. Found by scanning for
+    # ternaries whose condition is a string-literal membership test — there were two left, and this
+    # was the one whose fallback was `True`.
+    _vr_rules, _vr_excl = _gvr.load_manifest()
+    _dead_rules, _vr_why = _gvr.vacuous_rules(REPO, _vr_rules)
+    check("and THIS repo currently has no vacuous RULE — measured against the real manifest now, "
+          "and a fact about today rather than a guarantee: %d rule(s) checked" % len(_vr_rules),
+          _dead_rules == [] and not _vr_why and len(_vr_rules) > 5)
+    # THE EXEMPTIONS ARE THE HALF THAT IS NOT CLEAN, and the comment above says why that is worse: a
+    # rule matching nothing merely fails to run, while an exemption matching nothing is a STANDING
+    # AUTHORISATION for a surface that does not exist — the day a file lands there it arrives
+    # already exempt. A consumer found four in this repo; #99 carries them and is the human's to
+    # answer. So this PINS the four rather than asserting none, which keeps the fact measured and
+    # makes a FIFTH one fail here instead of arriving quietly while #99 sits open.
+    _vr_full = dict(_vr_rules)
+    _vr_full.update({_e: [] for _e in _vr_excl})
+    _dead_all, _vr_why2 = _gvr.vacuous_rules(REPO, _vr_full)
+    _dead_ex = sorted(set(_dead_all) - set(_dead_rules))
+    check("...and this repo's vacuous EXEMPTIONS are exactly the four standing today, which #99 "
+          "holds open for the human — a fifth arriving fails HERE rather than while nobody is "
+          "counting: " + ", ".join(_dead_ex),
+          not _vr_why2 and _dead_ex == [".claude/agents/**", ".claude/skills/**",
+                                        ".game_loop/notify.json", ".saggar/**"])
+    check("...and the exemption arm really is finding MORE than the rule arm, so the line above is "
+          "a measurement of a different field rather than the same answer twice",
+          len(_dead_ex) > len(_dead_rules))
 
     # ---- #95: every gate fires from INSIDE the session, which is what stops when a run goes quiet ----
     # Reported from a run that sat inert for six hours while status said the mandate was armed and

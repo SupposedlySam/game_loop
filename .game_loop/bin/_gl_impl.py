@@ -3917,14 +3917,30 @@ def shared_pins():
                     released.add(pid)
                 elif kind == "pin" and pid:
                     live.append(r)
+    except FileNotFoundError:
+        return []                        # no log yet is genuinely no pins
     except OSError:
-        return []
+        # "NONE REGISTERED" IS A CLAIM, AND THIS PATH COULD NOT MAKE IT. Returning [] here renders
+        # as `pins: none registered` -- an affirmative statement that nothing is load-bearing --
+        # when the truth is that the log would not open. That is the exact sentence #18 was built to
+        # prevent somebody acting on: the incident was a pin TIDIED AWAY by a later session cleaning
+        # up loose ends, and a status line volunteering that there is nothing to protect is an
+        # invitation to do it again.
+        return None                      # could not tell -- distinct from "none", see pins_report
     return [p for p in live if p.get("id") not in released]
 
 
 def pins_report(s):
     """The pins block for `status` — surviving compaction is the entire point of putting it here."""
     pins = shared_pins()          # the checkout's, not this session's (#31)
+    if pins is None:
+        return ["", "PINS — THE SHARED LOG WOULD NOT OPEN, so whether this checkout has "
+                    "load-bearing",
+                "  environment facts CANNOT be established. This is NOT 'none registered': if a pin "
+                "is",
+                "  live, nothing here will tell you before you tidy it away, which is exactly the "
+                "incident",
+                "  pins exist to prevent. Repair .game_loop/log.jsonl."]
     if not pins:
         return ['pins: none registered — `game_loop pin --fact ".." --reason ".." --path <real path>` '
                 "the moment local state becomes load-bearing"]

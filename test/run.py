@@ -2369,6 +2369,26 @@ def main():
               r2.returncode == 0 and "registered by ANOTHER session" in r2.stdout)
         check("...and with every pin released the empty-pins line is back",
               "pins: none" in gl(proj, "status").stdout)
+        # "NONE REGISTERED" IS A CLAIM, and one path could not make it. `shared_pins` returned []
+        # when the shared log would not OPEN, which renders as that same affirmative line — so a
+        # checkout whose log is unreadable told the reader there is nothing load-bearing here. That
+        # is the exact sentence #18 exists to stop somebody acting on: the incident was a pin tidied
+        # away by a later session cleaning up loose ends, and a status volunteering that there is
+        # nothing to protect is an invitation to repeat it.
+        _pin_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_pins", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _pinm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_pin_spec)
+        _pin_spec.loader.exec_module(_pinm)
+        _pinm.shared_pins = lambda: None
+        _pl = _pinm.pins_report({})
+        check("a shared log that will not open says the pins CANNOT be established — never 'none "
+              "registered', which is the line that invites the tidying #18 was built from",
+              any("CANNOT be established" in l for l in _pl)
+              and not any(l.startswith("pins: none registered") for l in _pl))
+        _pinm.shared_pins = lambda: []
+        check("...while genuinely no pins keeps the ordinary empty line, so the third answer did "
+              "not turn every fresh checkout into a warning",
+              any("none registered" in l for l in _pinm.pins_report({})))
         # AFTER the release sequence deliberately: pin ids are sequential (p1, p2), so registering
         # one earlier renumbers every later `--release` and breaks assertions that name an id.
         # THE ARM THAT REPORTS A VANISHED ANCHOR WAS NEVER REACHED. Found by mutating the glyph in

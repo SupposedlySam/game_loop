@@ -2211,6 +2211,25 @@ def main():
             return ((key, None, NOT_MEASURED, floor),
                     f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. NOT MEASURED: nothing was "
                     f"mutated, so this says nothing about coverage either way.\n")
+        if mutated == original:
+            # THE OTHER HALF OF "NEVER APPLIED", and NOT_MEASURED's own header already claimed it.
+            # `neuter` reports `hit` when it FINDS the function, not when the edit changes anything,
+            # so a body that already equals its neutered form produced a byte-identical file, a
+            # clean suite, and the verdict SURVIVED. That does not read as a broken control — it
+            # reads as a COVERAGE GAP, and sends the next reader hunting for an assertion that
+            # already exists. The wasted work is downstream of the wasted control and is
+            # indistinguishable from real work.
+            #
+            # Reported by a peer who found 44 of their 54 mutant-builders unverified: a `sed` that
+            # matches nothing exits 0, a `.replace()` that matches nothing returns the original.
+            # MEASURED HERE BEFORE ADDING THIS: all 108 declared producers mutate for real today, 0
+            # no-ops and 0 missing anchors — so this is not a fix for a live defect, it closes the
+            # gap between what the NOT_MEASURED contract SAYS it covers and what it checked.
+            return ((key, None, NOT_MEASURED, floor),
+                    f"  !! {key}: the mutation APPLIED BUT CHANGED NOTHING — {fn} in {rel} already "
+                    f"reads exactly like its neutered form, so the tree under test is byte-identical "
+                    f"to the baseline. NOT MEASURED: a clean suite here would mean nothing was "
+                    f"broken, not that nothing catches it.\n")
         t = tempfile.mkdtemp(prefix="sweep-")
         try:
             shutil.copytree(base, t, dirs_exist_ok=True)

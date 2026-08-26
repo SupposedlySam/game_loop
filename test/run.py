@@ -13134,6 +13134,58 @@ def main():
           found and "def aggregate_tell(text):\n    return None\n" in mutated
           and "_AGGREGATE_TELLS" in mutated and mutated != gl_src)
 
+    # AND `hit` IS NOT "THE EDIT LANDED" — it is "I FOUND THE FUNCTION". Those come apart exactly
+    # when a body already reads like its neutered form, and then the tree under test is
+    # BYTE-IDENTICAL to the baseline: the suite is clean, and the verdict is SURVIVED. That does not
+    # read as a broken control, it reads as a COVERAGE GAP, and it sends the next reader hunting for
+    # an assertion that already exists. The wasted work is downstream of the wasted control and is
+    # indistinguishable from real work.
+    #
+    # Raised by a peer who audited their own harness and found 44 of 54 mutant-builders never
+    # checking the edit applied — a `sed` matching nothing exits 0, a `.replace()` matching nothing
+    # returns the original. This drives the collision rather than describing it.
+    # The collision is NARROWER than "the body already matches", and this assertion was written
+    # wrong first and caught by its own run: neuter also swallows the blank lines between the
+    # function and whatever follows it, so a body that matches while the LAYOUT does not still
+    # produces different bytes. Both must agree. That makes the case rarer — and rarer is exactly
+    # what makes a silent one worth catching, since nobody is watching for it.
+    _noop_body = "    return None"
+    _noop_src = "def f(x):\n" + _noop_body + "\ndef g(y):\n    return 1\n"
+    _noop_out, _noop_hit = sweep.neuter(_noop_src, "f", _noop_body)
+    check("neuter reports HIT for an edit that changed NOTHING — so `hit` cannot stand in for "
+          "'the mutation applied', which is the whole reason the sweep compares bytes",
+          _noop_hit and _noop_out == _noop_src)
+    check("...and the same source with a blank line before the next def does NOT collide, which is "
+          "why this needs a byte comparison rather than a rule about matching bodies",
+          sweep.neuter("def f(x):\n" + _noop_body + "\n\ndef g(y):\n    return 1\n",
+                       "f", _noop_body)[0] != "def f(x):\n" + _noop_body + "\n\ndef g(y):\n    return 1\n")
+    check("...and the sweep treats that as NOT MEASURED rather than SURVIVED — a clean suite over "
+          "an unmutated tree means nothing was broken, not that nothing catches it",
+          "APPLIED BUT CHANGED NOTHING" in inspect.getsource(sweep.main)
+          and "mutated == original" in inspect.getsource(sweep.main))
+    # THE MEASUREMENT THAT SAYS THIS IS A CONTRACT GAP AND NOT A LIVE BUG. Every declared producer
+    # is neutered here and the result compared to the file it came from. 0 no-ops and 0 missing
+    # anchors today — so the branch above is closing the distance between what NOT_MEASURED's header
+    # CLAIMS it covers ("crashed, timed out, or was never applied") and the one cause it checked.
+    # If a producer ever drifts into agreeing with its own mutant, this fails HERE, naming it,
+    # instead of arriving as a coverage gap somebody spends an afternoon on.
+    _noops, _absent = [], []
+    for _lbl, _key, _body, _mk, _tn, _fl in sweep.MUTANTS:
+        _rel, _fn = _key.split("::", 1)
+        _orig = read_or_empty(os.path.join(REPO, _rel))
+        if not _orig:
+            continue
+        _mut, _h = sweep.neuter(_orig, _fn, _body)
+        if not _h:
+            _absent.append(_key)
+        elif _mut == _orig:
+            _noops.append(_key)
+    check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
+          "— so no producer is scored on a tree identical to the baseline: " +
+          (("no-op: " + ", ".join(_noops)) if _noops else "") +
+          (("absent: " + ", ".join(_absent)) if _absent else "none of either"),
+          not _noops and not _absent)
+
     # .game_loop/config.json is TRACKED — correct, it is project config — and two of its fields take
     # filesystem paths. A downstream project filled allow_write_roots with an absolute path under the
     # author's home and pushed to a public repo: every cloner inherited a WRITE ROOT outside their

@@ -218,6 +218,68 @@ def staged_files():
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
 
 
+# THE SCOPE FLAG, AND WHY THE CALLER COMPUTES IT RATHER THAN THIS SCRIPT.
+#
+# `verify` run by hand asks about the TREE: what have I changed that owes a check. The commit gate
+# asks a narrower question -- what does THIS COMMIT carry -- and the two shared one answer, so a
+# commit carrying a single README was gated on every dirty file in the tree and charged the full
+# suite for the privilege. That is the tax that gets a rule deleted rather than obeyed.
+#
+# The narrow scope cannot be computed HERE, and that is the whole design. A `-a` commit, a pathspec
+# commit and a plain one carry three different sets, and the only thing that distinguishes them is
+# the COMMAND -- which this script never sees. Worse, the guard runs at PreToolUse, BEFORE the
+# command body: at that moment a `-a` commit has staged NOTHING, so an index read here comes back
+# EMPTY and every rule goes unconsulted. Observed, not predicted -- an empty `git diff --cached`
+# beside a ` M gate.py` working tree, and the change landing in HEAD anyway. So a `verify` that
+# helpfully guessed "the index" would BE the bypass rather than the gate.
+#
+# The caller therefore resolves the set and names it. Absent this flag nothing changes: the tree is
+# the scope, which is what every hand-run and every pre-existing caller gets.
+SCOPE_FLAG = "--scope-from"
+
+
+def scope_arg(argv):
+    """The path given to --scope-from, or None. Accepts `--scope-from X` and `--scope-from=X`."""
+    for i, a in enumerate(argv):
+        if a == SCOPE_FLAG:
+            return argv[i + 1] if i + 1 < len(argv) else ""
+        if a.startswith(SCOPE_FLAG + "="):
+            return a[len(SCOPE_FLAG) + 1:]
+    return None
+
+
+def read_scope(path, prog="verify"):
+    """The caller's list of paths a commit carries -- one per line, repo-relative.
+
+    An EMPTY list is a legitimate answer (an empty index, which git itself then refuses) and comes
+    back as one. An UNREADABLE one is not. Falling back to an empty scope would pass every commit
+    unexamined, and falling back to the whole tree would refuse over files the commit does not
+    contain: two answers to a question nobody asked. So this refuses, naming the file it could not
+    read."""
+    if not path:
+        sys.stderr.write(f"{prog} REFUSED -- {SCOPE_FLAG} was given no path.\n")
+        raise SystemExit(2)
+    try:
+        raw = sys.stdin.read() if path == "-" else open(path).read()
+    except OSError as e:
+        sys.stderr.write(
+            f"{prog} REFUSED -- {SCOPE_FLAG} names a file this cannot read.\n"
+            f"    path : {path}\n    error: {e}\n\n"
+            "The caller passes this flag to say what a commit CARRIES. An empty scope would pass "
+            "every\ncommit unexamined and the whole tree would refuse over files the commit does "
+            "not contain,\nso neither fallback is honest and this refuses instead.\n")
+        raise SystemExit(2)
+    return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+
+
+def outside_scope(scoped):
+    """Dirty paths a scoped run did NOT look at. A rail is silent exactly where it is blind, and a
+    scoped run is blind by construction -- so it says so on the PASSING path, where the silence
+    would otherwise read as a statement about the whole tree."""
+    inside = set(scoped)
+    return [f for f in changed_files() if f not in inside]
+
+
 def owed(files, mapping):
     """{glob: [files]} for every rule a changed file trips."""
     hits = {}
@@ -346,7 +408,21 @@ def unchecked_tail(mapping, exclusions, files):
             + "\n  → ./.game_loop/bin/verify --coverage")
 
 
-def report_coverage(staged=False, porcelain=False):
+def outside_scope_tail(skipped):
+    """The sentence a scoped run owes. `unchecked_tail` says 'these paths matched no rule'; this
+    says 'these paths were not even looked at', which is the different and larger blindness a
+    narrowed scope buys. Both are printed on the same passing paths, for the same reason."""
+    if not skipped:
+        return ""
+    return (f"verify: OUT OF SCOPE — {len(skipped)} dirty path(s) are not in this commit, so "
+            "nothing above\n  looked at them. They stay dirty and will be asked about when a "
+            "commit carries them:\n"
+            + "\n".join(f"    {f}" for f in skipped[:UNCHECKED_SHOWN])
+            + (f"\n    ... {len(skipped) - UNCHECKED_SHOWN} more"
+               if len(skipped) > UNCHECKED_SHOWN else ""))
+
+
+def report_coverage(staged=False, porcelain=False, scope=None):
     """`verify --coverage` — the answer to 'what am I NOT checking?'. A REPORT: always exit 0.
 
     It must never be a gate. The manifest ships empty, so on a fresh install every path is
@@ -356,7 +432,8 @@ def report_coverage(staged=False, porcelain=False):
     mapping, exclusions = load_manifest()
     if (_dup := duplicate_key_tail()):
         print(_dup)
-    files = staged_files() if staged else changed_files()
+    files = read_scope(scope) if scope is not None else (
+        staged_files() if staged else changed_files())
     checked, excluded, unchecked = coverage(files, mapping, exclusions)
 
     if porcelain:
@@ -366,11 +443,12 @@ def report_coverage(staged=False, porcelain=False):
         sys.stdout.write("\n")
         return 0
 
-    scope = "staged" if staged else "changed"
+    scope_label = "in this commit" if scope is not None else ("staged" if staged else "changed")
     print("verify --coverage — what this manifest is NOT checking.\n")
     print(f"  rules in .game_loop/verify.yaml : {len(mapping)}")
     print(f'  deliberate exclusions ("{EXCLUDE_KEY}") : {len(exclusions)}')
-    print(f"  {scope} paths : {len(files)}  (checked {len(checked)} · excluded {len(excluded)} · "
+    print(f"  {scope_label} paths : {len(files)}  (checked {len(checked)} · excluded "
+          f"{len(excluded)} · "
           f"UNCHECKED {len(unchecked)})")
     if not mapping:
         print("\n  NO RULES AT ALL — `verify` and the commit gate are no-ops here. That is the "
@@ -451,12 +529,20 @@ def main():
     # BEFORE the empty-manifest early-out: "there are no rules" is precisely the state that must
     # still be able to report, and an empty manifest that returned in silence is the bug.
     if "--coverage" in sys.argv:
-        return report_coverage(staged="--staged" in sys.argv, porcelain="--porcelain" in sys.argv)
+        return report_coverage(staged="--staged" in sys.argv, porcelain="--porcelain" in sys.argv,
+                               scope=scope_arg(sys.argv))
 
     mapping, exclusions = load_manifest()
     if (_dup := duplicate_key_tail()):
         print(_dup)
-    files = changed_files()
+    # SCOPE. Absent --scope-from this is the tree, byte-for-byte what it always was. Present, it is
+    # the set the caller says a commit carries, and `skipped` is what that narrowing did not look
+    # at -- computed here, printed on the passing paths, because a scoped pass is a smaller claim
+    # than an unscoped one and must not be spelled the same way.
+    _scope = scope_arg(sys.argv)
+    scoped = _scope is not None
+    files = read_scope(_scope) if scoped else changed_files()
+    skipped = outside_scope(files) if scoped else []
     if not mapping:
         print("verify: no rules in .game_loop/verify.yaml — nothing owes a check.")
         _, _, unchecked = coverage(files, mapping, exclusions)
@@ -468,8 +554,11 @@ def main():
     check_only = "--check" in sys.argv
 
     if not hits:
-        print("verify: nothing changed that owes a check.")
+        print("verify: nothing in this commit owes a check." if scoped
+              else "verify: nothing changed that owes a check.")
         if (tail := unchecked_tail(mapping, exclusions, files)):
+            print(tail)
+        if (tail := outside_scope_tail(skipped)):
             print(tail)
         return 0
 
@@ -503,8 +592,12 @@ def main():
 
     if check_only:
         if not stale:
-            print("verify: every changed file's evidence is newer than the change. ✓")
+            print("verify: every file this commit carries has evidence newer than the "
+                  "change. ✓" if scoped else
+                  "verify: every changed file's evidence is newer than the change. ✓")
             if (tail := unchecked_tail(mapping, exclusions, files)):
+                print(tail)
+            if (tail := outside_scope_tail(skipped)):
                 print(tail)
             return 0
         print("VERIFY REFUSED — you changed things whose checks have not run SINCE the change:\n")
@@ -530,9 +623,13 @@ def main():
     # dozens of times in a working session, and "I ran them" and "somebody ran them earlier" are
     # different claims about how much the tree has been checked SINCE it last changed.
     if not stale:
-        print("verify: every changed file's evidence is already newer than the change — "
+        print("verify: every file this commit carries already has evidence newer than the "
+              "change — nothing needed re-running. ✓" if scoped else
+              "verify: every changed file's evidence is already newer than the change — "
               "nothing needed re-running. ✓")
         if (tail := unchecked_tail(mapping, exclusions, files)):
+            print(tail)
+        if (tail := outside_scope_tail(skipped)):
             print(tail)
         return 0
 

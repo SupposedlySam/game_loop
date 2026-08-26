@@ -720,6 +720,28 @@ newer than the last successful run of its checks — the gate is "is the evidenc
 change", not "did you remember". The write guard calls it before `git commit`. Ships empty (a no-op)
 until you add rules.
 
+**Scoped to what the commit carries, not to the tree.** Run by hand, `verify` asks about the working
+tree — every dirty path, which is the question a human at a terminal is asking. At `git commit` the
+question is narrower, and the write guard passes the answer in with `--scope-from`: the index for a
+plain commit, the index plus every tracked modification for `git commit -a`, the named paths for a
+pathspec commit (which ignores the index for everything else, as git does). Before this, one dirty
+file anywhere refused every commit and charged that file's whole check — in this repo, a three-minute
+suite run to commit a doc.
+
+The obvious version of this is a total bypass, which is why the scope is read off the *command*
+rather than looked up. The guard is a `PreToolUse` hook: it runs *before* the command body, and at
+that instant `git commit -am` has staged nothing at all. A gate that simply read the index would find
+it empty, match no rule, and wave through the most common way an agent commits. So anything the scope
+reader cannot classify — an unknown option that might consume the next token, `-p`, `--interactive`,
+`--pathspec-from-file`, two commits chained in one line — falls back to the whole tree: over-gating,
+which costs time, never under-gating, which costs the gate.
+
+Two things it still does not do. The commands themselves run over the *working tree* — nothing here
+stashes — so the evidence for a partial commit was never isolated from the unstaged work around it
+and is not isolated now; this narrows which rules are consulted and which stamps must be fresh.
+And staleness compares the working-tree mtime of a file in scope, so staging and then editing further
+refuses. Both err toward refusing.
+
 **What a map of listed paths cannot say.** It answers "is anything listed here stale?", never "is
 anything unverified?" — a path matching no glob owes nothing and passes `--check` in silence. That is
 how a whole new package gets built, hand-tested and committed with the gate reporting clean: the
@@ -730,8 +752,9 @@ where it is blind, and quiet reads as safe.
 So coverage is computed the other way round. Every changed path counts as **unchecked** until a rule
 claims it or the manifest excludes it out loud under the reserved `unchecked-ok:` key (whose entries
 are globs, not commands). `./.game_loop/bin/verify --coverage` prints the three sets, `game_loop
-status` re-prints the count and the paths every session, and the write guard names the staged
-unchecked set at `git commit`.
+status` re-prints the count and the paths every session, and the write guard names the unchecked
+paths *this commit carries* at `git commit` — the same scope the gate above uses, so the notice and
+the gate cannot disagree about what is being committed.
 
 **Default-deny for visibility, default-allow for blocking** — deliberately. The manifest ships empty,
 so "unlisted ⇒ refused" would refuse a fresh install's first commit with the fix, writing the rules,

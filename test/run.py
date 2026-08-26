@@ -721,6 +721,10 @@ def main():
             f.write('"*.txt":\n  - "false"\n')
         with open(os.path.join(proj, "note.txt"), "w") as f:
             f.write("x\n")
+        # STAGED, because the gate asks what the COMMIT CARRIES rather than what the tree holds. An
+        # untracked file plus a bare `git commit` is a commit of NOTHING — git itself refuses it —
+        # so a fixture built that way would assert a refusal over a commit that cannot happen.
+        subprocess.run(["git", "add", "--", "note.txt"], cwd=proj, capture_output=True)
         commit = {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}, "cwd": proj}
         check("blocks an in-repo commit whose owed checks are stale", denied(guard(proj, commit)))
         elsewhere = tempfile.mkdtemp(prefix="gameloop-other-")
@@ -757,6 +761,11 @@ def main():
               denied(r) and "OTHER OPERATION" not in r.stdout)
         with open(vy, "w") as f:
             f.write(vy_src)
+        # ...and unstaged again, so the shared sandbox goes back to the state the sections after
+        # this one were written against — an index this block filled is a fixture they never asked
+        # for, and the blast-radius warning reads exactly that index.
+        subprocess.run(["git", "rm", "--cached", "-q", "--", "note.txt"], cwd=proj,
+                       capture_output=True)
 
         # #16: a redirect token must stop at a shell metacharacter. A redirect inside a command
         # substitution used to swallow the closing paren — `2>/dev/null)` is not the sink
@@ -3731,14 +3740,17 @@ def main():
             quiet = cvcommit()                                  # nothing staged: no accusation
             cvgit("add", "--", "lib/new_package.py", "docs/notes.md")
             r = cvcommit()
-            check("the commit note names the STAGED path no rule checks",
-                  "STAGED FILE NO RULE CHECKS" in r.stdout and "lib/new_package.py" in r.stdout
-                  and "docs/notes.md" not in r.stdout)
+            check("the commit note names the path no rule checks — 'staged' was the wrong word "
+                   "for it the moment `git commit -a` came into scope, since those files are not "
+                   "in the index when the gate reads them",
+                   "FILE NO RULE CHECKS" in r.stdout and "lib/new_package.py" in r.stdout
+                   and "docs/notes.md" not in r.stdout)
             check("the commit note is stated, never blocked",
                   "NO RULE CHECKS" in r.stdout and not denied(r) and r.returncode == 0)
             check("the commit note states what it cannot see (INV6)",
-                  "NO RULE CHECKS" in r.stdout and "commit -a" in r.stdout
-                  and "silence here is not evidence" in r.stdout.lower())
+                   "NO RULE CHECKS" in r.stdout and "--no-verify skips all of it" in r.stdout
+                   and "not evidence that a commit was checked" in r.stdout.lower()
+                   and "could not be read" in r.stdout)
             # the quiet case, asserted against a sibling that DID fire — a bare absence would pass
             # against code that never implemented the note at all
             check("an empty index accuses nobody (the note is about what the commit carries)",
@@ -3776,6 +3788,10 @@ def main():
             r = vfy("--check")
             check("existing owed-check behaviour is unchanged — a stale rule still REFUSES",
                   r.returncode == 1 and "VERIFY REFUSED" in r.stdout and "src/**" in r.stdout)
+            # src/app.py has been untracked all along, so a bare commit never carried it. Stage it:
+            # the claim is that a STALE RULE blocks a commit, and the commit has to contain the file
+            # the rule is about for that claim to be tested at all.
+            cvgit("add", "--", "src/app.py")
             check("and the stale refusal still blocks the commit",
                   denied(cvcommit()))
 
@@ -4001,14 +4017,22 @@ def main():
                 gate ALLOWS is silence, and so is a gate that never ran."""
                 return allowed(wmain, _wpayload(cwd, sid), sid=sid)
 
-            def wwrite(tree, rel, when):
-                """Write a file and PIN its mtime: staleness here is a comparison against a recorded
-                timestamp, and a test that depends on wall-clock ordering is a flaky test."""
+            def wwrite(tree, rel, when, stage=True):
+                """Write a file, PIN its mtime, and STAGE it.
+
+                The mtime is pinned because staleness is a comparison against a recorded timestamp,
+                and a test depending on wall-clock ordering is a flaky test. It is staged because
+                the commit gate asks what the COMMIT CARRIES: an untracked file and a bare
+                `git commit` are a commit of nothing, and a refusal asserted over that is a refusal
+                about a commit that could never have happened."""
                 p = os.path.join(tree, rel)
                 os.makedirs(os.path.dirname(p), exist_ok=True)
                 with open(p, "w") as f:
                     f.write(rel + "\n")
                 os.utime(p, (_t.time() + when, _t.time() + when))
+                if stage:
+                    wgit(tree, "add", "--", rel)
+                    os.utime(p, (_t.time() + when, _t.time() + when))   # `add` must not move it
                 return p
 
             # A rule whose command PASSES, so a tree can be made genuinely green. The worktree and
@@ -4062,6 +4086,35 @@ def main():
             check("and the refusal names the worktree's file, not the main tree's",
                   denied(r) and "unrelated.txt" not in r.stdout)
 
+            # THE HOOK EXPORTS GAME_LOOP_HOME, AND IT USED TO WIN — #28 coming back through the
+            # environment, in a shape every assertion above is blind to.
+            #
+            # OBSERVED LIVE, not reasoned about: a commit in a real worktree was refused for the
+            # MAIN tree's dirty files, by a refusal whose own next paragraph named the WORKTREE as
+            # the tree it lands in. Two halves of one message disagreeing about which tree was
+            # under discussion. `run_verify` invokes the worktree's own binary in the unpinned
+            # case, which looks right and is not: the PreToolUse hook is wired
+            # `GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop" exec .../guard-writes.sh`, and
+            # `verify` resolves its home from that variable BEFORE its own location. So the right
+            # binary answered from the wrong tree, and a worktree could be refused for a main-tree
+            # staleness it cannot fix — or, in the other direction, pass on a main record that
+            # never saw its files. The second is the one #28 exists to prevent.
+            #
+            # THIS SUITE COULD NOT HAVE CAUGHT IT, and that is the part worth keeping. `_env()`
+            # pops GAME_LOOP_HOME deliberately (see its comment: a PINNED harness guarding this
+            # very suite would otherwise point every sandboxed script at the real repo). Every
+            # worktree assertion above therefore runs in a condition the live hook never produces
+            # — the scrub that makes those tests sound is the scrub that hid this one. So this
+            # check SETS the variable, to the project, exactly as the hook does.
+            _hookenv = _env(wmain, GAME_LOOP_HOME=os.path.join(wmain, ".game_loop"))
+            r = subprocess.run([os.path.join(wmain, ".game_loop", "bin", "guard-writes.sh")],
+                               input=json.dumps(_wpayload(wt)), capture_output=True, text=True,
+                               env=_hookenv)
+            check("an exported GAME_LOOP_HOME does not decide which tree a commit is answerable "
+                  "to — the hook sets it to the PROJECT on every tool call, and a worktree commit "
+                  "must still be gated on the WORKTREE's record (#28, via the environment)",
+                  denied(r) and "late.txt" in r.stdout and "unrelated.txt" not in r.stdout)
+
             # A tree the guard can NAME but cannot CHECK. Borrowing the project's record here would
             # report confidence about files that record never saw, which is the exact failure above.
             os.remove(os.path.join(wt, "late.txt"))
@@ -4081,14 +4134,25 @@ def main():
             guard(wmain, {"tool_name": "Write", "session_id": sid,
                           "tool_input": {"file_path": os.path.join(wt, "lib", "mine.dart")}},
                   sid=sid)
+            # THE INDEX IS THE FIXTURE HERE, so it is emptied first. Earlier steps in this
+            # section stage the files whose commits they are about, and this sub-test COUNTS the
+            # excess — every stray staged path lands in that number, and the number is the whole
+            # assertion. Reset, then stage exactly the two files this claim is about.
             for rel in ("lib/mine.dart", "lib/swept.dart"):
-                wwrite(wt, rel, -5)
+                wwrite(wt, rel, -5, stage=False)
+            wgit(wt, "reset", "-q")
             wgit(wt, "add", "--", "lib/mine.dart", "lib/swept.dart")
             r = wcommit(wt, sid=sid)
+            # ...and the assertion is scoped to the BLAST-RADIUS text rather than to all of stdout.
+            # The coverage notice is in there too, it reads the same commit, and no rule claims a
+            # .dart file — so it names both of these paths, correctly and for its own reasons. A
+            # bare `"mine.dart" not in r.stdout` was passing only because that notice used to read
+            # the WRONG TREE's index and could never mention a worktree file at all.
+            _blast = r.stdout.split("THIS COMMIT CARRIES")[0]
             check("the blast-radius warning reads the COMMITTING tree's index (#28)",
                   not denied(r)
-                  and "COMMIT INCLUDES 1 FILE THIS SESSION NEVER EDITED" in r.stdout
-                  and "swept.dart" in r.stdout and "mine.dart" not in r.stdout)
+                  and "COMMIT INCLUDES 1 FILE THIS SESSION NEVER EDITED" in _blast
+                  and "swept.dart" in _blast and "mine.dart" not in _blast)
             check("the session's edited set is one set, written beside the session's state",
                   os.path.exists(os.path.join(wmain, ".game_loop", "sessions", sid, "edited.txt")))
 
@@ -4104,6 +4168,187 @@ def main():
                   wallowed(wmain))
         finally:
             shutil.rmtree(wmain, ignore_errors=True)
+
+        # THE GATE ASKED ABOUT THE TREE WHEN THE QUESTION WAS ABOUT THE COMMIT. `verify --check` read
+        # `git status` — every dirty path — so a commit carrying one README was refused for an
+        # unrelated edit elsewhere in the tree, and charged that edit's whole suite. In this repo
+        # that is a three-minute test run to commit a doc, which is the kind of tax that gets a rule
+        # deleted rather than obeyed.
+        #
+        # THE OBVIOUS FIX IS A TOTAL BYPASS, and that is why this section leads with it. The hook is
+        # PreToolUse: it runs BEFORE the command body. At that instant `git commit -am` has staged
+        # NOTHING — `git diff --cached` comes back EMPTY beside a working tree that plainly shows the
+        # modification, observed on real git before a line of this was written — so a gate that
+        # narrowed itself to "the index" would consult ZERO rules and wave through the single most
+        # common way an agent commits. The first check below is that bypass, written as the control:
+        # it fails against any index-only reading and passes only because the scope is read off the
+        # COMMAND instead.
+        #
+        # WHAT IT STILL CANNOT SEE: the commands themselves run over the WORKING TREE, so the
+        # evidence for a partial commit was never isolated from the unstaged dirt around it and is
+        # not isolated now. This narrows which RULES are consulted and which STAMPS must be fresh —
+        # it does not stash, and it does not claim the tree was clean.
+        print("write guard (the commit gate is scoped to what the COMMIT carries):")
+        cs = make_sandbox()
+        try:
+            import time as _cst
+
+            def csgit(*args):
+                return subprocess.run(["git", "-c", "user.email=t@example.invalid",
+                                       "-c", "user.name=tester", "-c", "commit.gpgsign=false",
+                                       "-c", "init.defaultBranch=main", *args],
+                                      cwd=cs, capture_output=True, text=True)
+
+            def cswrite(rel, when, body):
+                """Write a file and PIN its mtime — staleness is a comparison against a recorded
+                stamp, and a test leaning on wall-clock ordering is a flaky test.
+
+                THE BODY IS A PARAMETER because pinning mtimes collides with git's stat cache: a
+                rewrite that lands the SAME size at the SAME mtime as the index entry is reported by
+                `git status` as CLEAN, whatever the bytes say. That silently emptied this fixture —
+                every commit here carried nothing, so every gate passed and the section looked green
+                where it was vacuous. Distinct sizes and distinct pinned times, every write."""
+                f = os.path.join(cs, rel)
+                with open(f, "w") as fh:
+                    fh.write(body)
+                os.utime(f, (_cst.time() + when, _cst.time() + when))
+
+            def cspay(command):
+                return {"tool_name": "Bash", "cwd": cs, "session_id": "",
+                        "tool_input": {"command": command}}
+
+            def csrun(command):
+                return guard(cs, cspay(command))
+
+            def csok(command):
+                return allowed(cs, cspay(command))
+
+            with open(os.path.join(cs, ".game_loop", "verify.yaml"), "w") as f:
+                f.write('"*.txt":\n  - "true"\n')      # a rule whose command genuinely passes
+            with open(os.path.join(cs, ".gitignore"), "w") as f:
+                f.write(".game_loop/verified.json\n")
+            csgit("init", "-q")
+            cswrite("a.txt", -90, "a one\n")
+            cswrite("b.txt", -90, "b one\n")
+            csgit("add", "-A")
+            csgit("commit", "-q", "-m", "init")
+
+            # GREEN, then ONE file goes stale. a.txt is older than the stamp, b.txt is newer, and
+            # b.txt is NOT staged — the exact shape of "I am committing one thing while another sits
+            # half-finished beside it".
+            cswrite("a.txt", -60, "a two, longer\n")
+            subprocess.run([os.path.join(cs, ".game_loop", "bin", "verify")],
+                           cwd=cs, capture_output=True, text=True, env=_env())
+            cswrite("b.txt", +60, "b two, longer still\n")
+            csgit("add", "a.txt")
+            check("the fixture is real: one file staged and fresh, one dirty and stale — a vacuous "
+                  "sandbox would pass every check below by carrying nothing",
+                  csgit("diff", "--cached", "--name-only").stdout.split() == ["a.txt"]
+                  and " M b.txt" in csgit("status", "--porcelain", "-uall").stdout)
+
+            check("a commit carrying only the STAGED file is allowed while an unstaged file is "
+                  "stale — the tree is no longer the question",
+                  csok("git commit -m x"))
+
+            # THE CONTROL, and the whole reason the scope is read off the command. `-a` stages at
+            # commit time, so b.txt is NOT in the index right now: a gate that read the index would
+            # never see it, match no rule and allow this. It must be REFUSED.
+            r = csrun("git commit -am x")
+            check("`git commit -am` is REFUSED for the stale file it will sweep in — that file is "
+                  "absent from the index at PreToolUse, so an index-only scope would be a bypass",
+                  denied(r) and "b.txt" in r.stdout)
+            check("...and git really does leave it out of the index at that moment, which is what "
+                  "makes the check above a control rather than a coincidence",
+                  "b.txt" not in csgit("diff", "--cached", "--name-only").stdout)
+
+            # A PATHSPEC COMMIT IGNORES THE INDEX for every other path — verified against real git,
+            # not read off a manpage: with a.txt staged, `commit b.txt` put b.txt alone in HEAD and
+            # left a.txt staged. So the pathspec is the scope, and neither direction may leak.
+            check("a pathspec commit naming the CLEAN file is allowed",
+                  csok("git commit -m x a.txt"))
+            r = csrun("git commit -m x b.txt")
+            check("a pathspec commit naming the STALE file is refused",
+                  denied(r) and "b.txt" in r.stdout)
+            r = csrun("git commit -m x -- b.txt")
+            check("...and `--` separates the pathspec the same way",
+                  denied(r) and "b.txt" in r.stdout)
+
+            # UNCERTAINTY FALLS BACK TO THE TREE. An option this cannot classify might consume the
+            # next token, and misreading that token as a pathspec would narrow the scope to a file
+            # nobody named — under-gating, which costs the gate, rather than over-gating, which
+            # costs time. Each of these must behave exactly as the gate did before scopes existed.
+            r = csrun("git commit --frobnicate-the-widget -m x")
+            check("an option the scope reader cannot classify falls back to the WHOLE TREE",
+                  denied(r) and "b.txt" in r.stdout)
+            r = csrun("git commit -p -m x")
+            check("an interactive commit falls back to the whole tree — its content is chosen at a "
+                  "prompt this gate cannot see",
+                  denied(r) and "b.txt" in r.stdout)
+            r = csrun("git commit --pathspec-from-file=list.txt")
+            check("a pathspec read from a FILE falls back to the whole tree",
+                  denied(r) and "b.txt" in r.stdout)
+            r = csrun("git commit -m x && git commit -m y")
+            check("two commits chained have no single answer to 'what does it carry', so both are "
+                  "gated on the whole tree",
+                  denied(r) and "b.txt" in r.stdout)
+
+            # THE VALUE-TAKING OPTIONS, which is where a hand-rolled parser silently goes wrong: the
+            # message must never be read as a pathspec, or the scope becomes a file that does not
+            # exist and the gate matches nothing.
+            r = csrun("git commit -m b.txt")
+            check("a MESSAGE that looks like a path is not mistaken for a pathspec — the scope is "
+                  "still the index, and the stale unstaged file does not gate it",
+                  not denied(r))
+            r = csrun("git commit --message b.txt")
+            check("...nor in its long form", not denied(r))
+            r = csrun("git commit -m x --author 'a <a@b.c>'")
+            check("...nor is an option's VALUE, when the option is one that takes one",
+                  not denied(r))
+
+            # UNTRACKED FILES COUNT: a pathspec commit can name one, and `git status -uall` is how
+            # the scope sees it. A scope built from `git diff` alone would miss it entirely.
+            cswrite("c.txt", +60, "c one\n")
+            r = csrun("git commit -m x c.txt")
+            check("an UNTRACKED file named in the pathspec is in scope and gates the commit",
+                  denied(r) and "c.txt" in r.stdout)
+            check("...while a commit that does not name it is still allowed — an untracked file is "
+                  "not swept in by `-a` either",
+                  csok("git commit -m x a.txt"))
+            os.remove(os.path.join(cs, "c.txt"))
+
+            # THE NARROWING IS SAID OUT LOUD. A rail is silent exactly where it is blind, and a
+            # scoped pass is blind by construction — so `verify` names the dirty paths it did not
+            # look at, on the PASSING path, where the silence would otherwise read as "tree clean".
+            sf = os.path.join(cs, "scope.txt")
+            with open(sf, "w") as f:
+                f.write("a.txt\n")
+            rv = subprocess.run([os.path.join(cs, ".game_loop", "bin", "verify"),
+                                 "--check", "--scope-from", sf],
+                                cwd=cs, capture_output=True, text=True, env=_env())
+            check("a scoped pass NAMES the dirty paths outside the commit rather than implying the "
+                  "tree is clean",
+                  rv.returncode == 0 and "OUT OF SCOPE" in rv.stdout and "b.txt" in rv.stdout)
+            check("...and says the smaller thing it is entitled to say — 'this commit', not 'every "
+                  "changed file'",
+                  "file this commit carries" in rv.stdout)
+
+            # AN UNREADABLE SCOPE IS NOT AN EMPTY ONE. Falling back to nothing would pass every
+            # commit unexamined; falling back to the tree would refuse over files the commit does
+            # not contain. Both answer a question nobody asked, so it refuses and names the file.
+            rv = subprocess.run([os.path.join(cs, ".game_loop", "bin", "verify"),
+                                 "--check", "--scope-from", os.path.join(cs, "no-such-scope")],
+                                cwd=cs, capture_output=True, text=True, env=_env())
+            check("an unreadable --scope-from REFUSES rather than degrading to a scope of nothing",
+                  rv.returncode == 2 and "REFUSED" in rv.stderr)
+
+            # THE UNSCOPED PATH IS UNTOUCHED. Every hand-run of `verify` still asks about the tree,
+            # which is the question a human at a terminal is actually asking.
+            rv = subprocess.run([os.path.join(cs, ".game_loop", "bin", "verify"), "--check"],
+                                cwd=cs, capture_output=True, text=True, env=_env())
+            check("`verify --check` with no scope is exactly what it always was — the whole tree",
+                  rv.returncode == 1 and "b.txt" in rv.stdout and "OUT OF SCOPE" not in rv.stdout)
+        finally:
+            shutil.rmtree(cs, ignore_errors=True)
 
         # #29: the blast-radius set is scoped to the SESSION, deliberately and correctly — which is
         # exactly why it can never hold what a SIBLING session wrote on a branch. The moment this
@@ -9127,9 +9372,26 @@ def main():
     # ONE AGAIN, and named rather than counted: the section-map writer a trimmed sweep depends on.
     # Neutering it writes no map, every producer falls back to the whole suite, and the run is
     # correct but slow — which nothing would notice, so it is a real gap rather than a formality.
-    _expected_gaps = ["test/mutation_sweep.py::_write_section_map"]
-    check("...and THIS repo's declared KNOWN GAPs are exactly the five the empty-string detector "
-          "surfaced — a fact about today, and the next one anybody adds or closes shows up HERE "
+    #
+    # THEN THREE, and the two that joined it are ORDERING rather than judgement — which is the
+    # distinction this roster exists to keep visible. Both arrived with the change that scopes the
+    # commit gate to what a commit CARRIES, and `mutation_sweep.main()` sweeps `git archive HEAD`
+    # deliberately, so a floor is measured against a tree somebody can check out. A producer
+    # introduced BY the commit under review is not in HEAD while it is under review, so there is no
+    # order of operations in which a first sweep could have scored those two. Recording a number for
+    # them today would be a number about nothing, which is the target-making the sweep's header
+    # warns against.
+    #
+    # What is known about them is not nothing and is not a floor: both are killed by assertions
+    # written in the same change — the scoped `--check` wording, and the OUT OF SCOPE line naming
+    # the dirty paths a narrowed run did not look at. That argues for EXPECTING a non-zero floor. It
+    # does not measure one, and the queue stays open until somebody does.
+    _expected_gaps = [".game_loop/bin/verify::outside_scope_tail",
+                      ".game_loop/bin/verify::scope_arg",
+                      "test/mutation_sweep.py::_write_section_map"]
+    check("...and THIS repo's declared KNOWN GAPs are exactly the three standing today — the "
+          "section-map writer, plus the two the commit-scope change introduced — a fact about "
+          "today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
           _gaps(_ns) == _expected_gaps)
     # A GAP MAY BE IN THE SWEEP'S OWN TOOLING, and that is not a loophole. This read

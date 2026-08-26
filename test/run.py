@@ -10428,11 +10428,15 @@ def main():
     # written in the same change — the scoped `--check` wording, and the OUT OF SCOPE line naming
     # the dirty paths a narrowed run did not look at. That argues for EXPECTING a non-zero floor. It
     # does not measure one, and the queue stays open until somebody does.
-    _expected_gaps = [".game_loop/bin/verify::outside_scope_tail",
-                      ".game_loop/bin/verify::scope_arg",
-                      "test/mutation_sweep.py::_write_section_map"]
-    check("...and THIS repo's declared KNOWN GAPs are exactly the three standing today — the "
-          "section-map writer, plus the two the commit-scope change introduced — a fact about "
+    # WAS THREE, IS ONE. The two the commit-scope change introduced were excluded with the reason
+    # "unmeasurable until the commit introducing it is IN HEAD, which is the tree the sweep
+    # archives" — true when written, and expired the moment 8561324 landed. Nothing was watching
+    # for the moment to pass, so the exclusion outlived its own reason and the two producers sat
+    # undeclared for days behind a blocker that no longer existed. Both are swept now; the rule that
+    # catches this class is asserted below.
+    _expected_gaps = ["test/mutation_sweep.py::_write_section_map"]
+    check("...and THIS repo's declared KNOWN GAPs are exactly the one standing today — the "
+          "section-map writer — a fact about "
           "today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
           _gaps(_ns) == _expected_gaps)
@@ -13538,6 +13542,37 @@ def main():
     # This does not fix the mismatch; making `neuter` indent-aware is the general fix and would let
     # class methods be swept. It stops the mismatch being SILENT: an unreachable candidate must be
     # excluded with a reason, never declared as a mutant that cannot run.
+    # AN EXCLUSION IS A DECISION ABOUT A MOMENT, AND NOTHING WAS WATCHING FOR THE MOMENT TO PASS.
+    # Two producers were excluded as KNOWN GAPs reading "unmeasurable until the commit introducing
+    # it is IN HEAD, which is the tree the sweep archives". That was true the day it was written and
+    # expired when 8561324 landed — after which the exclusion outlived its own reason, and both sat
+    # undeclared behind a blocker that no longer existed. Nothing could report it: the reason reads
+    # exactly as well after it stops being true.
+    #
+    # So a reason that cites HEAD is now CHECKED against HEAD. This is the narrow, checkable half of
+    # a general problem — most exclusion reasons are prose nothing can verify — and it is worth
+    # having precisely because this one class states a condition a machine can re-ask.
+    def _absent_from_head(key):
+        _rel, _fnm = key.split("::", 1)
+        _h = subprocess.run(["git", "show", f"HEAD:{_rel}"], cwd=REPO,
+                            capture_output=True, text=True)
+        if _h.returncode != 0:
+            return True                      # not in HEAD at all: the reason still holds
+        return not re.search(r"^def " + re.escape(_fnm) + r"\(", _h.stdout, re.M)
+
+    _head_claims = [k for k, v in sweep.NOT_SWEPT.items() if "IN HEAD" in v.upper()]
+    _expired = [k for k in _head_claims if not _absent_from_head(k)]
+    check("no exclusion is still citing 'not in HEAD yet' for a producer that IS in HEAD — that "
+          "reason expires on its own and reads exactly as well afterwards: " +
+          (", ".join(_expired) or "none of %d such reason(s)" % len(_head_claims)),
+          not _expired)
+    # THE RULE CAN FIRE, driven on this repo's own history rather than a fixture: a function that
+    # demonstrably IS in HEAD must come back as present, and a name that never existed must not.
+    check("...and the HEAD probe answers both ways, so the clean line above is a verdict rather "
+          "than a check that always says yes",
+          _absent_from_head(".game_loop/bin/verify::a_function_that_never_existed")
+          and not _absent_from_head(".game_loop/bin/verify::scope_arg"))
+
     _reach_un = []
     for _key in sweep.all_candidates():
         _rel, _fnm = _key.split("::", 1)

@@ -995,6 +995,17 @@ MUTANTS += [
 ]
 
 MUTANTS += [
+    ("verify.scope_arg -> every commit gate silently un-scopes to the whole tree",
+     ".game_loop/bin/verify::scope_arg", "    return None\n",
+     ["--scope-from", "scope-from", "OUT OF SCOPE", "in this commit"],
+     "FLOOR OWED ON THE NEXT SWEEP — this was excluded as a KNOWN GAP whose stated blocker was 'not in HEAD yet, which is the tree the sweep archives'. It has been in HEAD since 8561324, so the reason EXPIRED and the exclusion outlived it: an exclusion is a decision about a moment, and nothing was watching for the moment to pass. 0 means not yet measured, not a reading; a ZERO from the next sweep is the UNPROTECTED verdict.", 0),
+    ("verify.outside_scope_tail -> a scoped run stops saying what it did NOT look at",
+     ".game_loop/bin/verify::outside_scope_tail", '    return ""\n',
+     ["OUT OF SCOPE", "not in this commit", "stay dirty", "not even looked at"],
+     "FLOOR OWED ON THE NEXT SWEEP — this was excluded as a KNOWN GAP whose stated blocker was 'not in HEAD yet, which is the tree the sweep archives'. It has been in HEAD since 8561324, so the reason EXPIRED and the exclusion outlived it: an exclusion is a decision about a moment, and nothing was watching for the moment to pass. 0 means not yet measured, not a reading; a ZERO from the next sweep is the UNPROTECTED verdict.", 0),
+]
+
+MUTANTS += [
     ('_latest_version -> the source repo never appears to have a newer commit',
      '.game_loop/bin/_gl_impl.py::_latest_version', '    return None\\n',
      ['update check', 'newer commit', 'latest sha', 'update_cache'],
@@ -1742,16 +1753,6 @@ NOT_SWEPT = {
     #
     # WHEN PROMOTING THESE, the trap two entries up applies: a NOT_SWEPT member scores 2 free
     # accounting kills that DISAPPEAR on the move into MUTANTS, so measure, then subtract the two.
-    ".game_loop/bin/verify::scope_arg":
-        "KNOWN GAP — should be swept, is not yet. It reads --scope-from off argv and returning "
-        "None always would silently un-scope every commit gate, which is exactly the shape worth "
-        "a floor. Unmeasurable until the commit introducing it is IN HEAD, which is the tree the "
-        "sweep archives.",
-    ".game_loop/bin/verify::outside_scope_tail":
-        "KNOWN GAP — should be swept, is not yet. Its silence is the sentence a scoped run owes "
-        "about the dirty paths it did NOT look at, so a neutered version turns a smaller claim "
-        "back into a green that reads as a statement about the whole tree. Same ordering: not in "
-        "HEAD yet.",
 }
 
 

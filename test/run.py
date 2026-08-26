@@ -636,10 +636,26 @@ def main():
         # NAMED _scope_block, NOT _scope: a function called `_scope` is defined further down this
         # file, and binding a string to that name made it 'str' object is not callable when the
         # later section called it — one shard dead, caught by prun's silent-shard notice again.
-        _scope_block = _gtxt[:_gtxt.index("PAYLOAD")] if "PAYLOAD" in _gtxt else _gtxt[:6000]
+        # THE BLOCK IS THE LEADING COMMENT, DERIVED — not a delimiter that does not exist and a
+        # magic number that does not fit. This read `_gtxt[:_gtxt.index("PAYLOAD")]` with a fallback
+        # to the first 6000 characters, and the word PAYLOAD occurs ZERO times in that file: the
+        # primary path never ran once, and the fallback silently decided the whole check. The header
+        # is 6526 characters, so the window also cut 526 characters off the end of the thing it was
+        # measuring — an assertion named "is it in the SCOPE block" that actually asked "is it in
+        # the first 6000 characters", and passed, so nothing pointed at it.
+        #
+        # The header ends at the first line that is not a comment. That is a property of the file
+        # rather than a constant somebody has to keep in step with it.
+        _hdr_end = next((i for i, _l in enumerate(_gtxt.split("\n")) if _l and not _l.startswith("#")),
+                        0)
+        _scope_block = "\n".join(_gtxt.split("\n")[:_hdr_end])
+        check("the SCOPE block is found by structure, not by a delimiter that must keep existing — "
+              "it is the leading comment and it is non-trivial",
+              _hdr_end > 20 and len(_scope_block) > 3000
+              and _scope_block.startswith("#") and "set -uo pipefail" not in _scope_block)
         _declared = set()
         for _line in _gtxt.split("\n"):
-            for _key in ("MUTATORS = {", "_DEST_LAST = {"):
+            for _key in ("MUTATORS = {", "_DEST_LAST = {", "GIT_WRITES = {"):
                 if _line.startswith(_key):
                     _declared |= {w.strip().strip('"\'') for w in
                                   _line[len(_key):].rstrip("}").split(",") if w.strip()}

@@ -24,7 +24,8 @@
 #   DOES: Bash mutators whose resolved target is outside the allow roots. NAMED, not elided: rm,
 #         rmdir, touch, mkdir, chmod, chown, ln, dd, truncate, tee, cp, mv; sed -i and perl -i;
 #         curl -o, wget -O, tar -C, unzip -d, patch -o (destination read off the FLAG); install,
-#         rsync, split (destination is the last path, as with cp); git writes including clone; and
+#         rsync, split (destination is the last path, as with cp); the git writes, also NAMED —
+#         clone, commit, push, reset, rebase, checkout, clean, apply, restore, mv; and
 #         every redirect form in the shell grammar that creates or truncates a file. The list was
 #         written as "rm/mv/cp/mkdir/chmod/..." until 2026-08-26, and the ellipsis is what hid the
 #         gap: curl, wget, tar, unzip, rsync, install, patch, split and perl -i all wrote outside

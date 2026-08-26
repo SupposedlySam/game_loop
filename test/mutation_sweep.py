@@ -2617,7 +2617,18 @@ def main():
             blind.append((_tot - _hit, _hit, _tot, _key.split("::")[-1]))
     if blind:
         blind.sort(reverse=True)
-        print(f"MARKS THAT MISS THEIR OWN KILLERS ({len(blind)}) — the mark set does not match "
+        # THE COUNT IS NOT THE DISTRIBUTION, and I read my own headline as a regression because of
+        # it. This number counts producers missing AT LEAST ONE killer, so "names 21 of 22" and
+        # "names 0 of 22" are the same row. After narrowing 45 sets by measurement the count ROSE
+        # (44 -> 119, against a freshly measured killer set), while the sets I narrowed went from
+        # naming 36% of their killers to 80%. The count moved one way and the coverage the other.
+        #
+        # So the headline carries the aggregate. A count alone invites exactly the reading I gave
+        # it, in the file whose oldest lesson is that a sum is not a distribution.
+        _bl_named = sum(h for _d, h, _t, _k in blind)
+        _bl_total = sum(t for _d, _h, t, _k in blind)
+        print(f"MARKS THAT MISS THEIR OWN KILLERS ({len(blind)} producers, naming "
+              f"{_bl_named}/{_bl_total} of their killers) — the mark set does not match "
               "every assertion")
         print("  that actually killed the producer, so its 'name this producer's subject' count is "
               "an\n  UNDER-report and the gap is invisible to the breadth check above:")

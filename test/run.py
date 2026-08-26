@@ -13604,9 +13604,49 @@ def main():
     # read locally: `_msrc` is assigned further down this function, and referencing it here gave
     # UnboundLocalError — the same shape that killed a shard earlier today with `_gsrc`.
     _msweep_src = read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))
+    # DRIVEN, not grepped. This checked that a STRING I wrote is present in the source, which passes
+    # whether or not the section ever renders — the weakest form there is, and I flagged it in my
+    # own review the day I added it. The fixture below already drives sweep.main() with fake
+    # producers and a stubbed runner, so it can carry one whose marks miss a killer and assert the
+    # section actually appears in the output.
     check("...and the sweep REPORTS this direction, not only breadth",
           "MARKS THAT MISS THEIR OWN KILLERS" in _msweep_src
           and "marks_missing_killers" in source_flat(_msweep_src))
+    def _marks_section_rendered():
+        """Drive sweep.main() with a producer whose marks miss a killer; did the section print?
+
+        The stub runner must return DIFFERENT output for the mutant than for the baseline, or there
+        are no kills, KILL_NAMES stays empty, and the section correctly does not render — which
+        would make this pass for the wrong reason, by asserting nothing rather than by working.
+        """
+        _mk = [("solo -> x", ".game_loop/bin/watchdog::superseded", "    return False\n",
+                ["a phrase no assertion name contains"], None, 0)]
+        _seen = []
+
+        def _run2(tree, timeout=1800, sections=None):
+            _seen.append(tree)
+            if len(_seen) == 1:                       # baseline: both assertions pass
+                return ("  ok   the watchdog stands down when superseded\n"
+                        "  ok   an unrelated assertion\n2 passed, 0 failed\n")
+            return "  ok   an unrelated assertion\n1 passed, 1 failed\n"   # mutant kills the first
+
+        _r_run, _r_mut, _r_gate = sweep.run, sweep.MUTANTS, sweep.coverage_gate
+        _b = io.StringIO()
+        try:
+            sweep.run, sweep.MUTANTS = _run2, _mk
+            sweep.coverage_gate = lambda found: False
+            with contextlib.redirect_stdout(_b):
+                sweep.main()
+        finally:
+            sweep.run, sweep.MUTANTS, sweep.coverage_gate = _r_run, _r_mut, _r_gate
+        _out = _b.getvalue()
+        # the producer WAS killed (so there is something to miss), and the section says so
+        return ("killed: 1" in _out and "MARKS THAT MISS THEIR OWN KILLERS" in _out
+                and "0/1" in _out)
+
+    check("...and the section RENDERS when a producer's marks miss one of its killers — a string "
+          "present in the source is not a section that runs",
+          _marks_section_rendered())
 
     _noops, _absent = [], []
     for _lbl, _key, _body, _mk, _tn, _fl in sweep.MUTANTS:

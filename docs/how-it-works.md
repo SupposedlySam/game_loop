@@ -1185,6 +1185,8 @@ Everything lives in `.game_loop/`:
 | `INVARIANTS.md` | your north star; re-injected by `game_loop stepback` |
 | `verify.yaml` | the change → checks map |
 | `LEDGER.md` | VERIFIED / RULED-OUT / OPEN reference (not a gate) |
+| `behaviour.json` | **what changed about what this harness REFUSES**, one entry per change, with what it still misses. Read this after an upgrade instead of re-deriving refusal behaviour from the source — that is what it is for. A gate refuses a commit that changes a refusal line without adding an entry (`test/behaviour_gate.py`), and that gate reads refusal TEXT only, so an entry may exist for a change no diff would show. |
+| `claims.json` | what this harness BELIEVES about its host, each with the file it was read from, what would break it, and whether it can be re-checked live. `status` re-reads the stamps and says which are stale. |
 
 Run `game_loop status` first thing every session — it rehydrates the cost ladder, invariants, counters,
 and current phase from disk, which is how the loop survives context compaction.

@@ -428,6 +428,17 @@ Migrating from an older `.loop/`-style harness: run the installer, move any proj
 invariants into `.game_loop/INVARIANTS.md`, then delete the old `.loop/` directory AND its hook entries
 from `.claude/settings.json` (the installer *adds* game_loop's hooks; it does not remove yours).
 
+AFTER AN UPGRADE, READ `.game_loop/behaviour.json` — do not re-derive what changed about the
+refusals from the source. It carries one entry per change to what this harness REFUSES: what moved,
+why somebody who changed nothing would notice, and what the change still does NOT cover. A commit
+that alters a refusal line without adding an entry is refused by a gate. That gate reads refusal
+TEXT only, so entries also exist for changes that moved which commands REACH a refusal, which no
+diff of the messages would show.
+
+`.game_loop/claims.json` is the other half: what this harness BELIEVES about its host, each claim
+naming the file it was read from, what would falsify it, and whether it can be re-checked live.
+`status` re-reads the stamps and says which have gone stale — one of them went stale in a day.
+
 ## Deeper docs
 
 - `README.md` — the human-facing overview and quickstart.

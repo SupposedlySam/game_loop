@@ -186,8 +186,17 @@ claim and the last point at which the claim is cheap to check.
 A `PreToolUse` hook enforcing an **allowlist**: writes are permitted only under the repo, the OS temp
 dir, this project's agent-memory dir, and anything in `config.json → allow_write_roots`. Everything
 else — other projects, your home directory, the OS's own files — is read-only by default. It covers
-`Write`/`Edit`/`NotebookEdit` and Bash mutators (`rm`, `mv`, redirects, `git` writes, `sed -i`, …),
-resolving paths with realpath and tracking `cd` across a command. It also blocks configured
+`Write`/`Edit`/`NotebookEdit` **by tool name**, every redirect form in the shell grammar that creates
+or truncates a file, a **named** set of write-capable verbs (`rm`, `mv`, `cp`, `tee`, `dd`, … plus
+`curl -o`, `wget -O`, `tar -C`, `unzip -d`, `patch -o`, `install`, `rsync`, `split`, `sed -i`,
+`perl -i`) and `git` writes — resolving paths with realpath and tracking `cd` across a command. **The
+authoritative list is the SCOPE block at the top of `guard-writes-impl.sh`**, which names every verb
+rather than eliding them; this paragraph is a summary and the file is the contract.
+
+That distinction was not free. Until 2026-08-26 both this paragraph and the file wrote the list as
+`rm/mv/cp/…`, and the ellipsis is what a reader takes for "and the other obvious ones": five redirect
+forms (`>|`, `>!`, `>>!`, `>&`, `>>&`) and nine verbs including `curl -o` and `tar -C` wrote outside
+the repo unchecked, for weeks, while this page said the guard states its limits. It also blocks configured
 deploy/publish verbs anywhere. It states what it does *not* catch (interpreter one-liners, paths built
 from shell variables) right in the file — a guard that overstates its reach is worse than one that
 states its limits.

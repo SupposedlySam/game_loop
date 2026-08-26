@@ -8271,8 +8271,25 @@ def external_claims_report():
     try:
         with open(CLAIMS_F) as f:
             d = json.load(f)
-    except (OSError, ValueError):
-        return []
+    except FileNotFoundError:
+        return []                        # a project that makes no external claims is the norm
+    except (OSError, ValueError) as exc:
+        # THE FAILURE verify.yaml ALREADY NAMES, CLOSED AT RUNTIME. Its own comment says a malformed
+        # claims record "degrades to silence: external_claims_report returns nothing and status
+        # simply stops mentioning the host, which looks exactly like a harness with no external
+        # claims to make" -- and the answer was a commit-time rule over THIS repo's copy. That does
+        # nothing for a consumer whose file is truncated by a half-finished write or a bad merge.
+        #
+        # Measured: a corrupt claims.json and an absent one produced byte-identical status output.
+        # Absent is the norm and stays silent; unreadable now says so, because a load-bearing belief
+        # about the host that nobody can read is worse than one nobody made.
+        return [f"  claims : .game_loop/claims.json EXISTS AND COULD NOT BE READ "
+                f"({exc.__class__.__name__}).",
+                "           What this harness believes about its host cannot be listed, which is "
+                "NOT the",
+                "           same as believing nothing. Repair or delete that file — a silent record "
+                "is the",
+                "           failure it exists to prevent."]
     blocks = [(k, v) for k, v in d.items() if k != "//" and isinstance(v, dict)]
     if not blocks:
         return []

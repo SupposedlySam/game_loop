@@ -11438,6 +11438,31 @@ def main():
           "agreement it did not establish",
           "UNRECORDED version" in _rep and "not an assurance" in _rep)
 
+    # THE FAILURE verify.yaml ALREADY NAMED, CLOSED AT RUNTIME. Its comment says a malformed claims
+    # record "degrades to silence: external_claims_report returns nothing and status simply stops
+    # mentioning the host, which looks exactly like a harness with no external claims to make" —
+    # and the answer was a commit-time rule over THIS repo's copy, which does nothing for a
+    # consumer whose file is truncated by a half-finished write or a bad merge. Measured before
+    # fixing: a corrupt claims.json and an absent one produced byte-identical status output.
+    _cj = make_sandbox()
+    try:
+        _cjf = os.path.join(_cj, ".game_loop", "claims.json")
+        with open(_cjf, "w") as f:
+            f.write('{ "claude_code": {"subject": "x", "claims": [')     # truncated on purpose
+        _cjout = gl(_cj, "status", sid="sess-claims").stdout
+        check("a claims.json that EXISTS and will not parse says so — a load-bearing belief about "
+              "the host that nobody can read is worse than one nobody made",
+              "COULD NOT BE READ" in _cjout and "NOT the" in _cjout)
+        check("...and it names the repair, because a record this silent is the failure it exists "
+              "to prevent",
+              "Repair or delete that file" in _cjout)
+        os.remove(_cjf)
+        check("...while an ABSENT claims.json stays silent — a project that makes no external "
+              "claims is the norm, not a fault to warn about",
+              "COULD NOT BE READ" not in gl(_cj, "status", sid="sess-claims").stdout)
+    finally:
+        shutil.rmtree(_cj, ignore_errors=True)
+
     print("the behaviour record is a contract a consumer can pin to:")
     with open(os.path.join(SRC_GAME_LOOP, "behaviour.json")) as f:
         _bh = json.load(f)

@@ -13550,9 +13550,12 @@ def main():
     check("...and NO killers is (0, 0) rather than a perfect score — a producer nothing killed has "
           "no mark accuracy to report, and 100% of nothing is the reassuring answer",
           _mmk(["alpha"], []) == (0, 0) and _mmk([], ["an alpha thing"]) == (0, 0))
+    # read locally: `_msrc` is assigned further down this function, and referencing it here gave
+    # UnboundLocalError — the same shape that killed a shard earlier today with `_gsrc`.
+    _msweep_src = read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))
     check("...and the sweep REPORTS this direction, not only breadth",
-          "MARKS THAT MISS THEIR OWN KILLERS" in _msrc
-          and "marks_missing_killers" in source_flat(_msrc))
+          "MARKS THAT MISS THEIR OWN KILLERS" in _msweep_src
+          and "marks_missing_killers" in source_flat(_msweep_src))
 
     _noops, _absent = [], []
     for _lbl, _key, _body, _mk, _tn, _fl in sweep.MUTANTS:
@@ -13691,6 +13694,42 @@ def main():
           sweep.neuter("def f(x):\n    return 1\n", "f", "    return None")[1] is True
           and sweep.neuter("class C:\n    def f(x):\n        return 1\n",
                            "f", "    return None")[1] is False)
+
+    # AND THE MUTANT MUST STILL PARSE. "Bytes changed" was not enough, and I proved it on myself:
+    # eleven producers I declared carried `"    return None\\n"` — a literal backslash-n rather than
+    # a newline — so `neuter` wrote `    return None\\n` into the file as TEXT. Anchor found: yes.
+    # Bytes changed: yes. Result: `SyntaxError: unexpected character after line continuation
+    # character`, the suite could not start, and the sweep reported NINE producers NOT MEASURED.
+    #
+    # That verdict was correct and the diagnosis it invited was not: "the suite did not finish under
+    # this mutant" reads as a fact about the SUITE, and I spent a detached scan measuring assertion
+    # crashes before checking the mutant itself. A malformed mutant and a hostile one produce the
+    # same third outcome, so the cheap check has to run at declaration time.
+    _unparseable = []
+    for _lbl, _mk, _mb, _mm, _mt, _mf in sweep.MUTANTS:
+        _mrel, _mfn = _mk.split("::", 1)
+        if not _mrel.endswith(".py"):
+            continue                      # a shell mutant is not Python and ast cannot judge it
+        _msrc = read_or_empty(os.path.join(REPO, _mrel))
+        if not _msrc:
+            continue
+        _mmut, _mhit = sweep.neuter(_msrc, _mfn, _mb)
+        if not _mhit:
+            continue                      # the anchor check below is what reports that
+        try:
+            ast.parse(_mmut)
+        except SyntaxError as _e:
+            _unparseable.append(f"{_mk} ({_e.msg})")
+    check("every declared mutant leaves a file that still PARSES — a body that changes bytes and "
+          "breaks the syntax gives NOT MEASURED, which reads as a fact about the suite rather than "
+          "about the declaration: " + ("; ".join(_unparseable) or "none of %d" % len(sweep.MUTANTS)),
+          not _unparseable)
+    check("...and the rule can FIRE, on the exact shape that got past me: a body carrying a literal "
+          "backslash-n instead of a newline",
+          _parses(sweep.neuter("def f(x):\n    return 1\n", "f", "    return None\n")[0])
+          and not _parses(
+              sweep.neuter("def f(x):\n    return 1\n", "f",
+                           "    return None" + chr(92) + "n")[0]))
 
     check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
           "— so no producer is scored on a tree identical to the baseline: " +

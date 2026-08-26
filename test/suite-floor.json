@@ -2,6 +2,6 @@
   "//": "A TRIPWIRE, NOT A TARGET. A run covering LESS than this fails prun, because every shard that ran will have passed and nothing else would say so. Raise it when the suite grows; LOWER it in the same commit that removes assertions, so the reduction is a decision on the record rather than a number that quietly followed the code down.",
   "//why-recorded": "Deliberately NOT derived from the suite. An expectation computed by the same scan that finds the sections is satisfied by finding none of them \u2014 which is how a run that dispatched nothing prints a plausible small green total. The floor has to come from outside the run.",
   "//measured-by": "python3 test/prun.py \u2014 the distinct count it prints, and the section group count.",
-  "distinct": 1944,
+  "distinct": 1946,
   "groups": 81
 }

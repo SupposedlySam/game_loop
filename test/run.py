@@ -15584,6 +15584,34 @@ def main():
               "needs to read a record rather than only to match one",
               "text" in _kinds["mandate_set"] and "learning" in _kinds["harden"])
 
+        # THE GUARDS WRITE RECORDS AND WERE NOT BEING READ. `_SHIPPED_SCRIPTS` listed the Python
+        # files; the guards are SHELL wrappers around here-doc'd Python, `ast.parse` raises on them,
+        # and the extractor's `except SyntaxError: continue` swallowed that — so they fell out
+        # SILENTLY rather than being excluded by anyone's decision. Eight kinds were missing,
+        # including `commit_unedited`, which this repo's own log carries 11 times.
+        #
+        # And it was not merely an incomplete reference: `trigger_dead_kinds()` treats this schema
+        # as the set of kinds that EXIST, so a trigger matching a real guard kind was REPORTED DEAD.
+        # A false "your trigger cannot fire" is worse than no check, because it sends its reader to
+        # rewrite something that worked.
+        check("the guards' record kinds are in the extracted schema — they are shell wrappers "
+              "around here-doc'd Python, so the file does not parse but what it RUNS does",
+              {"authorized_write", "memory_write", "standing_mcp_write", "commit_unedited",
+               "authorized_mcp", "trusted_mcp_write"} <= set(_kinds))
+        check("...and they carry their FIELDS too, so the embedded program was really walked "
+              "rather than its kind strings being scraped out with a regex",
+              "path" in _kinds.get("authorized_write", []) or
+              "reason" in _kinds.get("authorized_write", []))
+        _pt = _glk._python_trees
+        check("...and the extractor takes plain Python unchanged, so adding the shell path did not "
+              "route ordinary files through the here-doc scanner",
+              len(_pt("x = 1\n")) == 1)
+        check("...and finds a program inside a shell wrapper, and NOTHING in a shell script that "
+              "embeds none — an extractor that returned something for every file would make the "
+              "line above pass for the wrong reason",
+              len(_pt("echo hi\npython3 " + chr(60) * 2 + "'PY'\nx = 1\nPY\n")) == 1
+              and _pt("echo hi\necho there\n") == [])
+
         # THE GATE, which is their suggestion 3. A reference nobody thinks to consult is rung 6;
         # naming the dead condition is the rung above it.
         _td = os.path.join(_lkh, "triggers.d")
@@ -15596,6 +15624,14 @@ def main():
         with open(os.path.join(_td, "dead.sh"), "w") as f:
             f.write("#!/usr/bin/env bash\npython3 -c \"\nd={}\n"
                     "if d.get('kind') == 'harden': print(1)\n\"\n")
+        with open(os.path.join(_td, "guardkind.sh"), "w") as f:
+            f.write("#!/usr/bin/env bash\npython3 -c \"\nd={}\n"
+                    "if d.get('kind') == 'commit_unedited': print(1)\n\"\n")
+        check("a trigger matching a kind the GUARDS write is not called dead — it was, and that "
+              "reader would have been sent to rewrite a trigger that worked",
+              ("guardkind.sh", "commit_unedited") not in _glk.trigger_dead_kinds())
+        os.remove(os.path.join(_td, "guardkind.sh"))
+
         check("#87: ...and a trigger matching a REAL kind is silent, so the finding above is a "
               "verdict rather than a check that fires on every quoted word",
               _glk.trigger_dead_kinds() == [])

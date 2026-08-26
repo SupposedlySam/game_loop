@@ -3005,7 +3005,45 @@ def release_distance_warning():
 # code whose log records are being extracted lives HERE. Scanning the door finds no records and the
 # schema comes back nearly empty — which reads as "this program writes almost nothing" rather than
 # as a broken scan, since an extractor that finds nothing does not raise.
-_SHIPPED_SCRIPTS = ("_gl_impl.py", "watchdog", "notify.py", "verify", "flair.py")
+# THE GUARDS WRITE RECORDS TOO, and they were missing for a reason nobody decided: they are shell
+# scripts, `ast.parse` raises SyntaxError on them, and the loop below CONTINUES on that — so they
+# fell out silently rather than being excluded. Measured: 8 kinds the guards emit were absent from
+# the extracted schema, including `commit_unedited`, which this repo's own log carries 11 times.
+#
+# That is not merely an incomplete reference. `trigger_dead_kinds()` treats this schema as the set
+# of kinds that EXIST, so a trigger matching a real guard kind was REPORTED DEAD — driven and
+# reproduced, not reasoned about. A false "your trigger cannot fire" is worse than no check.
+_SHIPPED_SCRIPTS = ("_gl_impl.py", "watchdog", "notify.py", "verify", "flair.py",
+                    "guard-writes-impl.sh", "guard-mcp-impl.sh")
+
+
+def _python_trees(text):
+    """Parsed ASTs for `text` — itself if it is Python, else each program embedded in it.
+
+    The guards are shell wrappers around here-doc'd Python, so their record-writing code is real
+    Python that simply is not at the top of the file. Parsing the wrapper fails; parsing what it
+    runs does not. Returns [] rather than raising: a file that yields nothing must fall out of the
+    scan the same way it always did, not take the scan down with it.
+    """
+    try:
+        return [ast.parse(text)]
+    except (SyntaxError, ValueError):
+        pass
+    trees, lines, i = [], text.split("\n"), 0
+    op = chr(60) + chr(60)
+    while i < len(lines):
+        m = re.search(re.escape(op) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", lines[i])
+        if m:
+            delim, body, i = m.group(2), [], i + 1
+            while i < len(lines) and lines[i].strip() != delim:
+                body.append(lines[i])
+                i += 1
+            try:
+                trees.append(ast.parse("\n".join(body)))
+            except (SyntaxError, ValueError):
+                pass                      # not every here-doc is Python; prose and SQL live in them
+        i += 1
+    return trees
 
 
 def log_kinds(code_dir=None):
@@ -3024,10 +3062,10 @@ def log_kinds(code_dir=None):
     for name in _SHIPPED_SCRIPTS:
         try:
             with open(os.path.join(base, name)) as f:
-                tree = ast.parse(f.read())
-        except (OSError, SyntaxError):
+                _text = f.read()
+        except OSError:
             continue
-        for n in ast.walk(tree):
+        for n in [_n for _t in _python_trees(_text) for _n in ast.walk(_t)]:
             if not isinstance(n, ast.Dict):
                 continue
             kind = None

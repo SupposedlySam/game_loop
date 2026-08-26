@@ -14,7 +14,15 @@
 #
 # SCOPE — what this DOES and does NOT catch (a guard that overstates its reach buys false confidence):
 #   DOES: Write/Edit/NotebookEdit whose target resolves outside the allow roots.
-#   DOES: Bash mutators (rm/mv/cp/mkdir/chmod/... , shell redirects, git writes, sed -i) whose
+#   DOES: Bash mutators whose resolved target is outside the allow roots. NAMED, not elided: rm,
+#         rmdir, touch, mkdir, chmod, chown, ln, dd, truncate, tee, cp, mv; sed -i and perl -i;
+#         curl -o, wget -O, tar -C, unzip -d, patch -o (destination read off the FLAG); install,
+#         rsync, split (destination is the last path, as with cp); git writes including clone; and
+#         every redirect form in the shell grammar that creates or truncates a file. The list was
+#         written as "rm/mv/cp/mkdir/chmod/..." until 2026-08-26, and the ellipsis is what hid the
+#         gap: curl, wget, tar, unzip, rsync, install, patch, split and perl -i all wrote outside
+#         the repo unchecked while a reader took the "..." for "and the other obvious ones".
+#   DOES: (continued) whose
 #         resolved target is outside the allow roots. Paths resolved by realpath, `cd` tracked across
 #         segments, every offending path collected (not just the first).
 #   DOES: Bash invoking a configured deploy/publish verb, anywhere (config.json -> deploy_verbs).
@@ -1719,7 +1727,16 @@ except (OSError, ValueError):
 allow = [os.path.realpath(p) for p in allow]
 
 MUTATORS = {"rm", "rmdir", "touch", "mkdir", "chmod", "chown", "ln", "dd", "truncate", "tee"}
-GIT_WRITES = {"commit", "push", "reset", "rebase", "checkout", "clean", "apply", "restore", "mv"}
+# A LIST OF VERBS CAN NEVER BE COMPLETE, AND THE POINT IS TO SHRINK THE GAP BETWEEN WHAT IS COVERED
+# AND WHAT IS CLAIMED. Measured against this guard: `curl -o`, `wget -O`, `tar -C`, `unzip -d`,
+# `rsync`, `install`, `patch -o`, `split` and `perl -i` all wrote outside the repo unchecked, while
+# the header advertised "Bash mutators (rm/mv/cp/mkdir/chmod/...)" -- and the `...` is what a reader
+# takes for "and the other obvious ones". Any program can still write; that is stated in SCOPE
+# rather than implied by an ellipsis.
+_DEST_FLAG = {"curl": ("-o", "--output"), "wget": ("-O", "--output-document"),
+              "tar": ("-C", "--directory"), "unzip": ("-d",), "patch": ("-o", "--output")}
+_DEST_LAST = {"install", "rsync", "split"}
+GIT_WRITES = {"clone", "commit", "push", "reset", "rebase", "checkout", "clean", "apply", "restore", "mv"}
 
 
 def under(path, root):
@@ -2031,6 +2048,39 @@ for seg in shell_segments(cmd):
         check = pathish                            # mv mutates source AND destination
     elif verb in MUTATORS:
         check = pathish
+    elif verb in _DEST_FLAG:
+        # WRITTEN BY A FLAG, NOT BY POSITION. `curl -o`, `wget -O`, `tar -C`, `unzip -d` and
+        # `patch -o` name their destination with an explicit flag, and every one of them wrote
+        # outside the repo unchecked -- measured, not assumed. Only the FLAG'S value is taken:
+        # curl's other argument is a URL and tar's is the archive it reads, so checking every
+        # pathish token here would refuse ordinary reads.
+        _f = _DEST_FLAG[verb]
+        for _i, _a in enumerate(args):
+            if _a in _f and _i + 1 < len(args):
+                check.append(args[_i + 1])
+                continue
+            for _name in _f:
+                if _a.startswith(_name + "="):     # --output=FILE
+                    check.append(_a.split("=", 1)[1])
+                elif len(_name) == 2 and _a.startswith("--"):
+                    continue
+                elif len(_name) == 2 and _a.startswith("-") and _name[1] in _a[1:]:
+                    # SHORT FLAGS CLUSTER, and `curl -so FILE` is how anyone actually writes it --
+                    # the first draft missed it because it only matched a bare `-o`. When the
+                    # letter ENDS the cluster the value is the next argument; when text follows it
+                    # in the same token, that text IS the value (`-oFILE`).
+                    _rest = _a[1:].split(_name[1], 1)[1]
+                    if _rest:
+                        check.append(_rest)
+                    elif _i + 1 < len(args):
+                        check.append(args[_i + 1])
+    elif verb in _DEST_LAST:
+        # DESTINATION IS THE LAST PATH, like cp: `install`, `rsync` and `split` read their earlier
+        # arguments and write the final one. Checking all of them would deny `install /etc/hosts
+        # <in-repo>` for reading /etc/hosts, which is exactly the false refusal cp's rule avoids.
+        check = pathish[-1:]
+    elif verb in ("perl", "ruby") and any(a.startswith("-i") for a in args):
+        check = pathish                            # -i is in-place, the same shape as sed -i
     elif verb == "sed" and "-i" in args:
         check = pathish
     elif verb == "git" and any(a in GIT_WRITES for a in args):

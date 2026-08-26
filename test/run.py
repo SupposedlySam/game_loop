@@ -482,6 +482,51 @@ def main():
             check("a clobber-override redirect to an out-of-repo path is refused (%s)"
                   % _clob.split()[2],
                   denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+        # THE VERB LIST, WALKED THE SAME WAY. `MUTATORS` is a hand-written set of spellings, and
+        # the header advertised "rm/mv/cp/mkdir/chmod/..." — where the `...` is what a reader takes
+        # for "and the other obvious ones". Measured: curl -o, wget -O, tar -C, unzip -d, rsync,
+        # install, patch -o, split, perl -i and `git clone` ALL wrote outside the repo unchecked.
+        #
+        # The reads matter as much as the writes here. curl's other argument is a URL, tar's is the
+        # archive it READS, and `install /etc/hosts <in-repo>` reads from outside legitimately — so
+        # a fix that checked every pathish token would refuse ordinary work, which is how a gate
+        # gets routed around. Destination comes off the FLAG for curl/wget/tar/unzip/patch and off
+        # the LAST path for install/rsync/split, exactly as cp already did.
+        _VERB_WRITES = [
+            ("curl -o", "curl -so /Users/nobody/x.txt https://x"),
+            ("curl --output=", "curl --output=/Users/nobody/x.txt https://x"),
+            ("wget -O", "wget -O /Users/nobody/x.txt https://x"),
+            ("tar -C", "tar -xf a.tar -C /Users/nobody"),
+            ("unzip -d", "unzip a.zip -d /Users/nobody"),
+            ("patch -o", "patch -o /Users/nobody/x.txt < a.diff"),
+            ("install", "install -m 644 /etc/hosts /Users/nobody/x.txt"),
+            ("rsync", "rsync -a ./ /Users/nobody/"),
+            ("split", "split -b 1m big /Users/nobody/part"),
+            ("perl -i", "perl -i -pe s/a/b/ /Users/nobody/x.txt"),
+            ("git clone", "git clone https://x/y /Users/nobody/y"),
+        ]
+        _VERB_READS = [
+            ("curl with no -o", "curl -s https://example.com"),
+            ("curl -so INSIDE", "curl -so out.txt https://x"),
+            ("tar reading an archive", "tar -tf a.tar"),
+            ("tar -C INSIDE", "tar -xf a.tar -C ./sub"),
+            ("install FROM outside INTO the repo", "install -m 644 /etc/hosts ./x.txt"),
+            ("rsync INTO the repo", "rsync -a /etc/ ./backup/"),
+            ("wget with no -O", "wget https://x"),
+            ("git clone INTO the repo", "git clone https://x/y ./y"),
+        ]
+        _vmiss = [n for n, c in _VERB_WRITES
+                  if not denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("every write-capable verb the SCOPE names is checked against its destination "
+              "(%d of them) — a hand-written list is only honest if the header names it" % len(_VERB_WRITES),
+              not _vmiss)
+        _vfalse = [n for n, c in _VERB_READS
+                   if denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("...and the same verbs READING from outside, or writing inside, are untouched (%d "
+              "cases) — a gate that refuses ordinary work is one that gets routed around"
+              % len(_VERB_READS),
+              not _vfalse)
+
         # THE REDIRECT GRAMMAR, WALKED — not the spellings I happened to think of. Five forms
         # reached this guard unseen (`>|`, `>!`, `>>!`, `>&`, `>>&`), every one ordinary shell, and
         # the reason they went unnoticed for weeks is that the parser matched SPELLINGS while the

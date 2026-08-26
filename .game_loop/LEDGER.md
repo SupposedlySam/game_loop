@@ -73,18 +73,28 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
   unchanged; there is no field for a caller to fill. Two live handovers on 2026-08-25 (sibling repo,
   the `handoff` skill's port of this verb) both came out named `HANDOFF-<timestamp> continuation` —
   the second one *after* its prompt led with the subject `confirm saggar names the terminal from the
-  subject line`, so the titler saw the string and keyed off the **filename** anyway. All three
-  `chat-info` payloads on this machine agree: `Handoff saggar support`,
+  subject line`. Three `chat-info` payloads on this machine agreed: `Handoff saggar support`,
   `DELEGATION-dodgeball implementation`, `DELEGATION-barbell` — each traceable to a document's name,
   none to a task string.
+
+  **CORRECTED 2026-08-25, by two more live handovers.** "It keys off the filename" was the reading
+  those four supported and it was too narrow. In override_canvas a successor came out
+  **"Game loop implementation"** while merging a Flutter branch — not the filename (`HANDOFF.md`)
+  but the `.game_loop/…` PATH, which was the only content its prompt had, because its subject was
+  the contentless `session 6acce140`. A fourth handover, run deliberately to re-read this entry,
+  led with the subject `session verify-e2e` and produced the terminal name **"Verify e2e"** — the
+  SUBJECT, not the filename. So the titler reads the PROMPT, and the path wins only when the
+  subject offers it nothing better. That is a mechanism with a lever in it, and the lever is the
+  subject line — which is why a heading that is only a session id is now refused as one.
 
   **Why this one was worth an entry.** Nothing was broken by the wrong version; the cost was that it
   was *load-bearing in the wrong direction*. It made "route `--title` through to saggar somehow"
   look like an unfinished feature rather than an impossibility, and it was the justification a
   subject line would most naturally have reached for — "it names the terminal" — which is a reason
   that does not exist. The subject line earns its place by being **read** (the successor's opening
-  message, the printed command, the `about` report line), and the only lever on a saggar terminal's
-  name is **what the handoff file is called**.
+  message, the printed command, the `about` report line) — and, as the correction above shows, by
+  being the best content the titler has to work with. The handoff file's PATH is what it falls back
+  to when the subject says nothing.
 
   Source: `~/.saggar/claude-status-bridge.sh` and `~/.saggar/chat-info/*.json`, read 2026-08-25.
   Filed as a claim the same day with both probes (`--task`/`--title`, and the subject line).

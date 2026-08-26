@@ -164,21 +164,22 @@
   "saggar": {
     "subject": "saggar (the terminal manager `successor` can hand a session to)",
     "verified_on": "2026-08-25",
-    "verified_against": "the installed bridge at ~/.saggar/claude-status-bridge.sh (mtime 2026-08-19), and every ~/.saggar/chat-info/*.json on this machine",
-    "why_it_matters": "`successor`'s saggar-agent mode is the handover a human is meant to find later. What that terminal is CALLED is the whole of finding it, and this repo asserted the wrong mechanism for it in two places \u2014 so the lever nobody could reach looked like an unfinished feature, and a subject line looked like it had a job it does not have.",
+    "verified_against": "the installed bridge at ~/.saggar/claude-status-bridge.sh (mtime 2026-08-19), every ~/.saggar/chat-info/*.json on this machine, and a live handover through the running app",
+    "why_it_matters": "`successor`'s saggar-agent mode is the handover a human is meant to find later. What that terminal is CALLED is the whole of finding it, this repo asserted the wrong mechanism for it in two places, and the subject line's own worth depends on the titler still reading the prompt \u2014 so both halves are load-bearing.",
     "claims": [
       {
         "id": "saggar-terminal-name-is-not-ours",
-        "says": "nothing game_loop passes to `saggar agent` reaches the displayed terminal name (RULED OUT): saggar shows `session_name` out of Claude Code's own status-line payload, mirrored verbatim into ~/.saggar/chat-info/<SAGGAR_SESSION>.json by ~/.saggar/claude-status-bridge.sh \u2014 Claude's auto-generated conversation title, which keys off the handoff FILENAME",
+        "says": "nothing game_loop passes to `saggar agent` reaches the displayed terminal name (RULED OUT): saggar shows `session_name` out of Claude Code's own status-line payload, mirrored verbatim into ~/.saggar/chat-info/<SAGGAR_SESSION>.json by ~/.saggar/claude-status-bridge.sh \u2014 Claude's auto-generated conversation title, which keys off whatever CONTENT the prompt carries: a distinctive subject line when there is one, and the handoff's PATH when the subject says nothing",
         "source": "~/.saggar/claude-status-bridge.sh + ~/.saggar/chat-info/*.json",
-        "breaks": "if saggar ever took a name from its caller, `successor` would have a lever it currently does not \u2014 and the docs and `successor_cfg`'s docstring, which now say plainly that no argument names the terminal, would be wrong in the OTHER direction",
+        "breaks": "if saggar ever took a name from its caller, `successor` would have a lever it currently does not \u2014 and the docs and `successor_cfg`'s docstring, which now say plainly that no argument names the terminal, would be wrong in the OTHER direction. The second half is what the subject line rests on: if the titler stopped reading the prompt, a good subject would no longer improve the tab and fix 3 would be buying nothing",
         "ledger": "Anything game_loop passes to `saggar agent` names the saggar terminal",
-        "exercisable": "no",
-        "exercisable_why": "UNCONDITIONAL absence with no local instrument: confirming it needs a real saggar terminal opened by a real handover and its name read back off the app \u2014 an act, not a read. The bridge's 14 lines are the strongest cheap evidence and they are a source, not an exercise, so a stamp is honestly all there is here",
-        "exercised_by": null,
+        "exercisable": "yes",
+        "exercisable_why": "EXERCISED 2026-08-25 by the act the earlier entry said would be needed: a live handover through the running app, with the terminal's name read back from `saggar list --json`. It costs a real claude session, so it is a thing a person re-runs, never a gate",
+        "exercised_by": "`game_loop successor` into the real app, then `saggar list --json` for the terminal's name and ~/.saggar/presence/<terminal>.json for its session id",
         "verified_on": "2026-08-25",
-        "verified_against": "saggar's installed bridge, 2026-08-19",
-        "verified_how": "SOURCED + two live handovers: the bridge script has no field a caller could fill, and two real 2026-08-25 handovers both came out named `HANDOFF-<timestamp> continuation` \u2014 the second AFTER its prompt led with the subject `confirm saggar names the terminal from the subject line`, which is the positive control that the string reached the terminal and the titler ignored it. All three chat-info payloads on this machine carry session_name values traceable to a document's name (`Handoff saggar support`, `DELEGATION-dodgeball implementation`, `DELEGATION-barbell`), none to a task string."
+        "verified_against": "saggar's installed bridge, 2026-08-19, plus a live handover through the running app on 2026-08-25",
+        "verified_how": "SOURCED + FOUR live handovers. The bridge script has no field a caller could fill. Two on 2026-08-25 through the `handoff` skill's port came out `HANDOFF-<timestamp> continuation`; a third, in override_canvas, came out \"Game loop implementation\" for a session merging a Flutter branch \u2014 off the `.game_loop/\u2026/HANDOFF.md` path, because its subject was the contentless `session 6acce140`. The fourth was run to check this entry and moved it: subject `session verify-e2e` produced the terminal name \"Verify e2e\", which is the SUBJECT and not the filename. So the earlier reading \u2014 the filename is the only lever \u2014 was too narrow: the titler reads the prompt, and the path wins only when the subject offers nothing better.",
+        "exercise_note": "the falsifying case is constructible and was constructed: a prompt whose subject is distinctive. If a name ever came from the caller, the same handover with --title set would show it"
       }
     ]
   }

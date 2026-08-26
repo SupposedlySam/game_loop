@@ -11490,7 +11490,9 @@ def main():
     # iterated the blocks generically — so reading one block HERE meant a claim about a sibling tool
     # could sit in the ledger, be reported by status, and still be unaccounted by the gate whose
     # whole job is that nothing joins quietly. Found by adding the saggar block: the check fired on
-    # a claim that was already fully declared, one file over.
+    # a claim that was already fully declared, one file over. Found INDEPENDENTLY, the same day, by
+    # the showrunner block — two subjects arriving at once is what a one-block reader looks like
+    # from the outside, and neither session could see the other's.
     _accounted = {c.get("ledger")
                   for _b in _cl.values() if isinstance(_b, dict)
                   for c in (_b.get("claims") or [])}

@@ -15591,9 +15591,18 @@ def main():
               "mandate" not in _kinds
               and {"mandate_set", "mandate_clear", "mandate_park", "mandate_park_stop",
                    "mandate_resume"} <= set(_kinds))
+        # `.get`, NOT `[...]`: a bare subscript here does not fail this assertion, it ENDS THE RUN.
+        # Measured — neutering `log_kinds` to return {} gave `KeyError: 'mandate_set'`, no trailer,
+        # and every assertion after this point never ran. The mutation sweep then reports the
+        # producer NOT MEASURED, so the one instrument that could tell whether anything notices
+        # `log_kinds` breaking is blinded by the way this line is written.
+        #
+        # Same rule `read_or_empty` states for files, one type over: absent must fail the assertion
+        # that cares, never end the run. A crash also destroys the other producers' readings in that
+        # shard, so the cost is not paid by this line alone.
         check("#87: ...and each kind carries the FIELDS recorded beside it, which is what an author "
               "needs to read a record rather than only to match one",
-              "text" in _kinds["mandate_set"] and "learning" in _kinds["harden"])
+              "text" in _kinds.get("mandate_set", []) and "learning" in _kinds.get("harden", []))
 
         # THE GUARDS WRITE RECORDS AND WERE NOT BEING READ. `_SHIPPED_SCRIPTS` listed the Python
         # files; the guards are SHELL wrappers around here-doc'd Python, `ast.parse` raises on them,

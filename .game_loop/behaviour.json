@@ -425,6 +425,33 @@
       "change": "--wake-path can now be given WITHOUT --set, to annotate a mandate that is already bound; and re-binding a mandate with IDENTICAL words no longer moves its `since` stamp. Giving --wake-path with no mandate bound is refused rather than silently stored.",
       "why_it_qualifies": "Somebody who changed nothing gets a verb that previously errored. `status` warns when a mandate is armed with no external wake path recorded, and that warning necessarily arrives AFTER the binding — but --wake-path was reachable only through --set, and --set stamps `since` with the current time. So the only way to answer the warning was to re-bind, which retyped the human's own words and silently replaced the record of when they said them. The field was unusable for its own purpose in the normal case. The `since` half qualifies separately: the replace-refusal explicitly promises that re-setting the same words 'costs nothing', and it was costing the stamp that every staleness judgement downstream reads.",
       "consequence": "`game_loop mandate --wake-path \"<how a signal reaches this session>\"` is now a standalone call. WHAT IT IS NOT: still recorded, never probed — the tool does not and cannot test that the path delivers, and a declared path that has stopped delivering reads exactly like one that works. The output says so in those words. FOUND WHILE DOING THIS, and larger: the behaviour gate's own watch list named the `game_loop` stub, which #109 had emptied of refusals when it split the binary into a stub plus an importable module. 129 of this payload's refusal lines live in _gl_impl.py and 1 in the stub, so the gate had been answering 'no refusal line changed — nothing owed' for every mandate, status, confidence, arm and authorize refusal since that split. _gl_impl.py and bin/verify are now watched, and the suite DERIVES the expected watch set from where refusals actually live rather than trusting the list — bin/verify was found by that derivation, not by inspection."
+    },
+    {
+      "seq": 44,
+      "sha": "213b176",
+      "notice": true,
+      "verb": "kinds / status (dead-kind check)",
+      "change": "`game_loop kinds` reports 75 record kinds where it reported 67. The extractor walked each shipped script's AST, and the two GUARDS are shell wrappers around here-doc'd Python — ast.parse raises on them and the loop's `except SyntaxError: continue` swallowed it, so they fell out silently. It now reads the programs the wrapper RUNS. The eight recovered kinds are authorized_write, authorized_mcp, memory_write, standing_mcp_write, trusted_mcp_write, commit_unedited, commit_gate_unharnessed_tree and attributed_merge.",
+      "why_it_qualifies": "A consumer who changed nothing gets a DIFFERENT VERDICT about their own trigger. `trigger_dead_kinds` — which `status` surfaces — treats this schema as the set of kinds that exist, so a trigger matching any of those eight was reported DEAD: 'it cannot fire'. Reproduced against a temp triggers.d before the fix and re-driven after. This repo's own log carries commit_unedited 11 times, so the accusation was about records being written that week. A false 'your trigger cannot fire' is worse than no check, because it sends its reader to rewrite something that worked.",
+      "consequence": "If `status` told you a trigger named a dead kind and the kind was one of the eight above, that was wrong and is now corrected — re-check before rewriting anything. `kinds` also lists their FIELDS, which is what an author needs to read a record rather than only match one. WHAT THIS STILL MISSES: the extractor finds dict literals carrying a constant \"kind\"; a record built dynamically, or in a language that is neither Python nor a here-doc inside a shell script, is still invisible, and its absence still reads as 'this program does not write that'."
+    },
+    {
+      "seq": 45,
+      "sha": "add92dd",
+      "notice": true,
+      "verb": "status (pinned-dispatch drift)",
+      "change": "the pin-drift check compares EVERY file in bin/ rather than a hand-written tuple of seven. It was missing _gl_impl.py, guard-writes.sh, guard-mcp.sh and limit-probe.sh — the module holding essentially all the logic since the binary was split into a stub plus an importable module, plus the two thin wrappers the harness actually invokes.",
+      "why_it_qualifies": "A consumer pinned to a code checkout now sees drift reported that was previously silent, and silence there had a specific and misleading meaning. The check exists for one state: you are FIXING a guard, pinned at HEAD, edits uncommitted, and every edit is inert because the hooks run the pinned copy. The commit check cannot see that state, and this one could not see it in the file such a fix almost always lands in.",
+      "consequence": "If you pin, expect this to name files it used not to. That is the point: an edit to a pinned tree's _gl_impl.py does nothing until you re-pin, and you were not being told. WHAT IT STILL DOES NOT DO, deliberately: a file present in only ONE of the two trees is not reported as drift — that is two different COMMITS, which the commit check above it already answers, and folding them together would make one sentence answer a question it was not asked."
+    },
+    {
+      "seq": 46,
+      "sha": "67733c3",
+      "notice": true,
+      "verb": "successor (saggar-agent mode)",
+      "change": "the 'terminal name' line now says the gap is OURS. It read 'NOT SET FROM HERE — saggar names the terminal and Claude then renames it ... nothing carries it into this mode', which explained the absence as a fact about saggar. `saggar agent` gained `--title` on 2026-08-26 and it does name the terminal; `successor` does not pass it.",
+      "why_it_qualifies": "The sentence stayed TRUE while its reason inverted, which is the harder kind of stale. A false sentence gets corrected the first time somebody reads it; a true one with a dead reason sends its reader to the wrong repo to look for a lever that is in fact missing from THIS one, and nothing about the sentence degrades when that happens.",
+      "consequence": "The handoff terminal is still not named by anything game_loop passes — unchanged in behaviour, changed in explanation. Tracked as a gap in this repo (#116) rather than a limitation of the host. NOT VERIFIED FROM HERE: saggar is not on this machine's PATH, so the --title reading is another session's measurement, recorded in claims.json and attributed rather than repeated as our own; the same reason `successor` does not yet pass the flag."
     }
   ],
   "schema": 1

@@ -231,16 +231,25 @@ print(json.dumps(cfg))
 # answers from. They were the same directory until pinning split them, and the commit gate needs
 # them apart — the whole point of a pin is that the code is not the half-edited copy in the tree
 # being committed, while the record must be exactly that tree's (#28).
-#   not pinned → runs "$home/bin/verify", byte-for-byte the invocation this always made.
-#   pinned     → runs the PINNED binary, told which home to answer from.
-# $1 is the .game_loop/ whose verify.yaml and verified.json describe the tree in question.
+#   $1 (`home`) is the .game_loop/ whose verify.yaml and verified.json describe the tree in question.
+#   not pinned → runs "$home/bin/verify".
+#   pinned     → runs the PINNED binary.
+#
+# THE HOME IS NAMED IN BOTH BRANCHES, and the unpinned one is why. Picking the right binary is not
+# the same as pointing it at the right tree: `verify`'s resolve_home() reads GAME_LOOP_HOME BEFORE
+# its own location, and this guard is invoked as
+# `GAME_LOOP_HOME="$CLAUDE_PROJECT_DIR/.game_loop" exec .../guard-writes.sh` — the host exports the
+# PROJECT's home on every single tool call. So the worktree's own binary, left to inherit that,
+# gated a worktree commit on the MAIN tree's record and refused it naming files the commit never
+# carried. That is #28 arriving through the environment instead of through the path, and leaving
+# this branch bare is what let it back in.
 run_verify() {
   local home="$1"; shift
+  local code="$CODE_DIR"
   if [ "$CODE_DIR" = "$GAMELOOP_DIR" ]; then
-    "$home/bin/verify" "$@"
-  else
-    GAME_LOOP_HOME="$home" "$CODE_DIR/bin/verify" "$@"
+    code="$home"
   fi
+  GAME_LOOP_HOME="$home" "$code/bin/verify" "$@"
 }
 
 # ONE INTERPRETER FOR EVERY SCALAR THIS GUARD DERIVES. These five values used to cost five separate
@@ -913,7 +922,13 @@ prompt surface is not knowable from inside a hook."
     #    Only a tree STRICTLY INSIDE the project moves the answer; the project itself, a project that
     #    lives inside a larger checkout, and a target git can name no tree for all keep this script's
     #    own .game_loop — so a repo without worktrees behaves exactly as it always did.
-    commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" python3 - "$payload" <<'PY'
+    # PER SESSION, not merely per project. VERIFY_OUT below is per-project because it is written
+    # and read inside one guard invocation; this file outlives the python that writes it and is
+    # read by a verify started afterwards, and this repo routinely has twenty sessions committing
+    # into one checkout. Two of them sharing a scope file would gate each other's commits.
+    SCOPE_OUT="/tmp/.game_loop_scope.${SLUG:-default}.${SID:-nosid}"
+    rm -f "$SCOPE_OUT"
+    commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" SCOPE_OUT="$SCOPE_OUT" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 payload = json.loads(sys.argv[1])
 cmd = os.environ.get("SCAN_CMD", "")
@@ -923,6 +938,8 @@ home = os.path.expanduser("~")
 found = False
 target = None
 others = []
+commit_args = None         # the argv of the FIRST repo-targeting commit, for reading its SCOPE
+commit_count = 0           # more than one, and "what does the commit carry" has no single answer
 cwd_dynamic = False        # a `cd` into a variable — every later commit lands somewhere unnameable
 unresolved = ""            # the raw fragment that made a COMMIT's target unreadable, if any
 
@@ -1056,10 +1073,138 @@ for seg in shell_segments(cmd):
         if os.path.realpath(tgt).startswith(os.path.realpath(repo).rstrip(os.sep) + os.sep) \
                 or os.path.realpath(tgt) == os.path.realpath(repo):
             found = True
+            commit_count += 1
             if target is None:
                 target = tgt          # the tree whose record this commit is answerable to (#28)
+                commit_args = args
             continue
     others.append(seg if len(seg) <= 70 else seg[:67] + "...")
+
+# WHAT THIS COMMIT CARRIES, read off the COMMAND — and the reason it is read here rather than in
+# `verify`. The gate used to check the whole dirty working tree, so a commit carrying one README was
+# refused for an unrelated file and charged that file's whole suite. The narrower question is "what
+# lands in HEAD", and only the command answers it: a plain commit carries the INDEX, `-a` carries the
+# index plus every tracked modification, and a pathspec commit carries those paths and IGNORES the
+# index for everything else (verified against real git: index [a.txt], `commit b.txt`, HEAD carried
+# b.txt alone and a.txt stayed staged).
+#
+# WHY `verify` CANNOT DO THIS ITSELF, which is the trap this whole block exists to avoid: the hook is
+# PreToolUse, so it runs BEFORE the command body. At that instant `git commit -am` has staged NOTHING
+# -- `git diff --cached` is EMPTY while the working tree shows the modification -- and a gate that
+# read the index would consult zero rules and pass anything. Observed on real git before this was
+# written, not reasoned about afterwards. So the index is the right answer for ONE commit form and a
+# silent bypass for the others, and only the parsed argv tells them apart.
+#
+# EVERY UNCERTAINTY FALLS BACK TO THE TREE. An option this cannot classify might take a value, and
+# misreading that value as a pathspec would narrow the scope to a file nobody named. `-p` and
+# `--interactive` pick their content from a human at a prompt this cannot see. `--pathspec-from-file`
+# keeps the list somewhere this does not read. Two commits chained have no single answer. In every
+# one of those the mode is "tree" and the gate behaves exactly as it did before this existed --
+# over-gating, which costs time, rather than under-gating, which costs the gate.
+#
+# NOT special-cased, and deliberately: `--amend`. It re-commits HEAD's own files, which were gated
+# when they were first committed, so the scope of an amend is the same as the scope of the commit
+# form it is spelled with.
+_VAL_LONG = {"--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message",
+             "--fixup", "--squash", "--template", "--cleanup", "--trailer"}
+_BOOL_LONG = {"--all", "--amend", "--edit", "--no-edit", "--signoff", "--no-signoff", "--verbose",
+              "--quiet", "--dry-run", "--short", "--branch", "--porcelain", "--long", "--null",
+              "--allow-empty", "--allow-empty-message", "--no-verify", "--verify", "--status",
+              "--no-status", "--reset-author", "--no-post-rewrite", "--only", "--include",
+              "--gpg-sign", "--no-gpg-sign", "--untracked-files", "--pathspec-file-nul"}
+_VAL_SHORT = "mFCct"        # consume the NEXT token when one of these ends a cluster
+_BOOL_SHORT = "avqnesoizSu"  # -S and -u take an optional value ATTACHED, never a separate token
+_GIVE_UP = {"--interactive", "--patch", "--pathspec-from-file"}
+
+
+def read_scope_mode(args):
+    """(mode, paths) for a commit's argv. mode 'tree' means: not readable narrowly, gate on it all."""
+    i = args.index("commit") + 1
+    paths, want_all, want_include, after_sep = [], False, False, False
+    while i < len(args):
+        a = args[i]
+        if after_sep:
+            paths.append(a); i += 1; continue
+        if a == "--":
+            after_sep = True; i += 1; continue
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if name in _GIVE_UP:
+                return "tree", []
+            want_all = want_all or name == "--all"
+            want_include = want_include or name == "--include"
+            if "=" in a or name in _BOOL_LONG:
+                i += 1; continue
+            if name in _VAL_LONG:
+                i += 2; continue
+            return "tree", []                    # unclassifiable: it may eat the next token
+        if a.startswith("-") and len(a) > 1:
+            cluster, j = a[1:], 0
+            while j < len(cluster):
+                c = cluster[j]
+                if c == "p":
+                    return "tree", []
+                want_all = want_all or c == "a"
+                want_include = want_include or c == "i"
+                if c in _VAL_SHORT:
+                    if j == len(cluster) - 1:
+                        i += 1                   # the value is the next token
+                    break                        # ...otherwise the cluster remainder IS the value
+                if c not in _BOOL_SHORT:
+                    return "tree", []
+                j += 1
+            i += 1; continue
+        paths.append(a); i += 1
+    if want_all and paths:
+        return "tree", []                        # git refuses this combination; do not out-guess it
+    if want_all:
+        return "all", []
+    if paths:
+        return ("include" if want_include else "pathspec"), paths
+    return "index", []
+
+
+def _names(argv, tree):
+    r = subprocess.run(argv, cwd=tree, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _status_names(paths, tree):
+    r = subprocess.run(["git", "status", "--porcelain", "-uall", "--"] + paths,
+                       cwd=tree, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    out = []
+    for ln in r.stdout.splitlines():
+        f = ln[3:].strip()
+        if " -> " in f:
+            f = f.split(" -> ")[1]
+        if f:
+            out.append(f)
+    return out
+
+
+def resolve_scope(mode, paths, tree):
+    """The file list, or None when git could not answer -- which is treated as 'tree' upstream."""
+    idx = None
+    if mode in ("index", "all", "include"):
+        idx = _names(["git", "diff", "--cached", "--name-only"], tree)
+        if idx is None:
+            return None
+    if mode == "index":
+        return sorted(set(idx))
+    if mode == "all":
+        mod = _names(["git", "diff", "--name-only"], tree)
+        return None if mod is None else sorted(set(idx) | set(mod))
+    if mode in ("pathspec", "include"):
+        got = _status_names(paths, tree)
+        if got is None:
+            return None
+        return sorted(set(got) | set(idx)) if mode == "include" else sorted(set(got))
+    return None
+
 
 answerable = ""
 if unresolved:
@@ -1076,15 +1221,33 @@ elif found:
                       else "undetermined:" + top)
     else:
         answerable = own
+scope_mode = ""
+if commit_args is not None and commit_count == 1 and answerable.startswith("root:"):
+    _mode, _paths = read_scope_mode(commit_args)
+    if _mode != "tree":
+        _tree = os.path.dirname(answerable[len("root:"):])
+        _files = resolve_scope(_mode, _paths, _tree)
+        if _files is not None:
+            try:
+                with open(os.environ["SCOPE_OUT"], "w") as _f:
+                    _f.write("\n".join(_files) + ("\n" if _files else ""))
+                scope_mode = _mode
+            except OSError:
+                scope_mode = ""      # cannot write it -> cannot narrow -> the tree, as before
+
 print("yes" if found else "")
 print(answerable)
+print(scope_mode)
 for o in others:
     print(o)
 PY
 )
     commit_here=$(printf '%s\n' "$commit_scan" | head -1)
     commit_root=$(printf '%s\n' "$commit_scan" | sed -n '2p')
-    chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +3 | grep -v '^$' || true)
+    # LINE 3 IS THE SCOPE, and empty means "could not be read narrowly -> the whole tree", which is
+    # what this gate did for its whole life before the line existed. Chained segments start at 4.
+    commit_scope=$(printf '%s\n' "$commit_scan" | sed -n '3p')
+    chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +4 | grep -v '^$' || true)
     if [ "$commit_here" = "yes" ]; then
       case "$commit_root" in
         unresolvable:*)
@@ -1168,7 +1331,17 @@ refusal is recorded in the PARENT's log either way, so how often it fires is ans
       # Per-repo, not a fixed name: the previous /tmp/.game_loop_verify was shared by every project
       # on the machine, so two of them committing at once would read each other's refusal.
       VERIFY_OUT="/tmp/.game_loop_verify.${SLUG:-default}"
-      if ! run_verify "$GAMELOOP_TARGET" --check >"$VERIFY_OUT" 2>&1; then
+      # GATE ON WHAT THE COMMIT CARRIES, not on whatever else the tree happens to hold. With no
+      # readable scope this is the empty string and the invocation is byte-for-byte the one this
+      # always made -- the fallback is the old behaviour, so an unparseable command loses speed and
+      # never loses the gate.
+      SCOPE_ARGS=()
+      [ -n "$commit_scope" ] && SCOPE_ARGS=(--scope-from "$SCOPE_OUT")
+      # ${a[@]+"${a[@]}"} rather than a bare "${a[@]}": bash 3.2 ships on macOS, and there
+      # `set -u` makes expanding an EMPTY array a fatal unbound-variable error. That kills the
+      # guard mid-run, the shim fails OPEN, and every refusal below silently stops happening —
+      # the loudest possible way to lose a gate while its tests still name it.
+      if ! run_verify "$GAMELOOP_TARGET" --check ${SCOPE_ARGS[@]+"${SCOPE_ARGS[@]}"} >"$VERIFY_OUT" 2>&1; then
         # ORDERING NOTE: this hook runs at PreToolUse, BEFORE the command body executes. Bundling
         # `verify` and `git commit` in ONE call can never pass — the check runs before your verify
         # line does. Run them as two separate calls.
@@ -1414,7 +1587,17 @@ PY
       # STATED, NEVER BLOCKED, and for the same reason the manifest ships empty: on a fresh install
       # every path is unchecked, and refusing there would block the first commit with the fix —
       # writing the rules — sitting behind the gate (INV5).
-      cov_json=$(run_verify "$GAMELOOP_DIR" --coverage --staged --porcelain 2>/dev/null || true)
+      # THE NOTICE READS THE SAME SCOPE AS THE GATE. It used to read the INDEX unconditionally,
+      # which is right for a plain commit and EMPTY for `git commit -am` -- so the loudest thing
+      # here went silent on the commit form that carries the most, and said so in its own footer.
+      # Sharing the gate's scope makes the two halves answer one question. The --staged fallback is
+      # kept for the case the scope could not be read, where it is exactly what it always was.
+      # ...and against the TARGET tree, which is the one being committed. It read $GAMELOOP_DIR --
+      # this script's own tree -- while the gate three lines up read the target, so on a worktree
+      # commit the notice was reporting some other tree's index. Same defect as #28, one call over.
+      cov_scope=(--staged)
+      [ -n "$commit_scope" ] && cov_scope=(--scope-from "$SCOPE_OUT")
+      cov_json=$(run_verify "$GAMELOOP_TARGET" --coverage ${cov_scope[@]+"${cov_scope[@]}"} --porcelain 2>/dev/null || true)
       cov_note=$(COV="$cov_json" python3 <<'PY'
 import io, json, os
 try:
@@ -1428,9 +1611,9 @@ n = len(unchecked)
 if not cov.get("rules"):
     lines = ["NOTHING IN THIS COMMIT IS CHECKED — .game_loop/verify.yaml has no rules, so the owed-"
              "checks",
-             "gate passed by having nothing to say about %d staged file%s." % (n, "" if n == 1 else "s")]
+             "gate passed by having nothing to say about %d file%s in it." % (n, "" if n == 1 else "s")]
 else:
-    lines = ["THIS COMMIT CARRIES %d STAGED FILE%s NO RULE CHECKS"
+    lines = ["THIS COMMIT CARRIES %d FILE%s NO RULE CHECKS"
              % (n, "" if n == 1 else "S")]
     lines += ["    " + p for p in unchecked[:10]]
     if n > 10:
@@ -1446,9 +1629,11 @@ lines += [
     '      - "<glob>"',
     "",
     "STATED, NEVER BLOCKED — the manifest ships empty, so refusing here would block a fresh install's",
-    "first commit. It reads the INDEX, so `git commit -a`, a pathspec commit and --no-verify pass it",
-    "unexamined, and it says nothing about paths that did not change. Silence here is not evidence",
-    "that a commit was checked.",
+    "first commit. It reads the same set the owed-checks gate does: the index for a plain commit, the",
+    "index plus every tracked modification for `git commit -a`, the named paths for a pathspec one —",
+    "and the WHOLE dirty tree wherever that command could not be read, which over-reports rather than",
+    "going quiet. --no-verify skips all of it, and nothing here says anything about a path that did",
+    "not change. Silence is not evidence that a commit was checked.",
 ]
 print("\n".join(lines))
 PY

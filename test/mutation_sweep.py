@@ -1649,6 +1649,33 @@ NOT_SWEPT = {
     # mutations hangs the suite rather than failing it, which is its own finding and has to be
     # chased before a floor recorded here would mean anything. Recording an unmeasured floor would
     # be the exact target-making this file's header warns about.
+
+    # ── THE COMMIT-SCOPE PRODUCERS, AND THE ORDERING THAT FORCES THEM HERE ───────────────────────
+    # Both are new with the change that scopes the commit gate to what a commit CARRIES, and both
+    # are KNOWN GAPS in the plainest sense: they should be swept, they are not yet, and the reason
+    # is mechanical rather than a judgement. `main()` sweeps `git archive HEAD` — deliberately, so
+    # a floor is measured against a tree somebody can check out — and these two functions are not
+    # in HEAD until the commit that introduces them lands. There is no order of operations in which
+    # a first sweep could have measured them, so a number recorded here today would be a number
+    # about nothing.
+    #
+    # What IS known about them is not nothing, and is not a substitute for a floor: each is killed
+    # by assertions written in the same change (the scoped `--check` wording, and the OUT OF SCOPE
+    # line naming the dirty paths a narrowed run did not look at). That is an argument for
+    # expecting a non-zero floor, not a measurement of one.
+    #
+    # WHEN PROMOTING THESE, the trap two entries up applies: a NOT_SWEPT member scores 2 free
+    # accounting kills that DISAPPEAR on the move into MUTANTS, so measure, then subtract the two.
+    ".game_loop/bin/verify::scope_arg":
+        "KNOWN GAP — should be swept, is not yet. It reads --scope-from off argv and returning "
+        "None always would silently un-scope every commit gate, which is exactly the shape worth "
+        "a floor. Unmeasurable until the commit introducing it is IN HEAD, which is the tree the "
+        "sweep archives.",
+    ".game_loop/bin/verify::outside_scope_tail":
+        "KNOWN GAP — should be swept, is not yet. Its silence is the sentence a scoped run owes "
+        "about the dirty paths it did NOT look at, so a neutered version turns a smaller claim "
+        "back into a green that reads as a statement about the whole tree. Same ordering: not in "
+        "HEAD yet.",
 }
 
 

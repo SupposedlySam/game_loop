@@ -482,6 +482,44 @@ def main():
             check("a clobber-override redirect to an out-of-repo path is refused (%s)"
                   % _clob.split()[2],
                   denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+        # THE REDIRECT GRAMMAR, WALKED — not the spellings I happened to think of. Five forms
+        # reached this guard unseen (`>|`, `>!`, `>>!`, `>&`, `>>&`), every one ordinary shell, and
+        # the reason they went unnoticed for weeks is that the parser matched SPELLINGS while the
+        # tests asserted the spellings somebody remembered. A parser matching spellings cannot tell
+        # you which spellings it is missing; a list taken from the shell's own grammar can.
+        #
+        # Both halves matter. The write list is the hole; the not-a-write list is the cost of
+        # closing it badly — `2>&1` names no file, and a fix that consumed the `&` there would
+        # invent a target called "1" and refuse ordinary redirects.
+        _OUT = "/Users/nobody/grammar-probe.txt"
+        _WRITES = [
+            ("plain", f"echo x > {_OUT}"),          ("append", f"echo x >> {_OUT}"),
+            ("clobber >|", f"echo x >| {_OUT}"),    ("zsh >!", f"echo x >! {_OUT}"),
+            ("zsh >>!", f"echo x >>! {_OUT}"),      ("both &>", f"echo x &> {_OUT}"),
+            ("both &>>", f"echo x &>> {_OUT}"),     ("csh >&", f"echo x >& {_OUT}"),
+            ("csh >>&", f"echo x >>& {_OUT}"),      ("fd 2>", f"echo x 2> {_OUT}"),
+            ("fd 2>>", f"echo x 2>> {_OUT}"),       ("fd 2>|", f"echo x 2>| {_OUT}"),
+            ("named {v}>", f"echo x {{v}}> {_OUT}"),
+            ("read-write <>", f"echo x <> {_OUT}"), ("fd 3<>", f"echo x 3<> {_OUT}"),
+        ]
+        _NOT_WRITES = [
+            ("dup 2>&1", "grep -q x f 2>&1"), ("dup >&2", "echo o >&2"),
+            ("close >&-", "echo o >&-"),      ("sink 2>/dev/null", "grep -q x f 2>/dev/null"),
+            ("read <", f"cat < {_OUT}"),
+        ]
+        _missed = [n for n, c in _WRITES
+                   if not denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("every redirect form in the shell grammar that CREATES OR TRUNCATES a file is seen "
+              "as a write (%d forms) — the list is the grammar's, not the ones somebody remembered"
+              % len(_WRITES),
+              not _missed)
+        _false = [n for n, c in _NOT_WRITES
+                  if denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("...and the forms that name NO file are still allowed (%d of them) — descriptor "
+              "duplication and a plain read must not become refusals when the write list widens"
+              % len(_NOT_WRITES),
+              not _false)
+
         # `>& file` IS A WRITE AND `2>&1` IS NOT, and the guard has to tell them apart. csh-style
         # `>&` / `>>&` send both streams to a FILE — valid in zsh, and in bash `>& f` means what
         # `&> f` means — and both were ALLOWED to an out-of-repo path because `&` terminated the

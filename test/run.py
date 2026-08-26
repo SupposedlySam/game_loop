@@ -93,6 +93,11 @@ def _env(proj=None, sid=None, **extra):
     # nothing was started. SAGGAR goes too, so nothing here can grow a second way to detect it.
     env.pop("SAGGAR_SESSION", None)
     env.pop("SAGGAR", None)
+    # And the window `successor` waits for saggar's presence file in (#the tab-title trio). The
+    # fake `saggar` these tests put on PATH opens nothing, so every handover would sit out the full
+    # 20s watching the DEVELOPER'S real presence directory — where a terminal they opened by hand
+    # would be read as the successor. Tests that mean to exercise discovery set it themselves.
+    env["GAME_LOOP_SAGGAR_DISCOVER_SEC"] = "0"
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -1864,6 +1869,55 @@ def main():
               "tab title           : a much longer deliberate title"
               in succ_mode("--title", "a much longer deliberate title"))
 
+        # ...AND THE FIELD IS ONLY PRINTED WHERE IT CAN ACT. `title` reaches a terminal through the
+        # Warp tab config and nowhere else, but the block printed `tab title : O | session 6acce140`
+        # in every mode — five lines above the paragraph saying nothing here names the terminal.
+        # OBSERVED 2026-08-25 (override_canvas, 6acce140 -> e0becca4): the session read the field,
+        # reported its successor as "titled O | session 6acce140", and the tab said "Game loop
+        # implementation". A field that cannot act in the mode it is printed in is not a field.
+        sag_t = succ_mode(SAGGAR_SESSION="F1AC5B4E")
+        check("saggar-agent prints NO tab title — a value a reader has no reason to doubt is worse "
+              "than no value where nothing can apply it",
+              "tab title" not in sag_t and "terminal name       : NOT SET FROM HERE" in sag_t)
+        check("...and names what DOES title it, rather than leaving the mechanism to be inferred",
+              "Claude then renames it" in sag_t)
+        check("...and still shows the string, so what was lost is visible rather than merely absent",
+              "is what a Warp tab would" in sag_t)
+        check("warp-tab keeps the field — it is the one mode that writes the title",
+              "tab title" in succ_mode(TERM_PROGRAM="WarpTerminal"))
+        check("print marks it a SUGGESTION — the command it hands a human sets no title either",
+              "(a SUGGESTION" in succ_mode(TERM_PROGRAM="Apple_Terminal"))
+
+        # ── FIX 3: a heading that is a session id is not a subject ────────────────────────────
+        #
+        # The subject exists because `Read /repo/.game_loop/sessions/8aae5d8f/HANDOFF.md in full`
+        # answers "which tab is doing the thing I care about" with a UUID. OBSERVED 2026-08-25:
+        # override_canvas handed over under `# Handoff — session 6acce140`, so the derived subject
+        # WAS a UUID and the prompt opened with exactly the string the feature replaces.
+        subj_h = os.path.join(proj, "H-subject.md")
+        with open(subj_h, "w") as f:
+            f.write("# Handoff — session 6acce140\n\nwhat the successor reads\n")
+        gl(proj, "mandate", "--set", "cut the release branch", sid="sess-succ")
+        out_sid_head = gl(proj, "successor", "--dry-run", "--handoff", subj_h,
+                          sid="sess-succ").stdout
+        check("a heading that is ONLY a session id is refused as a subject — it is the UUID label "
+              "the subject exists to replace",
+              "session 6acce140" not in out_sid_head)
+        check("...and the fall-through reaches the mandate, which is a human's words about this run",
+              "about               : cut the release branch" in out_sid_head)
+        with open(subj_h, "w") as f:
+            f.write("# Handoff — 6acce140-e2c3-4cb0-badb-8d90585d9713\n\nreads\n")
+        check("...the full uuid spelling too, since both are headings this harness writes",
+              "about               : cut the release branch"
+              in gl(proj, "successor", "--dry-run", "--handoff", subj_h, sid="sess-succ").stdout)
+        with open(subj_h, "w") as f:
+            f.write("# Handoff — session 6acce140 — merge into main\n\nreads\n")
+        check("an id in FRONT of a description is a prefix, not a label — that heading survives, "
+              "because refusing it would throw away the only thing that names the work",
+              "about               : session 6acce140 — merge into main"
+              in gl(proj, "successor", "--dry-run", "--handoff", subj_h, sid="sess-succ").stdout)
+        gl(proj, "mandate", "--clear", "--notes", "subject checks done", sid="sess-succ")
+
         # ── a handover stands the predecessor's watchdog down ─────────────────────────────────
         #
         # OBSERVED, not imagined (landlord, 2026-08-18, sessions 48641588 → 9187f2e8): the limit
@@ -1990,6 +2044,70 @@ def main():
         finally:
             stranger.kill()
             stranger.wait()
+
+        # ── the id that gets RECORDED is the one that actually started ────────────────────────
+        #
+        # `saggar agent` builds its own claude invocation, so the id minted here never runs — and
+        # recording it made four things point at nothing at once. OBSERVED 2026-08-25: successor
+        # reported d773d651 while the terminal ran e0becca4, so handed_off.to named a session with
+        # no state, the predecessor's watchdog rang it back into a mandate the successor already
+        # owned, the thread could not join to the successor's own log lines, and the human was
+        # handed an id that resumes nothing. saggar had written the answer to disk the whole time.
+        print("the successor's REAL session id is read back from saggar's presence file:")
+        fakehome = os.path.join(proj, "fakehome")
+        os.makedirs(os.path.join(fakehome, ".saggar", "presence"), exist_ok=True)
+        REAL_SID = "e0becca4-c2b7-4874-a689-2d0e5d711038"
+
+        def fake_saggar(body):
+            with open(os.path.join(fakebin, "saggar"), "w") as f:
+                f.write("#!/bin/sh\n" + body + "\necho 'agent terminal opened'\nexit 0\n")
+            os.chmod(os.path.join(fakebin, "saggar"), 0o755)
+
+        def hand_over(home=None, **envx):
+            gl(proj, "mandate", "--set", "the id that started", sid=hsid)
+            return gl(proj, "successor", sid=hsid, HOME=home or fakehome,
+                      PATH=fakebin + os.pathsep + os.environ.get("PATH", ""), **envx)
+
+        fake_saggar("printf '%s' '{\"claudeSessionID\":\"" + REAL_SID + "\"}' "
+                    "> \"$HOME/.saggar/presence/7624C9B0.json\"")
+        r = hand_over(GAME_LOOP_SAGGAR_DISCOVER_SEC="5")
+        check("the id RECORDED is the one saggar's presence file names, not the one this process "
+              "minted and nothing ran",
+              (json.load(open(hstate)).get("handed_off") or {}).get("to") == REAL_SID)
+        check("...and it is printed as READ BACK, so it cannot be mistaken for the command's id",
+              "READ BACK from" in r.stdout and REAL_SID in r.stdout)
+        check("...while the printed command keeps its own id — the portable floor is not rewritten "
+              "to match a session it did not start",
+              re.search(r"--session-id (\S+)", succ_cmdline(r.stdout)).group(1) != REAL_SID)
+
+        # Two terminals inside the window is the case a guess gets confidently wrong: another
+        # session opening one beside ours is ordinary on this machine.
+        fake_saggar("for n in A B; do printf '%s' '{\"claudeSessionID\":\"'$n'\"}' "
+                    "> \"$HOME/.saggar/presence/$n.json\"; done")
+        r = hand_over(GAME_LOOP_SAGGAR_DISCOVER_SEC="1")
+        check("two terminals appearing at once is reported AMBIGUOUS rather than resolved by "
+              "guessing, and both are named",
+              "NOT RECOVERED: 2 terminals appeared" in r.stdout and "(A, B)" in r.stdout)
+        check("...and the handover falls back to the minted id rather than recording one of them",
+              (json.load(open(hstate)).get("handed_off") or {}).get("to")
+              == re.search(r"--session-id (\S+)", succ_cmdline(r.stdout)).group(1))
+
+        # Silence is not a verdict: a terminal that started and has not written its file yet reads
+        # identically to one that never started, and only one of those is worth alarming about.
+        fake_saggar(":")
+        r = hand_over(GAME_LOOP_SAGGAR_DISCOVER_SEC="0")
+        check("a miss says COULD NOT CONFIRM, never that the successor did not start",
+              "NOT RECOVERED: no new terminal appeared" in r.stdout
+              and "may still be booting" in r.stdout)
+        check("...and the handover is still recorded, because starting and being read back are "
+              "different questions",
+              "handover recorded" in r.stdout)
+        r = hand_over(home=os.path.join(proj, "nosaggarhome"),
+                      GAME_LOOP_SAGGAR_DISCOVER_SEC="1")
+        check("no presence directory at all names the hook that writes it, rather than reporting a "
+              "successor that could not be found",
+              "no ~/.saggar/presence to read" in r.stdout and "presence hook" in r.stdout)
+        fake_saggar(":")
 
         gl(proj, "mandate", "--clear", "--notes", "the successor has it", sid=hsid)
         gl(proj, "mandate", "--set", "actually I am driving again", sid=hsid)

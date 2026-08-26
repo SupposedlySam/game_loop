@@ -1325,6 +1325,25 @@ MUTANTS += [
 ]
 
 
+# ── READING THE SUCCESSOR'S REAL SESSION ID BACK ────────────────────────────────────────────────
+#
+# Floors measured 2026-08-25 against the working tree that introduced them, whole-suite on both
+# sides, the same denominator as the block above.
+#
+# These two are one read split in half — the directory listing, and the delta over it — so their
+# kill sets overlap almost entirely. That is worth saying rather than reading as two independent
+# measurements: neuter either and the successor's id stops being recovered, which is the same
+# observable from outside.
+MUTANTS += [
+    ("_saggar_presence_names -> saggar's presence directory reads as absent",
+     ".game_loop/bin/_gl_impl.py::_saggar_presence_names", "    return None\n",
+     ["successor", "saggar", "presence", "session id"], "the outer half of the read: with no listing there is no delta, so every discovery path collapses to the one honest answer — no directory to read. What survives it is the fallback, which is asserted separately: the handover is still recorded, and the minted id is what gets written.", 4),
+    ("_saggar_discover -> the successor's real id is never read back, and the minted one stands",
+     ".game_loop/bin/_gl_impl.py::_saggar_discover", '    return None, ""\n',
+     ["successor", "saggar", "presence", "session id"], "the inner half: the terminal opens, the file appears, and nothing looks. Its kills are the three outcomes that have to be told apart — an id read back, two terminals that cannot be told apart, and a miss that says COULD NOT CONFIRM rather than DID NOT START.", 5),
+]
+
+
 NOT_SWEPT = {
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
     # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not

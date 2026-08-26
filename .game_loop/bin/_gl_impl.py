@@ -6942,6 +6942,19 @@ SUCCESSOR_PROMPT = ("Read {handoff} in full, then continue the work it describes
 SUBJECT_MAX = 100
 
 
+# A heading is a subject only when it NAMES THE WORK. These two spellings name a SESSION instead
+# — `# Handoff — session 6acce140` and `# Handoff — 6acce140-e2c3-4cb0-badb-8d90585d9713` — and both
+# are written by this harness's own conventions, which is why the check lives here rather than in
+# advice about writing better headings. Anchored whole: `session 6acce140 — merge into main` names
+# the work and survives, because the id in front of a description is a prefix, not the label.
+ID_LABEL_RE = re.compile(r"^(?:session\s+)?[0-9a-f]{8}"
+                         r"(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$", re.I)
+
+
+def _is_id_label(text):
+    return bool(ID_LABEL_RE.match(" ".join(str(text or "").split())))
+
+
 def successor_subject(hp, about=None, s=None):
     """The short line that says WHAT IS BEING WORKED ON, prepended to the successor's prompt.
 
@@ -6991,6 +7004,15 @@ def successor_subject(hp, about=None, s=None):
         # The generated handoff describes when it was written, not what the run is doing. Using it
         # would put "written automatically at every turn-end" on every unattended handover.
         if "written automatically" in subject:
+            subject = ""
+        # AND A HEADING THAT IS A SESSION ID IS THE FAILURE THIS WHOLE FEATURE REPLACES. Observed
+        # 2026-08-25: override_canvas handed over under `# Handoff — session 6acce140`, so the
+        # subject was "session 6acce140" and the successor's prompt opened with the UUID the
+        # docstring above names as the thing it exists to stop — the row a human scans answering
+        # "which tab is doing the thing I care about" with the one string nobody can read. Skipped
+        # rather than trusted, exactly as the generated heading is, and the fall-through below
+        # reaches the MANDATE: a human's own words about the same run.
+        if _is_id_label(subject):
             subject = ""
         if not subject and s is not None:
             m = (s.get("mandate") or {})
@@ -7316,6 +7338,63 @@ def successor_title(task=None, title=None, cwd=None, subject=None):
     return title
 
 
+def successor_id_lines(sid, mode, dry_run, found, why_not):
+    """WHOSE id this is — the question the printed block used to answer with a guess.
+
+    Under every mode but saggar-agent the id is ours: `successor` mints it and puts it on the
+    command line, so the session that starts is the session named. `saggar agent` builds its own
+    invocation, so the id minted here will never run — and the successor's real one is read back
+    from saggar's presence directory afterwards. Which of the two is on screen is SAID, because a
+    recovered id printed in the same shape as the command's would send the next reader — human or
+    successor — to a session that does not exist.
+    """
+    if mode != "saggar-agent":
+        return [f"successor session id : {sid}"]
+    if dry_run:
+        return [f"successor session id : {sid}  (the printed command's — `saggar agent` mints its "
+                "own,",
+                "                      and a dry run starts nothing to read one back from)"]
+    if found:
+        return [f"successor session id : {sid}",
+                "                      READ BACK from " + SAGGAR_PRESENCE_DIR + " after the "
+                "terminal opened —",
+                "                      this is the session that actually started, and it is what "
+                "the handover",
+                "                      recorded. The id in the command below was minted here and "
+                "ran nowhere."]
+    return [f"successor session id : {sid}  (the printed command's — `saggar agent` mints its own)",
+            "                      NOT RECOVERED: "
+            + (why_not or "nothing started, so there was no terminal to read back from") + ".",
+            "                      So nothing here names the session that started — `saggar list` "
+            "and the",
+            "                      terminal itself still do."]
+
+
+def terminal_name_lines(mode, title):
+    """What will actually be on the tab in THIS mode — never the string this verb computed as though
+    every mode could apply it.
+
+    ONLY warp-tab APPLIES IT. `title` reaches a terminal through _warp_tab's TOML and nowhere else,
+    and printing `tab title           : O | session 6acce140` under saggar-agent put a field a
+    reader has no reason to doubt five lines above the paragraph contradicting it. On 2026-08-25 a
+    session read that field, reported its successor as "titled O | session 6acce140", and the tab
+    said "Game loop implementation". A field that cannot act in the mode it is printed in is not a
+    field, it is a rumour with a colon in it.
+
+    print mode keeps a title because there it is honest: the human runs the command in a tab they
+    already have, so the string is advice to them and is marked as advice.
+    """
+    if mode == "warp-tab":
+        return [f"tab title           : {title}  (written into the tab config, which sets it)"]
+    if mode == "saggar-agent":
+        return ["terminal name       : NOT SET FROM HERE — saggar names the terminal and Claude "
+                "then renames it",
+                "                      from its own conversation title. "
+                f"\"{title}\" is what a Warp tab would",
+                "                      have read; nothing carries it into this mode."]
+    return [f"tab title           : {title}  (a SUGGESTION — the printed command sets no title)"]
+
+
 def _warp_tab(name, cwd, cmd, title):
     """Write a Warp tab config and open it; returns the config path.
 
@@ -7336,8 +7415,84 @@ def _warp_tab(name, cwd, cmd, title):
     return conf
 
 
+# Where saggar's own Claude Code presence hook writes one file per TERMINAL, carrying the claude
+# session id running in it. Read off the live directory (`~/.saggar/presence/<terminal-uuid>.json`,
+# `{"agent":"claude","event":"SessionStart",...,"claudeSessionID":"e0becca4-…"}`), which is also
+# what in_saggar()'s docstring rests on — this is the same file, used for the other question it can
+# answer.
+SAGGAR_PRESENCE_DIR = os.path.join("~", ".saggar", "presence")
+# A new terminal writes its file when the successor's SessionStart hook fires, so the wait is a
+# process booting, not a network. Env-overridable because a TEST must be able to pin it: the suite
+# runs on a machine whose real presence directory is live, and an unbounded look there would race
+# whatever the developer happens to open.
+SAGGAR_DISCOVER_SEC = 20.0
+SAGGAR_DISCOVER_POLL_SEC = 0.5
+
+
+def _saggar_presence_names():
+    """The presence directory's filenames, or None when there is no directory to read."""
+    try:
+        return set(os.listdir(os.path.expanduser(SAGGAR_PRESENCE_DIR)))
+    except OSError:
+        return None
+
+
+def _saggar_discover(before):
+    """The successor's REAL claude session id, recovered after `saggar agent` minted it.
+
+    Returns (session_id, why_not); exactly one is ever non-None, and it never raises.
+
+    WHY THIS IS NOT A NICETY. `saggar agent` builds its own claude invocation, so the id in the
+    printed command is one nothing ever ran — and that fiction was what got RECORDED. Observed
+    2026-08-25 in override_canvas: `successor` reported d773d651 while the terminal that opened ran
+    e0becca4, so `handed_off.to` named a session with no state, the predecessor's watchdog rang it
+    back into a mandate the successor already owned, the chain could never join to the successor's
+    own log lines, and the human was handed an id that resumes nothing. Every one of those is the
+    same missing read.
+
+    SILENCE IS NOT A VERDICT. A miss means "could not confirm", never "did not start": the terminal
+    may still be booting, the presence hook may be uninstalled (it is a toggle in saggar's
+    settings), or the directory may not exist at all. And TWO new terminals inside the window is
+    reported as ambiguous rather than resolved by guessing — another session opening a terminal
+    beside ours is exactly the case where a guess would record the wrong id confidently.
+    """
+    if before is None:
+        return None, ("no " + SAGGAR_PRESENCE_DIR + " to read — saggar's Claude Code presence hook "
+                      "is what writes it, and it is a toggle in Saggar \u25b8 Settings")
+    try:
+        budget = float(os.environ.get("GAME_LOOP_SAGGAR_DISCOVER_SEC", SAGGAR_DISCOVER_SEC))
+    except ValueError:
+        budget = SAGGAR_DISCOVER_SEC
+    deadline = time.time() + max(0.0, budget)
+    seen_empty = True
+    while True:
+        after = _saggar_presence_names()
+        new = sorted((after or set()) - before)
+        if len(new) > 1:
+            return None, ("%d terminals appeared while this ran (%s) — which one is the successor "
+                          "cannot be told apart, so nothing is recorded rather than the wrong one"
+                          % (len(new), ", ".join(os.path.splitext(n)[0][:8] for n in new)))
+        if len(new) == 1:
+            seen_empty = False
+            try:
+                with open(os.path.join(os.path.expanduser(SAGGAR_PRESENCE_DIR), new[0])) as f:
+                    got = (json.load(f) or {}).get("claudeSessionID")
+            except (OSError, ValueError):
+                got = None
+            if got:
+                return str(got), None
+        if time.time() >= deadline:
+            break
+        time.sleep(SAGGAR_DISCOVER_POLL_SEC)
+    if seen_empty:
+        return None, ("no new terminal appeared in %s within %gs — it may still be booting, "
+                      "and `saggar list` can still say" % (SAGGAR_PRESENCE_DIR, budget))
+    return None, ("the new terminal's presence file carries no claudeSessionID yet after %gs — "
+                  "the session had not reached its SessionStart hook" % budget)
+
+
 def _saggar_agent(cwd, prompt):
-    """Ask saggar for a new agent terminal beside this one; returns (started, detail).
+    """Ask saggar for a new agent terminal beside this one; returns (started, detail, id, why_not).
 
     The mechanism, read off the CLI saggar ships rather than guessed: `saggar agent claude <task>`
     starts an independent claude session in a new terminal in the CALLING terminal's project, and
@@ -7355,18 +7510,23 @@ def _saggar_agent(cwd, prompt):
     exe = shutil.which("saggar")
     if not exe:
         return False, ("no `saggar` on PATH. The CLI shim is a one-time toggle in Saggar ▸ Settings "
-                       "▸ General, which installs it to ~/.local/bin/saggar")
+                       "▸ General, which installs it to ~/.local/bin/saggar"), None, None
+    # BEFORE the call, because the whole method is a delta: one new file in a directory that also
+    # holds every other terminal on this machine.
+    before = _saggar_presence_names()
     try:
         r = subprocess.run([exe, "agent", "claude", prompt],
                            capture_output=True, text=True, cwd=cwd, timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
-        return False, f"`saggar agent` could not run: {e}"
+        return False, f"`saggar agent` could not run: {e}", None, None
     if r.returncode == 0:
-        return True, " ".join((r.stdout or "").split())
+        found, why_not = _saggar_discover(before)
+        return True, " ".join((r.stdout or "").split()), found, why_not
     hint = {1: "saggar understood and refused", 2: "saggar could not parse the call",
             3: "saggar is not running, or this is not a saggar terminal"}.get(r.returncode, "")
     msg = " ".join(((r.stderr or "") + " " + (r.stdout or "")).split()) or "no message"
-    return False, f"`saggar agent` exited {r.returncode}" + (f" ({hint})" if hint else "") + f": {msg}"
+    return (False, f"`saggar agent` exited {r.returncode}" + (f" ({hint})" if hint else "")
+            + f": {msg}", None, None)
 
 
 THREAD_ID_CHARS = 8
@@ -7586,9 +7746,9 @@ def cmd_successor(s, a):
     thread, inherited = successor_thread(subject)
     title = successor_title(a.task, a.title, cwd, subject)
     why = successor_why(sc)
-    sid_note = (f"{sid}  (the printed command's — `saggar agent` mints its own)"
-                if sc["mode"] == "saggar-agent" else sid)
-    lines = [f"successor session id : {sid_note}"]
+    # The id line is built LAST (below), because under saggar-agent the id that matters is one this
+    # process cannot know yet: it is minted by the terminal saggar opens and read back afterwards.
+    lines = []
     if subject:
         lines.append(f"about               : {subject}")
     # WHICH CHAIN THIS IS. The `about` line says what the work is; this says which running thread of
@@ -7598,9 +7758,9 @@ def cmd_successor(s, a):
                  + ("  — inherited, this continues an existing chain" if inherited
                     else "  — NEW chain, minted here"))
     lines += [f"reads               : {hp}" + ("  ⚠ the GENERATED handoff" if auto else ""),
-             f"working directory   : {cwd}",
-             f"tab title           : {title}",
-             f"command             : {cmd}"]
+              f"working directory   : {cwd}"]
+    lines += terminal_name_lines(sc["mode"], title)
+    lines.append(f"command             : {cmd}")
     # SET IN THE WRONG FILE. Printed on its own terms, before and independent of the grant: the
     # failure being prevented is somebody writing the key into the tracked config, reading a normal
     # successor line, and walking away believing the run is armed. Silence there is the 3am stall.
@@ -7658,11 +7818,12 @@ def cmd_successor(s, a):
     # human runs it, and a mandate left with no engine because of a tab nobody opened is a stall
     # nothing would report.
     handed = False
+    found, found_why = None, None
     if a.dry_run:
         lines.append(f"mode                : {sc['mode']} — {why}, configured "
                      f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
     elif sc["mode"] == "saggar-agent":
-        started, detail = _saggar_agent(cwd, prompt)
+        started, detail, found, found_why = _saggar_agent(cwd, prompt)
         handed = bool(started)
         if started:
             lines += [f"mode                : saggar-agent — {why}. Opened a new agent terminal"
@@ -7670,12 +7831,21 @@ def cmd_successor(s, a):
                       "                      Nothing outside this repo was written — this is a call "
                       "to a running app, not a",
                       "                      config file, so it costs none of what warp-tab costs.",
-                      "                      WHAT DID NOT REACH IT: the session id above, and "
-                      "--task/--title — `saggar agent`",
-                      "                      takes a task, not argv. Nothing here names the "
-                      "terminal: saggar shows Claude's",
-                      "                      own session title, which keys off the handoff "
-                      "FILENAME. It also",
+                      "                      WHAT DID NOT REACH IT: --task/--title, and the "
+                      "session id on the command —",
+                      "                      `saggar agent` takes a task, not argv. "
+                      + ("The id was READ BACK afterwards."
+                         if found else "The id was not recovered either."),
+                      "                      NOTHING HERE NAMES THE TERMINAL. Claude titles the "
+                      "session from its own",
+                      "                      conversation, so the tab ends up saying whatever the "
+                      "prompt gave it to work",
+                      "                      with — and with a subject that says nothing, the only "
+                      "content is the",
+                      "                      handoff's PATH. Observed 2026-08-25: a session "
+                      "merging a Flutter branch",
+                      "                      was titled \"Game loop implementation\", off "
+                      "`.game_loop/…/HANDOFF.md`. It also",
                       "                      starts in the CALLING terminal's directory, which is "
                       f"{cwd} only if you",
                       "                      have not cd'd away. Set limits.successor.mode to "
@@ -7711,6 +7881,14 @@ def cmd_successor(s, a):
                       "repo. saggar needs no such",
                       "                       override: SAGGAR_SESSION reaches hooks, so "
                       "\"auto\" resolves it there too.)"]
+    # WHOSE ID GETS RECORDED. Everything below turns on `sid`: handed_off.to, the watchdog's
+    # stand-down, the thread the chain joins on, and the line a human reads. Under saggar-agent the
+    # minted id is a session that never ran, so recording it made all four point at nothing —
+    # observed 2026-08-25 (override_canvas reported d773d651; the terminal ran e0becca4).
+    if found:
+        sid = found
+    lines = successor_id_lines(sid, sc["mode"], bool(a.dry_run), found, found_why) + lines
+
     # ── stand this session's autonomy engine down ────────────────────────────────────────────
     #
     # A watchdog rings an idle session back to work. After a handover that is exactly wrong: the
@@ -10424,9 +10602,11 @@ def main():
     sc.add_argument("--cwd", help="where the successor starts (default: this repo)")
     sc.add_argument("--task", help=f"what the successor is doing, {TASK_MAX_WORDS} words / "
                                    f"{TASK_MAX_CHARS} chars at most — becomes the tab title "
-                                   "`<R> | <task>`")
+                                   "`<R> | <task>` under warp-tab, the one mode that sets one")
     sc.add_argument("--title", help="tab title, verbatim and uncapped — the override for when "
-                                    "--task is too small a box")
+                                    "--task is too small a box. warp-tab only: saggar names its "
+                                    "own terminals and print sets no title, so there it is a "
+                                    "suggestion to whoever runs the command")
     sc.add_argument("--about", help="one line saying WHAT IS BEING WORKED ON, prepended to the "
                                     "successor's prompt so a human reading that terminal can tell. "
                                     "Derived from the handoff's heading, or the mandate, when "

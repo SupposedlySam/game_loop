@@ -80,9 +80,14 @@ Stated plainly, because a tool that oversells its guarantees is worse than one t
 
 - **It is not a sandbox.** It reduces blast radius; it does not contain a determined process. Run
   genuinely untrusted work in a VM.
-- **It cannot see everything.** A mutation made through an interpreter one-liner, or through a path
-  built from a shell variable, is outside what the write guard reads. It says so in its own output
-  rather than implying coverage it does not have.
+- **It cannot see everything.** The write guard reads your command TEXT. It knows the Write/Edit
+  tools by name, every redirect form in the shell grammar, and a NAMED set of write-capable verbs —
+  and **anything outside those three is invisible to it**: an interpreter one-liner, a path built
+  from a shell variable, a script that mutates once you run it, a program not on the list, a tool
+  name it has never heard of. It names the covered set in its own SCOPE block rather than eliding it
+  behind an ellipsis, which it did until 2026-08-26 — and that ellipsis is exactly how `curl -o` and
+  thirteen other ordinary forms wrote outside the repo, unchecked, for weeks. The rule still holds
+  in the gaps; the enforcement does not, and knowing which is which is the point of saying so.
 - **It does not make the agent smarter.** It makes it honest and persistent. A confused agent guarded
   by game_loop is a confused agent that has stopped claiming to be finished.
 - **Some parts need a terminal.** Usage-limit survival reads data Claude Code exposes only to a

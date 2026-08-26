@@ -13558,15 +13558,39 @@ def main():
     # THE REPO'S OWN BINARY, not a sandbox: `proj` at this point belongs to a section that has been
     # torn down, and the first version of this died on FileNotFoundError — loudly, which is the
     # right direction, and caught by running the section rather than by trusting the edit.
-    _mh = subprocess.run([os.path.join(SRC_GAME_LOOP, "bin", "game_loop"), "mandate", "--help"],
-                         capture_output=True, text=True, env=_env())
-    _mopts = sorted({_o.strip() for _o in re.findall(r"^\s+(--[a-z-]+)", _mh.stdout, re.M)})
-    _mskill = read_or_empty(os.path.join(REPO, "templates", "skills", "gl-mandate", "SKILL.md"))
-    _undoc = [_o for _o in _mopts if not _o.endswith("-file") and _o not in _mskill]
-    check("the shipped gl-mandate skill names every option the mandate parser accepts — the set is "
-          "read from --help, so an option added tomorrow fails HERE rather than being missing from "
-          "a consumer's only guide to the verb: " + (", ".join(_undoc) or "none of %d" % len(_mopts)),
-          not _undoc)
+    _gl_bin = os.path.join(SRC_GAME_LOOP, "bin", "game_loop")
+
+    def _verb_opts(verb):
+        _h = subprocess.run([_gl_bin, verb, "--help"], capture_output=True, text=True, env=_env())
+        return sorted({_o.strip() for _o in re.findall(r"^\s+(--[a-z-]+)", _h.stdout, re.M)})
+
+    # EVERY `gl-<verb>` SKILL, not just the one that was wrong. The skills directory names its own
+    # subjects, so a per-verb skill added tomorrow is covered without anybody remembering to add it
+    # here — which is the difference between a rule and a list.
+    _sk_dir = os.path.join(REPO, "templates", "skills")
+    _verb_help = subprocess.run([_gl_bin, "--help"], capture_output=True, text=True, env=_env())
+    _all_verbs = set(re.findall(r"[a-z_]+", _verb_help.stdout.split("{", 1)[-1].split("}", 1)[0])) \
+        if "{" in _verb_help.stdout else set()
+    _skill_gaps, _skill_verbs = [], []
+    for _d in sorted(os.listdir(_sk_dir)) if os.path.isdir(_sk_dir) else []:
+        _v = _d[3:] if _d.startswith("gl-") else _d
+        _sk = read_or_empty(os.path.join(_sk_dir, _d, "SKILL.md"))
+        if _v not in _all_verbs or not _sk:
+            continue                      # not a per-verb skill; nothing to compare it against
+        _skill_verbs.append(_v)
+        for _o in _verb_opts(_v):
+            if not _o.endswith("-file") and _o not in _sk:
+                _skill_gaps.append(f"{_d}:{_o}")
+    check("every shipped `gl-<verb>` skill names every option its verb's parser accepts — the set "
+          "comes from --help and the subjects come from the skills directory, so neither a new "
+          "option nor a new skill needs anybody to remember this check: " +
+          (", ".join(_skill_gaps) or "none across " + ", ".join(_skill_verbs)),
+          not _skill_gaps)
+    check("...and it actually compared some verbs, since a loop that matched no skill would report "
+          "'none' having looked at nothing",
+          len(_skill_verbs) >= 2)
+    _mopts = _verb_opts("mandate")
+    _mskill = read_or_empty(os.path.join(_sk_dir, "gl-mandate", "SKILL.md"))
     check("...and the option set was actually READ — an empty parse would satisfy the line above "
           "while proving nothing, which is the shape this file exists to refuse",
           len(_mopts) >= 8 and "--set" in _mopts and "--wake-path" in _mopts)

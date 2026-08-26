@@ -345,22 +345,35 @@ def main():
         print("stop gate (mandate bound):")
         gl(proj, "mandate", "--set", "do the work")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Done part 1. Want me to do part 2?"}')
-        check("blocks a question (exit 2)", r.returncode == 2)
+        # EXIT 2 ALONE IS WHAT A STUB THAT ONLY FAILS RETURNS. A `game_loop` replaced by
+        # `sys.exit(2)` passed these four, so the assertions guarding the STOP GATE — the mechanism
+        # that enforces the autonomy mandate — could not tell the working gate from a dead binary.
+        # Found by a second positive control, after the exit-1 one caught the claim gate: every
+        # refusal now has to carry words only the working code emits. See the note at the claim
+        # gate above; the technique is written up in NEXT_SESSION.
+        check("blocks a question (exit 2), and SAYS the question is the reason",
+              r.returncode == 2 and "asking the human a question" in (r.stdout + r.stderr))
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Continuing to the next step now."}')
-        check("blocks announce-then-stop (exit 2)", r.returncode == 2)
+        check("blocks announce-then-stop (exit 2), naming the CONTINUATION rather than a generic "
+              "refusal — the two arms must not be one message",
+              r.returncode == 2 and "you said you are continuing" in (r.stdout + r.stderr))
         gl(proj, "checkpoint", "--notes", "reporting")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Finished the batch. Remaining: docs."}')
         check("allows a checkpointed report (exit 0)", r.returncode == 0)
         # checkpoint is consumed — a second bare stop blocks again
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Still going on the batch."}')
-        check("checkpoint is single-use (next bare stop blocks)", r.returncode == 2)
+        check("checkpoint is single-use (next bare stop blocks), and the block is the gate's own "
+              "refusal rather than any non-zero exit",
+              r.returncode == 2 and "STOP GATE CLOSED" in (r.stdout + r.stderr))
 
         print("stop gate (arm → consume):")
         gl(proj, "arm", "--question", "which color?", "--read", real, "--predict", "blue")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Which color do you want?"}')
         check("armed question passes once (exit 0)", r.returncode == 0)
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"And which size?"}')
-        check("arm is consumed (next question blocks)", r.returncode == 2)
+        check("arm is consumed (next question blocks), with the gate's own words — a spent arm "
+              "and a dead binary both exit 2, and only one of them says why",
+              r.returncode == 2 and "STOP GATE CLOSED" in (r.stdout + r.stderr))
         gl(proj, "mandate", "--clear", "--notes", "done")
 
         print("write guard:")

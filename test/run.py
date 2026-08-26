@@ -15437,7 +15437,7 @@ def main():
 
         _code = os.path.join(_pd, "pinned")
         os.makedirs(os.path.join(_code, "bin"))
-        for _n in ("game_loop", "guard-writes-impl.sh"):
+        for _n in ("game_loop", "_gl_impl.py", "guard-writes-impl.sh"):
             shutil.copy(os.path.join(_pdh, "bin", _n), os.path.join(_code, "bin", _n))
         _gpd.CODE_ROOT = _code
         check("...pinned to a byte-identical tree is also silent — the check is about what RUNS, "
@@ -15460,6 +15460,39 @@ def main():
         check("...and TWO differing files are BOTH named — being shown one of two reads as the "
               "whole finding, and the guard you were not shown stays inert after you re-pin",
               sorted(_dr3) == ["game_loop", "guard-writes-impl.sh"] and _why3 is None)
+
+        # THE FILE A GUARD FIX ACTUALLY LANDS IN. This compared a hand-written tuple of seven names
+        # while bin/ held eleven, and the four it missed were `_gl_impl.py`, `guard-writes.sh`,
+        # `guard-mcp.sh` and `limit-probe.sh` — the module holding essentially all the logic since
+        # #109 split the binary, plus the two thin wrappers Claude Code actually invokes. So the
+        # check whose whole subject is "your edits are inert because the hooks run the pinned copy"
+        # could not see an edit to the file those edits are usually in. Derived from the directories
+        # now, so a file added to bin/ tomorrow is compared without anybody remembering.
+        with open(os.path.join(_code, "bin", "_gl_impl.py"), "a") as f:
+            f.write("\n# the pinned module is older\n")
+        _dr4, _why4 = _gpd.pin_file_drift()
+        check("a differing _gl_impl.py is REPORTED — the module holds the logic a guard fix edits, "
+              "and it sat outside the compared set from #109 until now",
+              "_gl_impl.py" in _dr4 and _why4 is None)
+        check("...and it is named ALONGSIDE the others rather than replacing them, so deriving the "
+              "list did not quietly narrow what the hand-written one covered",
+              sorted(_dr4) == ["_gl_impl.py", "game_loop", "guard-writes-impl.sh"])
+        # ONE-SIDED ABSENCE IS DELIBERATELY NOT DRIFT, and this pins that choice rather than my
+        # first guess at it. A file in one tree and not the other means the two are at DIFFERENT
+        # COMMITS, which the commit check above already reports; this check is only about
+        # same-commit-different-bytes, and folding the two together would make its one sentence
+        # ("your edits are inert") answer a question it was not asked. I asserted the opposite
+        # first and the assertion failed — which is the difference between checking what the code
+        # does and checking what I assumed it did.
+        with open(os.path.join(_code, "bin", "only-in-the-pin.sh"), "w") as f:
+            f.write("#!/bin/sh\necho hi\n")
+        _dr5, _why5 = _gpd.pin_file_drift()
+        check("...while a file existing ONLY in the pinned tree is NOT reported here — that is two "
+              "different commits, which the commit check answers, and this one stays about bytes",
+              "only-in-the-pin.sh" not in _dr5 and _why5 is None)
+        check("...and the files that DO differ are still named alongside it, so the line above is "
+              "a scoping decision rather than the check having gone quiet",
+              sorted(_dr5) == ["_gl_impl.py", "game_loop", "guard-writes-impl.sh"])
 
         # AND THE CONSEQUENCE. pinned_report() is what a human reads; nothing drove it, so the
         # finding could have stopped reaching the page with every assertion above still green.

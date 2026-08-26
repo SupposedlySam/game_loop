@@ -9436,8 +9436,28 @@ def pin_file_drift():
     if CODE_ROOT == ROOT:
         return [], None
     drift, checked = [], 0
-    for name in ("game_loop", "guard-writes-impl.sh", "guard-mcp-impl.sh", "watchdog", "notify.py",
-                 "verify", "flair.py"):
+    # EVERY FILE IN bin/, DERIVED — this was a hand-written tuple of seven and bin/ holds eleven.
+    # The four it missed were `_gl_impl.py`, `guard-writes.sh`, `guard-mcp.sh` and `limit-probe.sh`:
+    # the module holding essentially all the logic since #109 split the binary, plus the two thin
+    # hook wrappers Claude Code actually invokes. So the check whose docstring describes "you are
+    # FIXING a guard, pinned at HEAD, edits uncommitted, every one of them inert" could not see an
+    # edit to the file a guard fix almost always lands in.
+    #
+    # The UNION of both trees rather than a listing of one, so the enumeration does not depend on
+    # which side is asked. It does NOT make one-sided ABSENCE into drift — the loop below still
+    # skips a file missing from either tree, deliberately: that is a DIFFERENT COMMIT, which the
+    # commit check above already reports, and this one is only about same-commit-different-bytes.
+    # (I first wrote the opposite in this comment and asserted it; the assertion failed, which is
+    # the difference between describing what the code does and describing what I assumed.)
+    _names = set()
+    for _side in (CODE_ROOT, ROOT):
+        try:
+            _names |= {f for f in os.listdir(os.path.join(_side, "bin"))
+                       if not f.startswith("__")
+                       and os.path.isfile(os.path.join(_side, "bin", f))}
+        except OSError:
+            pass
+    for name in sorted(_names):
         a_, b_ = os.path.join(CODE_ROOT, "bin", name), os.path.join(ROOT, "bin", name)
         try:
             with open(a_, "rb") as f:

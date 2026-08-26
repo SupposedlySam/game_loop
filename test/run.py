@@ -528,6 +528,37 @@ def main():
                   % _unk.split("__")[-1][:22],
                   denied(_mcp_here(_unk)))
 
+        # THE SCOPE BLOCK CANNOT DRIFT FROM THE CODE. Four front-door documents now point at that
+        # block as the authority on what this guard covers — how-it-works.md, llms.txt, the README
+        # and the file's own header — precisely so there is ONE list instead of four that rot
+        # separately. That only works if the block actually names what the code checks, so this
+        # asserts it: every verb the guard dispatches on must appear in the header, or the header
+        # is back to being a summary somebody remembered.
+        #
+        # It is the encoded form of today's defect. The header said "rm/mv/cp/mkdir/chmod/..." while
+        # the code checked a different set, and the ellipsis is what a reader took for the rest.
+        # read here rather than reusing `_gsrc`, which is assigned further down the file — the
+        # first draft referenced it early and the section died on UnboundLocalError, caught by
+        # running the section rather than by trusting the edit.
+        _gtxt = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh"))
+        # NAMED _scope_block, NOT _scope: a function called `_scope` is defined further down this
+        # file, and binding a string to that name made it 'str' object is not callable when the
+        # later section called it — one shard dead, caught by prun's silent-shard notice again.
+        _scope_block = _gtxt[:_gtxt.index("PAYLOAD")] if "PAYLOAD" in _gtxt else _gtxt[:6000]
+        _declared = set()
+        for _line in _gtxt.split("\n"):
+            for _key in ("MUTATORS = {", "_DEST_LAST = {"):
+                if _line.startswith(_key):
+                    _declared |= {w.strip().strip('"\'') for w in
+                                  _line[len(_key):].rstrip("}").split(",") if w.strip()}
+            if _line.startswith("_DEST_FLAG = {"):
+                _declared |= set(re.findall(r'"(\w+)":', _line))
+        _unnamed = sorted(v for v in _declared if v and v not in _scope_block)
+        check("every verb the guard dispatches on is NAMED in its SCOPE block (%d verbs) — four "
+              "documents point at that block as the authority, and a header that drifts from the "
+              "code is the ellipsis defect wearing a longer sentence" % len(_declared),
+              not _unnamed)
+
         # THE VERB LIST, WALKED THE SAME WAY. `MUTATORS` is a hand-written set of spellings, and
         # the header advertised "rm/mv/cp/mkdir/chmod/..." — where the `...` is what a reader takes
         # for "and the other obvious ones". Measured: curl -o, wget -O, tar -C, unzip -d, rsync,

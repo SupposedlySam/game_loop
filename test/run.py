@@ -482,6 +482,29 @@ def main():
             check("a clobber-override redirect to an out-of-repo path is refused (%s)"
                   % _clob.split()[2],
                   denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+        # AND THE OTHER GUARD CANNOT HAVE THIS DEFECT, which is worth pinning because it explains
+        # why only one of them needs the discipline. guard-mcp DEFAULTS TO DENY, so a verb missing
+        # from its lists costs a false refusal a human clears; guard-writes sees every Bash command
+        # and must default to ALLOW, so a verb missing HERE is a silent write. Measured, not
+        # reasoned: every unrecognised MCP form comes back denied.
+        def _mcp_here(tool):
+            """The MCP guard, called from THIS section — `mcpguard` lives in its own block.
+
+            The first draft called it anyway: a NameError that killed two shards, reported by
+            prun's silent-shard notice rather than by a failing assertion. Without that notice it
+            would have read as `1188 passed, 0 failed`, exit 0.
+            """
+            return subprocess.run(
+                [os.path.join(proj, ".game_loop", "bin", "guard-mcp.sh")],
+                input=json.dumps({"tool_name": tool, "tool_input": {}}),
+                capture_output=True, text=True, env=_env(proj))
+
+        for _unk in ("mcp__db__frobnicate_everything", "mcp__db__row_delete", "mcp__db__x"):
+            check("an MCP tool whose verb this guard does not recognise is REFUSED (%s) — the "
+                  "opposite default from the write guard, and the reason its list can be partial"
+                  % _unk.split("__")[-1][:22],
+                  denied(_mcp_here(_unk)))
+
         # THE VERB LIST, WALKED THE SAME WAY. `MUTATORS` is a hand-written set of spellings, and
         # the header advertised "rm/mv/cp/mkdir/chmod/..." — where the `...` is what a reader takes
         # for "and the other obvious ones". Measured: curl -o, wget -O, tar -C, unzip -d, rsync,

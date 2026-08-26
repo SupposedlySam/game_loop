@@ -1726,6 +1726,15 @@ except (OSError, ValueError):
     pass
 allow = [os.path.realpath(p) for p in allow]
 
+# WHY THIS LIST HAS TO BE HONEST, WHILE guard-mcp's DOES NOT. That guard defaults to DENY: an MCP
+# tool whose verb it does not recognise is refused, so a verb missing from its lists costs a false
+# refusal a human can clear. This guard cannot do that. It sees EVERY Bash command, so defaulting to
+# deny would refuse everything and block its own repair (INV5) — which means a verb missing HERE is
+# a silent ALLOW, and the list's completeness is load-bearing in a way the MCP guard's is not.
+# Verified rather than assumed: every unrecognised MCP verb tested came back denied, including
+# `frobnicate`, a mid-name verb, and a name with no verb at all.
+#
+# That asymmetry is the whole reason the SCOPE header below names verbs instead of eliding them.
 MUTATORS = {"rm", "rmdir", "touch", "mkdir", "chmod", "chown", "ln", "dd", "truncate", "tee"}
 # A LIST OF VERBS CAN NEVER BE COMPLETE, AND THE POINT IS TO SHRINK THE GAP BETWEEN WHAT IS COVERED
 # AND WHAT IS CLAIMED. Measured against this guard: `curl -o`, `wget -O`, `tar -C`, `unzip -d`,

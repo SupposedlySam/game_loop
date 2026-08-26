@@ -5153,16 +5153,17 @@ def main():
         # PAIRED FIRST, so "held" means something: with no probe the cap escalates as it always has.
         _at_cap()
         _run()
-        with open(_wlog) as f:
-            check("with no probe configured the cap still stands the watchdog down — unchanged",
-                  '"watchdog_exhausted"' in f.read())
+        # read_or_empty, NOT a bare open: under a neutered watchdog this file does not exist, and
+        # the bare form raised FileNotFoundError and ended the whole run — every assertion after it
+        # never ran, which the sweep reads as coverage. Absent must fail the assertion that cares.
+        check("with no probe configured the cap still stands the watchdog down — unchanged",
+              '"watchdog_exhausted"' in read_or_empty(_wlog))
 
         open(_wlog, "w").close()
         _probe("echo 'two crawlers still live'; exit 0")
         _at_cap()
         _run()
-        with open(_wlog) as f:
-            _log = f.read()
+        _log = read_or_empty(_wlog)
         # A VERIFIED WAIT STOPS THE RING, not just the escalation. Guarding only the cap left the
         # run being WOKEN every idle_sec to rediscover it had nothing to do — a turn burnt each
         # time. Measured on this repo before fixing: the queue emptied, the probe said "waiting",
@@ -5182,10 +5183,9 @@ def main():
             json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
                        "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
         _env_run = _run()
-        with open(_wlog) as f:
-            check("the waiting probe gets the SAME environment a trigger gets — two runners of "
-                  "project-supplied commands must not differ in what they provide",
-                  _env_run.returncode == 0 and "env-ok" in f.read())
+        check("the waiting probe gets the SAME environment a trigger gets — two runners of "
+              "project-supplied commands must not differ in what they provide",
+              _env_run.returncode == 0 and "env-ok" in read_or_empty(_wlog))
 
         # ...AND IT KNOWS WHICH SESSION IT SPEAKS FOR (#60). Reported from a checkout running 18
         # concurrent sessions: the natural liveness signal is the mtime of per-session artifacts,
@@ -5201,11 +5201,10 @@ def main():
             json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
                        "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
         _sid_run = _run()
-        with open(_wlog) as f:
-            check("...and it is told its own SESSION, and a session dir that exists — so a probe in "
-                  "a checkout shared by many sessions can scope itself instead of globbing across "
-                  "everyone else's live work",
-                  _sid_run.returncode == 0 and "sid-ok" in f.read())
+        check("...and it is told its own SESSION, and a session dir that exists — so a probe in "
+              "a checkout shared by many sessions can scope itself instead of globbing across "
+              "everyone else's live work",
+              _sid_run.returncode == 0 and "sid-ok" in read_or_empty(_wlog))
 
         # PAIRED, on the function that decides it, because `_run` always supplies a session and an
         # assertion through it could never see the other case. What matters is that an UNRESOLVED
@@ -5235,19 +5234,34 @@ def main():
         check("a verified wait stops the RING itself — a run with nothing to do is not woken to "
               "discover that again",
               _r0.returncode == 0)
-        with open(_wlog) as f:
-            check("...and the quiet says WHY, so a watchdog that has stood down is distinguishable "
-                  "from one that is broken",
-                  "not ringing a run" in f.read())
+        check("...and the quiet says WHY, so a watchdog that has stood down is distinguishable "
+              "from one that is broken",
+              "not ringing a run" in read_or_empty(_wlog))
         # PAIRED: with the probe saying NOT waiting, the same idle state still rings.
         open(_wlog, "w").close()
         _probe("exit 1")
         with open(os.path.join(_wsd, "state.json"), "w") as f:
             json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
                        "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+        # THE PAIRED ARM NEEDED ITS OWN EVIDENCE. The quiet check above reads the log; this one
+        # asserted exit 2 alone, and exit 2 is what a stub that only fails returns — it passed in a
+        # control tree whose game_loop was `sys.exit(2)`. A ring INCREMENTS `watchdog_rings` in the
+        # session state, so requiring that counter to have moved says the watchdog reached its wake
+        # path rather than merely ending with the right number.
+        _rc = _run().returncode
+        # ABSENT MUST FAIL THE ASSERTION THAT CARES, NEVER END THE RUN. A bare open() here raised
+        # FileNotFoundError under a neutered watchdog and killed the whole serial run — the exact
+        # trap `read_or_empty` documents, walked into while fixing a neighbouring class. An
+        # assertion that never printed `ok` looks to the sweep exactly like one that flipped.
+        try:
+            with open(os.path.join(_wsd, "state.json")) as f:
+                _rings_after = (json.load(f) or {}).get("watchdog_rings", 0)
+        except (OSError, ValueError):
+            _rings_after = 0
         check("...while the same idle run DOES ring when nothing declares a wait — the quiet is the "
-              "probe's doing, not the watchdog having stopped working",
-              _run().returncode == 2)
+              "probe's doing, not the watchdog having stopped working (and the ring is COUNTED, "
+              "since exit 2 alone is what a binary that only fails returns)",
+              _rc == 2 and _rings_after > 0)
 
         check("a verifying wait HOLDS the cap — the human is not paged about a healthy run",
               '"watchdog_wait_held"' in _log and '"watchdog_exhausted"' not in _log)
@@ -5264,8 +5278,7 @@ def main():
             _probe(_cmd)
             _at_cap()
             _run()
-            with open(_wlog) as f:
-                _l = f.read()
+            _l = read_or_empty(_wlog)
             check(f"...{_name} escalates — conservative toward NOT waiting, since a false 'waiting' "
                   "silences the watchdog on exactly the wedged run it was built to catch",
                   '"watchdog_exhausted"' in _l and '"watchdog_wait_held"' not in _l)
@@ -5285,8 +5298,7 @@ def main():
             _probe(_cmd)
             _at_cap()
             _run()
-            with open(_wlog) as f:
-                _l = f.read()
+            _l = read_or_empty(_wlog)
             check(f"...{_name} is recorded as UNANSWERED, not as 'not waiting' — a check that "
                   "cannot run must not borrow the credibility of one that ran and said no",
                   '"answered": false' in _l)
@@ -5300,10 +5312,9 @@ def main():
         _probe("exit 1")
         _at_cap()
         _run()
-        with open(_wlog) as f:
-            check("...while a probe that answers 'there is work' is recorded as ANSWERED — the "
-                  "warning marks breakage only, so it still means something when it fires",
-                  '"answered": true' in f.read())
+        check("...while a probe that answers 'there is work' is recorded as ANSWERED — the "
+              "warning marks breakage only, so it still means something when it fires",
+              '"answered": true' in read_or_empty(_wlog))
         _st_ans = gl(wp, "status", sid="sess-wait").stdout
         check("...and status reports it as an ordinary 'not waiting', not as a failure",
               "not waiting" in _st_ans and "THE WAITING PROBE IS FAILING" not in _st_ans)

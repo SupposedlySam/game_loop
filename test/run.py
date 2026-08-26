@@ -195,6 +195,29 @@ def allowed(proj, payload, sid=None):
     return _probe_count(f) > before and not denied(res)
 
 
+def source_flat(text):
+    """Source with line-continuations dropped and whitespace collapsed, for ABSENCE claims.
+
+    An absence assertion against file text passes the moment the phrase WRAPS or is re-spaced, and
+    then it is perfectly effective at asserting the wrong thing — the shape mutation testing cannot
+    reach, because the assertion is not weak, it is precise about something that no longer matters.
+
+    Measured on this repo's own #110 guard, whose check is `"for seg in re.split(" not in <guard>`:
+
+        for  seg  in  re.split(     -> absent=True   the blind splitter returns, check stays green
+        for seg in \\ <newline> re.split(  -> absent=True   likewise
+
+    Collapsing whitespace catches the first; the second needs the backslash-continuation removed
+    too, which is why this does both. Reported by showrunner, who hit it as a phrase wrapping in
+    PROSE — the same defect, and their instance was a claim they had just removed from their docs
+    that a line break would have restored under a green suite.
+
+    NOT for process output. That is produced deterministically and compared as produced; flattening
+    it would hide real spacing bugs and flag nothing worth flagging.
+    """
+    return " ".join(text.replace("\\\n", " ").split())
+
+
 def read_or_empty(path):
     """A file's text, or "" when it does not exist.
 
@@ -652,7 +675,7 @@ def main():
         # use of the very pattern being banned everywhere else.
         _gsrc = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh"))
         check("no segment loop splits a command with a quote-blind regex",
-              "for seg in re.split(" not in _gsrc)
+              "for seg in re.split(" not in source_flat(_gsrc))
         check("...both loops go through the quote-aware splitter instead",
               _gsrc.count("for seg in shell_segments(cmd):") == 2)
         check("...and the blind regex survives only as shell_segments' own parse-failure fallback",
@@ -9826,6 +9849,17 @@ def main():
     # own name and its own exit, which is the same three-outcome rule the sweep applies one level
     # in (no trailer under a mutant → NOT MEASURED, never a kill count).
     _prun = read_or_empty(os.path.join(REPO, "test", "prun.py"))
+    # THE NORMALISER ITSELF, both arms. An absence claim against source is only evidence if it
+    # survives reformatting — and the two forms that defeat a raw `not in` are re-spacing and a
+    # backslash continuation, measured on this repo's own #110 guard assertion.
+    check("source_flat collapses whitespace AND drops line continuations, so an absence claim "
+          "against source survives reformatting — the raw form does not",
+          "for seg in re.split(" not in "for  seg  in  re.split(x)"
+          and "for seg in re.split(" in source_flat("for  seg  in  re.split(x)")
+          and "for seg in re.split(" in source_flat("for seg in \\\n    re.split(x)"))
+    check("...and it leaves text that was already flat alone, so it cannot manufacture a match",
+          source_flat("for seg in re.split(x)") == "for seg in re.split(x)")
+
     check("prun tracks shards that never reported, rather than summing only the ones that did",
           "silent.append(r)" in _prun and "SHARD NEVER REPORTED" in _prun)
     check("...and a silent shard FAILS the run — the exit code is what verify reads, and a run "
@@ -12766,7 +12800,7 @@ def main():
           "because an arm inventory is the most specific thing an entry knows about itself and the "
           "header was the only thing wrong with it",
           _swsrc.count("thin_note") >= 3
-          and "this entry still carries a THIN note" not in _swsrc)
+          and "this entry still carries a THIN note" not in source_flat(_swsrc))
 
     check("the sweep separates kills whose NAME is about the producer from the rest — collateral "
           "and genuine reddening report the same count, and a producer can look covered because "

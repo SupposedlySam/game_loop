@@ -392,7 +392,7 @@
     },
     {
       "seq": 40,
-      "sha": "pending",
+      "sha": "cfcd749",
       "notice": true,
       "verb": "guard-writes (the write guard)",
       "change": "nine more write-capable verbs are checked against their DESTINATION: curl -o / --output, wget -O / --output-document, tar -C, unzip -d and patch -o (destination read off the flag, including clustered short forms like `curl -so FILE`); install, rsync and split (destination is the last path, as with cp); perl -i (in place, as with sed -i); and `git clone` joins the git write list. The header's scope line named these verbs instead of eliding them behind `rm/mv/cp/mkdir/chmod/...`.",

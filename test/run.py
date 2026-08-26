@@ -7058,6 +7058,25 @@ def main():
         check("...and a run with NO session id is silent too — without per-session state that "
               "mandate is still the live one, so warning about it would be false",
               "LEGACY MANDATE" not in gl(_lm, "status", sid="").stdout)
+        # THE THIRD OUTCOME, which used to be the second. A corrupt state.json and an ABSENT one
+        # both returned None, so a file holding an active legacy mandate that could not be PARSED
+        # rendered exactly like a project that never had one — in the producer whose own docstring
+        # says silence is the failure this tool never accepts. Demonstrated before fixing:
+        # truncating the JSON took the warning from one line to zero, with nothing anywhere saying
+        # a file had been skipped.
+        with open(_lmf, "w") as f:
+            f.write('{ "mandate": {"active": true')          # truncated: exists, cannot be parsed
+        _corrupt = gl(_lm, "status", sid="sess-legacy").stdout
+        check("a legacy state.json that EXISTS and will not parse says so — 'could not tell' must "
+              "not wear the face of 'nothing to report'",
+              "UNREADABLE" in _corrupt and "CANNOT be established" in _corrupt)
+        check("...and it still names the remedy, because the recovery is the same either way and a "
+              "warning that only alarms is one the reader learns to skip",
+              "mandate --set" in _corrupt)
+        os.remove(_lmf)
+        check("...while an ABSENT legacy file stays silent — the fix separates the two, it does "
+              "not make every project warn",
+              "LEGACY MANDATE" not in gl(_lm, "status", sid="sess-legacy").stdout)
     finally:
         shutil.rmtree(_lm, ignore_errors=True)
 

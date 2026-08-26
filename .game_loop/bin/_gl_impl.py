@@ -6272,8 +6272,22 @@ def legacy_mandate_warning():
     try:
         with open(LEGACY_STATE_F) as f:
             legacy = json.load(f)
-    except (OSError, ValueError):
-        return None
+    except FileNotFoundError:
+        return None                      # no legacy file is genuinely nothing to report
+    except (OSError, ValueError) as exc:
+        # A FILE THAT EXISTS AND CANNOT BE READ IS NOT AN ABSENT ONE. Both used to return None, so a
+        # CORRUPT state.json holding an active mandate rendered exactly like a project that never
+        # had one -- in the function whose own docstring says silence is the failure this tool never
+        # accepts. Demonstrated: truncating the JSON took the warning from one line to none, with
+        # nothing anywhere saying a file had been skipped.
+        #
+        # The recovery is the same either way (re-bind the mandate), so this does not block; it
+        # refuses to let "could not tell" wear the face of "nothing to report".
+        return ("⚠ LEGACY MANDATE FILE UNREADABLE — .game_loop/state.json exists and could not be\n"
+                f"  parsed ({exc.__class__.__name__}). Whether a pre-per-session mandate is still\n"
+                "  active there CANNOT be established, and if one is, it gates nothing and nothing\n"
+                "  will say so. Read or repair that file; if the work is still open, re-bind it:\n"
+                "  game_loop mandate --set \"..\"")
     if not (legacy.get("mandate") or {}).get("active"):
         return None
     return ("⚠ LEGACY MANDATE — .game_loop/state.json (repo-global, pre-per-session) still holds an\n"

@@ -9624,6 +9624,26 @@ def main():
     # this block sat in a suite that ran 20+ minutes instead of 3 before I noticed. A test that
     # executes the thing it is asking a question about is paying that thing's full cost to read one
     # dict.
+    # THE RUNNER THAT REPORTS THE VERDICT HAD NO THIRD OUTCOME. prun.py sums each shard's
+    # `N passed, M failed` trailer and exits `1 if failed else 0` — so a shard that CRASHED produced
+    # no trailer, contributed nothing to either total, and vanished. Measured with one deliberate
+    # RuntimeError inside a section: `1912 passed, 0 failed`, exit 0, no mention of the traceback,
+    # and 180 assertions that never ran. `verify` runs this for the whole-suite rules, so that is a
+    # green gate over a suite which lost a shard.
+    #
+    # Counting it as a failure would be a different lie — nothing in that shard failed. It gets its
+    # own name and its own exit, which is the same three-outcome rule the sweep applies one level
+    # in (no trailer under a mutant → NOT MEASURED, never a kill count).
+    _prun = read_or_empty(os.path.join(REPO, "test", "prun.py"))
+    check("prun tracks shards that never reported, rather than summing only the ones that did",
+          "silent.append(r)" in _prun and "SHARD NEVER REPORTED" in _prun)
+    check("...and a silent shard FAILS the run — the exit code is what verify reads, and a run "
+          "that lost a shard has not gated the paths that shard covered",
+          "return 1 if (failed or silent) else 0" in _prun)
+    check("...and it says the outcome is UNKNOWN rather than passing, since nothing in that shard "
+          "failed either",
+          "UNKNOWN, not passing" in _prun)
+
     _msrc = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
     # ASKING THE SWEEP WHAT IT DOES MUST NOT COST AN HOUR. It parsed no arguments at all, so
     # `--help` — the first thing anyone types — silently started a full ~70-minute run that prints

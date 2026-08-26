@@ -119,10 +119,23 @@ def main():
 
     passed = failed = 0
     merged = {}
+    silent = []                    # shards that never reported — see below
     for r in results:
         m = COUNT.search(r["out"])
         if m:
             passed += int(m.group(1)); failed += int(m.group(2))
+        else:
+            # A SHARD THAT NEVER REPORTED IS NOT A SHARD THAT PASSED. Without this the totals were
+            # summed only over shards that produced a trailer, so a shard which CRASHED contributed
+            # nothing to either number — and `1 if failed else 0` then returned 0. Measured: one
+            # deliberate RuntimeError inside a section gave `1912 passed, 0 failed`, exit 0, and no
+            # mention of the traceback anywhere in this output. 180 assertions never ran and the
+            # gate was green, which is what `verify` runs for the whole-suite rules.
+            #
+            # This is the third outcome the summary did not have: passed, failed, and NEVER
+            # ANSWERED. Counting the shard as a failure would be a different lie — nothing in it
+            # failed — so it gets its own name and its own exit.
+            silent.append(r)
         merged.update(outcomes(r["out"]))
         if r["rc"] != 0:
             for line in r["out"].splitlines():
@@ -132,6 +145,13 @@ def main():
           (passed, failed, len(groups), jobs, wall))
     print("  slowest shard: %.1fs (%d sections)" %
           max((r["sec"], len(r["names"])) for r in results))
+    for r in silent:
+        print("\nSHARD NEVER REPORTED — it produced no `N passed, M failed` line, so none of its\n"
+              "  assertions are in the totals above and their outcome is UNKNOWN, not passing.\n"
+              "  sections: %s" % ", ".join(n[:60] for n in r["names"][:4]))
+        tail = [l for l in r["out"].splitlines() if l.strip()][-3:]
+        for l in tail:
+            print("    " + l[:104])
 
     if a.time:
         # One section per shard is the only way to attribute time to a section honestly.
@@ -156,7 +176,10 @@ def main():
             print("      %s" % k[:100])
         if missing or differ:
             return 1
-    return 1 if failed else 0
+    # A SILENT SHARD FAILS THE RUN. It is not `failed` (nothing in it failed) and it must not be
+    # 0 (nothing in it was established either) — the exit code is what `verify` reads, and a run
+    # that lost a shard has not gated the paths that shard covered.
+    return 1 if (failed or silent) else 0
 
 
 if __name__ == "__main__":

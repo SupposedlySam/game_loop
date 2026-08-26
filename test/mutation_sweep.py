@@ -998,11 +998,11 @@ MUTANTS += [
     ("verify.scope_arg -> every commit gate silently un-scopes to the whole tree",
      ".game_loop/bin/verify::scope_arg", "    return None\n",
      ["--scope-from", "scope-from", "OUT OF SCOPE", "in this commit"],
-     "FLOOR OWED ON THE NEXT SWEEP — this was excluded as a KNOWN GAP whose stated blocker was 'not in HEAD yet, which is the tree the sweep archives'. It has been in HEAD since 8561324, so the reason EXPIRED and the exclusion outlived it: an exclusion is a decision about a moment, and nothing was watching for the moment to pass. 0 means not yet measured, not a reading; a ZERO from the next sweep is the UNPROTECTED verdict.", 0),
+     "11 kills, MEASURED by the sweep of 2026-08-26 against ec9be33b — the first reading this producer has ever had. It was excluded as a KNOWN GAP whose blocker was 'not in HEAD yet', which expired at 8561324 and went unnoticed: an exclusion is a decision about a moment, and nothing watches for the moment to pass. Promoting it was the right call — neutered it un-scopes every commit gate back to the whole tree, and 11 assertions notice.", 11),
     ("verify.outside_scope_tail -> a scoped run stops saying what it did NOT look at",
      ".game_loop/bin/verify::outside_scope_tail", '    return ""\n',
      ["OUT OF SCOPE", "not in this commit", "stay dirty", "not even looked at"],
-     "FLOOR OWED ON THE NEXT SWEEP — this was excluded as a KNOWN GAP whose stated blocker was 'not in HEAD yet, which is the tree the sweep archives'. It has been in HEAD since 8561324, so the reason EXPIRED and the exclusion outlived it: an exclusion is a decision about a moment, and nothing was watching for the moment to pass. 0 means not yet measured, not a reading; a ZERO from the next sweep is the UNPROTECTED verdict.", 0),
+     "11 kills, MEASURED by the sweep of 2026-08-26 against ec9be33b — the first reading this producer has ever had. It was excluded as a KNOWN GAP whose blocker was 'not in HEAD yet', which expired at 8561324 and went unnoticed: an exclusion is a decision about a moment, and nothing watches for the moment to pass. Promoting it was the right call — neutered it un-scopes every commit gate back to the whole tree, and 11 assertions notice.", 2),
 ]
 
 MUTANTS += [

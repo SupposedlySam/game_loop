@@ -452,6 +452,15 @@
       "change": "the 'terminal name' line now says the gap is OURS. It read 'NOT SET FROM HERE — saggar names the terminal and Claude then renames it ... nothing carries it into this mode', which explained the absence as a fact about saggar. `saggar agent` gained `--title` on 2026-08-26 and it does name the terminal; `successor` does not pass it.",
       "why_it_qualifies": "The sentence stayed TRUE while its reason inverted, which is the harder kind of stale. A false sentence gets corrected the first time somebody reads it; a true one with a dead reason sends its reader to the wrong repo to look for a lever that is in fact missing from THIS one, and nothing about the sentence degrades when that happens.",
       "consequence": "The handoff terminal is still not named by anything game_loop passes — unchanged in behaviour, changed in explanation. Tracked as a gap in this repo (#116) rather than a limitation of the host. NOT VERIFIED FROM HERE: saggar is not on this machine's PATH, so the --title reading is another session's measurement, recorded in claims.json and attributed rather than repeated as our own; the same reason `successor` does not yet pass the flag."
+    },
+    {
+      "seq": 47,
+      "sha": "94c13be",
+      "notice": true,
+      "verb": "status (claims block)",
+      "change": "a load-bearing claim is only reported CONFIRMED LIVE by ITS OWN probe. The check ran the statusline's rate-limit probe for every exercisable claim outside a two-id deny list, and printed that probe's reading as the claim's evidence. Claims with no probe here now get a third outcome — exercisable, nothing here can observe it, the date is a stamp not a reading — and the line names the claim's own `exercised_by` to re-run.",
+      "why_it_qualifies": "A consumer who changed nothing stops being told a claim is confirmed when it is not. Observed in this repo's own status: `'saggar-terminal-name-is-not-ours' CONFIRMED LIVE here — five_hour snapshot with used_percentage present ... so it cannot be stale` — a claim about what names a TERMINAL, confirmed by a usage-limit reading, while that claim was in fact BROKEN. Wrong subject, wrong verdict, and an assurance of freshness attached to something that had just gone stale the same day.",
+      "consequence": "If your status showed a claim CONFIRMED LIVE and that claim is not about rate limits, the confirmation was not about your claim — re-read it. Claims genuinely covered by a probe (statusline-rate-limits, no-weekly-opus-window, no-rate-limits-in-hooks) are unchanged. WHAT THIS DOES NOT DO: it does not add probes. Most claims still have none, and the honest line says so rather than borrowing one; a claim about another tool is checkable only by running that tool, which is why `exercised_by` is printed beside the verdict now."
     }
   ],
   "schema": 1

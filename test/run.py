@@ -12483,6 +12483,57 @@ def main():
               "confirming it — the exercise checks the shape, not the file's existence",
               "has NOT been observed here" in gl(xw, "status", sid="sess-x").stdout)
 
+        # AND THE PROBE MUST BE THE CLAIM'S OWN. This ran the statusline probe for every exercisable
+        # claim not on a two-id deny list, so an unrelated claim was reported CONFIRMED LIVE on a
+        # rate-limit snapshot. Observed in this repo's real status:
+        #
+        #   ✓ 'saggar-terminal-name-is-not-ours' CONFIRMED LIVE here — five_hour snapshot with
+        #     used_percentage present ... so it cannot be stale.
+        #
+        # A claim about what names a TERMINAL, confirmed by a usage reading, in the confident voice
+        # of a live observation — and that claim was BROKEN, established the same day by another
+        # session actually running saggar. Wrong subject, wrong verdict, and "cannot be stale"
+        # attached to something that had just gone stale.
+        #
+        # The comment on that code already named this defect and said the first version had it. The
+        # fix was a DENY list of the two ids that had probes: it repairs the cases somebody was
+        # looking at and leaves the shape intact for every claim added afterwards. An allow list
+        # refuses by default, so a missing probe is VISIBLE instead of borrowed from whatever probe
+        # happens to exist.
+        with open(os.path.join(xw, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"windows": {"five_hour": {"used_percentage": 12, "resets_at": 1}}}, f)
+        _noprobe = {
+            "subject": "a subject this code has no probe for",
+            "verified_on": "2026-08-26",
+            "verified_against": "their own CLI",
+            "why_it_matters": "it is load-bearing somewhere else",
+            "claims": [{
+                "id": "a-claim-with-no-probe-here",
+                "says": "something about another tool entirely",
+                "source": "their docs",
+                "breaks": "if they change it",
+                "ledger": "x",
+                "exercisable": "yes",
+                "exercisable_why": "it costs a live run of their tool",
+                "exercised_by": "`theirtool --probe`, then read it back",
+            }],
+        }
+        _cjp = os.path.join(xw, ".game_loop", "claims.json")
+        _cjd = json_or_none(_cjp) or {}
+        _cjd["someothertool"] = _noprobe
+        with open(_cjp, "w") as f:
+            json.dump(_cjd, f)
+        _xs3 = gl(xw, "status", sid="sess-x").stdout
+        check("a claim this code has NO PROBE for is not confirmed by another claim's probe — the "
+              "reading would be about the wrong subject, under a line saying it cannot be stale",
+              "'a-claim-with-no-probe-here' CONFIRMED LIVE" not in _xs3)
+        check("...and it gets the third outcome instead: exercisable, unobservable HERE, so the "
+              "date above it is a stamp rather than a reading",
+              "NOTHING HERE CAN OBSERVE IT" in _xs3 and "a stamp and not a reading" in _xs3)
+        check("...and it names the claim's OWN exercise to re-run, because telling somebody a fact "
+              "is unchecked without saying how to check it is the last rung",
+              "theirtool --probe" in _xs3)
+
         # A DECLARED DEBT PAID. This claim carried its own positive control in prose for two weeks
         # while nothing checked it — the shape of every stale claim here: everything needed was
         # written down, only the code was missing. All three arms, because an exercise that cannot

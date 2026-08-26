@@ -8711,11 +8711,39 @@ def external_claims_report():
         # every exercised claim, so the weekly-window claim was reported twice — once correctly by
         # its own block above, and once carrying the statusline claim's evidence under its name.
         # A reading about the wrong subject, which is the defect this file exists to name.
-        _dedicated = {"no-weekly-opus-window", "no-rate-limits-in-hooks"}
+        # AN ALLOW LIST, NOT A DENY LIST — and the difference was a false confirmation about the
+        # wrong subject. This excluded the two claims with their own probes and then ran
+        # `_statusline_claim_live()` for EVERY OTHER exercisable claim, reporting the statusline's
+        # usage snapshot as that claim's evidence. Observed in this repo's own status:
+        #
+        #   ✓ 'saggar-terminal-name-is-not-ours' CONFIRMED LIVE here — five_hour snapshot with
+        #     used_percentage present ... so it cannot be stale.
+        #
+        # A claim about what names a TERMINAL, confirmed by a rate-limit reading, in the confident
+        # voice of a live observation — while that claim was in fact BROKEN, which another session
+        # established the same day by actually running saggar.
+        #
+        # The comment above this block already names the defect and says the first version had it.
+        # The fix was a deny list of the two ids that had probes, which repairs the two cases
+        # somebody was looking at and leaves the shape intact for every claim added afterwards. A
+        # deny list has to be extended by whoever adds the next claim; an allow list refuses by
+        # default and makes the missing probe visible instead of inventing one.
+        _PROBED = {"statusline-rate-limits": _statusline_claim_live}
         ex = [c for c in (b.get("claims") or [])
-              if c.get("exercised_by") and c["id"] not in _dedicated]
+              if c.get("exercised_by") and c["id"] not in
+              {"no-weekly-opus-window", "no-rate-limits-in-hooks"}]
         for c in ex:
-            live = _statusline_claim_live()
+            probe = _PROBED.get(c["id"])
+            if probe is None:
+                # THE THIRD OUTCOME. Not confirmed, and not refuted either: nothing here can look.
+                lines.append(f"           · '{c['id']}' is exercisable and NOTHING HERE CAN OBSERVE "
+                             "IT — this code has no")
+                lines.append(f"             probe for that subject, so the date above is a stamp "
+                             "and not a reading.")
+                lines.append(f"             Re-run its own exercise to check it: "
+                             f"{c.get('exercised_by') or '(none recorded)'}")
+                continue
+            live = probe()
             if live:
                 lines.append(f"           ✓ '{c['id']}' CONFIRMED LIVE here — {live}. Observed on "
                              "this machine, not")

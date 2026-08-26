@@ -2237,7 +2237,18 @@ def main():
               "than no value where nothing can apply it",
               "tab title" not in sag_t and "terminal name       : NOT SET FROM HERE" in sag_t)
         check("...and names what DOES title it, rather than leaving the mechanism to be inferred",
-              "Claude then renames it" in sag_t)
+              "Claude renames it" in sag_t and "conversation" in sag_t)
+        # THE REASON CHANGED UNDER THIS LINE, which is why it now pins the attribution and not only
+        # the mechanism. The field said the name was not ours because saggar took no such argument.
+        # `saggar agent` gained `--title` on 2026-08-26 and it does name the terminal — measured by
+        # another session, recorded in claims.json, and NOT re-verified here (saggar is not on this
+        # machine's PATH). The sentence stayed true while its reason inverted: nothing carries the
+        # name because OUR code does not pass one. A true sentence with a dead reason sends its
+        # reader to the wrong repo, and nothing about the sentence degrades when that happens.
+        check("...and says the gap is OURS — `saggar agent` takes --title now, so 'not from here' "
+              "is a fact about `successor` rather than about saggar, and a reader chasing it must "
+              "land in this repo",
+              "OUR gap" in sag_t and "--title" in sag_t and "does not pass it yet" in sag_t)
         check("...and still shows the string, so what was lost is visible rather than merely absent",
               "is what a Warp tab would" in sag_t)
         check("warp-tab keeps the field — it is the one mode that writes the title",

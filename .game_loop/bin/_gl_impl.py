@@ -7471,11 +7471,25 @@ def terminal_name_lines(mode, title):
     if mode == "warp-tab":
         return [f"tab title           : {title}  (written into the tab config, which sets it)"]
     if mode == "saggar-agent":
-        return ["terminal name       : NOT SET FROM HERE — saggar names the terminal and Claude "
-                "then renames it",
-                "                      from its own conversation title. "
-                f"\"{title}\" is what a Warp tab would",
-                "                      have read; nothing carries it into this mode."]
+        # THE REASON CHANGED AND THE LINE HAD NOT. This said the name was not ours because saggar
+        # took no such argument. `saggar agent` gained `--title` on 2026-08-26 and it DOES name the
+        # terminal — measured by another session and recorded in .game_loop/claims.json under
+        # `saggar-terminal-name-is-not-ours`, which is marked BROKEN on the falsifier it had written
+        # down for itself. NOT re-verified from here: saggar is not on this machine's PATH, so this
+        # comment reports their reading rather than making the claim again.
+        #
+        # So the sentence is still true and its REASON is now the opposite: nothing carries the name
+        # into this mode because THIS CODE DOES NOT PASS ONE. That is a gap in game_loop, not a fact
+        # about saggar, and saying otherwise sends a reader to the wrong repo.
+        return ["terminal name       : NOT SET FROM HERE — and that is OUR gap now, not saggar's: "
+                "`saggar agent`",
+                "                      takes `--title` since 2026-08-26 and it does name the "
+                "terminal, but",
+                "                      `successor` does not pass it yet. Until it does, saggar "
+                "names the",
+                "                      terminal and Claude renames it from its own conversation "
+                "title.",
+                f"                      \"{title}\" is what a Warp tab would have read."]
     return [f"tab title           : {title}  (a SUGGESTION — the printed command sets no title)"]
 
 

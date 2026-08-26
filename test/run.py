@@ -10044,6 +10044,10 @@ def main():
     # own name and its own exit, which is the same three-outcome rule the sweep applies one level
     # in (no trailer under a mutant → NOT MEASURED, never a kill count).
     _prun = read_or_empty(os.path.join(REPO, "test", "prun.py"))
+    _pr_spec = importlib.util.spec_from_file_location(
+        "gl_prun_mod", os.path.join(REPO, "test", "prun.py"))
+    _prun_mod = importlib.util.module_from_spec(_pr_spec)
+    _pr_spec.loader.exec_module(_prun_mod)
     # THE NORMALISER ITSELF, both arms. An absence claim against source is only evidence if it
     # survives reformatting — and the two forms that defeat a raw `not in` are re-spacing and a
     # backslash continuation, measured on this repo's own #110 guard assertion.
@@ -10057,12 +10061,57 @@ def main():
 
     check("prun tracks shards that never reported, rather than summing only the ones that did",
           "silent.append(r)" in _prun and "SHARD NEVER REPORTED" in _prun)
+    # PINNED ON THE PROPERTY, NOT THE LITERAL. This asserted the exact string
+    # `return 1 if (failed or silent) else 0`, and adding a THIRD failing condition to that line —
+    # the suite floor — broke it while making the runner strictly stricter. A source assertion that
+    # fails when the code improves teaches people to edit the test until it is quiet, so it names
+    # what must be true: `silent` decides the exit, and the exit is the only thing verify reads.
+    _prun_ret = [ln for ln in source_flat(_prun).split(" return ") if "else 0" in ln][:1]
     check("...and a silent shard FAILS the run — the exit code is what verify reads, and a run "
           "that lost a shard has not gated the paths that shard covered",
-          "return 1 if (failed or silent) else 0" in _prun)
+          bool(_prun_ret) and "silent" in _prun_ret[0] and "failed" in _prun_ret[0])
     check("...and it says the outcome is UNKNOWN rather than passing, since nothing in that shard "
           "failed either",
           "UNKNOWN, not passing" in _prun)
+
+    # A SHORT RUN IS NOT A SMALL SUITE (showrunner's #104, arriving here). prun already refuses the
+    # ZERO case — `sections()` returning nothing is "refusing to report a pass over nothing". The
+    # case that actually happens is SHORT: a header style that stops matching, a parse change, a
+    # shard-builder that drops a group. Then every shard that ran passes, the total is merely
+    # smaller, and it exits 0. showrunner emptied their dispatch tuple and got `16 passed, 0 failed`
+    # — not zero, a plausible small green run, which their release gate accepted.
+    #
+    # Their sharper point is why this is a RECORDED floor rather than a derived one: a suite cannot
+    # notice its own absence using an expectation that shrinks along with it. Deriving "how many
+    # sections should run" from the same scan that finds them is satisfied by finding none.
+    _floor_path = os.path.join(REPO, "test", "suite-floor.json")
+    _floor = json_or_none(_floor_path) or {}
+    check("the suite records a FLOOR outside the run — an expectation that shrinks with the code "
+          "cannot report that the code shrank",
+          isinstance(_floor.get("distinct"), int) and isinstance(_floor.get("groups"), int)
+          and _floor["distinct"] > 100)
+    check("...and prun EXITS non-zero on a breach, not merely prints one — verify reads the exit "
+          "code and nothing else from this runner",
+          "or below)" in source_flat(_prun) or "below or" in source_flat(_prun))
+    # THE RULE IS DRIVEN, not read. It lives at module level in prun for exactly this reason: a
+    # floor nobody can exercise is one that gets believed rather than checked.
+    _fb = _prun_mod.floor_breaches
+    _f = {"distinct": 1900, "groups": 81}
+    check("a run that MEETS the floor is silent, so a breach line means something when it appears",
+          _fb(_f, 1900, 81) == [])
+    check("...and one assertion short is a breach, naming the number and the drop — 'fewer than "
+          "last time' is the whole signal, so it must not need a threshold to be felt",
+          len(_fb(_f, 1899, 81)) == 1 and "down 1" in _fb(_f, 1899, 81)[0])
+    check("...and a run with fewer SECTIONS breaches separately from one with fewer assertions — "
+          "losing a whole section is the showrunner case, and a big section's loss can hide inside "
+          "an assertion count that grew elsewhere",
+          len(_fb(_f, 5000, 40)) == 1 and "section group(s)" in _fb(_f, 5000, 40)[0])
+    check("...and an ABSENT floor is not a satisfied one — nothing recorded is a different verdict "
+          "from a floor of zero, and reading absence as passing is the defect this file is full of",
+          _fb({}, 1, 1) == [])
+    check("...and a boolean is not an integer floor: json True would otherwise compare as 1 and "
+          "quietly become the smallest floor there is",
+          _fb({"distinct": True}, 0, 81) == [])
 
     # AND THE HEADLINE IS A SUM, WHICH IS NOT AN ASSERTION COUNT. A shared fixture prefix re-runs in
     # every shard that needs it, so prun's total exceeded the serial suite's by 276 — and the first

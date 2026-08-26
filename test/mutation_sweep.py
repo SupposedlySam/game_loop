@@ -986,6 +986,18 @@ MUTANTS += [
 ]
 
 MUTANTS += [
+    ("floor_breaches -> a short run reports no breach, which is what a short run already looked like",
+     "test/prun.py::floor_breaches", "    return []\n",
+     ["floor", "breach", "down 1", "section group"],
+     "2 kills, and the reason it is not 5 is worth more than the number: three of the five "
+     "assertions on this function check that it returns NOTHING — a met floor, an absent floor, a "
+     "boolean that must not count as one. `return []` satisfies every one of them. A neutered "
+     "function that returns the SAFE value passes every negative-arm test by construction, so a "
+     "kill count here can only ever come from the arms that expect it to SPEAK. Measured by "
+     "neutering it and running the section, not estimated.", 2),
+]
+
+MUTANTS += [
     ("note_line -> a floor nobody explained renders exactly like one somebody accepted",
      "test/mutation_sweep.py::note_line", "    return None\n",
      ["why it is thin", "NOT STATED", "unprotected", "what it covers"],

@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN = os.path.join(HERE, "run.py")
 TIMINGS = os.path.join(HERE, ".section-times.json")
+FLOOR = os.path.join(HERE, "suite-floor.json")
 COUNT = re.compile(r"^(\d+) passed, (\d+) failed", re.M)
 OUTCOME = re.compile(r"^  (ok|FAIL)\s+(.*)$", re.M)
 
@@ -93,6 +94,26 @@ def run_shard(names):
             "out": r.stdout + r.stderr}
 
 
+def floor_breaches(floor, distinct, n_groups):
+    """Which recorded floors this run came in UNDER, as printable lines. Empty when it did not.
+
+    At module level for the reason every selector here is: a rule that lives inside main() cannot be
+    driven by the suite, and a floor nobody can drive is one that gets believed rather than checked.
+
+    A MISSING OR NON-INT ENTRY IS NOT A BREACH. An absent floor means nothing was recorded, which is
+    a different thing from a floor of zero — and reading absence as satisfied is how the runner
+    would report a clean bill for a file it could not parse. main() says so separately when the
+    whole file is missing, rather than letting silence here stand in for it.
+    """
+    out_ = []
+    for key, now, what in (("distinct", distinct, "distinct assertion(s)"),
+                           ("groups", n_groups, "section group(s)")):
+        want = floor.get(key)
+        if isinstance(want, int) and not isinstance(want, bool) and now < want:
+            out_.append(f"{what}: {now}, floor {want} (down {want - now})")
+    return out_
+
+
 def outcomes(text):
     return {m.group(2).strip(): m.group(1) for m in OUTCOME.finditer(text)}
 
@@ -111,6 +132,10 @@ def main():
     if not secs:
         print("prun: the suite listed NO sections — refusing to report a pass over nothing.")
         return 2
+    # BEFORE shard() rebinds the name: `groups` goes from "the suite's section groups" to "the
+    # per-worker bins", and the floor is about the former. Comparing the wrong one made the first
+    # run of this floor report a breach of 81 against 14 bins — caught by running it.
+    n_groups = len(groups)
     groups = shard(groups, jobs)
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=len(groups)) as ex:
@@ -154,7 +179,42 @@ def main():
     # than in the sharding: a shard that covers less can still count more. So the line now says
     # what it is a sum OF, because a number that cannot be compared to anything is not evidence —
     # and the one comparison a reader will reach for is the serial run this is meant to replace.
+    # A SHORT RUN IS NOT A SMALL SUITE (showrunner, #104). The zero case is guarded above —
+    # `sections()` returning nothing is refused rather than reported as a pass over nothing. The
+    # case that actually happens is SHORT: a parse change in --list-sections, a header style that
+    # stops matching, a shard-builder that drops a group. Then every shard that DID run passes, the
+    # total is merely smaller, and this exits 0. showrunner emptied their dispatch tuple and got
+    # "16 passed, 0 failed, exit 0" — not zero, a plausible small green run, which their release
+    # gate accepted. Their point is the one worth stealing: a suite cannot notice its own absence
+    # using an expectation that shrinks with it.
+    #
+    # So the expectation lives OUTSIDE the run, in a recorded floor, and is raised deliberately.
+    # That is the same tripwire the mutation sweep already uses per producer, and it costs an
+    # explicit update whenever assertions are legitimately removed — which is the point: a
+    # DECISION, rather than a number nobody was watching.
     distinct, total = len(merged), passed + failed
+    floor = {}
+    try:
+        with open(FLOOR) as f:
+            floor = json.load(f)
+    except (OSError, ValueError):
+        pass
+    below = floor_breaches(floor, distinct, n_groups)
+    if below:
+        print("\nSUITE FLOOR BREACHED — this run covered LESS than the recorded floor, and every\n"
+              "  shard that ran passed, so nothing else here would have said so:")
+        for _b in below:
+            print("    " + _b)
+        print("  A short run is not a small suite. Either a section stopped being FOUND (check\n"
+              "  --list-sections), or assertions were removed on purpose — in which case lower the\n"
+              "  floor in test/suite-floor.json in the same commit, so it is a decision on the\n"
+              "  record rather than a number that quietly followed the code down.")
+    elif floor.get("distinct") and distinct > floor["distinct"]:
+        print("  floor: %d distinct (this run %d, +%d) — raise it in test/suite-floor.json when "
+              "this settles" % (floor["distinct"], distinct, distinct - floor["distinct"]))
+    elif not floor:
+        print("  floor: NOT RECORDED — test/suite-floor.json is missing or unreadable, so a run "
+              "that covered less than the last one would not be noticed here.")
     if total != distinct:
         print("  %d distinct assertion(s) · %d outcome(s) counted more than once (a shared fixture"
               "\n  prefix re-runs in every shard that needs it). The totals above are a SUM OVER"
@@ -196,7 +256,9 @@ def main():
     # A SILENT SHARD FAILS THE RUN. It is not `failed` (nothing in it failed) and it must not be
     # 0 (nothing in it was established either) — the exit code is what `verify` reads, and a run
     # that lost a shard has not gated the paths that shard covered.
-    return 1 if (failed or silent) else 0
+    # `below` joins the exit condition: a floor that reports and returns 0 is a floor `verify`
+    # never reads, and verify's whole input from this runner is the exit code.
+    return 1 if (failed or silent or below) else 0
 
 
 if __name__ == "__main__":

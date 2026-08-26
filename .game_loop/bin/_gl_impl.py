@@ -7412,19 +7412,34 @@ def handover_chains():
         by_from.setdefault(str(r["sid"])[:8], []).append(r)
         targets.add(str(r["to"])[:8])
     chains = []
+    # EVERY RECORDED HANDOVER IS ON SOME CHAIN, AND TAKING ONLY THE LATEST DROPPED WHOLE ONES. This
+    # followed `by_from[cur][-1]`, so a session that handed off TWICE kept its most recent successor
+    # and silently lost the earlier one — along with everything downstream of it. That is not exotic:
+    # `mandate --set` and `mandate --resume` deliberately re-drive a session that has already handed
+    # over, which is precisely how a second edge out of one session appears.
+    #
+    # Measured on a three-edge log (A->B, B->D, then A re-driven and handing to C): one chain came
+    # back, and B and D appeared nowhere at all. A verb whose entire job is "which chain is this"
+    # answered by not mentioning the chain. The earlier successor is not superseded — it RAN, and
+    # the log shows it handing on.
+    #
+    # So a branch point starts a branch: each edge out of a session continues its own path, and the
+    # per-path `seen` set stops a cycle without stopping a diamond that legitimately rejoins.
     for root in [f for f in by_from if f not in targets]:
-        hops, cur, guard = [], root, 0
-        while cur in by_from and guard < 200:
-            guard += 1
-            r = by_from[cur][-1]           # the latest pointing from this session
-            hops.append(r)
-            cur = str(r["to"])[:8]
-        if not hops:
-            continue
-        th = next((h["thread"] for h in hops if isinstance(h.get("thread"), dict)), None)
-        label = (th or {}).get("label") or ""
-        chains.append({"thread": (th or {}).get("id"), "label": label, "hops": hops,
-                       "head": str(hops[-1]["to"])})
+        stack = [(root, [], frozenset())]
+        while stack:
+            cur, hops, seen = stack.pop()
+            nxt = [] if (cur in seen or len(hops) >= 200) else by_from.get(cur, [])
+            if not nxt:
+                if hops:
+                    th = next((h["thread"] for h in hops
+                               if isinstance(h.get("thread"), dict)), None)
+                    chains.append({"thread": (th or {}).get("id"),
+                                   "label": (th or {}).get("label") or "",
+                                   "hops": hops, "head": str(hops[-1]["to"])})
+                continue
+            for r in nxt:
+                stack.append((str(r["to"])[:8], hops + [r], seen | {cur}))
     chains.sort(key=lambda c: c["hops"][-1].get("t") or "")
     return chains
 

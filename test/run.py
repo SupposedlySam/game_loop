@@ -1507,6 +1507,40 @@ def main():
         check("...and a chain is the HOPS, in order, not a count — a count cannot be argued with, "
               "and two chains merged by an id collision would look like one long one",
               "aaaa1111 → bbbb2222" in o and "bbbb2222 → cccc3333" in o)
+        # A SESSION THAT HANDED OFF TWICE USED TO LOSE ITS FIRST CHAIN ENTIRELY. The walk followed
+        # `by_from[cur][-1]` — the latest edge out of a session — so an earlier successor, and
+        # everything downstream of it, appeared nowhere. Not exotic: `mandate --set` and
+        # `mandate --resume` deliberately re-drive a session that has already handed over, which is
+        # exactly how a second edge out of one session comes to exist. Measured on A->B, B->D, then
+        # A re-driven and handing to C: one chain came back and B and D were unlisted.
+        _th = __import__("importlib.util", fromlist=["util"])
+        _sp = _th.spec_from_file_location(
+            "_gl_chain", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _m = _th.module_from_spec(_sp)
+        _sp.loader.exec_module(_m)
+        _fan = [
+            {"kind": "handed_off", "sid": "aaaaaaaa", "to": "bbbbbbbb-1-2-3-4", "t": "1",
+             "thread": {"id": "t1", "label": "first chain", "started": "x"}},
+            {"kind": "handed_off", "sid": "bbbbbbbb", "to": "dddddddd-1-2-3-4", "t": "2",
+             "thread": {"id": "t1", "label": "first chain", "started": "x"}},
+            {"kind": "handed_off", "sid": "aaaaaaaa", "to": "cccccccc-1-2-3-4", "t": "3",
+             "thread": {"id": "t2", "label": "second chain", "started": "y"}},
+        ]
+        _m.handover_edges = lambda: _fan
+        _chains = _m.handover_chains()
+        _reached = {str(h["to"])[:8] for c in _chains for h in c["hops"]}
+        check("a session that handed off TWICE keeps BOTH chains — the earlier successor is not "
+              "superseded, it RAN, and the log shows it handing on",
+              len(_chains) == 2 and not ({"bbbbbbbb", "cccccccc", "dddddddd"} - _reached))
+        check("...and the branch that was being dropped keeps its own hops, so it is a chain rather "
+              "than a session mentioned once",
+              any(len(c["hops"]) == 2 and c["label"] == "first chain" for c in _chains))
+        _m.handover_edges = lambda: [
+            {"kind": "handed_off", "sid": "11111111", "to": "22222222-x", "t": "1"},
+            {"kind": "handed_off", "sid": "22222222", "to": "11111111-x", "t": "2"}]
+        check("...and a log whose edges form a CYCLE still terminates — branching multiplies paths, "
+              "so the walk needs a bound that survives it",
+              isinstance(_m.handover_chains(), list))
         # The label is the FIRST hop's subject and stays that way; the per-hop `about` carries where
         # the work actually got to. Both are printed, so drift is shown rather than resolved by
         # silently overwriting the name the human has been navigating by.

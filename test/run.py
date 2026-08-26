@@ -757,8 +757,32 @@ def main():
                                 WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("watchdog rings for its own session's idle mandate (A)",
               watchdog("sess-aaa").returncode == 2)
-        check("watchdog stays quiet for a session with no mandate (C)",
-              watchdog("sess-ccc").returncode == 0)
+        # QUIET IS WHAT A DEAD WATCHDOG PRODUCES TOO. This asserted exit 0 and nothing else, so a
+        # `bin/watchdog` replaced by `sys.exit(0)` passed it — measured, along with the ring
+        # assertion beside it correctly FAILING, because a wake-up cannot be produced by absence
+        # while silence is exactly what absence emits. Same shape as the guards' allow side (#41)
+        # and the stop gate's.
+        #
+        # The evidence was already there: `quiet(why)` logs a `watchdog_quiet` record precisely so
+        # that "went quiet for a reason" and "is broken" stop being the same observation — its
+        # docstring says so. Nothing was reading it.
+        def _quiet_records():
+            n = 0
+            try:
+                with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+                    for _l in f:
+                        try:
+                            n += json.loads(_l).get("kind") == "watchdog_quiet"
+                        except ValueError:
+                            pass
+            except OSError:
+                pass
+            return n
+
+        _q_before = _quiet_records()
+        check("watchdog stays quiet for a session with no mandate (C) — and RECORDS why, which is "
+              "what separates a decision to stay quiet from a watchdog that never ran",
+              watchdog("sess-ccc").returncode == 0 and _quiet_records() > _q_before)
         check("watchdog pidfile is per-session, not repo-global",
               os.path.exists(os.path.join(proj, ".game_loop", "sessions", "sess-aaa",
                                           ".watchdog.pid"))

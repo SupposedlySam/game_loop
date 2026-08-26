@@ -213,7 +213,7 @@ def _write_killers():
     what it did not execute, and letting it rewrite this would ratchet the sets toward whatever ran
     last.
     """
-    if not KILL_NAMES:
+    if not KILL_NAMES or not _is_full_sweep():
         return
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -270,6 +270,8 @@ def _write_section_map(tree):
     # Dropping an unlocatable name is the same act as a short denominator: the set looks complete
     # because nothing says otherwise. So an unmappable killer means NO ENTRY, which means this
     # producer runs the whole suite — slow and right, rather than fast and one short.
+    if not _is_full_sweep():
+        return                       # explicit now; this used to be protected only by accident
     out, unmappable = {}, []
     for key, names in KILL_NAMES.items():
         missing = [n for n in names if n[:60] not in name_line]
@@ -1937,6 +1939,29 @@ def neuter(src, fn, body):
 # when it is not. That asymmetry is the whole licence for this mode; without it the trim would be
 # buying speed with the denominator, which is what this file exists to refuse.
 KILL_NAMES = {}          # key -> the COMPLETE set of assertion names a mutant flipped.
+
+# THE COUNT THE TABLE DECLARED AT IMPORT, captured before anybody can replace it. test/run.py drives
+# `sweep.main()` with THREE fake producers to assert report ordering, and both artifact writers run
+# inside main() and write into the REAL test/ directory — so a fixture testing something else was
+# free to overwrite a full sweep's measurements with its own three rows. The section map escaped
+# only by accident (its section lookup fails for those fakes and it returns early); the killer sets
+# did not, and shipped a 138-byte file with three producers and no killers in it.
+#
+# Comparing against len(MUTANTS) at write time cannot see this: the fixture replaces MUTANTS, so
+# both numbers are 3 and agree. The count has to be taken when the module is first read, which is
+# the one moment the table is certainly the module's own.
+_DECLARED_PRODUCERS = len(MUTANTS)
+
+
+def _is_full_sweep():
+    """True only when this run measured every producer the table declared at import time.
+
+    A trimmed or stubbed run has not observed what it did not execute. Letting one write either
+    artifact ratchets it toward whatever ran last — and the failure is silent, because a smaller
+    file is still a valid file and the next reader cannot tell it is looking at a sample.
+    """
+    return len(KILL_NAMES) == _DECLARED_PRODUCERS
+
                          # The printed report shows `targeted[:3]`; building the section map from
                          # THAT is building it from a truncated view, which is exactly what I did
                          # first: 40 of 102 producers came back short and the floor check failed

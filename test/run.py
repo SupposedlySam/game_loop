@@ -9001,6 +9001,18 @@ def main():
     # from three sampled names is how a set silently loses a real killer, and the floor tripwire
     # then fires on the next run for a reason nobody can reconstruct. A rendered report is not a
     # data structure; this repo has paid for that sentence twice.
+    # A FIXTURE TESTING SOMETHING ELSE MUST NOT REWRITE THE MEASUREMENTS. The ordering check below
+    # drives sweep.main() with three fake producers, and both artifact writers run inside main() and
+    # write into the REAL test/ directory. The killer sets shipped a 138-byte file with three
+    # producers and no killers before this guard existed; the section map escaped only because its
+    # lookup happens to fail for those fakes. Comparing to len(MUTANTS) at write time cannot catch
+    # it — the fixture replaces MUTANTS, so both numbers are 3 and agree.
+    check("the artifact writers require a FULL sweep, measured against the count the table declared "
+          "at IMPORT — the one moment the table is certainly the module's own",
+          "_DECLARED_PRODUCERS = len(MUTANTS)" in _msrc and "_is_full_sweep()" in _msrc)
+    check("...and BOTH writers are guarded, not just the one that was observed clobbering — the "
+          "section map's protection was accidental and is now stated",
+          _msrc.count("_is_full_sweep()") >= 3)
     check("the COMPLETE killer sets are persisted, not just the three the report renders — a mark "
           "cannot be narrowed safely against a sample of the names it has to keep matching",
           "_write_killers()" in _msrc and "sweep-killers.json" in _msrc)

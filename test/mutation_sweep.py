@@ -423,7 +423,10 @@ MUTANTS = [
      ["metric", "instrument"], None, 3),
     ("_asked_the_user -> no turn is ever seen to have asked",
      ".game_loop/bin/_gl_impl.py::_asked_the_user", "    return False\n",
-     ["ask", "checkpoint", "launder"], None, 3),
+     ['half-written final',
+      'park does',
+      'an oversized',
+      'blocks a question'], None, 3),
     ("binding_windows -> no usage window ever binds",
      ".game_loop/bin/_gl_impl.py::binding_windows", "    return []\n",
      # NARROWED FROM ["limit", "handoff", "gate"], which failed in BOTH directions: it matched 166
@@ -703,10 +706,17 @@ MUTANTS = [
      ["watchdog", "pidfile", "quiet", "ring"], None, 9),
     ("watchdog.limits_snapshot -> the watchdog never sees a usage snapshot",
      ".game_loop/bin/watchdog::limits_snapshot", "    return None\n",
-     ["watchdog", "limit", "park", "snapshot"], None, 4),
+     ['exhausted window',
+      'park and',
+      'the resume',
+      'the usage-limit'], None, 4),
     ("watchdog.transcript_size -> idleness becomes unmeasurable",
      ".game_loop/bin/watchdog::transcript_size", "    return None\n",
-     ["watchdog", "idle", "transcript", "ring"],
+     ['SAME idle',
+      'same idle',
+      'NEW mandate',
+      'engine a',
+      'watchdog rings'],
      # THIN at 1, and the shape is familiar: one assertion carries the whole producer. Neutered, the
      # watchdog cannot tell a parked run from a working one -- which is the entire premise of the
      # autonomy engine -- and exactly one named assertion notices.
@@ -764,7 +774,9 @@ MUTANTS = [
      None, 4),
     ("_hooks_stale_warning -> a dead Stop hook is never noticed",
      ".game_loop/bin/_gl_impl.py::_hooks_stale_warning", "    return None\n",
-     ["hook", "probe", "stale", "stop gate", "listening"],
+     ['says both',
+      'fired then',
+      'probe far'],
      # 3 against a baseline of 568. Neutered, a Stop hook that fired once and then died reads
      # exactly like a healthy one for the rest of the session -- which is the defect #43 named:
      # registered, fired, and listening now are three different claims.
@@ -785,7 +797,13 @@ MUTANTS = [
      None, 3),
     ("code_files -> two trees always look like they run the same code",
      ".game_loop/bin/_gl_impl.py::code_files", "    return []\n",
-     ["harness", "code", "worktree", "drift"],
+     [
+       'now actually',
+       'harness script',
+       "so 'could",
+       'it flags',
+       'code comparison',
+       'drifted harness'],
      # 3 against a baseline of 587. Neutered, the code comparison is empty on both sides, so every
      # pair of trees reports matching harnesses -- which is the state #38 found shipped, where the
      # field was named `harness` and contained only rules.
@@ -1148,7 +1166,12 @@ MUTANTS += [
      ["#102", "pidfile", "superseded", "identity"], None, 4),
     ("_proc_start -> no process has a readable start time, so no pid can be identified",
      ".game_loop/bin/watchdog::_proc_start", "    return None\n",
-     ["#102", "identity", "start time", "ps"],
+     ['identity differs',
+      'a matching',
+      'pid that',
+      'GONE pid',
+      'pid reports',
+      'the previously'],
      "one kill, and it is the RIGHT one. A start time nobody can read makes every pid "
      "unverifiable, and unverifiable means NOT SIGNALLED — so the three assertions about leaving a "
      "process alone still pass, because they were already expecting that outcome. Only the paired "
@@ -1259,7 +1282,12 @@ MUTANTS += [
      ["PINNED CODE", "repo @", "DIFFERENT commit"], None, 2),
     ("pin_file_drift -> the pinned copy never differs from this tree",
      ".game_loop/bin/_gl_impl.py::pin_file_drift", "    return [], None\n",
-     ["pin", "DIFFER BETWEEN", "inert", "drift"], None, 6),
+     ['TWO differing',
+      'reader who',
+      'state MEANS',
+      'report says',
+      'be COMPARED',
+      'THE STATE'], None, 6),
     # THIN AT 1, NOW 4, and the reason it was thin is the reason THIN is worth reporting. Four
     # assertions called this producer and THREE asserted it returns None — mid-work is silent, an
     # unpushed commit is silent, an already-marked HEAD is silent. All three are worth having (a

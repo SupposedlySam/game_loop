@@ -13542,6 +13542,45 @@ def main():
     # This does not fix the mismatch; making `neuter` indent-aware is the general fix and would let
     # class methods be swept. It stops the mismatch being SILENT: an unreachable candidate must be
     # excluded with a reason, never declared as a mutant that cannot run.
+    # A SHIPPED SKILL MUST NAME EVERY OPTION OF THE VERB IT DOCUMENTS, and the set comes from the
+    # PARSER rather than from a list here — so an option added tomorrow lands in neither and fails
+    # here, which is the only way a list can report that it is short (#96's rule, applied to the
+    # skills this repo ships to other people's machines).
+    #
+    # LIVE, NOT HYPOTHETICAL: `mandate --wake-path` was usable standalone and `status` warns when no
+    # wake path is recorded, so a consumer following gl-mandate hit a warning the skill gave them no
+    # way to answer. The skill was complete for the verb as it stood when written, which is exactly
+    # how documentation goes wrong — nothing degrades when a verb grows.
+    #
+    # Asked of `--help`, because the source is not the authority on what the parser accepts: my
+    # first pass grepped `md.add_argument` and swept in the `model` subparser, which shares the
+    # variable name, and reported `--json` missing from a verb that does not have it.
+    # THE REPO'S OWN BINARY, not a sandbox: `proj` at this point belongs to a section that has been
+    # torn down, and the first version of this died on FileNotFoundError — loudly, which is the
+    # right direction, and caught by running the section rather than by trusting the edit.
+    _mh = subprocess.run([os.path.join(SRC_GAME_LOOP, "bin", "game_loop"), "mandate", "--help"],
+                         capture_output=True, text=True, env=_env())
+    _mopts = sorted({_o.strip() for _o in re.findall(r"^\s+(--[a-z-]+)", _mh.stdout, re.M)})
+    _mskill = read_or_empty(os.path.join(REPO, "templates", "skills", "gl-mandate", "SKILL.md"))
+    _undoc = [_o for _o in _mopts if not _o.endswith("-file") and _o not in _mskill]
+    check("the shipped gl-mandate skill names every option the mandate parser accepts — the set is "
+          "read from --help, so an option added tomorrow fails HERE rather than being missing from "
+          "a consumer's only guide to the verb: " + (", ".join(_undoc) or "none of %d" % len(_mopts)),
+          not _undoc)
+    check("...and the option set was actually READ — an empty parse would satisfy the line above "
+          "while proving nothing, which is the shape this file exists to refuse",
+          len(_mopts) >= 8 and "--set" in _mopts and "--wake-path" in _mopts)
+    # AND THE RULE FIRES. Same comprehension, run against the skill with one option's name removed:
+    # a check whose clean answer is "none" proves nothing until the not-clean answer is shown.
+    _stripped = _mskill.replace("--wake-path", "--REMOVED-FOR-THIS-CONTROL")
+    check("...and the rule REPORTS an option the skill does not name, so 'none' above is a verdict "
+          "rather than a comprehension that cannot produce a row",
+          [_o for _o in _mopts if not _o.endswith("-file") and _o not in _stripped]
+          == ["--wake-path"])
+    check("...and the skill documents the wake path as DECLARED rather than probed, because a "
+          "declared path that has stopped delivering reads exactly like one that works",
+          "DECLARED, never" in _mskill and "probe" in _mskill)
+
     # AN EXCLUSION IS A DECISION ABOUT A MOMENT, AND NOTHING WAS WATCHING FOR THE MOMENT TO PASS.
     # Two producers were excluded as KNOWN GAPs reading "unmeasurable until the commit introducing
     # it is IN HEAD, which is the tree the sweep archives". That was true the day it was written and

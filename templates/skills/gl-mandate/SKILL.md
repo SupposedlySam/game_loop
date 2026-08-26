@@ -65,6 +65,31 @@ the thing) before spending the human's attention.
 ./.game_loop/bin/game_loop mandate --clear --notes "<why it is genuinely satisfied>"
 ```
 
+## The wake path — `status` asks for it and this is how you answer
+
+Binding a mandate arms every gate that lives **inside** the session: the Stop gate, the watchdog, the
+limit gate. All of them fire from in here, which is the thing that stops working when a run goes
+quiet. So `status` warns:
+
+```
+⚠ MANDATE ARMED, AND NO EXTERNAL WAKE PATH IS RECORDED.
+```
+
+Answer it on the mandate you already bound — no `--set`, so the human's words are not retyped and
+cannot be paraphrased in passing:
+
+```bash
+./.game_loop/bin/game_loop mandate --wake-path "<how a signal reaches this session while it is idle>"
+```
+
+A cron that pokes the session, a Stop-hook waker, a human who checks. **It is DECLARED, never
+probed** — the tool cannot test that the path delivers, and a declared path that has stopped
+delivering reads exactly like one that works. Recording it is worth less than a probe; not recording
+it is worth nothing.
+
+If the honest answer is "a human who checks", write that. It is the common case, and a run that says
+so is more use to a successor than one that leaves the field blank.
+
 ## Park and resume — a human called a break
 
 Parking is **not** clearing. It pauses the gate while leaving the work open, so nothing reads as

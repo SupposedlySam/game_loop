@@ -7216,9 +7216,16 @@ def tab_label(subject):
     if not words:
         return ""
     label = " ".join(words[:TASK_MAX_WORDS])
-    if len(label) > TASK_MAX_CHARS:
+    clipped = len(words) > TASK_MAX_WORDS
+    # THE ELLIPSIS COUNTS TOWARD THE BUDGET. Appending it in the word-clip branch could push a label
+    # that was exactly at the limit one character past it: three words totalling exactly
+    # TASK_MAX_CHARS, with a fourth word to signal, returned TASK_MAX_CHARS + 1. Narrow, but the
+    # docstring above promises a bound and `--task` REFUSES anything over it, so the same invariant
+    # was enforced on one path and quietly broken on the other. Measured, not reasoned about:
+    # "aaa aaa bbbbbbbbbbbb tail words" came back 21 characters against a limit of 20.
+    if len(label) + (1 if clipped else 0) > TASK_MAX_CHARS:
         label = label[:TASK_MAX_CHARS - 1].rstrip() + "\u2026"
-    elif len(words) > TASK_MAX_WORDS:
+    elif clipped:
         label += "\u2026"
     return label
 

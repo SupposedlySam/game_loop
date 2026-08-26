@@ -1346,6 +1346,24 @@ def main():
               r.returncode == 0 and "| scope the backups\u2026" in r.stdout)
         check("...and the ellipsis is kept, so a trimmed label cannot read as a complete one",
               "| scope the backups |" not in r.stdout)
+        # THE ELLIPSIS COUNTS TOWARD THE BUDGET, and the two trim rules met without anyone checking
+        # what happened at the seam. A char-length subject is trimmed to fit; a word-count clip
+        # appends the ellipsis instead — and a subject that trips the SECOND rule while already
+        # sitting exactly at the char limit came back one character over it. `--task` refuses
+        # anything past that bound, so the same invariant was enforced on one path and broken on
+        # the other. Driven straight at the function, because the boundary is a property of the
+        # label rather than of any one rendering of it.
+        _tab = __import__("importlib").import_module("importlib.util")
+        _spec = _tab.spec_from_file_location(
+            "_gl_tab", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _mod = _tab.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _over = [t for t in ("aaa aaa bbbbbbbbbbbb tail words", "scope the backups and push",
+                             "one two three four five", "a" * 40, "x " * 30)
+                 if len(_mod.tab_label(t)) > _mod.TASK_MAX_CHARS]
+        check("no label exceeds TASK_MAX_CHARS once the ellipsis is counted — including the seam "
+              "where a word-clipped label was already exactly at the limit",
+              not _over)
         r = gl(proj, "successor", "--dry-run", "--task", "goldens", sid="sess-succ")
         check("an explicit --task still outranks the derived label",
               "| goldens" in r.stdout)

@@ -1365,6 +1365,11 @@ NOT_SWEPT = {
     "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "
         "than split, so a renamed heading fails HERE) is asserted directly elsewhere",
     "test/run.py::why": "a suite helper for rendering a refusal reason in a message",
+    "test/run.py::_gate_ran": "a suite helper: it reads the stop gate's own payload probe so a "
+                              "permissive assertion requires the gate to have RUN, not merely to "
+                              "have exited 0. Neutering it makes every assertion that uses it FAIL "
+                              "rather than pass, which is the safe direction and the reason it is "
+                              "not swept — the same call as read_or_empty above.",
     "test/run.py::_ssctx": "a suite fixture helper",
     "test/run.py::_ask": "a suite fixture helper",
     "test/run.py::_pol": "a suite fixture helper",

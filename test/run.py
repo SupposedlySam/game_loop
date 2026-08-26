@@ -10141,9 +10141,30 @@ def main():
                               cwd=rw, input=json.dumps({"session_id": sid}),
                               capture_output=True, text=True, env=_env(rw, sid=sid))
 
+    def _gate_ran(proj, sid):
+        """Did the gate actually RUN for this call, or merely exit 0?
+
+        `cmd_stopgate` writes the payload it received to probe/stop-payload.json on EVERY
+        invocation, so the file naming THIS call's session is proof the gate was reached. Exit 0
+        alone is not: a `game_loop` replaced by `sys.exit(0)` returns it, and the sharded positive
+        control found fifteen assertions in this file resting on exactly that.
+
+        The same shape as `allowed()` (#41) and `mcp_allowed()`: for a verdict whose ALLOW is
+        silence, the mark has to have moved.
+        """
+        try:
+            with open(os.path.join(proj, ".game_loop", "probe", "stop-payload.json")) as f:
+                return (json.load(f) or {}).get("session_id") == sid
+        except (OSError, ValueError):
+            return False
+
+    def _gate_ok(sid):
+        """The gate allowed AND it ran — the permissive assertion, with the bit it needs."""
+        return _gate(sid).returncode == 0 and _gate_ran(rw, sid)
+
     check("a session with no retro and no mandate ends its turn — the control, or every arm below "
           "would be a gate that simply always closes",
-          _gate("sess-r1").returncode == 0)
+          _gate_ok("sess-r1"))
     gl(rw, "stepback", "--notes", "a real retro naming real learnings", sid="sess-r1")
     _held = _gate("sess-r1")
     check("...and after a RETRO with nothing encoded, turn-end is HELD — the reflection was never "
@@ -10158,13 +10179,13 @@ def main():
             sid="sess-r1")
     check("...and a SUCCEEDING harden pays the debt, so doing the right thing opens the gate — the "
           "arm I first read as broken, from a harden that had been refused for a bad artifact path",
-          _h.returncode == 0 and _gate("sess-r1").returncode == 0)
+          _h.returncode == 0 and _gate_ok("sess-r1"))
     gl(rw, "stepback", "--notes", "another chapter", sid="sess-r1")
     _dec = gl(rw, "stepback", "--nothing-to-harden", "--reason", "this chapter taught nothing",
               sid="sess-r1")
     check("...and DECLINING on the record opens it too: an empty chapter is a legitimate outcome, "
           "and it costs one sentence that lands in the log rather than a silence",
-          _dec.returncode == 0 and _gate("sess-r1").returncode == 0)
+          _dec.returncode == 0 and _gate_ok("sess-r1"))
     _refused = gl(rw, "stepback", "--nothing-to-harden", sid="sess-r1")
     check("...while declining with NO reason is refused — a decision with no reason recorded is "
           "indistinguishable from the silence this gate exists to stop, and the refusal names the "
@@ -10190,7 +10211,7 @@ def main():
        "--mechanism", "z2", "--rung", "3", sid="sess-r1")
     check("...and the NEXT harden pays it, so the arm above is about ordering rather than a gate "
           "that has stopped being satisfiable",
-          _gate("sess-r1").returncode == 0)
+          _gate_ok("sess-r1"))
 
     # READING IS NOT RETROSPECTING (#112). The retro's output is longer than a screen, so the only
     # way to read it was to RUN it — and every run logged a stepback, zeroed the counters and armed
@@ -10216,6 +10237,10 @@ def main():
     # state another fixture is reading, arriving as a bill rather than a memory.
     r112 = make_sandbox()
 
+    def _gate112_ok(sid):
+        """Allowed AND ran, for the #112 sandbox — same reasoning as _gate_ok above."""
+        return _gate112(sid).returncode == 0 and _gate_ran(r112, sid)
+
     def _gate112(sid):
         return subprocess.run([os.path.join(r112, ".game_loop", "bin", "game_loop"), "stopgate"],
                               cwd=r112, input=json.dumps({"session_id": sid}),
@@ -10228,7 +10253,7 @@ def main():
     gl(r112, "harden", "--learning", "encoded from the read chapter", "--artifact", _art112,
        "--mechanism", "z4", "--rung", "3", sid="sess-r2")
     check("#112: the debt is paid and the gate is open before any reading happens",
-          _gate112("sess-r2").returncode == 0)
+          _gate112_ok("sess-r2"))
     _before = _sb_lines(r112)
     _show = gl(r112, "stepback", "--show", sid="sess-r2")
     check("#112: --show RECORDS NOTHING — no stepback line, so reading cannot move the boundary "
@@ -10241,7 +10266,7 @@ def main():
           "WHAT THE LAST RETRO YIELDED" in _show.stdout)
     check("#112: ...and the debt it already paid STAYS paid, which is the whole defect: a read "
           "used to re-arm it and demand a second harden for the same chapter",
-          _gate112("sess-r2").returncode == 0)
+          _gate112_ok("sess-r2"))
     check("#112: ...while a real retro (no --show) DOES record and re-arm, so the read-only mode "
           "is an addition rather than a hole in the gate",
           (lambda _: gl(r112, "stepback", "--notes", "a second real chapter", sid="sess-r2")
@@ -10269,7 +10294,7 @@ def main():
     _work(8)
     check("at the NUDGE threshold the turn still ends — an agent mid-chapter is not yanked out of "
           "it, which is why the gate sits a full threshold further out",
-          _gate("sess-r2").returncode == 0)
+          _gate_ok("sess-r2"))
     _work(16)
     _over = _gate("sess-r2")
     check("...and at twice the threshold the nudge becomes a GATE, because `status` printing 'due' "
@@ -10296,7 +10321,7 @@ def main():
     _trans(12)
     check("...and TRANSITIONS have their own nudge threshold that does not gate — the two counters "
           "are separate debts and only one of them was ever driven here",
-          _gate("sess-r2").returncode == 0)
+          _gate_ok("sess-r2"))
     _trans(24)
     _tover = _gate("sess-r2")
     check("...while twice the transition threshold closes the gate on its own, naming ITS count "

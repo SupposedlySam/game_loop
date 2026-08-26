@@ -3222,6 +3222,30 @@ def main():
                                   input=json.dumps(payload), capture_output=True, text=True,
                                   env=_env(proj, sid))
 
+        def mcp_probe_f(sid=None):
+            raw = (sid or "")
+            s2 = re.sub(r"[^A-Za-z0-9._-]", "-", str(raw).strip())[:64]
+            base = os.path.join(proj, ".game_loop")
+            return os.path.join(base, "sessions", s2, "mcp-guard-probe") if s2 \
+                else os.path.join(base, "mcp-guard-probe")
+
+        def mcp_allowed(payload, sid=None):
+            """THE PERMISSIVE MCP ASSERTION, with the second bit it needs — #41 for this guard.
+
+            `not denied(...)` is not enough, and it was MEASURED here the same way it was measured
+            for the write guard: replacing guard-mcp.sh with a script that only `exit 0`s left
+            three permissive assertions in this block green, while every deny assertion correctly
+            failed. A refusal cannot be produced by absence; an allow is silence, and silence is
+            exactly what a dead guard emits.
+
+            #41 established this for the write guard and fixed it THERE. The sibling kept the hole
+            for as long as nobody pointed a control at it.
+            """
+            f = mcp_probe_f(payload.get("session_id") or sid)
+            before = _probe_count(f)
+            res = mcpguard(payload, sid)
+            return _probe_count(f) > before and not denied(res)
+
         def why(res):
             """The deny reason as text — assertions are on the MESSAGE, not merely on non-zero."""
             try:
@@ -3232,8 +3256,9 @@ def main():
         # The must-ALLOW / must-DENY fixture pair the issue asks for: the SAME read-named tool on the
         # SAME server, separated only by the argument it carries.
         ro = {"tool_name": "mcp__db__query", "tool_input": {"sql": "SELECT id FROM users LIMIT 5"}}
-        check("a read-only MCP call passes (SELECT through a query tool)",
-              not denied(mcpguard(ro)))
+        check("a read-only MCP call passes (SELECT through a query tool) — and the guard RAN, "
+              "which `not denied` alone cannot tell from a guard that is absent",
+              mcp_allowed(ro))
         rw = {"tool_name": "mcp__db__query",
               "tool_input": {"sql": "DELETE FROM users WHERE id = 1"}}
         r = mcpguard(rw)
@@ -3267,12 +3292,14 @@ def main():
         r = mcpguard({"tool_name": "mcp__pebble__pebble_run_command", "tool_input": {"cmd": "x"}})
         check("a server that repeats its own name still lands the verb (deny side)",
               denied(r) and "NAME's verb mutates: 'run'" in why(r))
-        check("a server that repeats its own name still lands the verb (allow side)",
-              not denied(mcpguard({"tool_name": "mcp__db__db_list_tables", "tool_input": {}})))
+        check("a server that repeats its own name still lands the verb (allow side), with the "
+              "guard's mark advanced — the deny arm beside it is self-validating and this one is not",
+              mcp_allowed({"tool_name": "mcp__db__db_list_tables", "tool_input": {}}))
         # Scoped to MCP: a repo with no MCP servers must behave exactly as before.
-        check("a non-MCP tool is not this guard's business (passes through untouched)",
-              not denied(mcpguard({"tool_name": "Bash",
-                                   "tool_input": {"command": "rm -rf ~/outside"}})))
+        check("a non-MCP tool is not this guard's business (passes through untouched) — the "
+              "guard still RAN and stood aside, which is not the same as never running",
+              mcp_allowed({"tool_name": "Bash",
+                           "tool_input": {"command": "rm -rf ~/outside"}}))
 
         print("MCP guard (fail-closed shim, and INV5):")
         mcp_impl_f = os.path.join(proj, ".game_loop", "bin", "guard-mcp-impl.sh")

@@ -222,6 +222,29 @@ fi
 
 # One classification pass. Prints "ALLOW", or "DENY" followed by the reason body.
 #
+# THE PROBE — a mark this guard advances on EVERY invocation, so that "it allowed the call" and "it
+# never ran" stop being the same observation. #41 established exactly this for the WRITE guard and
+# fixed it there only; the sibling kept the hole. Measured here rather than assumed: replacing
+# guard-mcp.sh with a script that only `exit 0`s left three permissive MCP assertions green, and
+# every DENY assertion correctly failed — because a refusal cannot be produced by absence, while an
+# allow is silence and silence is what a dead guard emits.
+#
+# Placed AFTER the state file is resolved and BEFORE the verdict, so it covers the non-MCP
+# pass-through too: that early return lives inside the embedded Python below.
+#
+# A read-only mount, a missing directory or a garbage counter costs THE MARK, never the guarding —
+# the same trade the write guard makes, and the reason this whole block is `|| true`. "Advanced" is
+# what may be relied on, never "advanced by exactly one".
+MCP_PROBE_D="${STATE_F%/*}"
+MCP_PROBE_F="$MCP_PROBE_D/mcp-guard-probe"
+{
+  _mprobe_n=0
+  [ -r "$MCP_PROBE_F" ] && read -r _mprobe_n < "$MCP_PROBE_F"
+  case "$_mprobe_n" in ''|*[!0-9]*) _mprobe_n=0 ;; esac
+  [ -d "$MCP_PROBE_D" ] || mkdir -p "$MCP_PROBE_D"
+  printf '%s\n' "$((_mprobe_n + 1))" > "$MCP_PROBE_F"
+} 2>/dev/null || true
+
 # NB: this Python is embedded in a $(...) here-doc, so it must contain NO backtick, NO dollar-paren,
 # and NO literal here-doc operator — any of those derails bash's parse of the surrounding $(...).
 verdict=$(GAMELOOP_DIR="$GAMELOOP_DIR" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" STATE_F="$STATE_F" SID="$SID" \

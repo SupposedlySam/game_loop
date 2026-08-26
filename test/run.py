@@ -317,6 +317,27 @@ def in_order(hay, first, second):
 def main():
     proj = make_sandbox()
     try:
+        def _logk(kind, _p=None):
+            """How many records of `kind` the shared log holds — the ALLOW side's only evidence.
+
+            An allow is silent by design, so `returncode == 0` is also what a binary that does
+            nothing returns: a stub of `sys.exit(0)` passed four of these. The gate DOES write a
+            record when it decides, so the record is what separates "allowed" from "never ran" —
+            the same reasoning as `allowed()` (#41), which requires the write guard's mark to have
+            advanced rather than trusting silence.
+            """
+            n = 0
+            try:
+                with open(os.path.join(_p or proj, ".game_loop", "log.jsonl")) as f:
+                    for _l in f:
+                        try:
+                            n += json.loads(_l).get("kind") == kind
+                        except ValueError:
+                            pass
+            except OSError:
+                pass
+            return n
+
         print("claim gate:")
         # ITS EXIT CODE ALONE WAS SATISFIED BY A BINARY THAT DOES NOTHING. This asserted only
         # `returncode != 0`, and a `game_loop` replaced by `sys.exit(1)` passes it — so the check
@@ -335,11 +356,19 @@ def main():
               _bad_read.returncode != 0
               and "don't resolve to a real, non-empty file" in (_bad_read.stdout + _bad_read.stderr))
         real = os.path.join(proj, ".game_loop", "config.json")
-        check("accepts a real --read path",
-              gl(proj, "claim", "--assert", "x", "--read", real).returncode == 0)
+        _c_before = _logk("claim")
+        check("accepts a real --read path, AND records the claim — exit 0 is what a binary that "
+              "does nothing returns, so the record is what says the gate ran",
+              gl(proj, "claim", "--assert", "x", "--read", real).returncode == 0
+              and _logk("claim") == _c_before + 1)
 
         print("stop gate (no mandate = inert):")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"want me to continue?"}')
+        # NOT STRENGTHENED, AND THAT IS THE HONEST ANSWER. With no mandate the gate is inert and
+        # writes NOTHING, so there is no record to separate "ran and stood aside" from "never ran"
+        # — a stub of sys.exit(0) passes this and no assertion here can tell. Saying so beats
+        # inventing evidence: the other three allows in this section are pinned by the record the
+        # gate actually writes, and this one is marked as what it is.
         check("inert with no mandate → allows", r.returncode == 0)
 
         print("stop gate (mandate bound):")
@@ -358,8 +387,11 @@ def main():
               "refusal — the two arms must not be one message",
               r.returncode == 2 and "you said you are continuing" in (r.stdout + r.stderr))
         gl(proj, "checkpoint", "--notes", "reporting")
+        _ck_before = _logk("checkpoint")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Finished the batch. Remaining: docs."}')
-        check("allows a checkpointed report (exit 0)", r.returncode == 0)
+        check("allows a checkpointed report (exit 0), and the GATE writes the record — a stub of "
+              "sys.exit(0) allows everything and writes nothing",
+              r.returncode == 0 and _logk("checkpoint") == _ck_before + 1)
         # checkpoint is consumed — a second bare stop blocks again
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Still going on the batch."}')
         check("checkpoint is single-use (next bare stop blocks), and the block is the gate's own "
@@ -369,7 +401,9 @@ def main():
         print("stop gate (arm → consume):")
         gl(proj, "arm", "--question", "which color?", "--read", real, "--predict", "blue")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"Which color do you want?"}')
-        check("armed question passes once (exit 0)", r.returncode == 0)
+        check("armed question passes once (exit 0), and the arm is SPENT in the log — the "
+              "difference between a gate that allowed and one that never ran",
+              r.returncode == 0 and _logk("t3_spend") >= 1)
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"And which size?"}')
         check("arm is consumed (next question blocks), with the gate's own words — a spent arm "
               "and a dead binary both exit 2, and only one of them says why",

@@ -367,8 +367,12 @@ kinds
 #   worker's own children, so a worker that dispatches must set a fresh one at every level.
 contribute --reviewed --filed "<urls, or none>" --note-file <path>
 #   the FILE form is the example on purpose: the honest answer here enumerates, so real notes
-#   run past the 400-char bound and `--note ".."` is then refused. Measured on this repo's own
-#   ledger, two of four entries were 855 and 1152 chars.
+#   run past the 400-char bound and `--note ".."` is then refused. Re-measured 2026-08-26 on this
+#   repo: the two ledger entries are 194 and 1440 chars, and the one recorded review's note is
+#   1372 — the real ones are three times the inline bound. (This line previously read "two of four
+#   entries were 855 and 1152"; that matches nothing on this machine now, and UPSTREAM_LEDGER.md is
+#   GITIGNORED, so it was a measured claim in a shipped file citing evidence no reader could check
+#   and no commit could preserve. Yours will hold different numbers; the bound is the point.)
 #   record that you asked, of each learning hardened since the last review: does this name a
 #   TOOL's behaviour, or THIS REPO's? `stepback` nudges once enough have accumulated and LISTS
 #   them, because the judgement is unmakeable from a count. A learning phrased as a fact about

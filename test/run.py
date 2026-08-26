@@ -6084,9 +6084,13 @@ def main():
                               "confidence", "--mark", "beta", "--notes", "should be refused"],
                              cwd=sv, capture_output=True, text=True, env=_env(sv, sid="sess-stale"))
         _txt = _mk.stdout + _mk.stderr
+        # A NON-ZERO EXIT IS WHAT A BINARY THAT DOES NOTHING RETURNS. These refusals rested on the
+        # code alone and passed against a stub of `sys.exit(1)` — found by running the whole suite
+        # against that stub SHARDED, which reaches 379 assertions where a serial run reached 33
+        # before its first section aborted and hid the rest.
         check("a gated file changed and uncommitted REFUSES the mark — a level describes a commit, "
-              "and this is not one yet",
-              _mk.returncode != 0)
+              "and this is not one yet, and it SAYS which of the two it is",
+              _mk.returncode != 0 and "uncommitted changes" in _txt)
         check("...and it is the UNCLEAN-TREE gate that says so, not the staleness one — naming "
               "which gate fired is what makes #108's unreachable branch visible rather than "
               "inferred from a refusal that happens to arrive",
@@ -6138,12 +6142,17 @@ def main():
         # THE REFUSALS ARE THE WHOLE DESIGN. Each is a way the mark could have been fabricated.
         with open(os.path.join(cd, "f.txt"), "a") as f:
             f.write("uncommitted\n")
-        check("a DIRTY tree cannot be marked — a mark describes a commit, not a desk",
-              _conf("--mark", "beta").returncode != 0)
+        _dirty = _conf("--mark", "beta")
+        check("a DIRTY tree cannot be marked — a mark describes a commit, not a desk, and the "
+              "refusal names the desk rather than exiting non-zero into silence",
+              _dirty.returncode != 0
+              and "not a desk" in (_dirty.stdout + _dirty.stderr))
         _cg("checkout", "--", "f.txt")
+        _alpha = _conf("--mark", "alpha")
         check("alpha cannot be marked at all: it IS the absence of a mark, so marking it would say "
-              "nothing",
-              _conf("--mark", "alpha").returncode != 0)
+              "nothing — and the refusal says that, rather than just failing",
+              _alpha.returncode != 0
+              and "ABSENCE of a mark" in (_alpha.stdout + _alpha.stderr))
         # RENAMED TO WHAT IT CHECKS (#104). This read "dogfooding is the evidence, and there is no
         # way to assert it without doing it" — a conclusion the assertion underneath cannot support
         # and, as it turns out, a false one: the gate compares the recorded pin to HEAD, so
@@ -10158,8 +10167,10 @@ def main():
           _dec.returncode == 0 and _gate("sess-r1").returncode == 0)
     _refused = gl(rw, "stepback", "--nothing-to-harden", sid="sess-r1")
     check("...while declining with NO reason is refused — a decision with no reason recorded is "
-          "indistinguishable from the silence this gate exists to stop",
-          _refused.returncode != 0)
+          "indistinguishable from the silence this gate exists to stop, and the refusal names the "
+          "missing flag rather than exiting non-zero the way a dead binary does",
+          _refused.returncode != 0
+          and "needs --reason" in (_refused.stdout + _refused.stderr))
 
     # THE WORD "AFTER" IS THE WHOLE MECHANISM, and nothing exercised it. The debt is satisfied by a
     # harden logged AFTER the stepback; every sequence above hardens after, so a comparison that

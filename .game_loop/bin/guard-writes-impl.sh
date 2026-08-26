@@ -13,7 +13,14 @@
 # misses whatever nobody remembered to list; an allowlist defaults to PROTECTED.
 #
 # SCOPE — what this DOES and does NOT catch (a guard that overstates its reach buys false confidence):
-#   DOES: Write/Edit/NotebookEdit whose target resolves outside the allow roots.
+#   DOES: Write/Edit/NotebookEdit whose target resolves outside the allow roots. It keys on the
+#         TOOL NAME and examines exactly those three: a host that gains another file-writing tool
+#         gets no check on it until the name is added here, and the guard has no way to notice.
+#         Verified against this host's tool list rather than assumed — those three are all of them
+#         today, so this is a latent gap, not a live one. Deliberately NOT widened by guessing at
+#         plausible names (MultiEdit, ApplyPatch, ...): a list of spellings is what cost this guard
+#         five redirect forms and nine verbs, and a guessed name that never arrives is a test
+#         asserting a belief about someone else's roadmap.
 #   DOES: Bash mutators whose resolved target is outside the allow roots. NAMED, not elided: rm,
 #         rmdir, touch, mkdir, chmod, chown, ln, dd, truncate, tee, cp, mv; sed -i and perl -i;
 #         curl -o, wget -O, tar -C, unzip -d, patch -o (destination read off the FLAG); install,

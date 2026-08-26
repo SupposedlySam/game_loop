@@ -494,8 +494,14 @@ MUTANTS = [
      ["no-rate-limits-in-hooks", "control", "payload"], None, 5),
     ("unpushed_warning -> never warns", ".game_loop/bin/_gl_impl.py::unpushed_warning", "    return None\n",
      ["unpushed", "upstream", "quiet"], None, 7),
+    # NARROWED AGAINST THE COMPLETE KILLER SET (sweep-killers.json), not against the three the
+    # report renders. "fix" alone matched 103 assertion names against a floor of 9, so `killers()`
+    # answered yes for almost any kill and the genuine-versus-collateral distinction stopped
+    # discriminating. All nine killers name a fix or a proof, so the subject is nameable: these six
+    # phrases keep 9 of 9 and take breadth to 19. ("proved fix" covers "an unproved fix" as a
+    # substring, which is why five phrases carry six cases.)
     ("fix_warning -> never warns", ".game_loop/bin/_gl_impl.py::fix_warning", "    return None\n",
-     ["fix", "quiet", "silence"], None, 9),
+     ["fix proof", "fix reported", "proved fix", "no fix", "fix warning", "that fix"], None, 9),
     ("category_tell -> never detects", ".game_loop/bin/_gl_impl.py::category_tell", "    return None\n",
      ["nudge", "category", "scope"], None, 4),
     ("aggregate_tell -> never detects", ".game_loop/bin/_gl_impl.py::aggregate_tell", "    return None\n",

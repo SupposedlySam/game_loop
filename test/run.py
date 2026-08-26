@@ -195,6 +195,41 @@ def allowed(proj, payload, sid=None):
     return _probe_count(f) > before and not denied(res)
 
 
+def assertions_that_cannot_fail(src):
+    """Line numbers of `check(...)` calls whose condition falls back to a literal True.
+
+    THE ONE THAT WAS HERE. An assertion reading "THIS repo currently has no vacuous rule —
+    measured, not assumed" was written as
+
+        check("...", _gvr.vacuous_rules(REPO, load_manifest_for_test())[0] == []
+                     if "load_manifest_for_test" in dir() else True)
+
+    and `load_manifest_for_test` is defined NOWHERE in this repo: its only occurrences were that
+    call and the string guarding it. The condition was always false, the ternary always yielded
+    True, and the check had never measured anything. The guard was presumably added to stop a
+    NameError; it stopped the check instead and left the sentence behind.
+
+    `else True` in an assertion is always the wrong direction. Whatever the guard is protecting
+    against, the safe fallback in a SUITE is to fail — a check that cannot fail is not a check, and
+    this file says so about other people's code in about thirty places.
+
+    Deliberately narrow: only a literal `True` in the else-branch of a ternary inside a check()
+    argument. Zero false positives across this repo's four test files, which is why it is a gate
+    rather than a report — a check that fires on legitimate work is one people route around.
+    """
+    out_ = []
+    for n in ast.walk(ast.parse(src)):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "check"):
+            continue
+        for arg in n.args[1:]:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.IfExp) and isinstance(sub.orelse, ast.Constant) \
+                        and sub.orelse.value is True:
+                    out_.append(n.lineno)
+    return sorted(set(out_))
+
+
 def source_flat(text):
     """Source with line-continuations dropped and whitespace collapsed, for ABSENCE claims.
 
@@ -16170,6 +16205,29 @@ def main():
     # fires is invisible for exactly as long as the check keeps passing. Found by scanning for
     # ternaries whose condition is a string-literal membership test — there were two left, and this
     # was the one whose fallback was `True`.
+    # AND NO ASSERTION IN THIS SUITE FALLS BACK TO True. The vacuity check below was written that
+    # way and could not fail for as long as it existed; the class is worth a gate because the
+    # failure is silent by construction — the suite goes green, the sentence still reads
+    # "measured", and nothing downstream depends on it enough to complain.
+    _cannot = []
+    for _tf in ("run.py", "prun.py", "mutation_sweep.py", "behaviour_gate.py"):
+        _tsrc = read_or_empty(os.path.join(REPO, "test", _tf))
+        if _tsrc:
+            _cannot += [f"{_tf}:{_l}" for _l in assertions_that_cannot_fail(_tsrc)]
+    check("no assertion in this suite falls back to a literal True — whatever a guard protects "
+          "against, the safe fallback in a SUITE is to FAIL: " + (", ".join(_cannot) or "none"),
+          not _cannot)
+    # THE RULE CAN FIRE. Driven on constructed source rather than trusted, and on BOTH arms: a
+    # ternary guard that falls back to False is the correct shape and must not be reported, or the
+    # gate would push people from one broken form into another.
+    check("...and the rule FIRES on that exact shape, so the clean answer above is a verdict "
+          "rather than a walk that matched nothing",
+          assertions_that_cannot_fail(
+              'check("x", thing() == [] if "name" in dir() else True)\n') == [1])
+    check("...while a guard falling back to FALSE is left alone — that one fails when its guard "
+          "fails, which is the direction a suite wants",
+          assertions_that_cannot_fail(
+              'check("x", thing() == [] if "name" in dir() else False)\n') == [])
     _vr_rules, _vr_excl = _gvr.load_manifest()
     _dead_rules, _vr_why = _gvr.vacuous_rules(REPO, _vr_rules)
     check("and THIS repo currently has no vacuous RULE — measured against the real manifest now, "

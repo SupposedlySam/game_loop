@@ -372,9 +372,15 @@ def main():
         # NOT STRENGTHENED, AND THAT IS THE HONEST ANSWER. With no mandate the gate is inert and
         # writes NOTHING, so there is no record to separate "ran and stood aside" from "never ran"
         # — a stub of sys.exit(0) passes this and no assertion here can tell. Saying so beats
-        # inventing evidence: the other three allows in this section are pinned by the record the
-        # gate actually writes, and this one is marked as what it is.
-        check("inert with no mandate → allows", r.returncode == 0)
+        # I MARKED THIS UNFIXABLE AND WAS WRONG, which is worth leaving in the file. The claim was
+        # that an inert gate writes nothing, so no assertion could separate "stood aside" from
+        # "never ran". True of the LOG — a mandate-less turn-end records no verdict — and false of
+        # the payload probe, which `cmd_stopgate` writes on EVERY invocation before it decides
+        # anything. The evidence was one directory away from the evidence I did check.
+        check("inert with no mandate → allows, and the gate RAN — an inert verdict and an absent "
+              "binary both exit 0, and only one of them leaves its payload behind",
+              r.returncode == 0
+              and os.path.exists(os.path.join(proj, ".game_loop", "probe", "stop-payload.json")))
 
         print("stop gate (mandate bound):")
         gl(proj, "mandate", "--set", "do the work")
@@ -5602,8 +5608,9 @@ def main():
                        "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
         _r0 = _run()
         check("a verified wait stops the RING itself — a run with nothing to do is not woken to "
-              "discover that again",
-              _r0.returncode == 0)
+              "discover that again, and the quiet is RECORDED, since exit 0 is also what a "
+              "watchdog that never ran returns",
+              _r0.returncode == 0 and '"watchdog_quiet"' in read_or_empty(_wlog))
         check("...and the quiet says WHY, so a watchdog that has stood down is distinguishable "
               "from one that is broken",
               "not ringing a run" in read_or_empty(_wlog))
@@ -6435,8 +6442,10 @@ def main():
               dig(_out, "hookEventName") == "SessionStart"
               and has(dig(_out, "additionalContext"), "INV:")
               and has(dig(_out, "additionalContext"), "COST LADDER"))
-        check("...and it never blocks: a first impression that bricks a session gets no second one",
-              r.returncode == 0)
+        check("...and it never blocks: a first impression that bricks a session gets no second "
+              "one — and it produced the context while not blocking, since exit 0 is also what a "
+              "binary that does nothing returns",
+              r.returncode == 0 and bool(dig(_out, "additionalContext")))
         check("...and PostCompact is served by the same verb, because compaction is exactly when a "
               "run loses the mandate, the pins and the invariants",
               dig(json_text(_start(event="PostCompact").stdout), "hookSpecificOutput", "hookEventName")
@@ -7844,8 +7853,9 @@ def main():
         # PAIRED: the same text, same length, through the file — or the bound is just a wall.
         _via = gl(pw, "note", "--text-file", _f, sid="sess-prose")
         check("...while the SAME text through --text-file is accepted, so the bound is a redirect "
-              "and not a cap on how much you may say",
-              _via.returncode == 0)
+              "and not a cap on how much you may say — asserted on the tool SAYING it recorded the "
+              "note, because exit 0 is what a binary doing nothing returns",
+              _via.returncode == 0 and "noted to" in (_via.stdout + _via.stderr))
         with open(os.path.join(pw, ".game_loop", "log.jsonl")) as f:
             check("...and the file's content is what got recorded, not its path",
                   any(_long in ln for ln in f))
@@ -8187,6 +8197,11 @@ def main():
               len(_paths) == 3
               and all(os.access(p, os.X_OK) for p in _paths)
               and all(subprocess.run([p, "authorize", "--help"], capture_output=True).returncode == 0
+                      for p in _paths)
+              # ...and the help it prints names the flag, so a binary that only exits 0 does not
+              # satisfy "it is a real executable" by returning the right number and nothing else.
+              and all(b"--reason" in subprocess.run([p, "authorize", "--help"],
+                                                    capture_output=True).stdout
                       for p in _paths))
         check("...and it is the PROJECT's binary, so a pinned session authorises into the project's "
               "own record rather than the copy it happens to be running",
@@ -10272,8 +10287,9 @@ def main():
           (lambda _: gl(r112, "stepback", "--notes", "a second real chapter", sid="sess-r2")
            and _sb_lines(r112) == _before + 1 and _gate112("sess-r2").returncode == 2)(None))
     check("#112: ...and --show needs no --notes, since demanding a reflection to READ one is the "
-          "same trap in a different place",
-          _show.returncode == 0)
+          "same trap in a different place — asserted on the banner it prints, because exit 0 is "
+          "also what a binary that does nothing returns",
+          _show.returncode == 0 and "A READ, NOT A RETRO" in _show.stdout)
 
     # THE NUDGE ITSELF, escalating. A printed nudge is a thing to remember; agents pass over it and
     # never re-check. It stays advice for a whole threshold, then closes.
@@ -10901,9 +10917,11 @@ def main():
         check("...and it names the file to fix and the heading shape to restore, because a reader "
               "told their invariants are not being read still has to know what to do",
               has(_fb, "INVARIANTS.md") and has(_fb, "## INVn"))
+        _ivs = gl(_iv, "status", sid="sess-inv")
         check("...and status still WORKS in that state — the fallback exists so a reshaped file "
-              "cannot take the entry point down, and saying so must not change that",
-              gl(_iv, "status", sid="sess-inv").returncode == 0)
+              "cannot take the entry point down, and saying so must not change that. Asserted on "
+              "what it PRINTS: exit 0 is what a binary doing nothing returns",
+              _ivs.returncode == 0 and has(_ivs.stdout, "COST LADDER"))
     finally:
         shutil.rmtree(_iv, ignore_errors=True)
 

@@ -56,14 +56,29 @@ def record_touched(ref):
     return r.returncode == 0 and bool(r.stdout.strip())
 
 
-def main():
-    ref = sys.argv[1] if len(sys.argv) > 1 else "HEAD"
+def main(ref="HEAD"):
+    """The ref is a PARAMETER, not something read out of sys.argv in here.
+
+    Reading argv inside a function means judging whatever command line the process happens to have,
+    which is only the caller's when the caller is the shell. Driven from another program this took
+    that program's first argument as a GIT REF -- `--section`, say -- and the diff then failed, and
+    the failure returned 0. The same shape cost a suite run the same day in mutation_sweep.py.
+    """
     lines = changed_lines(ref)
     if lines is None:
-        # Could not ask git. Not a pass and not a failure: say so and decline, rather than
-        # reporting clean from an answer nobody got.
-        print(f"behaviour gate: could not diff against {ref} — no verdict", file=sys.stderr)
-        return 0
+        # COULD NOT RUN IS NOT A PASS, and until now it shared an exit code with one. This prints a
+        # sentence about having no verdict and then returned 0 -- and `verify` reads the exit code,
+        # not the sentence, so a gate that never ran reported as a gate that was satisfied. Every
+        # other check in this repo owes three outcomes; this one owed them too and only had two.
+        #
+        # Demonstrated rather than reasoned about: `behaviour_gate.py no-such-ref` printed "no
+        # verdict" and exited 0, which verify renders as a passing rule.
+        print(f"behaviour gate: COULD NOT DIFF against {ref} — no verdict, and that is not a pass.",
+              file=sys.stderr)
+        print("  git could not answer, so nothing was compared. Exiting 2 rather than 0: a check\n"
+              "  that did not run must not be indistinguishable from one that ran and was content.\n"
+              "  Fix the ref (or the repository) and run it again.", file=sys.stderr)
+        return 2
     hits = [l for l in lines if REFUSAL.search(l)]
     if not hits:
         print("behaviour gate: no refusal line changed — nothing owed.")
@@ -87,4 +102,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "HEAD"))

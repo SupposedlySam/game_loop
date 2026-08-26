@@ -11386,6 +11386,22 @@ def main():
         check("with nothing changed the gate is silent — it must not fire on every commit or it "
               "becomes noise and gets turned off",
               _gate().returncode == 0 and "nothing owed" in _gate().stdout)
+        # COULD NOT RUN IS NOT A PASS, and it used to share an exit code with one. The gate printed
+        # "no verdict" on stderr and returned 0 — and `verify` reads the exit code, not the
+        # sentence, so a gate that never ran rendered as a rule that was satisfied. Demonstrated,
+        # not theorised: `behaviour_gate.py no-such-ref` exited 0.
+        _nover = subprocess.run([sys.executable, "behaviour_gate.py", "no-such-ref-xyz"], cwd=bg,
+                                capture_output=True, text=True)
+        check("a ref git cannot resolve is its OWN outcome — exit 2, never the 0 that means "
+              "'nothing owed', because verify reads the code and not the sentence beside it",
+              _nover.returncode == 2)
+        check("...and it says so in words too, naming what was not compared rather than implying a "
+              "clean result",
+              "COULD NOT DIFF" in _nover.stderr and "not a pass" in _nover.stderr)
+        check("...while the ref stays a PARAMETER of main(), so a program that drives it does not "
+              "have its own argv read as a git ref — the shape that broke the suite in "
+              "mutation_sweep.py the same day",
+              "def main(ref=" in read_or_empty(os.path.join(REPO, "test", "behaviour_gate.py")))
 
         # A REFUSAL CHANGES AND THE RECORD DOES NOT: the case that actually happened.
         with open(_guard, "a") as f:

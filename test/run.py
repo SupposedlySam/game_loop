@@ -8851,9 +8851,11 @@ def main():
               "same checkpoint still carries the next one, so clearing the trigger costs one turn "
               "and nothing else",
               _kb.returncode == 2 and _kept.returncode == 0)
+        _spent = _end(sid="sess-keep")
         check("...and the pair that proves it: with the checkpoint now spent, the next bare "
-              "turn-end is refused by the mandate gate again",
-              _end(sid="sess-keep").returncode == 2)
+              "turn-end is refused by the mandate gate again — by the GATE, which says so, rather "
+              "than by any binary that happens to exit 2",
+              _spent.returncode == 2 and "STOP GATE CLOSED" in (_spent.stdout + _spent.stderr))
 
         # It runs only where turn-end would otherwise be ALLOWED. A turn the mandate gate has
         # already refused is not a turn-end, so the attachment's question is moot — and asking it
@@ -8862,9 +8864,15 @@ def main():
         _attach_stop({"name": "marks", "command": f"date >> {shlex.quote(_seen)}; exit 0"})
         gl(stp, "mandate", "--set", "do the work", sid="sess-order")
         _asked = _end(sid="sess-order", msg="Which colour do you want?")
+        # BOTH HALVES WERE SATISFIED BY A DEAD BINARY. Exit 2 is what a stub that only fails
+        # returns, and the file "not appearing" is what happens when nothing runs at all — an
+        # absence proving an absence. The comment above already knew absence-of-output was weak
+        # evidence and reached for a file instead; a file that never gets created is the same
+        # shape. The gate's own words are what only a working gate can produce.
         check("a turn-end the mandate gate REFUSES never reaches the attachment — proved by a file "
-              "that does not appear, not by an absence of output",
-              _asked.returncode == 2 and not os.path.exists(_seen))
+              "that does not appear, and by the gate SAYING it refused",
+              _asked.returncode == 2 and not os.path.exists(_seen)
+              and "STOP GATE CLOSED" in (_asked.stdout + _asked.stderr))
         gl(stp, "checkpoint", "--notes", "reporting", sid="sess-order")
         _allowed = _end(sid="sess-order")
         check("...and on a turn-end it ALLOWS, the same attachment runs — without this the line "
@@ -12170,8 +12178,9 @@ def main():
         _nover = subprocess.run([sys.executable, "behaviour_gate.py", "no-such-ref-xyz"], cwd=bg,
                                 capture_output=True, text=True)
         check("a ref git cannot resolve is its OWN outcome — exit 2, never the 0 that means "
-              "'nothing owed', because verify reads the code and not the sentence beside it",
-              _nover.returncode == 2)
+              "'nothing owed', because verify reads the code and not the sentence beside it — and "
+              "it is THIS gate's exit, not any script that happens to fail",
+              _nover.returncode == 2 and "COULD NOT DIFF" in _nover.stderr)
         check("...and it says so in words too, naming what was not compared rather than implying a "
               "clean result",
               "COULD NOT DIFF" in _nover.stderr and "not a pass" in _nover.stderr)

@@ -466,6 +466,30 @@ def main():
         # Every command below puts an ABSOLUTE OUT-OF-REPO path where the old code would find one.
         # That is deliberate: with a bare relative target these all resolve INSIDE the sandbox and
         # pass whether the bug is present or not, and a check that cannot fail is not a check.
+        # THE CLOBBER OVERRIDES, WHICH WROTE STRAIGHT PAST THIS GUARD. `>|` is POSIX and works in
+        # bash; `>!` and `>>!` are zsh — and zsh is the shell this harness's own Bash commands run
+        # under, which is the question nobody had asked. All three write exactly like `>` and all
+        # three were ALLOWED to a path outside the repo. Verified they really write before fixing:
+        # `echo one >| f` and `echo two >! f` both produced the file.
+        #
+        # Two separate defects wearing one symptom. redirect_targets stopped at `|` (it is in the
+        # terminator set) and swallowed `!` AS the target, which resolves inside the repo; and the
+        # SPLITTER cut `echo x >|` from its target, because `|` is also a segment separator. Either
+        # half alone leaves the hole open.
+        for _clob in ("echo x >| /Users/nobody/outside.txt",
+                      "echo x >! /Users/nobody/outside.txt",
+                      "echo x >>! /Users/nobody/outside.txt"):
+            check("a clobber-override redirect to an out-of-repo path is refused (%s)"
+                  % _clob.split()[2],
+                  denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+        check("...while the SAME operator inside the repo is allowed — the fix reads past the "
+              "override, it does not refuse the override",
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "echo x >| inside.txt"}}))
+        check("...and a REAL pipe still splits, so teaching the splitter about `>|` did not make "
+              "every pipe part of a redirect",
+              allowed(proj, {"tool_name": "Bash",
+                             "tool_input": {"command": "jq -r '.a | .b' f.json"}}))
         check("a jq filter's quoted > is DATA, even when a quoted | precedes it",
               allowed(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "jq -r '.a | select(.p > \"/etc/passwd\")' f.json"}}))

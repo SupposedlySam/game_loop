@@ -1015,6 +1015,15 @@ def shell_segments(cmd):
             i += 2
             continue
         if c == "|":
+            # `>|` IS A REDIRECT, NOT A PIPE. Splitting here cut `echo x >|` from its target, so
+            # the redirect had no target to check and the write went unseen -- the clobber
+            # override defeated the guard at the SPLITTER even after redirect_targets learned to
+            # skip it. Both halves were needed: one to stop cutting the operator in two, one to
+            # read past it.
+            if buf and "".join(buf[-2:]).rstrip().endswith(">"):
+                buf.append(c)
+                i += 1
+                continue
             segs.append("".join(buf))
             buf = []
             i += 2 if (i + 1 < n and cmd[i + 1] == "|") else 1
@@ -1845,6 +1854,19 @@ def redirect_targets(seg):
             j = i + 1
             if j < n and seg[j] == ">":
                 j += 1
+            # THE CLOBBER OVERRIDES, WHICH WROTE STRAIGHT PAST THIS GUARD. `>|` is POSIX and works
+            # in bash; `>!` and `>>!` are zsh, and zsh is the shell this harness's own commands run
+            # under. All three write exactly like `>` and none of them was seen: after the `>`, a
+            # `|` is in the terminator set below so the target parsed as EMPTY and nothing was
+            # checked, while `!` is not a terminator so the target parsed as the literal "!" --
+            # which resolves inside the repo and is allowed. Measured: `echo x >| <path outside>`,
+            # `>!` and `>>!` were all ALLOWED, and all three genuinely write.
+            #
+            # Found by taking a sibling agent's finding seriously rather than assuming it was
+            # theirs alone: they ship a bash idiom that yields nothing under zsh. The question
+            # "which shell actually runs the commands this guard reads" had never been asked here.
+            while j < n and seg[j] in "|!":
+                j += 1
             while j < n and seg[j] in " \t":
                 j += 1
             if j < n and seg[j] in "'\"":
@@ -1952,6 +1974,15 @@ def shell_segments(cmd):
             i += 2
             continue
         if c == "|":
+            # `>|` IS A REDIRECT, NOT A PIPE. Splitting here cut `echo x >|` from its target, so
+            # the redirect had no target to check and the write went unseen -- the clobber
+            # override defeated the guard at the SPLITTER even after redirect_targets learned to
+            # skip it. Both halves were needed: one to stop cutting the operator in two, one to
+            # read past it.
+            if buf and "".join(buf[-2:]).rstrip().endswith(">"):
+                buf.append(c)
+                i += 1
+                continue
             segs.append("".join(buf))
             buf = []
             i += 2 if (i + 1 < n and cmd[i + 1] == "|") else 1

@@ -659,7 +659,7 @@ MUTANTS = [
      # ledger has to show that SHAPE rather than one number, so the claims/triggers arm was added.
      None, 3),
     ("working_tree_report -> never says you are in a different tree", ".game_loop/bin/_gl_impl.py::working_tree_report",
-     "    return []\n", ["worktree", "tree", "harness answers"], None, 3),
+     "    return []\n", ['names each', 'different REPOSITORY', 'check FINDS', 'naming BOTH', 'no shipped', 'worktree it'], None, 3),
     # THE TWO #44 SURFACED THAT MATTER, now measured rather than described. Both were entirely
     # OUTSIDE the denominator until the file list came from git — not excluded, absent.
     ("verify.owed -> nothing ever owes a check", ".game_loop/bin/verify::owed",
@@ -765,7 +765,7 @@ MUTANTS = [
      # which is exactly what #49 was about.
      None, 7),
     ("notify.replies -> the human's answer never arrives", ".game_loop/bin/notify.py::replies",
-     "    return []\n", ["slack", "reply", "watchdog", "arm", "forward"],
+     "    return []\n", ['human thread', 'a top-level', 'an unmandated', 'every executable', 'the forwarded'],
      # 4, and it took a fix to get a number at all. Neutered, this used to HANG the suite rather
      # than fail it -- the reply poll is a `while True:` whose exits all wait on a reply arriving,
      # so a producer that never produces spun forever and no assertion finished. Bounding the
@@ -824,7 +824,7 @@ MUTANTS = [
      # pinned to the wording only this one uses, it flips.
      "one message plus a caveat scoped to its own block; the rest are absence arms", 3),
     ("refresh_handoff -> no handoff is ever maintained", ".game_loop/bin/_gl_impl.py::refresh_handoff",
-     "    return False\n", ["handoff", "turn-end", "cliff", "limit"],
+     "    return False\n", ['last reported', 'handoff that', 'turn-end leaves'],
      # THIN at 2, and the first measurement said 164 — which was a CRASH CASCADE, not coverage. The
      # tests read the handoff unguarded, so a neutered producer made them raise, the run aborted,
      # and every later assertion counted as killed. A test must survive the thing it tests being

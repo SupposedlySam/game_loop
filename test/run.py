@@ -10319,6 +10319,77 @@ def main():
     check("the overbroad-marks advisory states that it measures BREADTH ONLY, so a producer the "
           "suite leans on is not read as a loose mark",
           "IT MEASURES BREADTH ONLY" in _msrc and "the breadth is the coverage" in _msrc)
+    # THE SECTION MAP WAS THE LAST DECLARED KNOWN GAP, and its own entry said why: neutering the
+    # writer produces no map, every FAST producer then falls back to the whole suite, and the run is
+    # "correct results, no speedup, and nothing to notice". The gap was never that it could not be
+    # checked — the entry ends "that is the shape worth an assertion and it does not have one yet".
+    #
+    # Two things were needed. The sweep now SAYS SO when FAST is asked for and no map exists, so the
+    # silent slow run is loud; and the writer is DRIVEN here, so neutering it flips something. It
+    # moves out of NOT_SWEPT in the same commit, because an entry there is invisible to the
+    # instrument by construction and that was the whole complaint.
+    # THE WRITER WRITES BESIDE ITSELF, NOT INTO THE TREE IT READS. `_write_section_map(tree)` uses
+    # `tree` for READING — it runs `--list-sections` there and reads that run.py's source — but the
+    # output path is `os.path.dirname(os.path.abspath(__file__))`, the module's own directory. That
+    # is deliberate (the sweep passes it a git-archive temp dir, so writing there would throw the
+    # map away with the temp tree) and it is nowhere stated. Driving it against a temp tree
+    # OVERWROTE THIS REPO'S REAL MAP with a fixture-derived one: 120 producers all pointing at a
+    # single section, which is the "wrong map makes producers come back short" case the file warns
+    # about. I deleted the corrupted file; absent is the safe direction and now announces itself.
+    #
+    # So the module is loaded FROM A COPY, which moves `__file__` into the temp tree and makes the
+    # write land there. A fixture that can damage the repo it is testing is a fixture that will.
+    _sm_tree = tempfile.mkdtemp(prefix="gl_secmap_")
+    try:
+        os.makedirs(os.path.join(_sm_tree, "test"))
+        for _f in ("run.py", "mutation_sweep.py"):
+            shutil.copy(os.path.join(REPO, "test", _f), os.path.join(_sm_tree, "test", _f))
+        _sw_spec = importlib.util.spec_from_file_location(
+            "gl_sweep_secmap", os.path.join(_sm_tree, "test", "mutation_sweep.py"))
+        _sw = importlib.util.module_from_spec(_sw_spec)
+        _sw_spec.loader.exec_module(_sw)
+        # THE WRITER'S OWN GUARD: it returns early unless every declared producer was measured,
+        # because a trimmed run rewriting the map ratchets it toward whatever ran last. And killer
+        # names are located through the `check("` literals in run.py, so a SECTION title finds no
+        # line and drops its producer silently. Two wrong fixtures taught me both.
+        _sw.KILL_NAMES.update({
+            _k: ["blocks a question (exit 2), and SAYS the question is the reason"]
+            for _l2, _k, _b2, _m2, _t2, _f2 in _sw.MUTANTS})
+        _sw._write_section_map(_sm_tree)
+        _sm_path = os.path.join(_sm_tree, "test", "sweep-sections.json")
+        _sm = json_or_none(_sm_path) or {}
+        check("the section map WRITER is driven, not just read in source — neutering it flipped "
+              "nothing before, which is why it was the last declared KNOWN GAP",
+              os.path.exists(_sm_path))
+        check("...and it maps every declared producer to the SECTION its killer lives in — a map "
+              "that exists and says nothing buys the same slow run it was meant to prevent",
+              len(_sm) == len(_sw.MUTANTS) and all(v for v in _sm.values()))
+        check("...and it writes beside the MODULE rather than into the tree it reads, which is why "
+              "this fixture loads a COPY: driving it in place overwrote this repo's real map",
+              os.path.dirname(os.path.abspath(_sw.__file__)) ==
+              os.path.dirname(_sm_path))
+    finally:
+        shutil.rmtree(_sm_tree, ignore_errors=True)
+
+    _sw2_spec = importlib.util.spec_from_file_location(
+        "gl_sweep_notice", os.path.join(REPO, "test", "mutation_sweep.py"))
+    _sw2 = importlib.util.module_from_spec(_sw2_spec)
+    _sw2_spec.loader.exec_module(_sw2)
+    # AND THE SILENT SLOW RUN IS LOUD. FAST with no map ran every producer over the whole suite and
+    # said nothing at all, so an hour looked like the price of fast mode.
+    _fastnotice = _sw2.fast_without_map_notice(True, {})
+    check("asking for FAST with NO section map SAYS the fallback happened — an hour spent by "
+          "somebody who asked for minutes, previously reported by nothing",
+          "NO SECTION MAP" in _fastnotice and "speedup is gone" in _fastnotice)
+    check("...and it names the remedy, since a notice that leaves you stuck is one people skip",
+          "run one once" in _fastnotice)
+    check("...while FAST WITH a map is silent, so the notice is a verdict rather than a line that "
+          "prints on every fast run",
+          "NO SECTION MAP" not in _sw2.fast_without_map_notice(True, {"x::y": ["s"]}))
+    check("...and a non-fast run with no map is silent too — the fallback only costs anything when "
+          "somebody asked for the speedup",
+          "NO SECTION MAP" not in _sw2.fast_without_map_notice(False, {}))
+
     check("...and it is written only on a FULL sweep, beside the section map — a trimmed run has "
           "not observed what it did not execute, and would ratchet the sets toward its own subset",
           "_write_section_map(base)\n        _write_killers()" in _msrc)

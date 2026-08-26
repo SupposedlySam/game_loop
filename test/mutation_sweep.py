@@ -173,6 +173,24 @@ _PROBE_MARK = "GAMELOOP-SWEEP-LIVENESS-PROBE"
 NOT_MEASURED = "NOT MEASURED"
 
 
+def fast_without_map_notice(fast, section_map):
+    """The line a FAST run owes when there is no section map, or "" when it owes none.
+
+    At module level for the reason every rule here is: one that lives inside main() cannot be
+    driven by the suite. This one especially — its whole subject is a run that produces correct
+    results and says nothing, so an unassertable version of it would be the same defect again.
+    """
+    if not fast or section_map:
+        return ""
+    return ("GAME_LOOP_SWEEP_FAST=1 was asked for and there is NO SECTION MAP -- "
+            "test/sweep-sections.json\n"
+            "  is missing or unreadable, so every producer falls back to the WHOLE suite. The "
+            "results are\n"
+            "  correct and the speedup is gone; this run takes about as long as a full one. The "
+            "map is\n"
+            "  written by a FULL sweep, so run one once and fast mode works after that.")
+
+
 def marks_missing_killers(marks, killer_names):
     """(matched, total) — how many of a producer's ACTUAL killers its mark set names.
 
@@ -1083,6 +1101,16 @@ MUTANTS += [
      'test/run.py::assertions_that_cannot_fail', '    return []\n',
      ['falls back to a literal True', 'cannot fail', 'else True'],
      "2 kills, MEASURED by the full sweep of 2026-08-26 against d2411ab — the first reading this producer has ever had. It entered the denominator with #115's widening of the candidate finder, and its first two sweeps produced NOTHING: the declared mutant body carried a literal backslash-n instead of a newline, so the file did not parse and the suite could not start. Comparable: test/run.py is unchanged between that sweep's tree and this commit.", 2),
+]
+
+MUTANTS += [
+    ("fast_without_map_notice -> a FAST run with no map goes quiet again",
+     "test/mutation_sweep.py::fast_without_map_notice", '    return ""\n',
+     ["NO SECTION MAP", "speedup is gone", "asked for minutes", "names the remedy"],
+     "2 kills, and the two that CANNOT kill it are the point: two of its four assertions check that "
+     "it stays SILENT (a map present, and a non-fast run), which `return \"\"` satisfies. A producer "
+     "whose job is to speak only sometimes can only be killed by the arms where it speaks. Measured "
+     "by neutering it, not estimated.", 2),
 ]
 
 MUTANTS += [
@@ -2227,6 +2255,17 @@ def _parse_argv(argv):
 
 
 def main():
+    # FAST WITH NO MAP IS A SLOW RUN THAT SAYS NOTHING. `SECTION_MAP` falls back to {} on any
+    # unreadable or unparseable file, and in FAST mode every `SECTION_MAP.get(key)` then returns
+    # None, so every producer runs the WHOLE suite: correct results, no speedup, and an hour spent
+    # by somebody who asked for minutes and was told nothing.
+    #
+    # This was `_write_section_map`'s declared KNOWN GAP, and the gap was never that it could not be
+    # checked -- the entry says so itself: "that is the shape worth an assertion and it does not
+    # have one yet". An absent map is silent BECAUSE nothing announced it, which is the same
+    # absence-reads-as-normal shape this file exists to refuse. Loud now, and therefore assertable.
+    if (_fastnote := fast_without_map_notice(FAST, SECTION_MAP)):
+        print(_fastnote)
     base = tempfile.mkdtemp(prefix="sweep-base-")
     subprocess.run(f"git -C {REPO} archive HEAD | tar -x -C {base}", shell=True, check=True)
     found = all_candidates(base)

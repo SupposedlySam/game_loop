@@ -760,7 +760,22 @@ explicitly authorized this path:
     scan_cmd=$(CMD="$cmd" python3 <<'PY'
 import os, re, sys
 cmd = os.environ["CMD"]
-DATA_SINKS = {"cat", "tee"}
+DATA_SINKS = {"cat", "tee", "llm_chat", "gh", "jq"}
+# A MESSAGE IS PROSE, AND PROSE THAT QUOTES A COMMAND IS NOT THAT COMMAND. Reported by a consumer as
+# "the guard refuses `--file -`", which was close but not the trigger: what is refused is the message
+# CONTENT. A heredoc fed to a consumer not on this list is scanned as CODE, so writing
+#   llm_chat say room --file - <<EOF ... the bug was: echo x > /Users/…/outside … EOF
+# is refused for a redirect that exists only inside a sentence describing it. The identical text
+# through `cat` was always allowed, and that asymmetry is the tell.
+#
+# Live here, not hypothetical: this session sends findings about redirects and paths through that
+# exact command all day, and any message quoting an absolute out-of-repo path with a `>` would have
+# been blocked from being SENT.
+#
+# The default stays "unknown consumer = code", which is the safe direction: a heredoc piped into an
+# interpreter nobody listed must still be read. That makes this a list of spellings with a
+# fail-CLOSED default, which is the guard-mcp shape rather than the MUTATORS shape — a missing entry
+# here costs a false refusal somebody notices, never a silent write.
 HD = chr(60) + chr(60)                       # the here-doc operator, with no literal one in this file
 opener = re.compile(re.escape(HD) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 lines = cmd.split("\n")
@@ -775,7 +790,18 @@ while i < len(lines):
         # (in a line like: cat with a redirect, then the operator, the consumer is cat).
         pre = re.sub(r">>?\s*[^\s;&|<>]*", " ", line.split(HD, 1)[0])
         words = re.findall(r"[A-Za-z0-9_./]+", pre)
-        is_data = (os.path.basename(words[-1]) if words else "") in DATA_SINKS
+        # THE CONSUMER IS THE COMMAND, NOT THE LAST WORD BEFORE THE OPERATOR. This took words[-1],
+        # which is `cat` for `cat HD X` and the FILENAME for `tee f HD X` — and for
+        # `llm_chat say room --file - HD X` it is "file", so a chat send was never recognised as a
+        # data sink no matter what this set contained. Take the first word of the LAST command in
+        # the line instead: that is what actually reads the body, and it survives a pipeline, where
+        # scanning every word would let `bash -c cat HD ...` masquerade as data.
+        tail_cmd = re.split(r"\|\||&&|[|;]", pre)[-1].strip()
+        head = re.findall(r"[A-Za-z0-9_./]+", tail_cmd)
+        # The head ALONE, never "any word": keeping the old last-word test as a fallback bought
+        # nothing (`tee f HD X` is already caught by its head) and cost the masquerade —
+        # `bash -c cat HD X` ends in "cat" and would have been waved through as data.
+        is_data = (os.path.basename(head[0]) if head else "") in DATA_SINKS
         delims = [d for _q, d in found]
         i += 1
         di = 0

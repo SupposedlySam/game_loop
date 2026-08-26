@@ -481,6 +481,60 @@ def main():
         check("still denies an out-of-repo redirect inside a bash (code) heredoc body",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
+        # #114: WHICH WORD NAMES THE CONSUMER. The data/code split above asks "is the thing reading
+        # this body a data sink?" — and answered it with the LAST word before the operator. That is
+        # right for `cat HD X` only by luck: the command IS the last word there. It is wrong the
+        # moment anything follows the command, and it was wrong in both directions at once.
+        #
+        # FALSE REFUSAL (what was reported): a chat message is sent with
+        # `llm_chat say room --file - HD X`, so the last word is "file", and the message body —
+        # prose that QUOTES a command and runs nothing — was scanned as code. Reporting an
+        # out-of-repo redirect to another agent was refused by the guard whose subject is
+        # out-of-repo redirects.
+        check("#114: a chat message body is prose, not code - quoting a redirect in it is allowed",
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "llm_chat say room --file - <<'EOF'\necho x > ~/outside.txt\nEOF"}}))
+        check("#114: and the same when the sender is named by absolute path",
+              allowed(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "/x/bin/llm_chat say room --file - <<'EOF'\nrm -rf ~/outside\nEOF"}}))
+
+        # BYPASS (found while fixing that, and the more serious half): the same rule let a CODE
+        # heredoc claim to be data by ENDING in a sink's name. `bash /dev/stdin cat HD X` runs the
+        # body as a script with $1=cat — measured actually writing outside the repo before the fix.
+        check("#114: a code heredoc cannot masquerade as data by ending in a sink's name",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash /dev/stdin cat <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+        check("#114: nor with -c",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash -c cat <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
+        # The consumer is the LAST command in the line, so a pipeline is read at its end and a sink
+        # earlier in it does not vouch for a shell later.
+        check("#114: a sink earlier in the pipeline does not vouch for the shell that ends it",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat f | bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+        check("#114: same across a semicolon",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "cat f ; bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
+        # WHAT THIS STILL MISSES, stated rather than implied: DATA_SINKS is a list of SPELLINGS, so
+        # an unlisted data consumer's body is scanned as code. That default is deliberate — an
+        # unknown consumer is treated as a shell, so the miss fails toward a refusal a human can
+        # clear, never toward a silent write. Asserting the default means a later widening cannot
+        # flip it quietly.
+        check("#114: an UNKNOWN consumer's heredoc is still scanned as code (fail-closed default)",
+              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+                  "command": "notasink <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
+        # Drift guard: the fallback that CAUSED the bypass must not come back. Keeping `words[-1]`
+        # as an OR beside the head test reads like belt-and-braces and is in fact the whole hole —
+        # it re-admits every masquerade above. (I wrote it that way first; the test caught it.)
+        _hd_src = source_flat(read_or_empty(
+            os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh")))
+        check("#114: the last-word test is not reinstated as a fallback beside the head test",
+              "in DATA_SINKS" in _hd_src and 'words[-1]) if words else "") in DATA_SINKS'
+              not in _hd_src)
         # #110: THE GUARD'S SUBJECT IS THE COMMAND TEXT, so its splitting has to respect shell
         # quoting. re.split on the separators is quote-BLIND, and that one fact broke this guard in
         # BOTH directions at once — which is why the false positive and the bypass are asserted

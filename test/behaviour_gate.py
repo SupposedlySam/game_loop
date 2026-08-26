@@ -81,7 +81,30 @@ def main(ref="HEAD"):
         return 2
     hits = [l for l in lines if REFUSAL.search(l)]
     if not hits:
-        print("behaviour gate: no refusal line changed — nothing owed.")
+        # WHAT THIS GATE CANNOT SEE (INV6). It matches refusal TEXT. A change that moves which
+        # COMMANDS REACH an unchanged refusal is invisible to it, and that is not hypothetical:
+        # three consumer-visible changes in one day passed here silently and their behaviour.json
+        # entries (38, 39, 40) were all written by hand afterwards —
+        #
+        #   #113  the commit gate narrowed from "what the tree holds" to "what the COMMIT carries",
+        #         so two commit forms that were refused now pass. Every deny string identical.
+        #   39    five redirect forms (`>|`, `>!`, `>>!`, `>&`, `>>&`) started being seen as writes.
+        #   40    nine write-capable verbs (curl -o, tar -C, rsync, …) started being checked.
+        #
+        # Widening the pattern is not the fix — deciding whether a diff changes which inputs reach a
+        # refusal is the halting problem wearing a regex. So it says what it did not look at, which
+        # is the same move the sweep's overbroad-marks advisory makes. A reader who changed a
+        # CONDITION now gets asked; a reader who changed a comment reads one line and moves on.
+        if any(l[1:].strip() for l in lines):
+            print("behaviour gate: no refusal line changed — nothing owed by the TEXT rule.")
+            print("  IT ONLY READS REFUSAL TEXT. If this change moved which commands REACH a "
+                  "refusal —")
+            print("  a new mutator, a redirect form now parsed, a gate's scope narrowed — the "
+                  "record is")
+            print("  owed and nothing here can tell. Three such changes shipped silently on "
+                  "2026-08-26.")
+        else:
+            print("behaviour gate: no refusal line changed — nothing owed.")
         return 0
     if record_touched(ref):
         print(f"behaviour gate: {len(hits)} refusal line(s) changed, and {RECORD} was updated.")

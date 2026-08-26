@@ -12311,6 +12311,35 @@ def main():
         # "no verdict" on stderr and returned 0 — and `verify` reads the exit code, not the
         # sentence, so a gate that never ran rendered as a rule that was satisfied. Demonstrated,
         # not theorised: `behaviour_gate.py no-such-ref` exited 0.
+        # AND IT SAYS WHAT IT CANNOT SEE. This gate matches refusal TEXT, so a change that moves
+        # which COMMANDS REACH an unchanged refusal is invisible to it — three consumer-visible
+        # changes shipped past it in one day (#113's commit-gate narrowing, and behaviour entries
+        # 39 and 40 for the redirect forms and write verbs), and all three records were written by
+        # hand afterwards. Widening the pattern is not available: deciding whether a diff changes
+        # which inputs reach a refusal is the halting problem wearing a regex. So it says so, and
+        # only when a watched file actually moved — a clean tree still gets one quiet line.
+        # COMMIT WHAT THE EARLIER ARMS LEFT, or this measures their refusal-text edits instead of
+        # my probe: `hits` would be non-empty and the notice path never reached. The fixture is
+        # shared down the section, which is the same lesson the retro block paid for.
+        _git("add", "-A")
+        _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "before the notice probe")
+        _wf = _guard
+        with open(_wf, "a") as f:
+            f.write("\n_PROBE_NOT_A_REFUSAL = 1\n")
+        _git("add", "-A")
+        _quiet_note = _gate()
+        check("a watched file that changed with NO refusal text touched is told the gate reads "
+              "TEXT ONLY — the blind spot is named where somebody is about to rely on it",
+              _quiet_note.returncode == 0
+              and "nothing here can tell" in _quiet_note.stdout)
+        # FROM HEAD, not from the index: the probe above was STAGED, so `checkout --` would
+        # restore the staged copy and leave the change in place — the clean-tree arm would then be
+        # measuring a dirty tree and fail for a reason that has nothing to do with the gate.
+        _git("checkout", "HEAD", "--", ".game_loop/bin/guard-writes-impl.sh")
+        check("...while a tree with nothing changed still gets ONE line — a caveat printed on every "
+              "run is one nobody reads",
+              "nothing here can tell" not in _gate().stdout)
+
         _nover = subprocess.run([sys.executable, "behaviour_gate.py", "no-such-ref-xyz"], cwd=bg,
                                 capture_output=True, text=True)
         check("a ref git cannot resolve is its OWN outcome — exit 2, never the 0 that means "

@@ -318,8 +318,22 @@ def main():
     proj = make_sandbox()
     try:
         print("claim gate:")
-        check("refuses a nonexistent --read path",
-              gl(proj, "claim", "--assert", "x", "--read", "/no/such/file").returncode != 0)
+        # ITS EXIT CODE ALONE WAS SATISFIED BY A BINARY THAT DOES NOTHING. This asserted only
+        # `returncode != 0`, and a `game_loop` replaced by `sys.exit(1)` passes it — so the check
+        # guarding INV1's keystone, the one rule prose cannot satisfy, was itself satisfiable by a
+        # dead tool. Found with a positive control: the whole suite run against a stub binary, then
+        # the assertions that still PASSED compared against the ones asserting a refusal by exit
+        # code alone. This was the only one the control reached before the broken tree aborted the
+        # rest of its sections — the other fifteen of that shape are unmeasured, not cleared.
+        #
+        # The same reasoning as `allowed()` (#41), in the other direction: there, silence is what a
+        # guard that never ran produces; here, a non-zero exit is what a tool that never ran
+        # produces. A verdict has to be carried by something only the working code can say.
+        _bad_read = gl(proj, "claim", "--assert", "x", "--read", "/no/such/file")
+        check("refuses a nonexistent --read path, and SAYS which rule refused — an exit code alone "
+              "is what a binary that does nothing returns",
+              _bad_read.returncode != 0
+              and "don't resolve to a real, non-empty file" in (_bad_read.stdout + _bad_read.stderr))
         real = os.path.join(proj, ".game_loop", "config.json")
         check("accepts a real --read path",
               gl(proj, "claim", "--assert", "x", "--read", real).returncode == 0)

@@ -143,6 +143,23 @@ def main():
                     print(line)
     print("%d passed, %d failed  ·  %d shard(s) on %d job(s), %.1fs wall" %
           (passed, failed, len(groups), jobs, wall))
+    # A SUM OVER SHARDS IS NOT AN ASSERTION COUNT, and this line was read as one. A shared fixture
+    # prefix re-runs in every shard that needs it, so the totals above exceeded the suite's own
+    # serial count by 276 — and that gap was mistaken for LOST COVERAGE by the first person to
+    # compare the two numbers, which was me. `--verify` then showed the distinct sets identical:
+    # 1871 either way, nothing absent in either direction, no verdict differing. Nothing was lost;
+    # the totals were counting the same assertion in several shards.
+    #
+    # This is the short-denominator shape the docstring warns about, arriving in the SUMMARY rather
+    # than in the sharding: a shard that covers less can still count more. So the line now says
+    # what it is a sum OF, because a number that cannot be compared to anything is not evidence —
+    # and the one comparison a reader will reach for is the serial run this is meant to replace.
+    distinct, total = len(merged), passed + failed
+    if total != distinct:
+        print("  %d distinct assertion(s) · %d outcome(s) counted more than once (a shared fixture"
+              "\n  prefix re-runs in every shard that needs it). The totals above are a SUM OVER"
+              "\n  SHARDS, NOT comparable to the serial runner's count — --verify diffs the NAMES."
+              % (distinct, total - distinct))
     print("  slowest shard: %.1fs (%d sections)" %
           max((r["sec"], len(r["names"])) for r in results))
     for r in silent:

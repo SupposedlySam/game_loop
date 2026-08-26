@@ -2192,14 +2192,79 @@ variable, or any MCP tool. It reads the command string. Prevention where it is c
 own hash is the detection this does not yet do."
     fi
 
+    # NAME THE TOKEN WHEN THE OFFENDER CAME OUT OF A NON-SHELL HEREDOC BODY (auditor's measurement,
+    # #114). A heredoc fed to python/node/ruby/perl is scanned with SHELL grammar, because the guard
+    # reads command text and cannot parse four languages. auditor counted their own transcript: 10
+    # of 100 non-shell heredocs would be refused, and EVERY hit was a numeric comparison or a string
+    # literal -- `i < len(body)`, `if age > 30 * 60`, a regex lookbehind. None exotic, none
+    # avoidable: comparing two numbers is not a style choice.
+    #
+    # This does NOT widen what is allowed. Doing that is the shape that re-admitted the whole
+    # masquerade earlier today. It changes only the REFUSING arm, which is the arm a human is
+    # standing in front of -- so the sentence they read says which token tripped and in whose
+    # grammar, instead of making them re-derive it from a path they never wrote.
+    hd_hint=""
     if [ -n "$offender" ]; then
+      hd_hint=$(CMD="$cmd" OFF="$offender" python3 <<'PY'
+import os, re
+cmd, off = os.environ["CMD"], os.environ["OFF"]
+HD = chr(60) + chr(60)                       # no literal here-doc operator in this file
+NON_SHELL = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "osascript", "awk"}
+opener = re.compile(re.escape(HD) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+lines, i, hit = cmd.split("\n"), 0, ""
+while i < len(lines):
+    line = lines[i]
+    found = opener.findall(line)
+    if found:
+        pre = re.sub(r">>?\s*[^\s;&|" + chr(60) + chr(62) + r"]*", " ", line.split(HD, 1)[0])
+        tail = re.split(r"\|\||&&|[|;]", pre)[-1].strip()
+        w = re.findall(r"[A-Za-z0-9_./]+", tail)
+        who = os.path.basename(w[0]) if w else ""
+        delims = [d for _q, d in found]
+        i += 1
+        di = 0
+        while i < len(lines) and di < len(delims):
+            if lines[i].strip() == delims[di]:
+                di += 1
+            # The hint fires only if the OFFENDING text is really in this body -- a command that
+            # merely contains a python heredoc somewhere else must not get a note about it. Match on
+            # the BASENAME: the offender is the RESOLVED path and the body holds what was written,
+            # so `~/x.txt` in the body never contains `/Users/me/x.txt` and an exact test fired
+            # never, silently, on the one case that prompted this.
+            elif who in NON_SHELL and off and os.path.basename(off.rstrip("/")) in lines[i]:
+                hit = who
+            i += 1
+        continue
+    i += 1
+print(hit)
+PY
+)
       consumed_raw=$(consume_authorization "$offender")
       if [ "$(printf '%s\n' "$consumed_raw" | sed -n '1p')" = "yes" ]; then
         note "$(consumed_note "$offender" \
                   "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
                   "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
       fi
-      deny "BLOCKED: mutating command targets a path outside this repo → $offender
+      if [ -n "$hd_hint" ]; then
+        hd_note="
+
+READ THIS FIRST — THE TEXT ABOVE CAME OUT OF A \`$hd_hint\` HERE-DOC BODY, WHICH THIS GUARD SCANNED
+WITH SHELL GRAMMAR. It reads command text and does not parse $hd_hint, so a redirect token in that
+body is read as a redirect even when the program would never run one. If that is what happened,
+this is a FALSE REFUSAL and nothing was going to be written.
+
+WHAT ACTUALLY TRIPS IT, measured against this guard rather than assumed: an UNQUOTED redirect token
+followed by an out-of-repo path — most often in a COMMENT. Quoting is already handled: the same
+path inside a string literal is allowed, and so are bare comparisons like a less-than between two
+numbers, because their target resolves inside the repo. So the fix is usually to quote it, put the
+program in a file, or assemble the literal from pieces.
+
+The refusal itself stays. An unparsed body is treated as shell, which costs a refusal you can clear
+rather than a write nobody sees."
+      else
+        hd_note=""
+      fi
+      deny "BLOCKED: mutating command targets a path outside this repo → $offender$hd_note
 
 Everything outside this project is READ-ONLY by default. READING elsewhere is fine, and so is copying
 OUT of it: \`cp <their path> <repo path>\` is allowed. Copy what you need in and work on the copy.

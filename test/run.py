@@ -523,6 +523,44 @@ def main():
         # unknown consumer is treated as a shell, so the miss fails toward a refusal a human can
         # clear, never toward a silent write. Asserting the default means a later widening cannot
         # flip it quietly.
+        # #114 (second half, auditor's proposal): WHEN A REFUSAL IS PROBABLY WRONG, SAY SO IN IT.
+        # A heredoc fed to python/node/ruby/perl is scanned with SHELL grammar, because this guard
+        # reads command text and does not parse four languages. That default is right — an unparsed
+        # body treated as shell costs a refusal a human clears, never a silent write — but the human
+        # clearing it was handed a resolved path they never wrote and no clue where it came from.
+        # The note fires ONLY on the refusing arm. Nothing here widens what is allowed, which is the
+        # shape that re-admitted the masquerade above.
+        #
+        # THE TRIGGER IS MEASURED AGAINST THIS GUARD, NOT BORROWED. auditor reported 10 of 100
+        # non-shell heredocs refused and characterised it as "an operator Python and the shell both
+        # spell <" — comparisons and string literals. Run against the real guard, NONE of their
+        # example forms is refused: a comparison's target is a number that resolves inside the repo,
+        # and a path inside a string literal is already allowed because the redirect scanner is
+        # quote-aware. What actually trips it is an UNQUOTED redirect token with an out-of-repo
+        # path, most often in a comment. Their detector approximated this guard instead of running
+        # it, so the count did not transfer — and the message states the trigger I measured.
+        check("#114: a refusal caused by a python heredoc body SAYS that body was scanned as shell",
+              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+                  "tool_input": {"command": "python3 - <<'PY'\nx = 1  # echo q > ~/outside.txt\nPY"}}).stdout)
+        check("...and the same for node, so the note is about non-shell interpreters, not one name",
+              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+                  "tool_input": {"command": "node <<'JS'\nvar x = 1  // echo q > ~/outside.txt\nJS"}}).stdout)
+        # BOTH NEGATIVE ARMS, because a note that fires everywhere carries no information. A bash
+        # heredoc body IS shell, so annotating it would be a lie. And a command that merely CONTAINS
+        # a python heredoc elsewhere must not get a note about a refusal from another part of the
+        # line — that one was a real bug in the first version, which compared the RESOLVED offender
+        # against a body holding the unresolved `~/...` and therefore fired never, silently, on the
+        # only case that prompted it.
+        check("...but a bash heredoc gets NO such note — that body really is shell",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+                  "tool_input": {"command": "bash <<'EOF'\necho q > ~/outside.txt\nEOF"}}).stdout)
+        check("...nor a plain redirect with no heredoc anywhere in the command",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+                  "tool_input": {"command": "echo q > ~/outside.txt"}}).stdout)
+        check("...nor when a python heredoc is present but the offender came from OUTSIDE it",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+                  "tool_input": {"command": "echo q > ~/outside.txt ; python3 - <<'PY'\nprint(1)\nPY"}}).stdout)
+
         check("#114: an UNKNOWN consumer's heredoc is still scanned as code (fail-closed default)",
               denied(guard(proj, {"tool_name": "Bash", "tool_input": {
                   "command": "notasink <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
@@ -9953,6 +9991,23 @@ def main():
     check("...and it says the outcome is UNKNOWN rather than passing, since nothing in that shard "
           "failed either",
           "UNKNOWN, not passing" in _prun)
+
+    # AND THE HEADLINE IS A SUM, WHICH IS NOT AN ASSERTION COUNT. A shared fixture prefix re-runs in
+    # every shard that needs it, so prun's total exceeded the serial suite's by 276 — and the first
+    # reader to compare the two numbers took the gap for lost coverage and stopped trusting the
+    # gate. It was not: --verify showed the distinct sets identical in both directions. But a number
+    # that overstates cannot report that it is short either, which is the whole hazard the sharding
+    # docstring names — a shard covering LESS can still count MORE — arriving in the summary.
+    check("prun's summary says its totals are a SUM OVER SHARDS and names the distinct count, so "
+          "the number cannot be read as an assertion count",
+          "distinct, total = len(merged), passed + failed" in source_flat(_prun)
+          and "SUM OVER" in _prun and "distinct assertion(s)" in _prun)
+    check("...and it points at --verify, which is the thing that can actually answer coverage — "
+          "the count says how many outcomes there were, never which ones are missing",
+          "--verify diffs the NAMES" in _prun)
+    check("...and the note is CONDITIONAL on the totals disagreeing, so a run with no duplication "
+          "does not print a caveat about duplication it does not have",
+          "if total != distinct:" in source_flat(_prun))
 
     _msrc = open(os.path.join(REPO, "test", "mutation_sweep.py")).read()
     # ASKING THE SWEEP WHAT IT DOES MUST NOT COST AN HOUR. It parsed no arguments at all, so

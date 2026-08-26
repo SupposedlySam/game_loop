@@ -1168,7 +1168,8 @@ Everything lives in `.game_loop/`:
 
 | File | What it is |
 |---|---|
-| `bin/game_loop` | the CLI (all the verbs, plus the stopgate/limitgate/statusline hook entrypoints) |
+| `bin/game_loop` | the CLI ENTRY POINT — a ~27-line stub that imports `_gl_impl.py`. It is not where the verbs live, and has not been since the split described below. |
+| `bin/_gl_impl.py` | the implementation: every verb, plus the stopgate/limitgate/statusline hook entrypoints. Split out of the stub for a measured reason — Python caches an imported module's bytecode and re-parses a `__main__` script on every invocation, which cost ~31ms of each of the 3,126 spawns one suite run makes. If a report names this file (pin drift does), this row is what it means. |
 | `bin/watchdog` | the autonomy engine (Stop hook): idle rings, limit park, Slack reply forwarding |
 | `bin/guard-writes.sh` | the write guard (PreToolUse hook) |
 | `bin/verify` | the changed-file → owed-checks gate |

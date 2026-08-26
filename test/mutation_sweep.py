@@ -2391,6 +2391,21 @@ def main():
         print("  broken a run, it has only ever made a report agree with you.")
         print("  The names to narrow AGAINST are in test/sweep-killers.json, written by this run:"
               "\n  every assertion that actually killed each producer, not the three shown above.")
+        # WHAT THIS CANNOT TELL YOU (INV6), and it took trying to act on it to find out: breadth
+        # alone does not separate a LOOSE MARK from a genuinely CENTRAL PRODUCER. `fix_warning`'s
+        # nine killers all name fixes and proofs, so a subject-naming set narrows it from 103
+        # matches to 19 with every killer kept. `claim_pidfile`'s twenty-two span the watchdog's
+        # whole behaviour -- "a NEW mandate re-arms the engine" names no pidfile at all -- so any
+        # mark narrow enough to describe its subject would DROP real killers. Same advisory, and
+        # the right answer is opposite.
+        #
+        # No signal here computes that difference. A diversity measure over the killer names was
+        # tried and reported the two as identical, which is why this says so rather than shipping
+        # a number that looks like it decided.
+        print("  IT MEASURES BREADTH ONLY. A wide mark set is sometimes a loose mark and sometimes")
+        print("  a producer the whole suite leans on, and nothing here tells the two apart — read")
+        print("  the killer names before narrowing: if they share a subject, narrow to it; if they")
+        print("  span the tool, the breadth is the coverage and the mark is already right.")
     slack = stale_low_floors(verdicts)
     if slack:
         print(f"FLOOR IS STALE-LOW ({len(slack)}) — measured well above what is recorded, so the "

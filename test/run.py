@@ -9165,6 +9165,16 @@ def main():
     check("...and the overbroad-marks advisory NAMES that file, so the instruction and the data it "
           "requires are not one screen apart",
           "sweep-killers.json, written by this run" in _msrc)
+    # AND IT SAYS WHAT IT CANNOT TELL YOU. Breadth alone does not separate a LOOSE MARK from a
+    # genuinely CENTRAL producer, and acting on the advisory is how that surfaced: fix_warning's
+    # nine killers all name fixes and proofs, so a subject-naming set narrows it 103 -> 19 with
+    # every killer kept; claim_pidfile's twenty-two span the watchdog's whole behaviour, so any
+    # mark narrow enough to name its subject would DROP real killers. Same advisory, opposite
+    # right answer, and no signal here computes the difference — a diversity measure over the
+    # killer names was tried and reported the two as identical.
+    check("the overbroad-marks advisory states that it measures BREADTH ONLY, so a producer the "
+          "suite leans on is not read as a loose mark",
+          "IT MEASURES BREADTH ONLY" in _msrc and "the breadth is the coverage" in _msrc)
     check("...and it is written only on a FULL sweep, beside the section map — a trimmed run has "
           "not observed what it did not execute, and would ratchet the sets toward its own subset",
           "_write_section_map(base)\n        _write_killers()" in _msrc)

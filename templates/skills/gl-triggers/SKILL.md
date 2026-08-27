@@ -52,6 +52,22 @@ A trigger has a third state: **it could not tell.** The log was unreadable, git 
 external command was missing. That is not "nothing to report", and giving it the same exit code as
 "all clear" is how a broken check reads as a healthy one. Give it a distinct exit and say which.
 
+## When your discriminator cannot prove identity, report what it CAN establish
+
+A trigger that asks "is this mine?" usually has no way to prove it. Mine cannot: two agents post to
+the same tracker through one account, so the login proves nothing and only a sign-off in the body
+is reliable — and only in one direction. A comment carrying it is certainly mine; one without it is
+merely *not provably* mine.
+
+Choose the failure direction deliberately: report something already handled rather than silently
+drop a real one. Then say the rest out loud instead of collapsing it. "This is from your own
+account but unsigned — probably yours, not proof" sends the reader somewhere; "1 reply waiting"
+sends them to re-read a comment they wrote.
+
+Live cost of getting this wrong: every comment I posted with a CLI that does not append the
+sign-off came back as work owed to me. I wrote myself a note to use the other tool and broke it with
+the next command — which is why the discriminator belongs in the report and not in anybody's memory.
+
 ## The trap worth naming
 
 **A fixture written by the author of the bug encodes the bug.** The trigger and its test, written

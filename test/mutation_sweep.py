@@ -1116,6 +1116,13 @@ MUTANTS += [
 ]
 
 MUTANTS += [
+    ("_write_section_map -> a FAST sweep has no map and silently runs everything",
+     "test/mutation_sweep.py::_write_section_map", "    return\n",
+     ["section map WRITER", "maps every declared producer", "writes beside the MODULE"],
+     "2 kills, MEASURED by neutering it. This was the repo's LAST declared KNOWN GAP and its entry stated the gap exactly: neutering produces no map, every FAST producer falls back to the whole suite, and the result is correct-but-slow with nothing to notice. Two things were owed and both landed before this moved -- the sweep SAYS SO now when FAST is asked for with no map, and the writer is DRIVEN by assertions rather than only read in source. I claimed this move in 322a6cd's commit message and did not make it: the prerequisites shipped and the entry stayed. The next sweep still reporting KNOWN GAPS (1) is what caught it, which is the instrument outliving my own summary of it.", 2),
+]
+
+MUTANTS += [
     ("fast_without_map_notice -> a FAST run with no map goes quiet again",
      "test/mutation_sweep.py::fast_without_map_notice", '    return ""\n',
      ["NO SECTION MAP", "speedup is gone", "asked for minutes", "names the remedy"],
@@ -1517,11 +1524,6 @@ NOT_SWEPT = {
     # coverage verdict. `read_or_empty` alone would redden hundreds and report as the best-covered
     # producer in the repo while proving nothing about itself. That is the collateral-kill problem
     # with no genuine kills left underneath it.
-    "test/mutation_sweep.py::_write_section_map": "KNOWN GAP — writes the section map a trimmed "
-        "sweep reads. Neutering it produces no map, and no map means every producer falls back to "
-        "the WHOLE suite: correct results, no speedup, and nothing to notice. That is the shape "
-        "worth an assertion and it does not have one yet — the map's own correctness is what the "
-        "floor check catches, since a wrong map makes producers come back short and fail.",
     "test/run.py::read_or_empty": "a suite helper: neutering it reddens every assertion that reads "
         "a file, which counts users rather than coverage of the helper",
     "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "

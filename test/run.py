@@ -10516,9 +10516,15 @@ def main():
     # for the moment to pass, so the exclusion outlived its own reason and the two producers sat
     # undeclared for days behind a blocker that no longer existed. Both are swept now; the rule that
     # catches this class is asserted below.
-    _expected_gaps = ["test/mutation_sweep.py::_write_section_map"]
-    check("...and THIS repo's declared KNOWN GAPs are exactly the one standing today — the "
-          "section-map writer — a fact about "
+    # WAS ONE, IS NONE. `_write_section_map` was the last, and closing it took two things its own
+    # entry had named: the sweep now SAYS SO when FAST is asked for with no map (the silent slow run
+    # was the gap), and the writer is DRIVEN rather than only read in source. An EMPTY list here is
+    # only meaningful because the classifier below is shown to fire on a constructed case — an empty
+    # live category otherwise reads as "nothing is owed" when it could equally be a check with
+    # nothing to look at.
+    _expected_gaps = []
+    check("...and THIS repo has NO declared KNOWN GAP left — the section-map writer was the last, "
+          "and the next one anybody adds shows up HERE. A fact about "
           "today, and the next one anybody adds or closes shows up HERE "
           "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
           _gaps(_ns) == _expected_gaps)

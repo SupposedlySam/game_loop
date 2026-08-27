@@ -1658,6 +1658,11 @@ NOT_SWEPT = {
     "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "
         "than split, so a renamed heading fails HERE) is asserted directly elsewhere",
     "test/run.py::why": "a suite helper for rendering a refusal reason in a message",
+    "test/run.py::_marks_section_rendered": "a suite helper, and it became a candidate only "
+        "because a guard was added INSIDE it: it now returns False early when the stubbed seam "
+        "was never reached, which is the check that stops it verdicting on a run nobody "
+        "controlled. Neutering it to False would fail the one assertion that calls it — that is "
+        "the assertion doing its job, not a coverage reading about this helper.",
     "test/run.py::_gate_ran": "a suite helper: it reads the stop gate's own payload probe so a "
                               "permissive assertion requires the gate to have RUN, not merely to "
                               "have exited 0. Neutering it makes every assertion that uses it FAIL "
@@ -1736,11 +1741,14 @@ NOT_SWEPT = {
     "test/run.py::json_or_none": "the same shape for parsed JSON, inside the suite, and its None "
             "arm is also the honest answer for a file that exists and is corrupt. Asserted through "
             "the cases that read producer-written state rather than by mutation.",
-    "test/mutation_sweep.py::run": "the sweep's own suite-runner. Its None arm is the DEADLINE — a "
-            "mutant that hangs measures nothing and waiting for it measures nothing — and it is "
-            "asserted directly in-suite against a command that sleeps past its bound and one that "
-            "returns normally. Mutating it would measure whether the sweep can sweep its own "
-            "subprocess call, which is not a question about this repo's gates.",
+    "test/mutation_sweep.py::run_detail": "the sweep's own suite-runner — this exclusion was "
+            "carried over from `run`, which is now a one-line wrapper around it and no longer a "
+            "producer at all. The reason is unchanged. Its None arm is the DEADLINE — a mutant "
+            "that hangs measures nothing and waiting for it measures nothing — and it is asserted "
+            "directly in-suite against a command that sleeps past its bound and one that returns "
+            "normally. Mutating it would measure whether the sweep can sweep its own subprocess "
+            "call, which is not a question about this repo's gates. The exit status and stderr it "
+            "now also returns are what `died_how` reads; that one IS swept.",
 
     ".game_loop/bin/_gl_impl.py::_ledger_last": "reads the last timestamp out of the ledger (#78). "
             "Neutered to None it declares every project un-baselined, which the FIRST-ENCOUNTER "
@@ -2400,14 +2408,55 @@ def run(tree, timeout=1800, sections=None):
     difference, so an assertion that runs in neither side cancels — but one that runs in only one
     side is counted as a kill or missed as one, which is not a measurement at all.
     """
+    return run_detail(tree, timeout, sections)[0]
+
+
+def run_detail(tree, timeout=1800, sections=None):
+    """As `run`, plus the two things it used to throw away: the exit status and stderr.
+
+    They were discarded, so a suite that produced no summary line could only ever be reported as
+    the MUTANT's doing — there was nothing else left to say. See `died_how` for what that cost.
+    """
     cmd = [sys.executable, "test/run.py"]
     for sec in (sections or ()):
         cmd += ["--section", sec]
     try:
         r = subprocess.run(cmd, cwd=tree, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return None
-    return r.stdout
+        return None, None, ""
+    return r.stdout, r.returncode, (r.stderr or "")
+
+
+def died_how(rc, err):
+    """Why a run produced no summary line, as a fact about the PROCESS rather than the mutant.
+
+    OBSERVED (INV4): twelve CONTIGUOUS producers — MUTANTS indices 109-120, which is exactly the
+    worker count — reported NOT MEASURED within two seconds of each other, every one with empty
+    stdout, in a sweep that overlapped other full-suite runs on the same machine. Twelve
+    independent mutants do not break the suite in the same two seconds; one batch of workers dies
+    together. The report nonetheless said "Fix the anchor or the crash and re-measure", twelve
+    times, about twelve functions that were fine — and I spent an hour believing it, first
+    blaming the sweep's concurrency and then a stray `pkill`, neither of which the log could
+    confirm or refute.
+
+    It could not say anything better: `run` kept stdout and dropped the exit status and stderr, so
+    "this mutant breaks the suite" and "something killed my subprocess" arrived as the same bytes.
+    A third outcome that cannot be told from the second is not a third outcome.
+
+    A NEGATIVE returncode is the one that matters: the process did not choose to exit, so nothing
+    in that tree is evidence about the producer.
+    """
+    if rc is None:
+        return "the deadline expired before it finished"
+    if rc < 0:
+        return (f"KILLED BY SIGNAL {-rc} — the process did not choose to exit, so this says "
+                "NOTHING about the mutant. Something on this machine ended it (memory pressure, "
+                "a concurrent suite, a stray pkill). Re-run this producer alone before believing "
+                "any verdict about it")
+    tail = [l.strip() for l in (err or "").strip().splitlines() if l.strip()][-3:]
+    if not tail:
+        return f"exit {rc}, and it printed nothing on stderr either"
+    return f"exit {rc}; stderr: " + " / ".join(t[:150] for t in tail)
 
 
 def passing(out):
@@ -2660,7 +2709,7 @@ def main():
                 local_base = set(passing(_b))
             else:
                 local_base = baseline
-            out = run(t, sections=_secs)
+            out, _rc, _err = run_detail(t, sections=_secs)
             if out is None:
                 return ((key, None, NOT_MEASURED, floor),
                         f"{label}\n  NOT MEASURED — the suite TIMED OUT under this mutant. A run\n"
@@ -2678,7 +2727,8 @@ def main():
                     f"{label}\n  suite: {tail}\n"
                     f"  NOT MEASURED — the suite did not finish under this mutant, so its unrun\n"
                     f"  assertions never printed and would have counted as KILLED. That is an\n"
-                    f"  inflated number about a run that stopped, not a coverage reading.\n")
+                    f"  inflated number about a run that stopped, not a coverage reading.\n"
+                    f"  HOW IT DIED: {died_how(_rc, _err)}.\n")
         killed = len(local_base - still)
         v = verdict(killed)
         # ASKED ONLY AT ZERO, because one kill already proves the producer executes — and a probe

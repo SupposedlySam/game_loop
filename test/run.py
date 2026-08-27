@@ -14376,15 +14376,26 @@ def main():
             time.sleep(_delays.get(n - 1, 0))
         return "  ok   assertion one\n  ok   assertion two\n1 passed, 0 failed\n"
 
-    _real_run, _real_mut, _real_gate = sweep.run, sweep.MUTANTS, sweep.coverage_gate
+    # BOTH SEAMS, because the sweep has two: `run` for the baseline and `run_detail` for each
+    # mutant (it needs the exit status and stderr to say HOW a suite died). Patching only `run`
+    # left every per-producer call reaching the REAL runner, which does not fail — it quietly
+    # copies the tree and runs the actual suite, so this section went from milliseconds to minutes
+    # and one downstream assertion failed for a reason nothing here named. A stub that stands in
+    # for one of two seams is a stub that no longer stands in.
+    def _stub_detail(tree, timeout=1800, sections=None):
+        return _stub_run(tree, timeout, sections), 0, ""
+
+    _real_run, _real_det, _real_mut, _real_gate = (sweep.run, sweep.run_detail, sweep.MUTANTS,
+                                                   sweep.coverage_gate)
     _buf = io.StringIO()
     try:
-        sweep.run, sweep.MUTANTS = _stub_run, _fake
+        sweep.run, sweep.run_detail, sweep.MUTANTS = _stub_run, _stub_detail, _fake
         sweep.coverage_gate = lambda found: False      # accounting is asserted above, not here
         with contextlib.redirect_stdout(_buf):
             sweep.main()
     finally:
-        sweep.run, sweep.MUTANTS, sweep.coverage_gate = _real_run, _real_mut, _real_gate
+        (sweep.run, sweep.run_detail, sweep.MUTANTS,
+         sweep.coverage_gate) = _real_run, _real_det, _real_mut, _real_gate
     _out = _buf.getvalue()
     _order = [_out.find(lbl) for lbl in ("alpha -> x", "beta -> x", "gamma -> x")]
     check("every producer is reported, and in MUTANTS order even though they finished in exactly "
@@ -14486,16 +14497,28 @@ def main():
                         "  ok   an unrelated assertion\n2 passed, 0 failed\n")
             return "  ok   an unrelated assertion\n1 passed, 1 failed\n"   # mutant kills the first
 
-        _r_run, _r_mut, _r_gate = sweep.run, sweep.MUTANTS, sweep.coverage_gate
+        def _run2_detail(tree, timeout=1800, sections=None):
+            return _run2(tree, timeout, sections), 0, ""
+
+        _r_run, _r_det, _r_mut, _r_gate = (sweep.run, sweep.run_detail, sweep.MUTANTS,
+                                           sweep.coverage_gate)
         _b = io.StringIO()
         try:
-            sweep.run, sweep.MUTANTS = _run2, _mk
+            sweep.run, sweep.run_detail, sweep.MUTANTS = _run2, _run2_detail, _mk
             sweep.coverage_gate = lambda found: False
             with contextlib.redirect_stdout(_b):
                 sweep.main()
         finally:
-            sweep.run, sweep.MUTANTS, sweep.coverage_gate = _r_run, _r_mut, _r_gate
+            (sweep.run, sweep.run_detail, sweep.MUTANTS,
+             sweep.coverage_gate) = _r_run, _r_det, _r_mut, _r_gate
         _out = _b.getvalue()
+        # THE STUB MUST HAVE BEEN REACHED. Without this, a call site that stops using the patched
+        # seam does not fail here — it runs the REAL suite in a copied tree, slowly, and this
+        # returns a verdict about a run nobody in this test controlled. That happened: the mutant
+        # call moved from `run` to `run_detail` and only the wall-clock changed until a different
+        # assertion failed. `_seen` is the evidence the seam was live.
+        if len(_seen) < 2:
+            return False
         # the producer WAS killed (so there is something to miss), and the section says so
         return ("killed: 1" in _out and "MARKS THAT MISS THEIR OWN KILLERS" in _out
                 and "0/1" in _out)
@@ -15107,6 +15130,42 @@ def main():
           "cannot arrive silently outside the denominator",
           sweep.coverage_gate(_newfile, out=_nf_said.append) == 1
           and any("tools/newly_added.py::reports_or_declines" in ln for ln in _nf_said))
+
+    # A SUITE THAT PRODUCED NOTHING USED TO BE THE MUTANT'S FAULT BY DEFAULT — there was nothing
+    # else the sweep could say, because it kept stdout and threw the exit status and stderr away.
+    # OBSERVED: twelve CONTIGUOUS producers (MUTANTS 109-120, exactly the worker count) came back
+    # NOT MEASURED within two seconds of each other, all with empty stdout, in a run overlapping
+    # other full-suite runs on this machine. Twelve mutants do not break the suite in the same two
+    # seconds; one batch of workers dies together. The report still said "fix the anchor or the
+    # crash" twelve times, about twelve functions that were fine, and it took an hour and two
+    # wrong theories to get past it — neither of which the log could confirm OR refute, which is
+    # the actual defect. A third outcome you cannot tell from the second is not a third outcome.
+    print("when a mutant's suite produces nothing, the sweep says WHY (process, not producer):")
+    check("a run KILLED BY A SIGNAL is named as such — a negative returncode means the process "
+          "did not choose to exit, so nothing in that tree is evidence about the producer",
+          "KILLED BY SIGNAL 9" in sweep.died_how(-9, ""))
+    check("...and it says outright that this says NOTHING about the mutant and must be re-run "
+          "alone — the old text sent the reader to fix an anchor that was never broken",
+          "NOTHING about the mutant" in sweep.died_how(-9, "")
+          and "alone" in sweep.died_how(-9, ""))
+    check("...while a DEADLINE is a different sentence, because a mutant that genuinely hangs is "
+          "a fact about the mutant and a signal is a fact about the machine",
+          "deadline" in sweep.died_how(None, "") and "SIGNAL" not in sweep.died_how(None, ""))
+    check("...and an ordinary non-zero exit surfaces the STDERR TAIL, which is the thing that was "
+          "being discarded and the reason two wrong theories survived an hour each",
+          "ValueError: boom" in sweep.died_how(1, "Traceback\n  x\nValueError: boom"))
+    check("...and an exit that printed nothing at all SAYS that, rather than rendering an empty "
+          "stderr as a blank the reader fills in themselves",
+          "printed nothing on stderr" in sweep.died_how(2, ""))
+    _hows = [sweep.died_how(-9, ""), sweep.died_how(None, ""),
+             sweep.died_how(1, "ValueError: boom"), sweep.died_how(2, "")]
+    check("...and the four causes produce four DISTINCT sentences — collapsing any two of them "
+          "is exactly how 'something killed my subprocess' arrived as 'this mutant is broken'",
+          len(set(_hows)) == 4)
+    check("`run` still answers with stdout alone, so every existing caller is unchanged while the "
+          "diagnosis rides along beside it rather than replacing it",
+          sweep.run.__doc__ and sweep.run_detail.__doc__
+          and len(sweep.run_detail(tempfile.mkdtemp(prefix="glrd-"), timeout=60)) == 3)
 
     # The owning agent runs the harness it would SHIP, not the one it is editing: every game_loop
     # hook prefers a pinned checkout when one exists and falls back to the repo's own bin/ when it

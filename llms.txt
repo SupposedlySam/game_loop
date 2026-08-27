@@ -325,10 +325,12 @@ somewhere else.
 script that does nothing at all — which is exactly what a guard looks like after it silently stops
 firing. Write the case that must NOT fire.
 
-Two things it reads that are easy to conflate: a hook may refuse by exiting 2 OR by printing a JSON
-`permissionDecision`, and both are a deny. Exiting 0 having said nothing is reported as `silent` —
-that is what an allow looks like and equally what a guard no longer running looks like, so the run
-counts them and says so.
+Things it reads that are easy to conflate. A hook may refuse by exiting 2 OR by printing a JSON
+`permissionDecision`, and both are a deny — the decision is scanned for as JSON anywhere in the
+output, so indenting it or printing it among other logging both work. Exiting 0 having said nothing
+is `silent`: that is what an allow looks like and equally what a guard no longer running looks
+like, so the run counts them and says so. And a decision that cannot be PARSED is `unreadable`,
+never silent — a hook whose verdict came back truncated has judged, and only the reading failed.
 
 ## Other verbs
 

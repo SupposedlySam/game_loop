@@ -10377,18 +10377,38 @@ def hook_decision(rc, out):
     """
     if rc == 2:
         return "deny", "exit 2 — the exit-code protocol"
-    for line in (out or "").splitlines():
-        line = line.strip()
-        if not (line.startswith("{") and "permissionDecision" in line):
+    # SCANNED AS JSON, NOT AS LINES. This read `out.splitlines()` and required the object to sit on
+    # ONE line — so a hook that pretty-prints its decision, which is ordinary, came back `silent`.
+    # Silent is treated as an allow. That is the SAME defect this function was written to fix, one
+    # level down: the first cut read only exit codes and called a JSON deny an allow; the second
+    # read only single-line JSON and called a pretty-printed deny an allow. Found by feeding this
+    # function an indented payload rather than by reading it.
+    #
+    # raw_decode from each `{` handles all three shapes at once — one line, indented, or embedded
+    # in a hook's other chatter — and never needs the object to be the whole of the output.
+    _scan = json.JSONDecoder()
+    _text = out or ""
+    for _i, _ch in enumerate(_text):
+        if _ch != "{":
             continue
         try:
-            d = json.loads(line)
+            d, _ = _scan.raw_decode(_text, _i)
         except ValueError:
             continue
-        hso = d.get("hookSpecificOutput") or d
+        if not isinstance(d, dict):
+            continue
+        hso = d.get("hookSpecificOutput")
+        hso = hso if isinstance(hso, dict) else d
         dec = str(hso.get("permissionDecision") or "").lower()
         if dec in ("deny", "allow", "ask"):
             return dec, f"permissionDecision {dec!r} in its JSON output"
+    # IT SAID SOMETHING AND THIS COULD NOT READ IT, which is not the same as saying nothing. A hook
+    # whose decision came back truncated or malformed has JUDGED; only the reading failed. Folding
+    # that into `silent` would treat a broken guard as an allowing one — the same substitution this
+    # function exists to refuse, arriving by a third road.
+    if "permissionDecision" in (out or ""):
+        return "unreadable", ("it printed a permissionDecision this could not parse — that is a "
+                              "guard whose verdict was lost, never a guard that allowed")
     if rc != 0:
         return "error", (f"exit {rc}, and it named no decision — a hook that failed rather than one "
                          "that judged")

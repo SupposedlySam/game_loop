@@ -15332,6 +15332,26 @@ def main():
               "crashed did not judge anything, and counting a crash as a refusal manufactures a "
               "guard out of a broken script",
               _dec["crashed"][0] == "error")
+        # THE SAME DEFECT A THIRD TIME, found by feeding this function an indented payload rather
+        # than by reading it. Cut one read only exit codes and called a JSON deny an allow. Cut two
+        # read only SINGLE-LINE json — `out.splitlines()` with a startswith("{") — and called a
+        # PRETTY-PRINTED deny `silent`, which is treated as an allow. Pretty-printing a hook's
+        # output is ordinary. Scanning with raw_decode from each brace reads all three shapes.
+        _pretty_deny = '{\n  "hookSpecificOutput": {\n    "permissionDecision": "deny"\n  }\n}'
+        check("#91: a PRETTY-PRINTED decision is read — the scan is over JSON, not over lines, and "
+              "requiring the object on one line called an indented deny `silent`, which this verb "
+              "treats as an allow",
+              _hd(0, _pretty_deny)[0] == "deny")
+        check("#91: ...and one embedded in a hook's other chatter is read too, since nothing "
+              "obliges a guard to make its decision the whole of its output",
+              _hd(0, "starting up\n" + _pretty_deny + "\ndone")[0] == "deny")
+        check("#91: ...and a decision this CANNOT parse is `unreadable`, never silent — a hook "
+              "whose verdict came back truncated has judged, and only the reading failed; folding "
+              "that into silence treats a broken guard as an allowing one",
+              _hd(0, '{"hookSpecificOutput": {"permissionDecision": ')[0] == "unreadable")
+        check("#91: ...while output with no decision in it at all is still silent, so the answer "
+              "above is a discrimination rather than a function that now cries foul at any noise",
+              _hd(0, "just some logging")[0] == "silent")
 
         _dirs = _mlm.guardtest_directions
         _only_allow = [{"expect": "allow"}, {"expect": "allow"}]

@@ -4577,8 +4577,42 @@ def main():
             check(f"the mcp__.* hook is registered in {label}", len(wired) == 1)
         with open(os.path.join(REPO, "install.sh")) as f:
             inst = f.read()
-        check("install.sh copies AND chmods both MCP guard files",
-              inst.count("guard-mcp.sh") >= 2 and inst.count("guard-mcp-impl.sh") >= 2)
+        # WAS A COUNT AND WAS INERT. `inst.count("guard-mcp.sh") >= 2` claimed to cover a COPY and
+        # a CHMOD with one number, and install.sh names that file six times — so the chmod line
+        # could be deleted whole and the count would still be five. Verified by deleting it: the
+        # assertion stayed green while a guard landed without +x, which is a hook that silently
+        # never runs. Found by scanning for the shape after the same defect cost a floor today:
+        # a threshold over a whole-file count is satisfied by growth, and two facts collapsed into
+        # one count cannot report either.
+        def _cmd_blocks(text, verb):
+            """EVERY shell statement starting with `verb`, line-continuations joined.
+
+            install.sh has two install paths — `--central` writes five dispatcher shims, the
+            normal one copies the payload — and each has its own cp and chmod. Taking the FIRST
+            match found the central block, which carries no impl files, and the check failed for
+            a reason that had nothing to do with what it was asserting.
+            """
+            _ls, _out = text.splitlines(), []
+            for _i, _ln in enumerate(_ls):
+                if _ln.strip().startswith(verb):
+                    _acc = []
+                    for _l in _ls[_i:]:
+                        _acc.append(_l)
+                        if not _l.rstrip().endswith("\\"):
+                            break
+                    _out.append(" ".join(_acc))
+            return _out
+
+        def _both_in_a(verb):
+            return any("guard-mcp.sh" in b and "guard-mcp-impl.sh" in b
+                       for b in _cmd_blocks(inst, verb))
+        check("install.sh COPIES both MCP guard files — asserted against the cp statement itself, "
+              "not a count of the name anywhere in the file",
+              _both_in_a("cp "))
+        check("...and CHMODS them, which is the half the old count could not see: install.sh names "
+              "these six times, so a threshold of two survived deleting the chmod line entirely — "
+              "and a guard that lands without +x is a hook that silently never runs",
+              _both_in_a("chmod +x"))
         with open(os.path.join(SRC_GAME_LOOP, "verify.yaml")) as f:
             vy = f.read()
         check("both MCP guard files owe the test suite in verify.yaml (#25)",

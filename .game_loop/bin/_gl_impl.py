@@ -7738,7 +7738,38 @@ def _saggar_discover(before):
                   "the session had not reached its SessionStart hook" % budget)
 
 
-def _saggar_agent(cwd, prompt):
+def saggar_argv(exe, prompt, title=None):
+    """The `saggar agent` invocations to try, best first — titled, then bare.
+
+    #116: `saggar agent` gained `--title <title>` on 2026-08-26 and it names the displayed
+    terminal; `successor` was not passing it, so the one mode whose whole job is a handover a
+    human finds LATER left its terminal called "Terminal". That is our gap, not saggar's.
+
+    WHY TWO INVOCATIONS AND NOT ONE. This machine has no saggar, so the flag's POSITION is the one
+    thing that could not be read off `--help` here — and a misplaced option is exactly what makes
+    saggar exit 2. Guessing once would trade a working handover for a nicer label. So the titled
+    form is tried first and a parse failure falls back to today's exact call: best-effort naming
+    that cannot cost the handover. When saggar can be run, confirm the position and this list
+    collapses to one entry.
+
+    Placed before the positional agent name deliberately: the task is variadic
+    (`saggar agent <agent> <task...>`), so an option after it can be swallowed as another word.
+
+    WHAT THIS ASSUMES AND HAS NOT CHECKED (INV6): that exit 2 means saggar rejected the call
+    BEFORE opening anything. The existing hint table here already reads 2 as "could not parse",
+    and a parse failure normally precedes any action — but if saggar were to open a terminal and
+    THEN exit 2, the retry would open a second one. Nothing on this machine can settle that. It is
+    written down rather than assumed silently, and it is the first thing to confirm on a machine
+    that has saggar; `_saggar_discover` compares presence files taken before the first attempt, so
+    a doubled terminal would show up there rather than passing unnoticed.
+    """
+    bare = [exe, "agent", "claude", prompt]
+    if not title:
+        return [bare]
+    return [[exe, "agent", "--title", title, "claude", prompt], bare]
+
+
+def _saggar_agent(cwd, prompt, title=None):
     """Ask saggar for a new agent terminal beside this one; returns (started, detail, id, why_not).
 
     The mechanism, read off the CLI saggar ships rather than guessed: `saggar agent claude <task>`
@@ -7761,14 +7792,28 @@ def _saggar_agent(cwd, prompt):
     # BEFORE the call, because the whole method is a delta: one new file in a directory that also
     # holds every other terminal on this machine.
     before = _saggar_presence_names()
-    try:
-        r = subprocess.run([exe, "agent", "claude", prompt],
-                           capture_output=True, text=True, cwd=cwd, timeout=30)
-    except (OSError, subprocess.SubprocessError) as e:
-        return False, f"`saggar agent` could not run: {e}", None, None
+    attempts = saggar_argv(exe, prompt, title)
+    r, used_title = None, False
+    for argv in attempts:
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            return False, f"`saggar agent` could not run: {e}", None, None
+        # EXIT 2 IS "COULD NOT PARSE", which is the one failure a wrong flag PLACEMENT produces.
+        # Retry without the flag rather than let a naming nicety break the handover itself; every
+        # other exit code is a real refusal and is reported as it stands.
+        if r.returncode == 2 and len(attempts) > 1 and argv is attempts[0]:
+            continue
+        used_title = argv is attempts[0] and len(attempts) > 1
+        break
     if r.returncode == 0:
         found, why_not = _saggar_discover(before)
-        return True, " ".join((r.stdout or "").split()), found, why_not
+        detail = " ".join((r.stdout or "").split())
+        if title and not used_title:
+            detail = ((detail + " — ") if detail else "") + (
+                "saggar could not parse --title, so the terminal keeps its default name. The "
+                "handover still happened; only the label was lost.")
+        return True, detail, found, why_not
     hint = {1: "saggar understood and refused", 2: "saggar could not parse the call",
             3: "saggar is not running, or this is not a saggar terminal"}.get(r.returncode, "")
     msg = " ".join(((r.stderr or "") + " " + (r.stdout or "")).split()) or "no message"
@@ -8070,7 +8115,7 @@ def cmd_successor(s, a):
         lines.append(f"mode                : {sc['mode']} — {why}, configured "
                      f"\"{sc['configured']}\" (DRY RUN — nothing was started)")
     elif sc["mode"] == "saggar-agent":
-        started, detail, found, found_why = _saggar_agent(cwd, prompt)
+        started, detail, found, found_why = _saggar_agent(cwd, prompt, title)
         handed = bool(started)
         if started:
             lines += [f"mode                : saggar-agent — {why}. Opened a new agent terminal"

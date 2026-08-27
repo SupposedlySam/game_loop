@@ -1877,6 +1877,78 @@ def main():
         check("Warp wins when both are somehow set, so one terminal never resolves to two modes",
               "mode                : warp-tab"
               in succ_mode(SAGGAR_SESSION="F1AC5B4E", TERM_PROGRAM="WarpTerminal"))
+        # #116 — `saggar agent` gained `--title` and `successor` was not passing it, so the one
+        # mode whose whole job is a handover a human finds LATER left its terminal named
+        # "Terminal". The issue reads as blocked on a machine that can run saggar, and that is
+        # true of END-TO-END verification only: whether OUR side passes the flag is decided here.
+        # What genuinely could not be read off this machine is the flag's POSITION, and a
+        # misplaced option is exactly what makes saggar exit 2 — so the titled form is tried
+        # first and a parse failure falls back to today's exact call. Best-effort naming that
+        # cannot cost the handover.
+        _sag = importlib.machinery.SourceFileLoader(
+            "gl_sag", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _sagm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_sag", _sag))
+        _sag.exec_module(_sagm)
+        _av = _sagm.saggar_argv("/bin/saggar", "TASK", "G | scope backups")
+        check("#116: the titled invocation is tried FIRST and carries --title with the name",
+              _av[0][:4] == ["/bin/saggar", "agent", "--title", "G | scope backups"])
+        check("#116: ...and --title sits BEFORE the positional agent name, because the task is "
+              "variadic and an option after it can be read as one more word of the task",
+              _av[0].index("--title") < _av[0].index("claude"))
+        check("#116: ...and the fallback is byte-identical to the call shipped before this change, "
+              "so a saggar that cannot parse the flag behaves exactly as it does today",
+              _av[-1] == ["/bin/saggar", "agent", "claude", "TASK"])
+        check("#116: ...and with NO title there is ONE invocation, not a pointless retry of the "
+              "same argv — the fallback exists for the flag, not as a blanket second attempt",
+              _sagm.saggar_argv("/bin/saggar", "TASK") == [["/bin/saggar", "agent", "claude",
+                                                            "TASK"]])
+        # And the retry itself, driven. A stub stands in for subprocess.run; per the rule this
+        # suite learned today, the calls it saw are asserted, not assumed.
+        _seen_argv = []
+
+        class _R:
+            def __init__(self, rc, out=""):
+                self.returncode, self.stdout, self.stderr = rc, out, ""
+
+        def _fake_run(argv, **kw):
+            _seen_argv.append(list(argv))
+            return _R(2) if "--title" in argv else _R(0, "opened")
+
+        _real_sp_run, _real_disc = _sagm.subprocess.run, _sagm._saggar_discover
+        _real_which = _sagm.shutil.which
+        try:
+            _sagm.subprocess.run = _fake_run
+            _sagm._saggar_discover = lambda before: ("term-1", None)
+            _sagm.shutil.which = lambda n: "/bin/saggar"
+            _ok, _detail, _found, _why = _sagm._saggar_agent(REPO, "TASK", "G | scope backups")
+        finally:
+            (_sagm.subprocess.run, _sagm._saggar_discover,
+             _sagm.shutil.which) = _real_sp_run, _real_disc, _real_which
+        check("#116: a saggar that exits 2 on --title is RETRIED bare, and the handover still "
+              "happens — a naming nicety must never cost the handover it was meant to label",
+              len(_seen_argv) == 2 and "--title" in _seen_argv[0]
+              and "--title" not in _seen_argv[1] and _ok is True)
+        check("#116: ...and it SAYS the label was lost rather than reporting a clean open — the "
+              "terminal a human goes looking for is now named something else, and silence there "
+              "is the whole failure this issue is about",
+              "could not parse --title" in _detail and "handover still happened" in _detail)
+
+        _seen2 = []
+
+        def _fake_refuse(argv, **kw):
+            _seen2.append(list(argv))
+            return _R(1)
+
+        try:
+            _sagm.subprocess.run = _fake_refuse
+            _sagm.shutil.which = lambda n: "/bin/saggar"
+            _ok2, _detail2, _, _ = _sagm._saggar_agent(REPO, "TASK", "G | scope backups")
+        finally:
+            _sagm.subprocess.run, _sagm.shutil.which = _real_sp_run, _real_which
+        check("#116: ...while exit 1 is a REAL refusal and is not retried — the fallback is scoped "
+              "to 'could not parse', or a saggar saying no would be asked twice and reported once",
+              len(_seen2) == 1 and _ok2 is False and "exited 1" in _detail2)
+
         check("saggar-agent still prints the portable command, and says the id did not reach it",
               "successor session id" in succ_mode(SAGGAR_SESSION="F1AC5B4E")
               and "`saggar agent` mints its own" in succ_mode(SAGGAR_SESSION="F1AC5B4E")

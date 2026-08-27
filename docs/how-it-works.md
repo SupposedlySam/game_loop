@@ -107,6 +107,34 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
   the answer into the run. The trust scope is stated in `notify.py`: a reply is taken as the human's
   words — anyone in the channel can answer, so scope the channel accordingly.
 
+### The wake path — `mandate --wake-path`, `note --woke`, `doorbell`
+
+Every gate above fires from **inside** the session, which is the thing that stops working when a run
+goes quiet. A consumer's run sat inert for six hours with the Stop gate, the watchdog and the limit
+gate all reporting healthy, while their chat transport's own doctor said no wake had landed in that
+whole time. Nothing here knew, and nothing here could.
+
+`mandate --wake-path "<how a signal reaches this session>"` records that something outside can reach
+the run, and `status` warns while nothing is recorded. It is a **declaration, never a probe**, and
+says so where it is printed: this cannot see a host's cron and does not pretend to.
+
+The other half is observable, and only once something arrives. `note --woke` records an arrival;
+`status` then reports when the last wake **landed**, how long ago, and how many. Nothing else can
+record it, so `doorbell` asks the woken run to do it first — an unrecorded arrival reads exactly
+like a dead wake path.
+
+**What it still cannot see, stated in the report itself:** a wake that was *requested and never
+delivered* leaves nothing here, because the run that would have recorded it is the run that did not
+happen. That is the six-hour hole, and only a watcher outside the session can close it.
+
+`doorbell` prints the wake-up prompt for the run — what done means, where to resume, and the
+recovery paths recorded with `note --recovery`. It is generated rather than a file you fill in,
+because those paths are per-run: the known flake and its remedy, which credential actually
+authenticates, the known-good retry. With none recorded it says outright that the prompt mostly buys
+re-orientation, rather than printing a confident one that carries nothing. A generic "check your
+background tasks" ping is nearly worthless — the agent wakes, spends real tokens re-deriving where
+it was, and re-runs finished steps.
+
 ### The statusline tap — `game_loop statusline`
 
 Claude Code exposes subscription rate limits in exactly one place: the JSON it pipes to a configured
@@ -1005,6 +1033,36 @@ anything about this codebase. It is a separate act of thought from hardening, be
 form almost never transfers — *"our tap never wrote limits.json"* helps nobody, while *"a check whose
 pass is silence cannot distinguish satisfied from never-ran"* is the part that travels. Where a
 `harden` trigger is attached and `--general` is missing, the loop says so and hardens anyway.
+
+### testing the triggers you write — `game_loop guardtest`
+
+The suite proves this tool's own guarantees. A consumer's attachments and hook scripts had nothing,
+and a guard that silently stops firing is the failure the whole harness is about.
+
+`guardtest --fixture <path>` runs your script against recorded payloads and asserts what it decides.
+The payload is handed to it on **stdin as JSON**, which is how Claude Code hands a hook its own and
+how `fire_triggers` hands a trigger its moment. The fixture is yours: a `script`, and `cases` each
+with a `name`, a `payload`, and an `expect` of `deny` / `allow` / `ask` — or `expect_exit` for a
+guard that only speaks exit codes, and `expect_output` to pin the reason, since a guard refusing for
+the wrong reason sends you somewhere else.
+
+**Both directions are the price of admission**, the way `instrument` demands a null control beside
+its positive one. A fixture whose cases all expect `allow` is refused: a script that does nothing at
+all passes it. All-deny is refused too.
+
+Four answers, not two, and three of them were learned the hard way. A hook may refuse by exiting 2
+**or** by printing a JSON `permissionDecision` — the first cut read only exit codes and reported this
+project's own write guard, mid-refusal, as allowing everything. The decision is scanned for as JSON
+anywhere in the output, because the second cut required it on one line and read a pretty-printed
+deny as silence. Exit 0 having said nothing is `silent`, counted and reported, because that is what
+an allow looks like and equally what a guard no longer running looks like. And a decision that
+cannot be parsed is `unreadable`, never silent: a guard whose verdict was lost did not allow
+anything.
+
+**What it does not test:** state. It exercises payload → decision, so a guard whose verdict comes
+from the repo — does the handoff name HEAD — cannot be driven by varying payloads, and its deny case
+simply never fires. It cannot be faked green either, which is the point: the both-directions rule
+needs a real deny, so you get a refusal to certify rather than a green run that proves nothing.
 
 ### the retro nudge — and why it never fired
 

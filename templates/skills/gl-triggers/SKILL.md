@@ -82,7 +82,7 @@ likely to have covered.
 and `test/trigger_fixtures.py` exercises them in all four shapes above. Read those before writing
 your own — they are the same shapes, already debugged.
 
-## Four ways a two-direction test still cannot fail
+## Five ways a two-direction test still cannot fail
 
 Writing a positive case and a negative case is not the same as having a check that can fail. Each of
 these was written by someone who believed they had both directions, and each was found the same way:
@@ -107,7 +107,16 @@ still discriminates.
 previous section. They run in a full suite and are invisible to `--section`, so a targeted rule that
 claims to cover them covers nothing.
 
-The tell they share: in all four the assertion was GREEN while its subject was BROKEN, and green is
+**The stub stands in for one of two seams.** A test replaced the runner a tool calls, and the tool
+was refactored to call a second entry point beside it for the extra data it now needed. The stub
+still existed, still matched its old signature, still got patched in — and every call went to the
+REAL runner instead. Nothing raised. The test kept returning a verdict, but about a run nobody in
+the test controlled, and the only visible symptom was that the section went from milliseconds to
+minutes. **A slowdown is what a bypassed stub looks like**; I read that as machine load and said so
+out loud before checking. Assert the stub was REACHED — count its calls and fail if the count is
+zero — because "my double was used" is exactly the thing a refactor can quietly stop being true.
+
+The tell they share: in all five the assertion was GREEN while its subject was BROKEN, and green is
 what you were hoping for. A check you have never seen fail is a check you have not tested — and
 knowing that rule does not exempt the check you just wrote *because* of it.
 

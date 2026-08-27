@@ -13469,6 +13469,59 @@ def main():
           + " | ".join(sorted(_spellings)),
           len(_spellings) == 1 and len(_shims) >= 5)
 
+    # AND THE DISPATCH ITSELF, with a central install actually PRESENT. Everything below the
+    # postures runs with it absent, so the `exec` line — the one that carries a consumer's own
+    # GAME_LOOP_HOME across to the central code — never executes there and nothing pinned it.
+    #
+    # Drop that assignment and the shim still dispatches, still refuses /etc, and still looks
+    # healthy: what changes is WHICH TREE it is protecting. Measured by hand — a write inside the
+    # consumer's own repo comes back DENIED, because the central install has become "the project"
+    # and their repo is now outside it. Every write in their own tree blocked.
+    _ctr = tempfile.mkdtemp(prefix="gameloop-central-")
+    try:
+        shutil.copytree(os.path.join(REPO, ".game_loop"), os.path.join(_ctr, "central", ".game_loop"),
+                        ignore=shutil.ignore_patterns("sessions", "log.jsonl", "state.json",
+                                                      "triggers.json", "triggers.d",
+                                                      "config.local.json"))
+        _cproj = os.path.join(_ctr, "proj")
+        os.makedirs(os.path.join(_cproj, ".game_loop", "bin"))
+        for _n in ("guard-writes.sh", "guard-mcp.sh"):
+            _d = os.path.join(_cproj, ".game_loop", "bin", _n)
+            shutil.copy(os.path.join(_shim_dir, _n), _d)
+            os.chmod(_d, 0o755)
+        shutil.copy(os.path.join(REPO, ".game_loop", "config.json"),
+                    os.path.join(_cproj, ".game_loop", "config.json"))
+
+        def _disp(path):
+            return subprocess.run(
+                ["bash", os.path.join(_cproj, ".game_loop", "bin", "guard-writes.sh")],
+                input=json.dumps({"tool_name": "Write", "tool_input": {"file_path": path}}),
+                capture_output=True, text=True,
+                env=dict(os.environ, GAME_LOOP_CENTRAL=os.path.join(_ctr, "central")))
+
+        _out = _disp("/etc/not-ours-at-all.txt")
+        check("#central: with a central install PRESENT the shim dispatches to it, and a write "
+              "outside the CONSUMER's repo is refused — the guard is real code now, not the "
+              "fail-open notice the cases above exercise",
+              "deny" in _out.stdout and "READ-ONLY" in _out.stdout)
+        # WHICH TREE IT PROTECTS, read off the refusal rather than from an allow/deny.
+        # The obvious test — "a write inside the consumer's repo is ALLOWED" — CANNOT FAIL here,
+        # and I wrote it that way first. The guard allows /tmp, /private/tmp and /var/folders
+        # outright (its `allow` list), so a fixture built with mktemp is inside an exempt root and
+        # comes back allowed no matter which tree the guard thinks it is guarding. A green
+        # assertion measuring the exemption, not the dispatch.
+        #
+        # The refusal names its own repo, and that survives the exemption: intact, it names the
+        # CONSUMER's tree; with the assignment dropped, the CENTRAL install. Measured both ways.
+        _why = _out.stdout
+        check("#central: ...and the refusal names the CONSUMER's tree as the repo being protected, "
+              "not the central install — that is the whole of what the shim's GAME_LOOP_HOME "
+              "assignment buys, and dropping it leaves a shim that still dispatches, still refuses "
+              "/etc, and still looks healthy while guarding the wrong tree",
+              _cproj in _why and os.path.join(_ctr, "central") not in _why)
+    finally:
+        shutil.rmtree(_ctr, ignore_errors=True)
+
     # THE POSTURES, driven with the central install DELIBERATELY ABSENT.
     _nocentral = tempfile.mkdtemp(prefix="gameloop-nocentral-")
     try:

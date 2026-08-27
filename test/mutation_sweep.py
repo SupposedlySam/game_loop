@@ -1123,7 +1123,7 @@ MUTANTS += [
     ("verify.outside_scope_tail -> a scoped run stops saying what it did NOT look at",
      ".game_loop/bin/verify::outside_scope_tail", '    return ""\n',
      ["OUT OF SCOPE", "not in this commit", "stay dirty", "not even looked at"],
-     "11 kills, MEASURED by the sweep of 2026-08-26 against ec9be33b — the first reading this producer has ever had. It was excluded as a KNOWN GAP whose blocker was 'not in HEAD yet', which expired at 8561324 and went unnoticed: an exclusion is a decision about a moment, and nothing watches for the moment to pass. Promoting it was the right call — neutered it un-scopes every commit gate back to the whole tree, and 11 assertions notice.", 2),
+     "3 kills, and only ONE of them is about this producer. THIS NOTE USED TO BE ITS SIBLING'S: the text describing `scope_arg` — 11 kills, un-scoping every commit gate back to the whole tree — was copy-pasted here when the two entries were added together, and sat for a day claiming a number and a behaviour that belong to a different function. A reader would have concluded this one measures 11 and un-scopes commit gates; it does neither. That is the 'mislabelled, not stale' class this file warns about, caught by reading the killers rather than by comparing counts. WHAT IS ACTUALLY TRUE: of its 3 kills, two are the sweep's own bookkeeping (`neuter` reaches every candidate, every declared producer mutates its own file) and redden for ANY neutered producer at all. The single genuine killer — a scoped pass NAMES the dirty paths outside the commit — is SHARED with `scope_arg`, so it passes whenever either works. This producer's own coverage is one assertion it does not own exclusively, and that is the finding the borrowed note hid.", 2),
 ]
 
 MUTANTS += [

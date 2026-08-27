@@ -9877,6 +9877,136 @@ def config_paths_report():
     return lines
 
 
+def hook_wiring(repo_root):
+    """Which hook commands in .claude/settings*.json actually prefer the pinned checkout.
+
+    `self` used to answer this from `CODE_ROOT == ROOT` alone. That expression is true of the
+    process you just typed — and says nothing whatever about the hooks, which live in a file it
+    never opened. Run by hand, which is the only way anybody runs it, it therefore told a repo
+    whose hooks were wired correctly that "the hooks still point at the repo's own bin/", and
+    handed over a wiring block whose own warning is about the double-wiring that following it
+    from that state produces. Observed here at d6bdef8, with all six hooks wired. The fix is not
+    a better inference; it is opening the file.
+
+    Three answers that never share bytes: wired · unwired · unknown. "Unknown" is for no readable
+    settings at all, and must not be reported as "unwired" — one means the guards are off, the
+    other means nobody looked.
+    """
+    out_ = {"state": "unknown", "read": [], "unreadable": [], "pinned": [], "plain": [],
+            "files_with_hooks": []}
+    for name in ("settings.json", "settings.local.json"):
+        p = os.path.join(repo_root, ".claude", name)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as e:
+            out_["unreadable"].append(f"{name} ({e.__class__.__name__})")
+            continue
+        out_["read"].append(name)
+        cmds = []
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        if isinstance(hooks, dict):
+            for event, groups in hooks.items():
+                if not isinstance(groups, list):
+                    continue
+                for g in groups:
+                    if not isinstance(g, dict):
+                        continue
+                    for hk in (g.get("hooks") or []):
+                        if not isinstance(hk, dict):
+                            continue
+                        c = hk.get("command")
+                        if isinstance(c, str) and ".game_loop" in c:
+                            cmds.append((event, c))
+        if cmds:
+            out_["files_with_hooks"].append(name)
+        for event, c in cmds:
+            (out_["pinned"] if PINNED_DIRNAME in c else out_["plain"]).append((event, c))
+    if not out_["read"]:
+        return out_
+    if out_["pinned"] and not out_["plain"]:
+        out_["state"] = "wired"
+    else:
+        out_["state"] = "unwired"
+    return out_
+
+
+def pin_wiring_lines(code, w):
+    """What `self` says about a pin that exists, having READ the wiring rather than guessed it."""
+    n_pin, n_plain = len(w["pinned"]), len(w["plain"])
+    if w["state"] == "unknown":
+        L = [f"a pinned checkout exists at {code}, and WHETHER THE HOOKS USE IT IS UNKNOWN.",
+             "  No readable .claude/settings.json or settings.local.json under "
+             f"{os.path.join(REPO_ROOT, '.claude')}."]
+        if w["unreadable"]:
+            L.append("  could not parse: " + ", ".join(w["unreadable"]))
+        L += ["  This is NOT the same answer as \"not wired\": nobody looked, so wire from the",
+              "  block below only after reading the file yourself — a second copy of these entries",
+              "  runs every gate twice."]
+        return L
+    if w["state"] == "wired":
+        L = [f"a pinned checkout exists at {code}, and the hooks ARE wired to prefer it.",
+             f"  {n_pin} hook command(s) in {', '.join(w['files_with_hooks'])} name "
+             f"{PINNED_DIRNAME}/, so the gates guarding",
+             "  this session run the PINNED code — editing .game_loop/bin/ here cannot break them.",
+             "  That is the whole point of the pin, and you have it."]
+        if len(w["files_with_hooks"]) > 1:
+            L.append("  ⚠ game_loop hooks appear in BOTH settings files, which MERGE rather than "
+                     "override —")
+            L.append("    every gate is running twice. Delete the ones in settings.local.json.")
+        gen = {l.strip() for l in self_hooks_block(code)
+               if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/')}
+        have = {c.strip() for _e, c in w["pinned"]}
+        if gen and have and gen != have:
+            L += ["",
+                  "  ⚠ WIRED — BUT NOT WITH THE WIRING THIS VERB GENERATES. These are two "
+                  "hand-maintained",
+                  "    copies of one command line, and the one that drifts is the one nobody "
+                  "re-reads:"]
+            L += ["      settings.json has : " + c for c in sorted(have - gen)]
+            L += ["      this verb prints  : " + c for c in sorted(gen - have)]
+        elif gen and have:
+            L.append(f"  ✓ all {len(have)} are byte-identical to the wiring this verb prints, so "
+                     "the tracked file")
+            L.append("    and the instructions have not drifted apart.")
+        pin_sha = _pin_marker_sha(code)
+        head = _git_sha(REPO_ROOT)
+        if pin_sha and head and not (pin_sha.startswith(head) or head.startswith(pin_sha)):
+            L += ["",
+                  f"  ⚠ the pin is {pin_sha[:8]} and HEAD is {head[:8]} — the gates are running "
+                  "OLDER code than",
+                  "    this tree. Edits here are inert until `self --pin <sha>`, which is both the "
+                  "protection",
+                  "    and how a shipped fix sits unused. Re-pinning takes effect immediately."]
+        L += ["",
+              f"  (this invocation ran {CODE_ROOT}, because that is the path you typed. That fact "
+              "is about",
+              "   the command, not the hooks, and answering the hook question from it is what "
+              "this verb",
+              "   used to do wrong.)"]
+        return L
+    L = [f"a pinned checkout exists at {code}, but THE HOOKS DO NOT ALL USE IT.",
+         f"  read {', '.join(w['read'])}: {n_pin} command(s) prefer the pin, {n_plain} still exec "
+         "the repo's own bin/."]
+    if n_plain:
+        L.append("  not preferring the pin: " + ", ".join(sorted({e for e, _ in w["plain"]})))
+    if not n_pin and not n_plain:
+        L.append("  in fact NO game_loop hook is registered at all — the guards are not running.")
+    L.append("  Wire them (below) and reload.")
+    return L
+
+
+def _pin_marker_sha(code):
+    """The commit a pinned checkout was cut from, per its own PINNED marker, or None."""
+    try:
+        with open(os.path.join(code, PINNED_MARK), encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("sha") or None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def cmd_self(s, a):
     """`game_loop self` — run the harness from a pinned checkout, so editing it cannot break it.
 
@@ -9906,8 +10036,10 @@ def cmd_self(s, a):
         if CODE_ROOT != ROOT:
             out(*(pinned_report()[1:]))
         elif os.path.isdir(code):
-            out(f"a pinned checkout exists at {code}, but THIS process is not running from it.",
-                "  The hooks still point at the repo's own bin/. Wire them (below) and reload.")
+            wiring = hook_wiring(REPO_ROOT)
+            out(*pin_wiring_lines(code, wiring))
+            if wiring["state"] == "wired":
+                return
         else:
             out("not pinned: this process runs the repo's own .game_loop/bin/, which is also what "
                 "you edit.")

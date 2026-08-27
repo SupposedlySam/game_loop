@@ -3240,6 +3240,99 @@ def main():
               "learn — twice, because the first time was recorded in a form too narrow to stop it",
               "SPENDS" in _mtxt and "throwaway" in _mtxt)
 
+        print("`self` READS the wiring rather than inferring it from its own path:")
+        # OBSERVED FAILURE (INV4), not a hypothetical. At d6bdef8 this repo had all six hooks wired
+        # to prefer the pin — verified by reading .claude/settings.json — and `self` reported "The
+        # hooks still point at the repo's own bin/. Wire them (below) and reload." Its entire
+        # evidence was `CODE_ROOT == ROOT`, which is true of the process you just typed and says
+        # nothing whatever about the hooks, in a file it never opened. Run by hand, the only way
+        # anyone runs it, it therefore misreported EVERY correctly-wired repo, and handed over a
+        # block whose own warning is about the double-wiring that following it from there creates.
+        # That is the day's most expensive shape: a TRUE sentence promoted to a claim about the
+        # general case and never tested in the general form. The fix is not a better inference.
+        # LOADED AT THE USE SITE — see the note in the grant section above.
+        _wl = importlib.machinery.SourceFileLoader(
+            "gl_wire", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _wmodl = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_wire", _wl))
+        _wl.exec_module(_wmodl)
+        _wire, _wtext = _wmodl.hook_wiring, _wmodl.pin_wiring_lines
+
+        def _mkwire(settings=None, local=None):
+            r = tempfile.mkdtemp(prefix="glwire-")
+            os.makedirs(os.path.join(r, ".claude"))
+            for fn, d in (("settings.json", settings), ("settings.local.json", local)):
+                if d is None:
+                    continue
+                with open(os.path.join(r, ".claude", fn), "w", encoding="utf-8") as f:
+                    f.write(d if isinstance(d, str) else json.dumps(d))
+            return r
+
+        def _hk(*cmds):
+            return {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": c}
+                                                        for c in cmds]}]}}
+        _PINCMD = ('d="$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop"; '
+                   '[ -x "$d/bin/guard-writes.sh" ] || d="$CLAUDE_PROJECT_DIR/.game_loop"; '
+                   'exec "$d"/bin/guard-writes.sh')
+        _PLAINCMD = '"$CLAUDE_PROJECT_DIR"/.game_loop/bin/guard-writes.sh'
+
+        check("a repo whose hook commands all name the pin directory reads as WIRED — this is the "
+              "case the old code got wrong, and it is the common one",
+              _wire(_mkwire(_hk(_PINCMD)))["state"] == "wired")
+        check("...and one whose hooks exec the repo's own bin/ reads as UNWIRED, so the two "
+              "answers are decided by the file's CONTENT and not by which path invoked the verb",
+              _wire(_mkwire(_hk(_PLAINCMD)))["state"] == "unwired")
+        check("...and MIXED wiring is UNWIRED, not wired: a pin that half the gates ignore "
+              "protects nothing, and 'some of them' rounds to yes exactly when it must not",
+              _wire(_mkwire(_hk(_PINCMD, _PLAINCMD)))["state"] == "unwired")
+        check("a repo with NO readable settings answers UNKNOWN, never 'unwired' — 'the guards "
+              "are off' and 'nobody looked' are different facts and only one of them is about "
+              "the repo (INV: could not tell must not share bytes with nothing to report)",
+              _wire(_mkwire())["state"] == "unknown")
+        check("...and settings.json that does not PARSE is also UNKNOWN rather than unwired, "
+              "since a file the reader choked on is evidence about the reader",
+              _wire(_mkwire("{ this is not json"))["state"] == "unknown")
+        _seen = {st: "\n".join(_wtext("/p/.game_loop", _wire(rt)))
+                 for st, rt in (("wired", _mkwire(_hk(_PINCMD))),
+                                ("unwired", _mkwire(_hk(_PLAINCMD))),
+                                ("unknown", _mkwire()))}
+        check("...and the three states produce three DISTINCT reports — a state a reader cannot "
+              "tell from another state is not a third outcome, it is a second one with extra "
+              "code, which is how the vacuous checks earlier today passed",
+              len(set(_seen.values())) == 3)
+        check("...and the UNWIRED report is the only one that says 'Wire them', so following the "
+              "wiring block is advice a correctly-wired repo never receives — that misdirection, "
+              "not the wrong word, is what the old message actually cost",
+              "Wire them" in _seen["unwired"] and "Wire them" not in _seen["wired"]
+              and "Wire them" not in _seen["unknown"])
+        _pm = _wmodl._pin_marker_sha
+
+        def _mkpin(marker=None):
+            d = tempfile.mkdtemp(prefix="glpin-")
+            if marker is not None:
+                with open(os.path.join(d, "PINNED"), "w", encoding="utf-8") as f:
+                    f.write(marker if isinstance(marker, str) else json.dumps(marker))
+            return d
+
+        check("the commit a pin was cut from is read from its own PINNED marker, which is what "
+              "lets `self` say the gates are running OLDER code than the tree they guard",
+              _pm(_mkpin({"sha": "abc123def456", "ref": "abc123d"})) == "abc123def456")
+        check("...and a pin with NO marker reads as None rather than as some commit — an absent "
+              "stamp must not become a sha that then gets compared against HEAD and 'matches'",
+              _pm(_mkpin()) is None)
+        check("...and a marker that does not parse is also None, so a corrupt stamp cannot be "
+              "reported as agreement between the pin and HEAD",
+              _pm(_mkpin("{ not json")) is None)
+        _same = "\n".join(_wtext("/p/.game_loop", _wire(_mkwire(_hk(_PINCMD)))))
+        check("...and when the marker is missing the pin-vs-HEAD warning is SILENT rather than "
+              "guessing — 'I could not read the stamp' is not 'the pin is current'",
+              "gates are running OLDER code" not in _same)
+
+        check("game_loop hooks in BOTH settings files are called out even though the state is "
+              "wired: the two files MERGE rather than override, so that repo runs every gate "
+              "twice, and 'wired' alone would report the duplicate as success",
+              "BOTH settings files" in "\n".join(
+                  _wtext("/p/.game_loop", _wire(_mkwire(_hk(_PINCMD), _hk(_PINCMD))))))
+
         print("a wake that LANDED is recorded; one that never came cannot be (#95):")
         _wk = "sess-woke"
         gl(proj, "mandate", "--set", "keep going", sid=_wk)
@@ -11613,8 +11706,14 @@ def main():
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
         "cmd_checkpoint", "cmd_harden", "cmd_measure",
-        "cmd_pin", "cmd_status", "instruments_report",
+        "cmd_pin", "cmd_status", "instruments_report", "pin_wiring_lines",
     ]
+    # pin_wiring_lines ARRIVES AS DEBT, deliberately. Its ⚠ and ✓ arms both have assertions and
+    # both have been seen to fire — but they match by WORDS ("byte-identical", "NOT WITH THE
+    # WIRING THIS VERB GENERATES"), not line-scoped to the symbol. That is precisely the shape
+    # pin_state was caught by, and cmd_guardtest shipped in for a day: a producer whose glyphs
+    # could all change without one assertion noticing. Listing it here says so out loud rather
+    # than letting it join the pinned set on the strength of having tests at all.
     # cmd_guardtest ARRIVED AS DEBT AND WAS PAID THE SAME DAY, which is the only reason it is up
     # there. It shipped with its ✓ asserted line-scoped and its ✗ and ? asserted by their WORDS —
     # one glyph out of three, which is not a pinned symbol, and the exact shape pin_state was
@@ -15017,6 +15116,7 @@ def main():
     # These assert the SELECTION, not the verdict. Both arms deny an out-of-repo write, so "it
     # denied" cannot tell which copy ran — the same discrimination failure this suite spent #41 on.
     print("pinned dispatch (the agent runs what it would ship):")
+    PIN_DIRNAME_FOR_TEST = ".game_loop_self"
     with open(os.path.join(REPO, ".claude", "settings.json")) as f:
         _hooks = json.load(f)["hooks"]
     _cmds = [h["command"] for v in _hooks.values() for e in v for h in e.get("hooks", [])
@@ -15026,12 +15126,41 @@ def main():
     # The guidance `self` PRINTS must be the wiring this repo actually ships. Two hand-maintained
     # copies of one command line drift, and the copy that drifts is the one nobody runs — so the
     # generated text is asserted equal to the tracked settings, not merely similar to it.
-    _gen = sorted(l.strip() for l in gl(REPO, "self").stdout.splitlines()
-                  if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/'))
+    # Driven from the GENERATOR, not from `self`'s stdout. `self` no longer prints the block to a
+    # repo that is already wired — handing copyable wiring to somebody who has it is precisely how
+    # the double-wire it warns about gets made. And .game_loop_self is gitignored, so in a fresh
+    # clone `self` takes the not-pinned branch: an assertion reading its stdout would be testing
+    # which machine it ran on. That is the clone-divergence trap this suite has now hit twice.
+    _sb = importlib.machinery.SourceFileLoader(
+        "gl_selfblk", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+    _sbmod = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_selfblk", _sb))
+    _sb.exec_module(_sbmod)
+    _gen = sorted({l.strip() for l in _sbmod.self_hooks_block(
+                       os.path.join(REPO, PIN_DIRNAME_FOR_TEST, ".game_loop"))
+                   if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/')})
     # Compared as SETS: one command legitimately serves two events (SessionStart and PostCompact
     # run the same verb), so a list comparison would fail on the duplicate rather than on drift.
-    check("the wiring `self` prints is byte-identical to the wiring settings.json carries",
-          _gen and sorted(set(_gen)) == sorted(set(_cmds)))
+    check("the wiring `self` generates is byte-identical to the wiring settings.json carries",
+          _gen and _gen == sorted(set(_cmds)))
+    # And the tool must SAY it, not leave the comparison to this suite — a consumer has no suite,
+    # so drift they cannot see is drift they keep. Fed the repo's REAL tracked commands.
+    _wired_state = {"state": "wired", "read": ["settings.json"], "unreadable": [],
+                    "pinned": [("PreToolUse", c) for c in _cmds], "plain": [],
+                    "files_with_hooks": ["settings.json"]}
+    _wired_txt = "\n".join(_sbmod.pin_wiring_lines(
+        os.path.join(REPO, PIN_DIRNAME_FOR_TEST, ".game_loop"), _wired_state))
+    check("...and `self` REPORTS that identity on a wired repo instead of staying silent about it",
+          "byte-identical" in _wired_txt)
+    _drifted = [c for c in _cmds]
+    _drifted[0] = _drifted[0].replace("guard-", "guard-STALE-")
+    _drift_state = dict(_wired_state, pinned=[("PreToolUse", c) for c in _drifted])
+    _drift_txt = "\n".join(_sbmod.pin_wiring_lines(
+        os.path.join(REPO, PIN_DIRNAME_FOR_TEST, ".game_loop"), _drift_state))
+    check("...and a settings.json that has DRIFTED from the generated wiring is called out with "
+          "both versions printed — the arm that fires on a real repo is the quiet one, so the "
+          "loud arm has to be proven separately or it ships never having run",
+          "NOT WITH THE WIRING THIS VERB GENERATES" in _drift_txt
+          and "byte-identical" not in _drift_txt)
     check("...and each still names the script it runs, so the wiring stays readable",
           all(any(t in c for t in ("guard-writes.sh", "guard-mcp.sh", "game_loop limitgate",
                                    "game_loop stopgate", "game_loop sessionstart",

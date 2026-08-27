@@ -454,6 +454,17 @@ MUTANTS = [
     ("pinned_report -> the PINNED CODE block is never reported",
      ".game_loop/bin/_gl_impl.py::pinned_report", "    return None\n",
      ["pinned", "self"], None, 170),
+    # THIN AT 1, AND THE THINNESS IS STRUCTURAL — do not "fix" it by adding assertions.
+    # `_pin_marker_sha` returns a sha or None, so the neutered body IS its nothing-value: the two
+    # assertions covering the absent-marker and corrupt-marker paths survive by construction, not
+    # by weakness. They still earn their place (they would catch a raise, or a bare "" reported as
+    # agreement between the pin and HEAD) — they simply cannot ever kill THIS mutant. Only the
+    # positive read can, and there is exactly one of those to have. Measured 1 against the section
+    # that asserts it, at the commit that introduced it; confirm at the next full sweep.
+    ("_pin_marker_sha -> a pin's own commit stamp is never read, so `self` cannot tell a "
+     "consumer their gates are running older code than the tree they guard",
+     ".game_loop/bin/_gl_impl.py::_pin_marker_sha", "    return None\n",
+     ["pin", "wiring", "marker"], None, 1),
     ("parse_events -> no per-event distribution is ever seen",
      ".game_loop/bin/_gl_impl.py::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),
@@ -1619,7 +1630,7 @@ MUTANTS += [
      ['unreadable timestamp', 'how old that is'],
      "the age of the last landed wake stops being readable. Its kills are the two that matter: an "
      "age actually rendering, and the THIRD answer for a stamp nobody can parse — which must not "
-     "render as 0, the freshest possible reading, in the one case where nothing is known.", 2),
+     "render as 0, the freshest possible reading, in the one case where nothing is known.", 4),
     ("wake_landed_lines -> status says nothing about wakes that arrived",
      ".game_loop/bin/_gl_impl.py::wake_landed_lines", "    return []\n",
      ['NO WAKE HAS LANDED', 'how old that is', 'CANNOT see', 'arrivals COUNT'],
@@ -1627,7 +1638,7 @@ MUTANTS += [
      "state exactly: a declared path, nothing said about whether it has ever delivered, and an "
      "inert run reading identically to a healthy one. HELD AT 7, AND OWED A RAISE TO ~16. The cadence check added an OVERDUE verdict, a holding verdict and a third answer for no cadence, each asserted — a hand measurement says 16. The floor stays at 7 until a FULL SWEEP re-measures, because the killer record still describes the older function and this repo's own gate refuses a floor that claims more than the record holds. It refused this raise, which is the gate working. Four of its seven kills are the #95 report "
      "itself; the other three are the orphan check, which fires because this is the only shipped "
-     "caller of _minutes_since — real collateral, and named here so the number is not a mystery.", 7),
+     "caller of _minutes_since — real collateral, and named here so the number is not a mystery.", 8),
 ]
 
 

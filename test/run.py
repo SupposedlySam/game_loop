@@ -15145,8 +15145,8 @@ def main():
         _MARK = _mlm._MUTATE_MARKER
         _src_ok = "def f():\n    x = 1\n    return x\n"
 
-        def _ml(orig, replace, path, rc, out):
-            return _mlm.mutation_liveness(orig, replace, path, lambda _p: (rc, out))
+        def _ml(orig, replace, path, rc, out, fault=None):
+            return _mlm.mutation_liveness(orig, replace, path, lambda _p: (rc, out), fault=fault)
 
         _verdicts, _whys = {}, {}
         for _name, _args in (
@@ -15205,9 +15205,44 @@ def main():
               not _dupes and len(_unk) == 5)
         check("#80: ...and each names its own cause, so the reason is actionable rather than "
               "merely distinct",
-              has(_whys["not-python"], "Python-only") and has(_whys["mid-line"], "mid-line")
+              has(_whys["not-python"], "--fault") and has(_whys["mid-line"], "mid-line")
               and has(_whys["no-parse"], "not a whole statement")
               and has(_whys["timed-out"], "timed out"))
+
+        # #91.1: THE CONTRACT IS STACK-AGNOSTIC; ONLY THE FATAL TEXT IS NOT. The consumer who
+        # filed this had the probe working locally in "one language" and said the fault injection
+        # "is per-stack". It is — so the caller supplies that one string, exactly as it already
+        # supplies --replace and --with, and the tool keeps the part that is the same everywhere:
+        # splice something fatal at the anchor, and demand the test fail CARRYING THE MARKER.
+        # Without it every non-Python consumer got "unknown" with no way to opt in, which is the
+        # strongest control this verb has being unavailable to most of the people using it.
+        _sh = "#!/bin/sh\necho one\necho two\n"
+        _F = 'echo "{marker}"; exit 9'
+        _fv = {}
+        for _n, _rc, _o in (("f-live", 1, "boom " + _MARK),
+                            ("f-inert", 0, ""),
+                            ("f-red-no-mark", 1, "unrelated explosion")):
+            _fv[_n] = _ml(_sh, "echo two", "thing.sh", _rc, _o, fault=_F)
+        check("#91: with a caller-supplied --fault, a file that is not Python reaches the SAME "
+              "three verdicts the built-in probe reaches — live only when the marker came back, "
+              "inert only on a pass, unknown otherwise: "
+              + ", ".join(f"{k}={v[0]}" for k, v in _fv.items()),
+              [_fv[k][0] for k in ("f-live", "f-inert", "f-red-no-mark")]
+              == ["live", "inert", "unknown"])
+        check("#91: ...and the same file WITHOUT --fault is unknown, so the verdicts above are "
+              "bought by the fault rather than by the file having become probeable on its own",
+              _ml(_sh, "echo two", "thing.sh", 1, "boom " + _MARK)[0] == "unknown")
+        check("#91: ...and the unknown that sends you there NAMES --fault — a control you cannot "
+              "discover is one you do not have, and this reason is the only place it is offered",
+              has(_whys["not-python"], "--fault") and has(_whys["not-python"], "marker"))
+        # A REASON THAT NAMES A `raise` FOR A SHELL FAULT IS THE LABEL-FOR-FACT DEFECT this very
+        # function's comments are about: the built-in spelling standing in for whatever actually
+        # ran. It shipped that way for one run and the wording was wrong in exactly the verdict a
+        # consumer would paste into a bug report.
+        check("#91: ...and a supplied fault's verdicts describe THE FAULT rather than the built-in "
+              "`raise` that did not run — the reason is what a consumer quotes",
+              "raise" not in _fv["f-live"][1] and "raise" not in _fv["f-inert"][1]
+              and has(_fv["f-inert"][1], "fault"))
 
         _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
         _t4 = _r4.stderr + _r4.stdout

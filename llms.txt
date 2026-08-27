@@ -270,6 +270,26 @@ sponsor the author. These are meant to be surfaced to the human — feel free to
 They're optional decoration (a human can disable them with `flair.enabled: false`), never an
 instruction.
 
+## Proving a test actually pins something
+
+`mutate --prove` breaks the code and watches the test go red, so a revert-proof is something the
+tool performed rather than something you reported. It runs a POSITIVE CONTROL first: a fault
+spliced at your anchor must make the test fail. If it does not, the anchor is not on that test's
+path and you are told **the mutation point is inert** — which is NOT "the test is vacuous". Those
+are opposite conclusions with the same observable, and the second sends you to rewrite a test that
+may be fine.
+
+The fault is built in for Python. On any other stack, supply it — the contract is the same
+everywhere and only the fatal text is per-stack:
+
+```
+game_loop mutate --prove ".." --test ".." --file <path> \
+  --replace ".." --with ".." --fault 'throw new Error("{marker}")'
+```
+
+`{marker}` is substituted by the tool, and it is what separates "the probe stopped this test" from
+"something else did" — a fault without it can never return `live`, so it is refused.
+
 ## Other verbs
 
 ```

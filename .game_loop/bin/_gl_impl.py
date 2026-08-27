@@ -3262,7 +3262,7 @@ def _py_parses(src):
         return False
 
 
-def mutation_liveness(orig, replace, path, run):
+def mutation_liveness(orig, replace, path, run, fault=None):
     """Is the anchor ON the test's execution path? ("live"|"inert"|"unknown", why).
 
     THE POSITIVE CONTROL THIS VERB SHIPPED WITHOUT (#80). A green run under mutation has two very
@@ -3282,9 +3282,20 @@ def mutation_liveness(orig, replace, path, run):
     # A label standing in for the fact it labels, in the verb whose job is refusing exactly that.
     # Nothing downstream needed the extension: the poisoned tree must PARSE before the probe runs,
     # so a JSON file that happens to read as a Python literal is still declined a line below.
-    if not _py_parses(orig):
-        return "unknown", ("liveness probing is Python-only — it has to parse what it writes, and "
-                           "this file does not parse as Python")
+    # A CALLER-SUPPLIED FAULT IS WHAT MAKES THIS WORK OFF PYTHON (#91). The CONTRACT here is
+    # stack-agnostic — splice something unmistakably fatal at the anchor, demand the test fail
+    # CARRYING THE MARKER — and only the fatal text is per-stack. So the tool keeps the contract and
+    # the caller supplies the one string, exactly as it already supplies --replace and --with.
+    # Without this, every non-Python consumer got "unknown" and the verb's strongest control was
+    # unavailable to them with no way to opt in.
+    if fault:
+        marked = fault.replace("{marker}", _MUTATE_MARKER)
+    elif not _py_parses(orig):
+        return "unknown", ("this file does not parse as Python, and the built-in fault is the "
+                           "only one this knows how to write. Supply --fault \"<text that aborts "
+                           "here, containing {marker}>\" for your stack and the probe runs")
+    else:
+        marked = None
     at = orig.index(replace)
     line_start = orig.rfind("\n", 0, at) + 1
     prefix = orig[line_start:at]
@@ -3302,20 +3313,29 @@ def mutation_liveness(orig, replace, path, run):
     # An anchor written WITHOUT its own leading whitespace is the natural form and the one
     # `--replace-file` produces, so the tool's strongest control was quietly unavailable for it.
     # Found by taking a consumer's refutation seriously enough to run it here (lamp-owner, #91).
-    poisoned = (orig[:line_start] + f'{indent}raise SystemExit("{_MUTATE_MARKER}")'
-                + orig[at + len(replace):])
-    if not _py_parses(poisoned):
+    body = marked if marked is not None else f'raise SystemExit("{_MUTATE_MARKER}")'
+    poisoned = orig[:line_start] + indent + body + orig[at + len(replace):]
+    # ONLY THE BUILT-IN FAULT IS CHECKED FOR COMPILATION, because only for that one does this know
+    # what a program looks like. A supplied fault that does not compile is not silently excused: it
+    # makes the test fail WITHOUT the marker, which is already the "something else broke it" branch
+    # below — unestablished, never "live". The honest outcome arrives by the same road.
+    if marked is None and not _py_parses(poisoned):
         return "unknown", ("the anchor is not a whole statement — replacing it with a `raise` does "
                            "not compile, so the probe cannot be run here")
     rc, out = run(poisoned)
     if rc is None:
         return "unknown", "the probe run timed out, so nothing was established either way"
     if rc != 0 and _MUTATE_MARKER in out:
-        return "live", "the probe raised and the test carried the marker"
+        return "live", ("the supplied fault ran at that anchor and the test carried the "
+                        "marker" if marked is not None else
+                        "the probe raised and the test carried the marker")
     if rc != 0:
         return "unknown", ("the test failed under the probe but WITHOUT the marker, so something "
                            "other than the probe broke it and liveness is unestablished")
-    return "inert", "the test passed with a `raise` at that anchor — it never runs that line"
+    return "inert", ("the test passed with the fault spliced at that anchor — it never "
+                         "runs that line" if marked is not None else
+                         "the test passed with a `raise` at that anchor — it never runs "
+                         "that line")
 
 
 # One line per runner, and the shapes are stable across their whole lifetimes. A parse that
@@ -3434,14 +3454,25 @@ def cmd_mutate(s, a):
     # THE POSITIVE CONTROL, BEFORE THE RESULT IT QUALIFIES (#80). Run first so a green mutated run
     # can be attributed: without it, "the test does not cover this" and "the mutation never ran"
     # are the same observation, and the verb was reporting the first for both.
-    live, live_why = mutation_liveness(orig, a.replace, path, run_source)
+    if getattr(a, "fault", None) and "{marker}" not in a.fault:
+        die("--fault must contain {marker} — the tool substitutes its own token there.\n\n"
+            f"  got: {a.fault!r}\n\n"
+            "The marker is the ONLY thing separating 'the probe stopped this test' from 'something "
+            "else did'. A fault that aborts without it produces a red run this cannot attribute, "
+            "which is reported as liveness UNESTABLISHED — so an unmarked fault buys a probe that "
+            "can never return `live`.\n\n"
+            "    --fault 'throw new Error(\"{marker}\")'")
+    live, live_why = mutation_liveness(orig, a.replace, path, run_source,
+                                       fault=getattr(a, "fault", None))
     if live == "inert":
         die(f"YOUR MUTATION WOULD HAVE BEEN INERT — the anchor is not on this test's path.\n\n"
             f"  {a.file}: {a.replace!r}\n"
             f"  {a.test}\n"
-            f"  probe: {live_why}\n\n"
-            "A `raise` at that exact anchor did NOT make the test fail, so nothing you put there "
-            "can. This is NOT 'the test is vacuous' — that is the answer this verb used to give "
+            f"  probe: {live_why}\n"
+            + (f"  fault  : {a.fault!r}\n\n" if getattr(a, "fault", None) else "\n")
+            + "That fault at that exact anchor did NOT make the test fail, so nothing you "
+            "put there can. This is NOT 'the test is vacuous' — that is the answer this "
+            "verb used to give "
             "here, and it sends you to rewrite a test that may be fine. A docstring, a comment, a "
             "type annotation, an unreachable branch, or a line this test simply never reaches all "
             "look like this. Move the anchor to code the test executes.")
@@ -10589,7 +10620,12 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
               # fragment is short, so 400 chars never fires on it — but a shell rewrites `..` and
               # $(..) before argparse sees anything, and the applied text is what a ✓ PROVED
               # verdict then attests to. The file path is the only route that no shell touches.
-              "--replace", "--with")
+              "--replace", "--with",
+              # and the fault spliced beside them, for the same reason: it is inserted into source
+              # verbatim, and a shell that ate its quoting produces a probe that fails without the
+              # marker — which reads as "something else broke it", the one outcome that looks like
+              # an honest unknown rather than a mangled input.
+              "--fault")
 
 # MEASURED, not chosen for roundness. Over the 130 prose values in this repo's log: p50 157, p75
 # 285, p95 632, max 1011. Both corrupted values were over 700. 400 sits above the p95 of every field
@@ -10700,6 +10736,9 @@ def main():
     mu.add_argument("--prove", help="what this test is claimed to pin")
     mu.add_argument("--test", help="the test command; must be GREEN before, RED after")
     mu.add_argument("--file", help="the production file to break")
+    mu.add_argument("--fault", help="text that ABORTS at the anchor, containing {marker} — the "
+                                    "per-stack half of the liveness probe, which is built in for "
+                                    "Python and needs this everywhere else")
     mu.add_argument("--replace", help="text to replace — must appear exactly once")
     mu.add_argument("--with", dest="with_", help="what to replace it with")
     mu.add_argument("--timeout", help="seconds per test run (default 900)")

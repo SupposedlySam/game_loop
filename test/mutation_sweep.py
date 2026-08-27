@@ -594,7 +594,7 @@ MUTANTS = [
     # artifact as protection and make a later honest run look like drift. The two real ones are the
     # paired arms below.
     ("superseded -> never reports supersession", ".game_loop/bin/watchdog::superseded",
-     "    return False\n", ["supersed", "pidfile", "watchdog"],
+     "    return False\n", ['was superseded', 'watchdog whose', 'producer actually'],
      "re-measured today: 2 kills, and BOTH are behavioural — the stand-down itself and the line that SAYS it stood down. This note used to read 'measured at 4, floored at 2: the other two kills are the sweep's own bookkeeping noticing that a neutered superseded no longer parses as a producer'. That reading no longer reproduces, and the accounting assertions changed under it during this session's work. The floor was right; its EXPLANATION had gone stale, which matters because a reader subtracting two artefacts from a future reading of 4 would record a floor of 2 for a producer that had genuinely improved", 2),
     # Measured on the working tree, not on HEAD: claims.json did not exist in HEAD when this was
     # measured, so the archived fixture could not be built and the baseline came back 0 — which the
@@ -870,7 +870,7 @@ MUTANTS = [
      # point, not a gap.
      "one log line, read by both arms; it deliberately gates nothing yet", 2),
     ("pinned_sha -> stable can never be evidenced", ".game_loop/bin/_gl_impl.py::pinned_sha",
-     "    return None\n", ["confidence", "stable", "pinned", "dogfood"],
+     "    return None\n", ['and stable', 'producer actually', 'harness actually'],
      # THIN at 2 by construction, and honestly so: this producer feeds exactly one decision -- can
      # `confidence --mark stable` prove the owning agent is running on this commit -- and that
      # decision has two arms, refused-without-pin and allowed-with. There is no third thing to
@@ -1095,7 +1095,7 @@ MUTANTS += [
      "14 kills, MEASURED by the full sweep of 2026-08-26 against d2411ab — the first reading this producer has ever had. It entered the denominator with #115's widening of the candidate finder, and its first two sweeps produced NOTHING: the declared mutant body carried a literal backslash-n instead of a newline, so the file did not parse and the suite could not start. Comparable: test/run.py is unchanged between that sweep's tree and this commit.", 14),
     ('_accumulates_then_returns -> the accumulator shape is never recognised',
      'test/mutation_sweep.py::_accumulates_then_returns', '    return False\n',
-     ['accumulat', 'candidate', 'denominator', 'silence-on-pass'],
+     ['producers this', 'ARE unreachable', 'a candidate', 'producer actually', 'every excluded'],
      "5 kills, MEASURED by the full sweep of 2026-08-26 against d2411ab — the first reading this producer has ever had. It entered the denominator with #115's widening of the candidate finder, and its first two sweeps produced NOTHING: the declared mutant body carried a literal backslash-n instead of a newline, so the file did not parse and the suite could not start. Comparable: test/run.py is unchanged between that sweep's tree and this commit.", 5),
     ('candidates -> the sweep finds no producers to account for',
      'test/mutation_sweep.py::candidates', '    return []\n',
@@ -1125,7 +1125,7 @@ MUTANTS += [
 MUTANTS += [
     ("fast_without_map_notice -> a FAST run with no map goes quiet again",
      "test/mutation_sweep.py::fast_without_map_notice", '    return ""\n',
-     ["NO SECTION MAP", "speedup is gone", "asked for minutes", "names the remedy"],
+     ['notice that', 'for FAST', 'producer actually'],
      "2 kills, and the two that CANNOT kill it are the point: two of its four assertions check that "
      "it stays SILENT (a map present, and a non-fast run), which `return \"\"` satisfies. A producer "
      "whose job is to speak only sometimes can only be killed by the arms where it speaks. Measured "
@@ -1135,7 +1135,7 @@ MUTANTS += [
 MUTANTS += [
     ("floor_breaches -> a short run reports no breach, which is what a short run already looked like",
      "test/prun.py::floor_breaches", "    return []\n",
-     ["floor", "breach", "down 1", "section group"],
+     ['with fewer', 'assertion short', 'producer actually'],
      "2 kills, and the reason it is not 5 is worth more than the number: three of the five "
      "assertions on this function check that it returns NOTHING — a met floor, an absent floor, a "
      "boolean that must not count as one. `return []` satisfies every one of them. A neutered "
@@ -1257,13 +1257,13 @@ MUTANTS += [
     # "equal shas means these two agree" actually rests on.
     ("pin_status -> never reports a tree as pinned",
      ".game_loop/bin/_gl_impl.py::pin_status", "    return False, None\n",
-     ["pin", "pinned"], None, 4),
+     ['pin marker', 'answers about', 'two PINNED', 'a VERSION', 'producer actually'], None, 4),
     ("probe_reading -> a probe's output never yields a reading",
      ".game_loop/bin/_gl_impl.py::probe_reading", "    return {}, None\n",
      ['an envelope', 'the OLDER', 'the envelope'], None, 3),
     ("running_host_version -> the running host's version is never known",
      ".game_loop/bin/_gl_impl.py::running_host_version", "    return None, \"neutered\"\n",
-     ["host", "version", "EXECPATH"], None, 3),
+     ['path carrying', 'is taken', 'but carrying', 'producer actually', 'running_host_version with'], None, 3),
     ("_scan_transcript -> the transcript never yields records",
      ".game_loop/bin/_gl_impl.py::_scan_transcript",
      "    return [], {\"lines\": 0, \"skipped\": 0, \"oversized\": 0, \"denials\": {}}, None\n",
@@ -1273,7 +1273,7 @@ MUTANTS += [
      ['tree git', 'not resurrect', 'rule matching', 'an EXEMPTION'], None, 5),
     ("ci_commands -> CI's commands are never read",
      ".game_loop/bin/verify::ci_commands", "    return [], \"neutered\"\n",
-     ["CI", "workflow"], None, 2),
+     ['gate runs', 'gate DOES', 'producer actually', 'NO workflows'], None, 2),
     ("ci_gap -> no CI command is ever reported as ungated",
      ".game_loop/bin/verify::ci_gap", "    return [], \"\"\n",
      ['gate runs', 'names each', 'check FINDS', 'gate DOES', 'no shipped', 'NO workflows'], None, 2),
@@ -1291,7 +1291,7 @@ MUTANTS += [
      ["merge", "attribute", "merge-base"], None, 10),
     ("wake_path_report -> a mandate with no external wake path is never named",
      ".game_loop/bin/_gl_impl.py::wake_path_report", "    return []\n",
-     ["#95", "WAKE PATH", "wake path", "inert run"], None, 5),
+     ['the internal', 'as WEAKER', 'DECLARED wake', 'mandate armed', 'producer actually'], None, 5),
     ("guards_report -> a disabled project guard is never reported as inert",
      ".game_loop/bin/_gl_impl.py::guards_report", "    return []\n",
      ["#90", "INERT", "UNKNOWN", "guard"], None, 12),
@@ -1303,7 +1303,7 @@ MUTANTS += [
     # wired, so a stray script in triggers.d with no trigger configured is never reported at all.
     ("trigger_dead_kinds -> a trigger matching an impossible kind is never named",
      ".game_loop/bin/_gl_impl.py::trigger_dead_kinds", "    return []\n",
-     ["#87", "NEVER WRITES", "dead", "kind"], None, 4),
+     ['TWO dead', 'matters in', 'dead condition', 'kind NOTHING', 'producer actually'], None, 4),
     # THIN AT 2 -> 6. Four assertions and two of them asserted `== ([], None)` — not pinned, and
     # pinned to identical bytes — which the neutered form returns for everything. Added: TWO
     # differing files BOTH named (being shown one of two reads as the whole finding, and the guard
@@ -1407,7 +1407,7 @@ MUTANTS += [
      # real failures now have to stay DISTINGUISHABLE FROM EACH OTHER: no gh on PATH, gh ran and
      # failed, and gh exited 0 while printing non-JSON — the last being the one most easily read as
      # "nothing to report", since the process itself reported no error at all.
-     ["#76", "upstream", "`gh`", "gh on PATH"], None, 3),
+     ['SUCCEEDS while', 'answers yields', 'two failure', 'producer actually'], None, 3),
     ("read_probe -> notify never reports whether replies can be read",
      ".game_loop/bin/notify.py::read_probe", "    return False, \"neutered\"\n",
      ['the reply-read', 'every executable', '--test names', '--test verifies'], None, 3),
@@ -1479,14 +1479,14 @@ MUTANTS += [
      ["chain", "thread", "hop", "listing"], None, 8),
     ("thread_for -> a successor never finds the chain it was handed into",
      ".game_loop/bin/_gl_impl.py::thread_for", "    return None\n",
-     ["chain", "thread", "inherit"], "THIN AT 2, and the two are the whole contract: a handed-to "
+     ['session handed', 'that WAS', 'producer actually'], "THIN AT 2, and the two are the whole contract: a handed-to "
      "session INHERITS its chain, and a session handed to twice takes the LATEST pointing. The "
      "third branch — nobody handed to me, so mint — is asserted through successor_thread's output "
      "rather than here, because from the outside 'returned None' and 'minted a new chain' are the "
      "same observable and only the minting one is worth a name.", 2),
     ("tab_label -> the tab never derives a label, and falls back to the noun",
      ".game_loop/bin/_gl_impl.py::tab_label", '    return ""\n',
-     ["tab", "subject", "title"], "THIN AT 2 because the function is two decisions wide: trim to "
+     ['subject far', 'producer actually', 'no --task'], "THIN AT 2 because the function is two decisions wide: trim to "
      "the tab's width, and keep the ellipsis that stops a trimmed label reading as a complete "
      "smaller job. Both are asserted. The third case — no subject at all, fall back to "
      "'successor' — cannot kill this mutant, since the neutered form produces exactly that "

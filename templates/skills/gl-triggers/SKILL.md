@@ -152,6 +152,38 @@ finished install.
 A blocker is a claim like any other, and the expensive ones are the claims nobody asks you to prove
 because they only ever stop work rather than starting it.
 
+## Before you add a report, check the tool is not already printing it
+
+Three times in one day I began building a report that already existed, and each time the fact was
+in output I had asked for and not finished reading.
+
+- A sweep verdict named twelve assertions as outside its denominator and said nothing about why.
+  I diagnosed the cause, wrote it up, and started on a patch to print it. The sweep prints it —
+  three lines below where my `head -14` stopped, in more detail than my patch would have.
+- I argued that a re-pin of the running harness ought to be recorded somewhere a session could
+  read it. `status` had been printing the pinned-commit-versus-HEAD delta at every session start
+  the whole time. The gap was that I had not read it.
+- A guard refused a write "by design", or so a note of mine said; a later note of mine said the
+  opposite. Reading the guard settled it in one grep, and the file had not changed in between.
+
+The pull is the same each time: a truncating pipe turns a report into an excerpt, and the excerpt
+gets reasoned about as if it were the whole. `head`, `tail`, `grep -m1`, "first 20 lines" — all
+fine for looking, all dangerous the moment a conclusion rests on the absence of something.
+
+**The check is one command.** Before proposing that a tool SHOULD say X, run it and search its
+whole output for X:
+
+```
+<the tool> <the args> 2>&1 | grep -i "<the thing you think is missing>"
+```
+
+If that comes back empty, you have a finding. If it does not, you have saved yourself the feature.
+Absence in an excerpt is not absence.
+
+The tell is a sentence in your own draft beginning *"it does not say"* or *"nothing reports"*.
+That sentence is a claim about the complete output of a program, and you can only have it by
+reading the complete output — which is cheaper than the feature you were about to write.
+
 ## Auditing a guard: follow the caller, not the guard
 
 The sharpest miss of the day was not an instrument, it was a QUESTION.

@@ -3190,6 +3190,52 @@ def main():
               "per-session, and a remedy learned in a different run is a guess here",
               "make deploy" not in r.stdout)
 
+        # #95 PROPOSAL 4, THE HALF THAT IS OBSERVABLE. `--test` cannot assert a wake LANDED: that
+        # cannot be seen from inside the session it lands in. What CAN be seen is the arrival
+        # itself, once a woken run says so — and the report behind this issue caught its six-hour
+        # hole only because the transport's doctor watches from OUTSIDE. So this reports the one
+        # direction and NAMES the other, rather than implying it covered both.
+        print("a wake that LANDED is recorded; one that never came cannot be (#95):")
+        _wk = "sess-woke"
+        gl(proj, "mandate", "--set", "keep going", sid=_wk)
+        gl(proj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_wk)
+        r = gl(proj, "status", sid=_wk)
+        check("#95: with a wake path declared and nothing recorded, status says NO WAKE HAS LANDED "
+              "— and says that is not evidence none did, since only a woken run can record one and "
+              "a run that never woke could not have",
+              "NO WAKE IS RECORDED" in r.stdout and "not evidence none did" in r.stdout)
+        r = gl(proj, "note", "--woke", sid=_wk)
+        check("#95: `note --woke` records an arrival, and says plainly that this is the only "
+              "direction observable from in here",
+              r.returncode == 0 and "LANDED" in r.stdout
+              and "cannot record its own absence" in r.stdout)
+        r = gl(proj, "status", sid=_wk)
+        check("#95: ...and status then reports WHEN it landed and how old that is — the six-hour "
+              "hole was a wake path that had not delivered, which an age is what shows",
+              "last wake LANDED" in r.stdout and "min ago" in r.stdout)
+        check("#95: ...and it still names what it CANNOT see: a wake requested and never delivered "
+              "leaves nothing here, which is why this is not the probe the issue asked for",
+              "invisible from in here" in r.stdout)
+        gl(proj, "note", "--woke", sid=_wk)
+        r = gl(proj, "status", sid=_wk)
+        check("#95: ...and arrivals COUNT rather than overwrite, so a path delivering once and one "
+              "delivering all morning are not the same reading",
+              "2 this session" in r.stdout)
+        r = gl(proj, "doorbell", sid=_wk)
+        check("#95: ...and the doorbell prompt ASKS the woken session to record it — nothing else "
+              "can, so a prompt that does not say so guarantees the report above stays empty",
+              "note --woke" in r.stdout)
+        # AN UNREADABLE STAMP IS NOT A FRESH ONE. Rendering it as "0 min ago" would produce the
+        # healthiest possible reading out of the one case where nothing is known.
+        _wl = importlib.machinery.SourceFileLoader(
+            "gl_wake", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _wmod = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_wake", _wl))
+        _wl.exec_module(_wmod)
+        _ms = _wmod._minutes_since
+        check("#95: an unreadable timestamp yields None rather than 0 — a stamp nobody can parse is "
+              "not a wake that landed this instant, which is the reading that would most reassure",
+              _ms("not-a-date") is None and _ms("") is None and isinstance(_ms(_wmod.now()), int))
+
         print("mandate park (a human-called break, #15):")
         pk = "sess-park15"
         gl(proj, "mandate", "--set", "ship the outcomes work", sid=pk)
@@ -8475,7 +8521,7 @@ def main():
             # booleans — no text at all can reach them
             "--clear", "--dry-run", "--force", "--interval-only", "--json", "--list", "--merge",
             "--nothing-to-harden", "--park", "--porcelain", "--probe", "--resume", "--reviewed",
-            "--show", "--test",
+            "--show", "--test", "--woke",
             # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
             # silently — the opposite of prose, where the corruption is indistinguishable
             "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file",

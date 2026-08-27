@@ -880,6 +880,45 @@ def fire_triggers(s, event, payload):
     return lines
 
 
+def _minutes_since(ts):
+    """Whole minutes since an ISO stamp, or None when it cannot be read.
+
+    None is a THIRD answer and is rendered as one. A stamp this cannot parse is not zero minutes
+    old, and printing "0 min ago" for it would make the freshest possible reading out of the one
+    case where nothing is known.
+    """
+    try:
+        then = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if then.tzinfo is not None:
+        then = then.replace(tzinfo=None)
+    return max(0, int((datetime.datetime.now() - then).total_seconds() // 60))
+
+
+def wake_landed_lines(s):
+    """What is known about wakes that ACTUALLY ARRIVED (#95, the observable half of proposal 4).
+
+    A wake that lands leaves a trace, because the run happens. A wake that was REQUESTED and never
+    delivered leaves NOTHING here — the report behind this issue caught a six-hour hole only
+    because the chat transport's doctor watches from OUTSIDE the session. Nothing running inside a
+    stalled run can see the request that never reached it.
+
+    So this says the one direction it can, and names the other rather than implying it covered
+    both. "No wake recorded" is never "no wake arrived": it is recorded only when a woken run says
+    so, and a run that never woke could not have.
+    """
+    w = s.get("wake_landed") or {}
+    if not w.get("at"):
+        return ["  NO WAKE IS RECORDED AS HAVING LANDED here. That is not evidence none did — it is",
+                "  recorded only by a woken run saying so:  game_loop note --woke"]
+    mins = _minutes_since(w.get("at"))
+    age = "age unreadable" if mins is None else f"{mins} min ago"
+    return [f"  last wake LANDED: {w.get('at')} ({age}); {w.get('count', 1)} this session.",
+            "  A wake REQUESTED and never delivered is invisible from in here — that is the exact",
+            "  six-hour hole behind this, and only something outside the run can see it."]
+
+
 def wake_path_report(s):
     """Say when a mandate is armed and NOBODY HAS SAID how an external signal reaches this run (#95).
 
@@ -897,7 +936,8 @@ def wake_path_report(s):
         return []
     if m.get("wake_path"):
         return ["", f"wake path (declared): {m['wake_path']}",
-                "  A DECLARATION, not a probe — nothing here has verified a signal actually lands."]
+                "  A DECLARATION, not a probe — nothing here has verified a signal actually lands."
+                ] + wake_landed_lines(s)
     return ["", "⚠ MANDATE ARMED, AND NO EXTERNAL WAKE PATH IS RECORDED.",
             "  Every gate here fires from INSIDE this session — which is the thing that stops",
             "  working when the run goes quiet. If nothing outside can reach you, an inert run and",
@@ -10221,6 +10261,16 @@ def cmd_note(s, a):
     # to the log, where it is found by whoever goes looking. A recovery path has to arrive in a
     # session that has lost the context which would make it go looking — so it lives in state,
     # where the wake-up prompt can assemble it.
+    if getattr(a, "woke", False):
+        w = s.get("wake_landed") or {}
+        s["wake_landed"] = {"at": now(), "count": int(w.get("count", 0)) + 1}
+        save(s)
+        logline({"kind": "wake_landed", "count": s["wake_landed"]["count"]})
+        out("wake recorded as LANDED.",
+            f"  {s['wake_landed']['at']} — {s['wake_landed']['count']} this session.",
+            "  This is the only direction observable from in here: a wake that never arrived",
+            "  cannot record its own absence.")
+        return
     _rec = (getattr(a, "recovery", None) or "").strip()
     if _rec:
         s.setdefault("recovery", []).append({"text": _rec, "at": now()})
@@ -10277,6 +10327,10 @@ def doorbell_lines(s, repo=""):
          "",
          "DONE MEANS:",
          "  " + (m.get("text") or "").strip(),
+         "",
+         "FIRST, record that you arrived:  game_loop note --woke",
+         "Nothing else can. A wake that lands is observable from in here; one that was sent and",
+         "never delivered is not, so an unrecorded arrival reads exactly like a dead wake path.",
          "",
          "WHERE YOU WERE: run `game_loop status` and read it before doing anything else. It",
          "carries the current note. Re-deriving what it already says is the waste this prompt",
@@ -10909,6 +10963,9 @@ def main():
     n.add_argument("--text")
     n.add_argument("--recovery", help="a remedy this run learned that a woken session must not "
                                       "have to re-derive; carried by `doorbell`")
+    n.add_argument("--woke", action="store_true",
+                   help="record that an external wake LANDED — the half of a wake path that can be "
+                        "observed from inside the run")
 
     sub.add_parser("doorbell", help="print the wake-up prompt for THIS run, filled from live state")
 

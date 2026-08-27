@@ -1551,6 +1551,33 @@ MUTANTS += [
 ]
 
 
+# ── the wake-landed report (#95 proposal 4's observable half), measured 2026-08-27. ────────────
+# COUNTED BY DISTINCT NAME, not by prun's total. prun shards the suite and its footer says so in
+# terms — "the totals above are a SUM OVER SHARDS" — so a shared-fixture assertion is counted once
+# per shard that needs it. Reading kills straight off that total gave wake_landed_lines 11 for 7
+# real assertions, and the sweep's own baseline is stated in NAMED assertions. An instrument
+# cruder than its subject, in the measurement whose entire job is being exact.
+#
+#   _minutes_since      raw 8  · accounting 4 · shard dupes 2 · distinct 2
+#   wake_landed_lines   raw 15 · accounting 4 · shard dupes 4 · distinct 7
+MUTANTS += [
+    ("_minutes_since -> every timestamp reads as unparseable",
+     ".game_loop/bin/_gl_impl.py::_minutes_since", "    return None\n",
+     ['unreadable timestamp', 'how old that is'],
+     "the age of the last landed wake stops being readable. Its kills are the two that matter: an "
+     "age actually rendering, and the THIRD answer for a stamp nobody can parse — which must not "
+     "render as 0, the freshest possible reading, in the one case where nothing is known.", 2),
+    ("wake_landed_lines -> status says nothing about wakes that arrived",
+     ".game_loop/bin/_gl_impl.py::wake_landed_lines", "    return []\n",
+     ['NO WAKE HAS LANDED', 'how old that is', 'CANNOT see', 'arrivals COUNT'],
+     "the whole report disappears while the wake-path DECLARATION stays — which is the pre-#95 "
+     "state exactly: a declared path, nothing said about whether it has ever delivered, and an "
+     "inert run reading identically to a healthy one. Four of its seven kills are the #95 report "
+     "itself; the other three are the orphan check, which fires because this is the only shipped "
+     "caller of _minutes_since — real collateral, and named here so the number is not a mystery.", 7),
+]
+
+
 NOT_SWEPT = {
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
     # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not

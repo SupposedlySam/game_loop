@@ -98,9 +98,15 @@ Every gate above fires from INSIDE this session, which is the thing that stops w
 goes quiet. If something outside pokes you on a timer, give it a prompt that carries this run:
 
 ```
-./.game_loop/bin/game_loop note --recovery ".."   # a remedy you learned; a woken you must not re-derive it
-./.game_loop/bin/game_loop doorbell               # the wake-up prompt, assembled from live state
+./.game_loop/bin/game_loop note --woke             # you were woken from outside — record the ARRIVAL
+./.game_loop/bin/game_loop note --recovery ".."    # a remedy you learned; a woken you must not re-derive it
+./.game_loop/bin/game_loop doorbell                # the wake-up prompt, assembled from live state
 ```
+
+`--woke` is the first thing a woken run should do, and nothing else can do it for you. A wake that
+LANDS is observable from in here; one that was sent and never delivered is not — so an unrecorded
+arrival reads exactly like a dead wake path. `status` reports when the last one landed and how long
+ago, and says outright that a requested-but-undelivered wake is invisible to it.
 
 A generic "check your background tasks" ping is nearly worthless — you wake, spend real tokens
 working out where you were, and re-run finished steps. What makes the difference is the block of

@@ -375,6 +375,35 @@ def exemptions_the_suite_reads(root, exclusions, test_sources=None, tracked=None
     contradicted — a check that cannot come back clean. Measured: the crude version flagged four of
     five including `.gitignore`; this one flags three and leaves LICENSE and .gitignore honest.
 
+    WHY IT COUNTS ONLY PATHS A COMMAND NAMES, and why that is the definition rather than a
+    limitation. This repo's house-voice check opens EVERY tracked file and asserts none contains the
+    banned word. Read literally, that is "a command that fails when the content is wrong" for every
+    path in the tree, and every exemption is contradicted — including LICENSE. An instrument that
+    flags all of its input has measured nothing, and it looks exactly like a thorough audit.
+
+    The resolution is not to exclude that scan by name. It is that `unchecked-ok` exempts a path
+    from the per-path RULES that say what a change owes, and a universal rule holds regardless of
+    what is on the list — it is not evidence that any particular exemption has gone stale. So the
+    question is whether a command names THIS surface, and a path a command constructs is exactly
+    that. A whole-tree sweep names nothing.
+
+    llm_chat reached the same answer by excluding two whole-tree readers by module, and said a
+    two-name list is what their repo distrusts. It is the same judgement; this form needs no list
+    and cannot rot when a module is renamed.
+
+    THE BLIND SPOT, MEASURED RATHER THAN CONCEDED. Counting only literal names misses a call site
+    that opens ONE specific file through a variable — `open(FLOOR)`, where FLOOR is a module
+    constant. In this suite that is 323 of 525 `open()` sites, so the gap is large in call-site
+    terms. It changes NO verdict here: every exemption that survives is opened only by whole-tree
+    sweeps, which the criterion above excludes on purpose. Both facts belong together, because the
+    first alone reads as a broken instrument and the second alone reads as a complete one.
+
+    llm_chat built the other form — "was the caller a whole-tree sweep?" — and found their tree
+    partitions identically under both, so their data cannot separate the two rules. Nor can this
+    one at the verdict level, for the same reason from the other side. Two repos, no separating
+    case yet; the comparison is still worth running, and neither result should be read as the
+    criteria having been confirmed against each other.
+
     A REPORT, never a gate. Three entries here are contradicted today and all three are decisions a
     human has to make; failing the build on them would make the report the thing to route around.
     """
@@ -414,7 +443,13 @@ def exemptions_the_suite_reads(root, exclusions, test_sources=None, tracked=None
     #     two reports name the same entry for opposite reasons helps nobody.
     # So: the exemption must cover something that EXISTS, and the suite must read one of those.
     trackset = set(tracked)
-    out = {}
+    # THE BASIS, RETURNED ALONGSIDE THE FINDING. llm_chat's implementation of this check reported
+    # 6 of 6 and read as a thorough audit; mine reported 4 and was legible as different only
+    # because theirs could be held against it. A count with no denominator cannot be compared, and
+    # comparison is what caught both of us. So the report says what it looked at, not just what it
+    # found — under the key "" so a caller that only wants entries can ignore it.
+    out = {"": {"constructed": len(built), "in_tree": len(built & trackset),
+                "tracked": len(tracked)}}
     for pat in exclusions:
         covered = [t for t in tracked if matches(t, pat)]
         if not covered:
@@ -424,7 +459,7 @@ def exemptions_the_suite_reads(root, exclusions, test_sources=None, tracked=None
         hit = sorted(p for p in built if p in trackset and matches(p, pat))
         if hit:
             out[pat] = hit
-    return out
+    return out if len(out) > 1 else {}
 
 
 def vacuous_rules(root, mapping):
@@ -560,10 +595,16 @@ def report_coverage(staged=False, porcelain=False, scope=None):
         print("  says clean without ever looking. Delete the entry and let the gate ask you then —")
         print("  which is what it is for.")
     _stale_x = exemptions_the_suite_reads(REPO, exclusions)
+    _basis = _stale_x.pop("", {}) if _stale_x else {}
     if _stale_x:
+        # COUNTED AFTER THE BASIS IS REMOVED. The first version printed 5 for 4 entries because the
+        # basis rides in the same dict — a report about miscounting, miscounting.
         print(f"\nEXEMPTIONS THE SUITE NOW READS ({len(_stale_x)}) — each says no command can fail "
               "on these files,")
         print("and a command in this repo opens them:")
+        if _basis:
+            print(f"  (looked at {_basis['constructed']} path(s) the suite constructs by name, "
+                  f"{_basis['in_tree']} of them tracked, out of {_basis['tracked']} tracked files)")
         for _p, _hits in sorted(_stale_x.items()):
             print(f"    {_p}")
             for _h in _hits[:4]:

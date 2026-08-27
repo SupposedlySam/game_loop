@@ -11042,9 +11042,25 @@ def main():
     check("the artifact writers require a FULL sweep, measured against the count the table declared "
           "at IMPORT — the one moment the table is certainly the module's own",
           "_DECLARED_PRODUCERS = len(MUTANTS)" in _msrc and "_is_full_sweep()" in _msrc)
-    check("...and BOTH writers are guarded, not just the one that was observed clobbering — the "
-          "section map's protection was accidental and is now stated",
-          _msrc.count("_is_full_sweep()") >= 3)
+    # WAS A GLOBAL COUNT WITH A MAGIC THRESHOLD — `_msrc.count("_is_full_sweep()") >= 3` — and it
+    # stopped discriminating the day an UNRELATED third call site was added (a34e7da, the
+    # universal-collateral report). Neutering `_write_section_map` used to drop the count from 3 to
+    # 2 and fail this; with a fourth occurrence in the file it drops to 3 and passes. The assertion
+    # did not change, nobody touched it, and it quietly stopped covering the thing it names. Caught
+    # by the floor tripwire — `_write_section_map` came back 4 against a floor of 5 — which is the
+    # one instrument that could have, and exactly what a floor is for.
+    #
+    # Now asked of EACH writer's own body, so an addition anywhere else cannot satisfy it.
+    def _guarded(fn):
+        _start = _msrc.index(f"def {fn}(")
+        _rest = _msrc[_start + 1:]
+        _end = _start + 1 + (_rest.index("\ndef ") if "\ndef " in _rest else len(_rest))
+        return "_is_full_sweep()" in _msrc[_start:_end]
+
+    check("...and BOTH writers are guarded IN THEIR OWN BODIES, not just somewhere in the file — "
+          "the section map's protection was accidental, and a global count of the guard stopped "
+          "discriminating the day an unrelated call site was added",
+          _guarded("_write_killers") and _guarded("_write_section_map"))
     check("the COMPLETE killer sets are persisted, not just the three the report renders — a mark "
           "cannot be narrowed safely against a sample of the names it has to keep matching",
           "_write_killers()" in _msrc and "sweep-killers.json" in _msrc)
@@ -14487,7 +14503,17 @@ def main():
                  + "\n"
                  + _vex[_vex.index("def exemptions_the_suite_reads("):
                         _vex.index("def vacuous_rules(")], "verify-exempt", "exec"), _vex_ns)
-    _exr = _vex_ns["exemptions_the_suite_reads"]
+    _exr_raw = _vex_ns["exemptions_the_suite_reads"]
+
+    def _exr(*a, **kw):
+        # The function returns its BASIS under "" alongside the entries, so a reader can hold a
+        # second implementation against it. These assertions are about the entries; dropping the
+        # basis here is why they did not have to change shape when it was added — they DID have to,
+        # and prun said so on the first run after it.
+        _r = dict(_exr_raw(*a, **kw))
+        _r.pop("", None)
+        return _r
+
     _tr = ["docs/a.md", "LICENSE", "templates/x.md", "untouched/y.md"]
     _ts = ['p = os.path.join(REPO, "docs", "a.md")\nq = os.path.join(REPO, "templates", "x.md")']
     check("an exemption whose tracked files the SUITE READS is reported — the entry says no command "

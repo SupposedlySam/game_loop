@@ -114,6 +114,27 @@ broken form is not the neutered one written here — a validator that wrongly AC
 that fires on everything. And a high count is not coverage: ten assertions against one line of
 output kill together and count ten.
 
+AND A LOW COUNT IS NOT WEAK COVERAGE, which is the same caveat in the direction this file forgot
+to state — the direction its own headline advice ("strengthen in ascending kill order") acts on.
+A mutant is neutered to the producer's NOTHING value, so every assertion covering the NOTHING
+answer survives BY CONSTRUCTION. It cannot flip: the mutant returns exactly what that assertion
+expects. Only the something-direction assertions can ever kill, so the count measures one half of
+a two-direction contract and calls it the whole.
+
+Measured across the clean sweep of 132: ALL TWELVE of the lowest-ranked producers neuter to their
+own nothing-answer. Ten do it in the obvious shapes — `None`, `[]`, `""`, `False`, `(False, "")`.
+The other two return TRUE, and mean it the same way: `_parses` -> True is "everything compiles",
+`guardtest_directions` -> (True, "") is "every fixture is fine". Both are no-finding. Counting by
+shape alone would have missed them, which is the small version of the same mistake. `declared_mutant_unparseable` sits near the bottom at 3 with FOUR assertions in THREE
+directions; two of them assert the negative answer and can never contribute. So this file ranks
+lowest exactly the producers whose negative direction is best tested, which is the discipline the
+rest of it argues for.
+
+The ordering is still the most useful thing here. Read it as "which producers have the fewest
+SOMETHING-direction assertions", not as "which are least tested", and open the assertions before
+adding any. Strengthening one of these by writing more nothing-direction checks raises no number
+and protects nothing new.
+
 The DISCOVERY has its own edge, and it is the same kind: it reads the SHAPE of a return, never the
 meaning of one. A producer that signals nothing-found with an empty string, a zero, an empty dict
 or a sentinel object is not a candidate — and unlike a producer nobody listed, it will not be

@@ -265,6 +265,18 @@ def _write_killers():
 def _write_section_map(tree):
     """Write {producer: [section, ...]} from the COMPLETE killer sets this run measured.
 
+    `tree` IS READ FROM, NEVER WRITTEN TO, and that asymmetry is worth stating because it is not
+    guessable from the signature. The map is written beside THIS MODULE —
+    `os.path.dirname(os.path.abspath(__file__))` — while `tree` supplies the `--list-sections`
+    output and the run.py source the killer names are located in. It has to be that way: the sweep
+    passes a git-archive temp directory, so writing there would throw the map away with the tree.
+
+    Undocumented, it cost the real map. Driving this against a temp tree to test it overwrote this
+    repo's own test/sweep-sections.json with a fixture-derived one — 120 producers all pointing at
+    a single section, which is the "a wrong map makes producers come back short" case this file
+    warns about two paragraphs down. A test fixture must load this module FROM A COPY so `__file__`
+    moves with it.
+
     A byproduct of a full sweep, and only of a full sweep: a trimmed run does not observe the
     sections it did not execute, so letting it rewrite the map would let the map shrink toward
     whatever it happened to run last — a ratchet, tightening on itself until it measures nothing.

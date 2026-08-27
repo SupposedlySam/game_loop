@@ -470,6 +470,15 @@
       "change": "the success output now states what the verb did NOT check: that the --artifact path exists and the record is written, but not that the artifact ENFORCES the learning. The line 'enforced by the harness now, not by memory' is unchanged and still printed.",
       "why_it_qualifies": "A consumer who changed nothing reads a different claim. The strongest sentence in that output asserted the one thing the verb cannot verify — 'this file contains a check that would catch this class' is not decidable from a path — and the limit was stated only in the REFUSAL text, which nobody reads on the success path. INV6 asks a guard to say what it misses, on the path where it passes.",
       "consequence": "Nothing about what harden accepts or refuses changed. If you were reading 'enforced by the harness now' as the tool having confirmed your artifact fires, it never did and now says so. The claim is yours, in --mechanism. WHAT IS STILL NOT CHECKED, and cannot be: whether the artifact would catch the class, whether it still does after an edit, and whether the mechanism describes what the file actually does."
+    },
+    {
+      "seq": 49,
+      "sha": "d0ad397",
+      "notice": true,
+      "verb": "status (claims block)",
+      "change": "a claim whose own `verified_how` records PARTIAL now gets its own marker and a line telling the reader to open `verified_how` before quoting it, instead of the tick a complete re-read earns.",
+      "why_it_qualifies": "The staleness check compares a DATE and a VERSION, and both advance whether the reader re-established the whole claim or one corner of it — so a partial re-read cleared the warning exactly like a complete one and then reported as fully current. Measured here: three of seven claims re-read against 2.1.246 established only part of themselves, each said so in prose, and nothing read it back.",
+      "consequence": "If you re-verify a claim and can only establish part of it, write PARTIAL in `verified_how` and the report will say so. WHAT THIS IS NOT: it does not judge completeness — the marker is the writer's own word, deliberately, because sniffing for hedged wording would fire on careful writing. A partial re-read that does not say so still reads as complete, and nothing here can tell."
     }
   ],
   "schema": 1

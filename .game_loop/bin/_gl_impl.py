@@ -8409,6 +8409,17 @@ def installed_by():
 CLAIMS_F = os.path.join(ROOT, "claims.json")
 
 
+def _partial_reread(claim):
+    """True when a claim's own re-read says it established only part of itself.
+
+    The word is the claim's, not this function's judgement: a reader who checked one half writes
+    PARTIAL into `verified_how`, and before this nothing ever looked at it. Kept to an explicit
+    marker rather than prose-sniffing -- guessing at hedged wording would fire on careful writing,
+    which is the opposite of what should be encouraged.
+    """
+    return "PARTIAL" in str((claim or {}).get("verified_how") or "")
+
+
 def running_host_version():
     """(version, how) for the Claude Code actually running this session — or (None, why not).
 
@@ -8631,6 +8642,22 @@ def external_claims_report():
             elif run and _cv != run:
                 lines.append(f"           ⚠ '{c['id']}' was re-read {_con} against {_cv}; RUNNING "
                              f"{run} ({how}) — re-read it.")
+            elif run and _partial_reread(c):
+                # A PARTIAL RE-READ CLEARED THIS WARNING EXACTLY LIKE A FULL ONE. The staleness
+                # check compares a DATE and a VERSION, and both advance whether the reader
+                # re-established the whole claim or one corner of it. Live: two claims were re-read
+                # at 2.1.246 and recorded as partial in the same breath -- one confirmed its field
+                # NAMES survive without re-measuring what the values mean, the other confirmed the
+                # payload still carries two windows while the binary had grown a vocabulary that
+                # could not be compared to anything. Both then reported as fully current.
+                #
+                # The reader wrote PARTIAL down. Nothing read it. So the ✓ is split rather than the
+                # word being trusted to travel: a claim that says so about itself gets a verdict of
+                # its own, and the honesty of whoever wrote it is no longer load-bearing.
+                lines.append(f"           ◑ '{c['id']}' re-read {_con} against {_cv} (what is "
+                             "running) — but that re-read records itself as PARTIAL. Read")
+                lines.append("             `verified_how` before quoting this: something in it was "
+                             "checked and something was not.")
             elif run:
                 lines.append(f"           ✓ '{c['id']}' re-read {_con} against {_cv}, and that is "
                              "what is running.")

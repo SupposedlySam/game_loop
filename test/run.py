@@ -12681,6 +12681,39 @@ def main():
               "is unchecked without saying how to check it is the last rung",
               "theirtool --probe" in _xs3)
 
+        # A PARTIAL RE-READ CLEARED THE STALENESS WARNING EXACTLY LIKE A FULL ONE. That check
+        # compares a DATE and a VERSION, and both advance whether the reader re-established the
+        # whole claim or one corner of it. Live, in the session that added this: three claims were
+        # re-read at 2.1.246 and each established only part of itself — field NAMES without what
+        # the values mean, a payload absence without a code absence, two config keys of three — and
+        # all three then reported as fully current with a ✓.
+        #
+        # The readers wrote it down; nothing read it back. The marker is the CLAIM'S OWN word rather
+        # than prose-sniffing, deliberately: guessing at hedged wording would fire on careful
+        # writing, which is the opposite of what should be encouraged.
+        # loaded HERE: `_glk` is bound much further down this function, and reaching for a name
+        # before its assignment is the NameError/UnboundLocalError shape that has cost a shard four
+        # times today. Cheaper to load the module than to remember where the other one starts.
+        _pr_ld = importlib.machinery.SourceFileLoader(
+            "gl_partial", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _pr_mod = importlib.util.module_from_spec(
+            importlib.util.spec_from_loader("gl_partial", _pr_ld))
+        _pr_ld.exec_module(_pr_mod)
+        _pr = _pr_mod._partial_reread
+        check("a re-read recording itself as PARTIAL does not get the same verdict as a complete "
+              "one — the date and version advance either way, so the tick was the whole story",
+              _pr({"verified_how": "PARTIAL RE-READ at 2.1.246: field names only"}) is True)
+        check("...and a complete re-read is untouched, so the marker is a verdict rather than a "
+              "hedge applied to everything",
+              _pr({"verified_how": "RE-READ at 2.1.246, every field measured"}) is False)
+        check("...and a claim with NO re-read is not called partial — absent is a different state "
+              "from incomplete, and collapsing the two is the defect one level up",
+              _pr({}) is False and _pr(None) is False)
+        check("...and the status line SAYS partial for a claim that records it, rather than "
+              "leaving the word where only a reader of verified_how would find it",
+              "records itself as PARTIAL" in read_or_empty(
+                  os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py")))
+
         # A DECLARED DEBT PAID. This claim carried its own positive control in prose for two weeks
         # while nothing checked it — the shape of every stale claim here: everything needed was
         # written down, only the code was missing. All three arms, because an exercise that cannot

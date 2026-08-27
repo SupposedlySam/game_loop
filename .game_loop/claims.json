@@ -82,7 +82,7 @@
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
         "verified_on": "2026-08-26",
         "verified_against": "2.1.246",
-        "verified_how": "RE-READ in the running binary: `statusLine` (29 occurrences) and `refreshInterval` (3) are present. `padding` appears 407 times and is NOT evidence — it is a common word in a 230MB binary, and counting it as confirmation would be the kind of match that agrees with whatever you hoped. So this re-read confirms two of the three key names and declines to claim the third; the docs URL remains the source for the shape."
+        "verified_how": "PARTIAL RE-READ in the running binary: `statusLine` (29 occurrences) and `refreshInterval` (3) are present. `padding` appears 407 times and is NOT evidence — it is a common word in a 230MB binary, and counting it as confirmation would be the kind of match that agrees with whatever you hoped. So this re-read confirms two of the three key names and declines to claim the third; the docs URL remains the source for the shape."
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -157,7 +157,7 @@
         "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one — which is exactly what closed it.",
         "verified_on": "2026-08-26",
         "verified_against": "2.1.246",
-        "verified_how": "RE-READ at 2.1.246 (the running binary, not PATH's 2.1.247): total_input_tokens, total_output_tokens and context_window_size are all present. This confirms the FIELD NAMES survive the version bump; it does not re-establish that the values are absolute rather than deltas, which was the original reading's substance and was not re-measured here."
+        "verified_how": "PARTIAL RE-READ at 2.1.246 (the running binary, not PATH's 2.1.247): total_input_tokens, total_output_tokens and context_window_size are all present. This confirms the FIELD NAMES survive the version bump; it does not re-establish that the values are absolute rather than deltas, which was the original reading's substance and was not re-measured here."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

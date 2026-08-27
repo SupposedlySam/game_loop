@@ -13372,6 +13372,195 @@ def main():
     # somebody else wrote. The name collision is the ONLY evidence a hand-written skill ever
     # existed, so a copy over it leaves nothing to notice afterwards. Driven through the real
     # installer's real interface, like every other install test here.
+    # THE CENTRAL SHIMS HAD NO ASSERTIONS AT ALL — five tracked files that install into somebody
+    # else's repo and dispatch their guards, checked by nothing: zero mentions in this suite, and
+    # `templates/**` sits in verify.yaml's unchecked-ok, so editing one owes no check either.
+    # Found while widening the bash-3.2 scan, which is how they turned out to be invisible twice.
+    #
+    # Their postures are deliberate and DIFFERENT from each other, which is the part worth pinning:
+    # the write guard fails OPEN because it gates the tools that would repair it (INV5), the MCP
+    # guard fails CLOSED because an MCP call can be irreversible, and verify fails LOUD because a
+    # check that could not run is not a pass. A shim that quietly flipped posture would be a
+    # regression in exactly the direction nobody would notice.
+    # A FLOOR MAY NOT EXCEED WHAT WAS ACTUALLY MEASURED FOR IT. Observed the hard way: a commit
+    # raising 28 floors used a POSITIONAL search — find the producer's key, replace the first
+    # ", <old floor>)," after it — and twice walked past its own tuple into a later entry.
+    # `pinned_sha`, which was never stale-low, received `trailing_usage`'s 20 against 4 real kills.
+    #
+    # NOTHING IN THIS SUITE COULD SEE IT. prun passed 3175/0 before and after, and verify was clean,
+    # because floors are read by the sweep and by nothing else — so the corruption was committed AND
+    # released with every gate green. Only the next full sweep caught it, ~50 producers in.
+    #
+    # test/sweep-killers.json is written by a full sweep and records every assertion that actually
+    # killed each producer. That makes the property checkable HERE, in seconds, instead of only in
+    # an hour-long run somebody may skip as advisory.
+    print("a floor cannot claim more coverage than was measured for it:")
+    _swl = importlib.machinery.SourceFileLoader(
+        "gl_floors", os.path.join(REPO, "test", "mutation_sweep.py"))
+    _swm_pre = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_floors", _swl))
+    _swl.exec_module(_swm_pre)
+    _kill_p = os.path.join(REPO, "test", "sweep-killers.json")
+    _killers = json_or_none(_kill_p)
+    # ABSENT IS A THIRD ANSWER, and the first draft got this exactly wrong. The record is written by
+    # a full sweep and is GITIGNORED, so a fresh clone has none — where the draft FAILED its own
+    # denominator guard while the real check passed VACUOUSLY on an empty set. That is the shape
+    # this file exists to refuse, in the gate added to enforce measurement discipline.
+    _have = _killers is not None
+    if not _have:
+        print("       NOT CHECKED — test/sweep-killers.json is absent. It is a byproduct of a full")
+        print("       sweep and is gitignored, so a fresh clone has none. That is NO READING, not a")
+        print("       clean one.  python3 test/mutation_sweep.py  writes it.")
+    else:
+        print("       %d producer(s) recorded; %d declared here have no record yet and are NOT"
+              % (len(_killers), len([k for k in {e[1] for e in _swm_pre.MUTANTS}
+                                     if k not in _killers])))
+        print("       checked: %s" % (", ".join(
+            k.split("::")[-1] for k in sorted({e[1] for e in _swm_pre.MUTANTS} - set(_killers))[:6])
+            or "none"))
+    check("when a killer record exists it covers many producers, and when it does NOT this says so "
+          "rather than passing on an empty set — the record is gitignored, so absent is the "
+          f"ordinary state of a fresh clone: {'%d recorded' % len(_killers) if _have else 'ABSENT'}",
+          (not _have) or len(_killers) >= 50)
+    _floors = {e[1]: e[5] for e in _swm_pre.MUTANTS}
+    _over = sorted((k, _floors[k], len(_killers[k])) for k in _floors
+                   if _have and k in _killers and _floors[k] > len(_killers[k]))
+    check("no producer's floor is higher than the number of assertions the last full sweep recorded "
+          "as killing it — a floor above its own measurement is a tripwire that can only ever fire "
+          "falsely, and the one instrument that reads floors is an hour long (passes in both "
+          "states; the line above says which): "
+          + ("; ".join(f"{k.split('::')[-1]} floor {f} > {n}" for k, f, n in _over) or "none"),
+          not _over)
+    check("...and the rule FIRES on the exact corruption that produced it — floor 20 against 4 "
+          "recorded killers — so the clean answer above is a verdict and not a scan that matches "
+          "nothing (skipped, honestly, with no record present)",
+          (not _have) or any(20 > len(v) for k, v in _killers.items()
+                             if k.endswith("::pinned_sha")))
+
+    print("the central-install shims, which run in somebody else's repo:")
+    _shim_dir = os.path.join(REPO, "templates", "central-shims")
+    _shims = sorted(os.listdir(_shim_dir)) if os.path.isdir(_shim_dir) else []
+    check("there ARE central shims to check, so the assertions below have a subject: "
+          + ", ".join(_shims),
+          len(_shims) >= 5 and "guard-writes.sh" in _shims and "guard-mcp.sh" in _shims)
+    _unparsed = [n for n in _shims
+                 if subprocess.run(["bash", "-n", os.path.join(_shim_dir, n)],
+                                   capture_output=True).returncode != 0]
+    check("every shim PARSES — one that does not is a hook that cannot run in a consumer's repo, "
+          "and these are the files that dispatch every guard they have: "
+          + (", ".join(_unparsed) or "none"),
+          not _unparsed)
+    # THE STATED INVARIANT, WHICH NOTHING CHECKED. guard-writes.sh's own header says "Tracked in
+    # git — must stay machine-agnostic, no baked path", and a home path in a tracked file has been
+    # reported here once before, in .claude/settings.json, after which nothing stopped it returning.
+    _baked = []
+    for _n in _shims:
+        _t = read_or_empty(os.path.join(_shim_dir, _n))
+        for _m in re.finditer(r"/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+", _t):
+            _baked.append(f"{_n}: {_m.group(0)}")
+    check("no shim carries a baked home path — they are tracked, so one machine's path ships to "
+          "every clone, and their own header states this rule while nothing enforced it: "
+          + ("; ".join(_baked) or "none"),
+          not _baked)
+    _spellings = {re.search(r'central="([^"]+)"', read_or_empty(os.path.join(_shim_dir, _n))).group(1)
+                  for _n in _shims
+                  if re.search(r'central="([^"]+)"', read_or_empty(os.path.join(_shim_dir, _n)))}
+    check("...and all five resolve the central location with ONE spelling, so they cannot disagree "
+          "about where it is — two spellings means half the guards dispatch and half fail open: "
+          + " | ".join(sorted(_spellings)),
+          len(_spellings) == 1 and len(_shims) >= 5)
+
+    # THE POSTURES, driven with the central install DELIBERATELY ABSENT.
+    _nocentral = tempfile.mkdtemp(prefix="gameloop-nocentral-")
+    try:
+        def _shim(name, payload="{}"):
+            return subprocess.run(["bash", os.path.join(_shim_dir, name)],
+                                  input=payload, capture_output=True, text=True,
+                                  env=dict(os.environ, GAME_LOOP_CENTRAL=_nocentral))
+
+        _w = _shim("guard-writes.sh")
+        check("with NO central install the write-guard shim ALLOWS — exit 0 — because it gates the "
+              "very tools that would repair the install, so blocking here would block its own fix "
+              "(INV5)",
+              _w.returncode == 0)
+        check("...and it SAYS the guard is not running, rather than allowing in silence, which is "
+              "indistinguishable from a guard that ran and was content",
+              "NOT RUNNING" in _w.stdout and "not evidence of safety" in _w.stdout)
+        _m = _shim("guard-mcp.sh")
+        check("...while the MCP shim fails CLOSED on the same absence — deny, not allow — because "
+              "an MCP call can be irreversible and a missing guard gates nothing. The two postures "
+              "are opposite ON PURPOSE and nothing pinned that until now",
+              '"permissionDecision":"deny"' in _m.stdout.replace(" ", ""))
+        for _n, _out in (("guard-writes.sh", _w.stdout), ("guard-mcp.sh", _m.stdout)):
+            _first = next((l for l in _out.splitlines() if l.strip().startswith("{")), "")
+            check(f"...and {_n}'s notice is PARSEABLE JSON — Claude Code drops a malformed hook "
+                  "payload, so a broken notice is a guard that fails open in total silence",
+                  bool(_first) and isinstance(json.loads(_first), dict))
+        _v = _shim("verify")
+        check("...and the verify shim fails LOUD: non-zero, and it says in words that this is NOT "
+              "a pass — a check that could not run reporting success is the whole defect this "
+              "project is about",
+              _v.returncode != 0 and "NOT a pass" in (_v.stdout + _v.stderr))
+    finally:
+        shutil.rmtree(_nocentral, ignore_errors=True)
+
+    print("shipped bash runs on what macOS ships, which is 3.2:")
+    # BASH 3.2 IS WHAT macOS SHIPS, and every one of these runs on a consumer's machine as a hook.
+    # Observed here today, in this repo's own tooling: a scratch script used `declare -A`, which 3.2
+    # does not have. Under `set -euo pipefail` it did not abort — it printed its success line and
+    # exited 0 having done NOTHING. A shipped guard failing that way fails OPEN and silent, on every
+    # mac, and the only symptom is that nothing is guarded.
+    #
+    # THE FILE LIST IS DERIVED, because a hand-kept one is the half that goes stale: it is every
+    # executable this repo ships whose first line names bash, found by reading them.
+    # FROM `git ls-files`, NOT FROM A LIST OF DIRECTORIES. The first version of this scan named
+    # three directories and required the file to be executable, and BOTH were holes: it missed
+    # templates/central-shims/ entirely — five bash scripts that install into a consumer's repo —
+    # and would have skipped them anyway, because they are not +x in git (install.sh chmods them on
+    # the way in). A hand-written list of directories is the same defect as a hand-written list of
+    # files, in the check written because of that defect. Tracked-and-says-bash is the real
+    # property, and it is one command away.
+    _tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)
+    _sh_files = []
+    for _rel in (_tracked.stdout or "").splitlines():
+        _f = os.path.join(REPO, _rel)
+        if not os.path.isfile(_f):
+            continue
+        try:
+            with open(_f, "rb") as _fh:
+                _first = _fh.readline(200)
+        except OSError:
+            continue
+        if _first.startswith(b"#!") and b"bash" in _first:
+            _sh_files.append(_f)
+    check("there ARE shipped bash scripts to check, so the scan below is not passing on an empty "
+          f"denominator: {len(_sh_files)} found",
+          len(_sh_files) >= 10)
+    # Each pattern is a construct bash 3.2 does not have. `declare -A` is the one measured today;
+    # the rest are its siblings, and every one of them fails the same way — quietly.
+    _B4 = [(r"\b(declare|local|typeset)\s+-[A-Za-z]*A", "associative arrays (declare -A)"),
+           (r"\breadarray\b|\bmapfile\b", "readarray/mapfile"),
+           (r"\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\^\^", "${var^^} upper-casing"),
+           (r"\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?,,", "${var,,} lower-casing"),
+           (r"&>>", "&>> append-both-streams"),
+           (r"\bcoproc\b", "coproc")]
+    _b4_hits = []
+    for _f in _sh_files:
+        _src = read_or_empty(_f)
+        for _pat, _why in _B4:
+            for _m in re.finditer(_pat, _src):
+                _ln = _src.count("\n", 0, _m.start()) + 1
+                _b4_hits.append(f"{os.path.relpath(_f, REPO)}:{_ln} {_why}")
+    check("no shipped bash script uses a construct bash 3.2 lacks — that is what macOS ships, every "
+          "one of these runs there as a hook, and the failure is SILENT: under `set -e` the "
+          "unsupported line does not abort, so the script prints its success and exits 0 having "
+          "done nothing: " + ("; ".join(_b4_hits) or "none"),
+          not _b4_hits)
+    check("...and the scan can FIND one — the exact construct measured today, so the clean answer "
+          "above is a verdict rather than a pattern that matches nothing",
+          any(re.search(_B4[0][0], "declare -A MAP=()") for _ in (1,))
+          and re.search(_B4[1][0], "readarray -t x < f")
+          and not re.search(_B4[0][0], "declare -a PLAIN=()"))
+
     print("the shipped skills are asked for, and never clobber somebody else's (#skills):")
     _sk_src = os.path.join(REPO, "templates", "skills")
     _sk_names = sorted(d for d in os.listdir(_sk_src)

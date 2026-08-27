@@ -82,8 +82,35 @@ likely to have covered.
 and `test/trigger_fixtures.py` exercises them in all four shapes above. Read those before writing
 your own — they are the same shapes, already debugged.
 
-## What this skill does NOT give you
+## The harness, for the shape it fits
 
-A shared harness. Each project still writes its own fixtures, and the boilerplate is duplicated
-across consumers. That is a real gap ("a consumer cannot regression-test the guards it writes"), and
-this skill is the method rather than the tooling.
+This skill used to close by saying the tooling did not exist and this was the method. That stopped
+being true — `guardtest` ships it:
+
+```
+game_loop guardtest --fixture <path>
+```
+
+The fixture is yours and stays yours: a `script`, and `cases` each with a `name`, a `payload` handed
+to the script on stdin, and an `expect` of `deny` / `allow` / `ask` (or `expect_exit` for a guard
+that only speaks exit codes, and `expect_output` to pin the REASON). It enforces the rule this skill
+argues for — **a fixture whose cases all point one way is refused**, because a script that does
+nothing passes it.
+
+It reads a refusal by `exit 2` and by a JSON `permissionDecision` alike, reports `silent` for exit 0
+with nothing said, and `unreadable` for a decision it cannot parse. Each of those is a separate
+answer on purpose: two of them are what a guard that stopped running looks like.
+
+## What it still does NOT give you
+
+**It tests payload → decision, and that is not every guard.** Measured against a real trigger whose
+verdict comes from repo STATE — does the handoff name HEAD — where varying the payload varied
+nothing and the deny case simply never fired. Nothing was wrong with the trigger; the harness did
+not fit it.
+
+It cannot be faked green either, and that is the point: the both-directions rule needs a real DENY,
+and a script whose answer does not depend on the payload cannot produce one. So you get a refusal to
+certify rather than a green run that proves nothing.
+
+If your guard reads state, the thing to vary is the state. That is a different harness, and it does
+not exist yet.

@@ -7526,8 +7526,14 @@ def successor_why(sc):
 TASK_MAX_WORDS, TASK_MAX_CHARS = 3, 20
 
 
-def tab_label(subject):
+def tab_label(subject, trim=True):
     """A <=TASK_MAX_CHARS label for a tab, trimmed out of a subject that may be five times that.
+
+    THE TRIM IS A PROPERTY OF THE SURFACE, NOT OF THE LABEL, so `trim=False` returns the subject
+    whole. A Warp tab is one cell in a row of eight and genuinely cannot show more; a saggar
+    terminal is a named row in its project's own folder, which is not that shape. Dropped there on
+    the user's instruction, 2026-08-27 — the same call as the `<R> | ` prefix, and for the same
+    reason: both spend a narrow tab's scarcest characters on a surface that is not narrow.
 
     IT TRIMS WHERE `--task` REFUSES, and the asymmetry is the point. `--task` is a human naming the
     job, so too long is a correctable mistake and the refusal teaches the convention. A subject is
@@ -7542,6 +7548,10 @@ def tab_label(subject):
     words = " ".join(str(subject or "").split()).split()
     if not words:
         return ""
+    if not trim:
+        # Whitespace is still collapsed: a subject carrying a newline would break the TOML line and
+        # a run of spaces reads as a gap in the name. Only the SHORTENING is off.
+        return " ".join(words)
     label = " ".join(words[:TASK_MAX_WORDS])
     clipped = len(words) > TASK_MAX_WORDS
     # THE ELLIPSIS COUNTS TOWARD THE BUDGET. Appending it in the word-clip branch could push a label
@@ -7567,6 +7577,11 @@ def successor_title(task=None, title=None, cwd=None, subject=None, mode=None):
     belong to and prints that project's name above them, so the initial re-states in four
     characters what the surrounding folder already says — and it spends them at the FRONT, which
     is the end that survives truncation. Dropped on the user's instruction, 2026-08-27.
+
+    THE ELLIPSIS GOES WITH IT, on the same instruction and the same reasoning. Cutting "scope the
+    backups and push" down to "scope the backups\u2026" is a cost paid for a width saggar does not
+    impose, and what it buys back is a name that says the job is longer than this without saying
+    what the rest of it was. Warp keeps the trim, because there the width is real.
 
     THE TAB IS THE SURFACE THE HUMAN ACTUALLY SCANS, and until now it was the one place the subject
     did not reach. #b6a0276 gave the successor's PROMPT a subject — derived from the mandate, the
@@ -7597,7 +7612,7 @@ def successor_title(task=None, title=None, cwd=None, subject=None, mode=None):
         # "successor" is the floor, not a description: it is true of every session this verb ever
         # starts, so it distinguishes nothing. Reached only when there is no subject either — and
         # then it is honest, because at that point the harness genuinely does not know the job.
-        body = task or tab_label(subject) or "successor"
+        body = task or tab_label(subject, trim=mode != "saggar-agent") or "successor"
         # The one mode with a folder around the name is the one that does not repeat it.
         initial = (os.path.basename(cwd or REPO_ROOT) or "?")[:1].upper() or "?"
         title = body if mode == "saggar-agent" else f"{initial} | {body}"

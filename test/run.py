@@ -2343,6 +2343,21 @@ def main():
         check("...and under saggar it carries NO `<R> | ` prefix — the folder already names the "
               "project, and the characters are spent at the end that truncation eats first",
               not re.match(r"^[A-Za-z0-9?] \| ", sag_name))
+        # ...AND NEITHER IS THE ELLIPSIS. The trim exists because a Warp tab is one cell in a row
+        # of eight; a saggar terminal is a named row inside its project's folder, so the width the
+        # trim is paying for is not there, and what it costs is a name cut to a DIFFERENT, smaller
+        # job. Dropped on the user's instruction, 2026-08-27, alongside the prefix above.
+        sag_long = re.search(
+            r"terminal name       : (.*?)  \(passed to",
+            succ_mode("--about", "scope the backups and push them", SAGGAR_SESSION="F1AC5B4E")
+        ).group(1)
+        check("...and under saggar a long subject arrives WHOLE — no trim, no ellipsis, because "
+              "the folder-grouped terminal list is not the narrow row the limit was built for",
+              sag_long == "scope the backups and push them")
+        check("...while Warp still trims it, so the ellipsis is spent on the surface that is "
+              "actually narrow rather than on every surface alike",
+              "| scope the backups\u2026" in succ_mode(
+                  "--about", "scope the backups and push them", TERM_PROGRAM="WarpTerminal"))
         check("...while Warp keeps it, so this is a fact about the SURFACE and not a rename — a "
               "flat row of tabs from eight repos has nothing else to tell two of them apart",
               re.search(r"tab title           : [A-Za-z0-9?] \| ",

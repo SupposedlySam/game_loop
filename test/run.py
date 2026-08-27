@@ -13598,8 +13598,13 @@ def main():
     # AND A TREE WITH NO .git STILL GETS SCANNED. `git ls-files` returns NOTHING there, so this
     # scanned zero files: the denominator guard failed loudly while the real check passed VACUOUSLY
     # on an empty set — loud where it does not matter, green where it does, which is the same shape
-    # as the floor gate's first draft one screen up. Not hypothetical: a `git archive` extract is
-    # such a tree (the sweep's own), and so is a tarball install, which is the `curl | bash` path.
+    # as the floor gate's first draft one screen up. Not hypothetical: the sweep's own tree under
+    # test is a `git archive` extract, and this scan measurably found NOTHING there.
+    #
+    # I first justified it as "and a tarball install, the `curl | bash` path" — CHECKED AND WRONG.
+    # A curl install lays down .game_loop/ and .claude/ and no test/ at all, so this suite never
+    # runs in a consumer's installed project. The real second case is somebody who takes the REPO
+    # as a zip or tarball to run its tests. Narrower than I claimed, and still a tree with no .git.
     #
     # git first because it is the honest list of what SHIPS; the walk is the fallback, and it skips
     # the directories a checkout accumulates rather than pretending they are shipped.

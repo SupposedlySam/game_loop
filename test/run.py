@@ -216,6 +216,22 @@ def assertions_that_cannot_fail(src):
     Deliberately narrow: only a literal `True` in the else-branch of a ternary inside a check()
     argument. Zero false positives across this repo's four test files, which is why it is a gate
     rather than a report — a check that fires on legitimate work is one people route around.
+
+    WHAT IT DECLINES TO MATCH, measured rather than asserted (INV6). The obvious widenings were
+    scanned across every test file here, and each hit is legitimate work this gate must not fire
+    on — which is the evidence for the narrowness, where the paragraph above was only a claim:
+
+      · `check(..., True)` as a deliberate SKIP marker — 1 here, and its own name says "skipped,
+        not passed" because the file it needs is gitignored and a clone rightly lacks it
+      · `check(..., True)` carrying documentation — 1 here, the "WHAT THIS DOES NOT CHECK" limits,
+        written as an assertion precisely so they cannot be dropped quietly
+      · `<setup>() or True` — 1 here, discarding a side-effecting setup call's return value so the
+        real condition after the `and` decides
+      · a truthy non-`True` constant in an else-branch (`else 1`, `else "ok"`) — 0 here
+
+    So three of the four shapes occur and all three are sound, and the fourth does not occur at
+    all. Widening to any of them buys nothing and costs three false positives on the day it lands.
+    Re-run that scan before widening; do not re-derive it from this list.
     """
     out_ = []
     for n in ast.walk(ast.parse(src)):

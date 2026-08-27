@@ -14209,6 +14209,40 @@ def main():
     # said 11 kills, because the note written for scope_arg had been copy-pasted onto it, and a
     # number that large is exactly what stops anyone looking. These are the assertions it did not
     # have: driven directly, so they discriminate this function from its sibling.
+    # AN EXEMPTION RECORDS A JUDGEMENT ABOUT A MOMENT, and nothing watched for the moment to pass.
+    # `unchecked-ok` claims no command can fail on those files; the suite then grew assertions about
+    # what is IN them and the entry kept standing. Hit here (`templates/**`) and independently in
+    # llm_chat's verify.yaml the same day, neither repo aware of the other. `vacuous_rules` already
+    # catches the opposite shape — an exemption matching NOTHING — so this is its complement.
+    _vex = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "verify"))
+    _vex_ns = {"re": re, "os": os, "subprocess": subprocess}
+    exec(compile("from fnmatch import fnmatch\n"
+                 + _vex[_vex.index("def matches("):_vex.index("\n\n", _vex.index("def matches("))]
+                 + "\n"
+                 + _vex[_vex.index("def exemptions_the_suite_reads("):
+                        _vex.index("def vacuous_rules(")], "verify-exempt", "exec"), _vex_ns)
+    _exr = _vex_ns["exemptions_the_suite_reads"]
+    _tr = ["docs/a.md", "LICENSE", "templates/x.md", "untouched/y.md"]
+    _ts = ['p = os.path.join(REPO, "docs", "a.md")\nq = os.path.join(REPO, "templates", "x.md")']
+    check("an exemption whose tracked files the SUITE READS is reported — the entry says no command "
+          "can fail on them and a command in the repo opens them, which is the entry having gone "
+          "false by standing still",
+          _exr("/r", ["docs/**", "templates/**"], _ts, _tr)
+          == {"docs/**": ["docs/a.md"], "templates/**": ["templates/x.md"]})
+    check("...and an exemption nothing reads is LEFT ALONE, so the report is a verdict rather than "
+          "a list of every entry — LICENSE is exempt here and stays exempt",
+          _exr("/r", ["LICENSE"], _ts, _tr) == {})
+    check("...and an exemption matching NO tracked file is not reported here at all: that is the "
+          "vacuous-exemption check's subject, and two reports naming one entry for opposite "
+          "reasons helps nobody",
+          _exr("/r", ["ghost/**"], _ts, _tr) == {})
+    check("...and a path the suite CONSTRUCTS but the repo does not track is a fixture, not a "
+          "surface — the first version reported a directory and a file that does not exist",
+          _exr("/r", ["docs/**"], ['os.path.join(REPO, "docs", "nonexistent.md")'], _tr) == {})
+    check("...and with no test sources it answers EMPTY rather than clean-looking-silence being "
+          "mistaken for a verdict — nothing was read, so nothing can be concluded",
+          _exr("/r", ["docs/**"], [], _tr) == {})
+
     _vsrc0 = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "verify"))
     _ost_cap = int(re.search(r"^UNCHECKED_SHOWN = (\d+)", _vsrc0, re.M).group(1))
     _ost_ns = {"UNCHECKED_SHOWN": _ost_cap}          # read, not hardcoded: the cap may move

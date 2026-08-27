@@ -473,6 +473,15 @@ MUTANTS = [
     # instance of it, in the assertions written to raise this producer's coverage, and the
     # cost was the producer losing its reading entirely. Fluency is not protection; the sweep
     # is.
+    ("verify.exemptions_the_suite_reads -> an exemption the suite has outgrown is never reported",
+     ".game_loop/bin/verify::exemptions_the_suite_reads", "    return {}\n",
+     ["exemption", "unchecked-ok", "SUITE READS", "outgrown"],
+     "FLOOR 1 IS MEASURED AND DELIBERATELY LOW. Five assertions drive it and exactly ONE can kill: "
+     "the other four assert the EMPTY answer, and the neutered body returns {} — the "
+     "nothing-direction rule this file states in its header, predicted before the run rather than "
+     "discovered by it. Neutering it flips five assertions in total, so expect roughly 5 from the "
+     "next full sweep; 1 is what I could measure without one, and the rule is that a floor may not "
+     "claim more than was measured. Raise it from the killers file.", 1),
     ("pinned_report -> the PINNED CODE block is never reported",
      ".game_loop/bin/_gl_impl.py::pinned_report", "    return None\n",
      ["pinned", "self"], None, 217),

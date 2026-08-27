@@ -356,6 +356,77 @@ def ci_gap(root, mapping):
     return missing, ""
 
 
+def exemptions_the_suite_reads(root, exclusions, test_sources=None, tracked=None):
+    """Exemptions whose files the SUITE now reads — {glob: [paths]}, empty when it cannot be asked.
+
+    THE COMPLEMENT OF `vacuous_rules` OVER EXCLUSIONS, and the direction that actually bit here. An
+    entry in unchecked-ok claims no command exists that fails when what those files SAY is wrong.
+    That is a claim about a MOMENT, and nothing watches for the moment to pass: the day the suite
+    grows an assertion about a file under the glob, the claim is false and the entry keeps standing.
+    This file's own words for that are that it "launders a gap into a decision".
+
+    Observed the same day in two repos that did not know about each other — `templates/**` here,
+    while the suite had grown assertions about shipped skills, and `*.md` in llm_chat's verify.yaml
+    while three of its test files had started reading those documents. Neither entry was touched;
+    the world moved under both.
+
+    ASKED OF PATHS THE SUITE CONSTRUCTS, NEVER OF THE WORD APPEARING IN IT. The suite names these
+    directories constantly in assertion prose, and a substring match reports every exemption as
+    contradicted — a check that cannot come back clean. Measured: the crude version flagged four of
+    five including `.gitignore`; this one flags three and leaves LICENSE and .gitignore honest.
+
+    A REPORT, never a gate. Three entries here are contradicted today and all three are decisions a
+    human has to make; failing the build on them would make the report the thing to route around.
+    """
+    if tracked is None:
+        try:
+            r = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True,
+                               timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            return {}
+        if r.returncode != 0:
+            return {}
+        tracked = [t for t in (r.stdout or "").split("\n") if t.strip()]
+    if not tracked:
+        return {}
+    if test_sources is None:
+        test_sources = []
+        for t in tracked:
+            if t.startswith("test/") and t.endswith(".py"):
+                try:
+                    with open(os.path.join(root, t), encoding="utf-8", errors="replace") as fh:
+                        test_sources.append(fh.read())
+                except OSError:
+                    pass
+    if not test_sources:
+        return {}
+    blob = "\n".join(test_sources)
+    built = set()
+    for j in re.findall(r'os\.path\.join\(\s*REPO\s*,\s*((?:"[^"]+"\s*,?\s*)+)\)', blob):
+        built.add("/".join(re.findall(r'"([^"]+)"', j)))
+    built |= set(re.findall(r'"((?:[\w.\-]+/)+[\w.\-]+\.(?:md|txt|yaml|json|sh))"', blob))
+    # ONLY REAL, TRACKED FILES, on both sides. Two corrections the first version needed, and both
+    # were visible the moment it ran rather than reasoned out:
+    #   · a constructed path that is not tracked is a FIXTURE, not this repo's surface — the first
+    #     version reported "the suite reads docs", naming a directory, and `.game_loop/notify.json`,
+    #     which matches no tracked file at all;
+    #   · an exemption matching no tracked file is already the check above's subject, and having
+    #     two reports name the same entry for opposite reasons helps nobody.
+    # So: the exemption must cover something that EXISTS, and the suite must read one of those.
+    trackset = set(tracked)
+    out = {}
+    for pat in exclusions:
+        covered = [t for t in tracked if matches(t, pat)]
+        if not covered:
+            continue                      # the vacuous-exemption report owns this one
+        # `matches` and not a second copy of the rule: this file keeps glob semantics in ONE
+        # place on purpose, and my duplicate already differed from it by a trailing slash.
+        hit = sorted(p for p in built if p in trackset and matches(p, pat))
+        if hit:
+            out[pat] = hit
+    return out
+
+
 def vacuous_rules(root, mapping):
     """Rules whose glob matches NO tracked file — ([], why) when the question cannot be asked.
 
@@ -488,6 +559,24 @@ def report_coverage(staged=False, porcelain=False, scope=None):
         print("  When a file finally lands under one of these, it arrives EXEMPT and this report")
         print("  says clean without ever looking. Delete the entry and let the gate ask you then —")
         print("  which is what it is for.")
+    _stale_x = exemptions_the_suite_reads(REPO, exclusions)
+    if _stale_x:
+        print(f"\nEXEMPTIONS THE SUITE NOW READS ({len(_stale_x)}) — each says no command can fail "
+              "on these files,")
+        print("and a command in this repo opens them:")
+        for _p, _hits in sorted(_stale_x.items()):
+            print(f"    {_p}")
+            for _h in _hits[:4]:
+                print(f"        the suite reads {_h}")
+            if len(_hits) > 4:
+                print(f"        ... {len(_hits) - 4} more")
+        print("  An exemption records a judgement about a MOMENT and nothing watches for the moment")
+        print("  to pass. These were true when written; the suite grew assertions about what is IN")
+        print("  those files and nobody edited the entry. That is this file's own 'launders a gap")
+        print("  into a decision', arrived at by standing still.")
+        print("  NOT A GATE, and not an accusation that the entries are wrong: promoting one to a")
+        print("  real rule is a decision about what a change OWES, which is a human's. What is not")
+        print("  defensible is the entry claiming a command cannot fail while one reads the file.")
     _dead, _why = vacuous_rules(REPO, mapping)
     if _dead:
         print(f"\nRULES THAT MATCH NO TRACKED FILE ({len(_dead)}) — they run nothing and fail "

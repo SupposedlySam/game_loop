@@ -18046,6 +18046,31 @@ def main():
           "fails, which is the direction a suite wants",
           assertions_that_cannot_fail(
               'check("x", thing() == [] if "name" in dir() else False)\n') == [])
+    # MEASURED AT ONE GENUINE KILLER. Of its three, two are the sweep's universal bookkeeping —
+    # one of which reddens for all 132 producers — so a single assertion covered the check that
+    # catches assertions which cannot fail. The `else False` arm above cannot help: the mutant
+    # returns [] and that arm expects [], which is the nothing-direction rule this repo now
+    # states out loud. These are the something-direction cases it was missing.
+    check("...and it finds EVERY offending check, not the first — a detector that stops at one "
+          "leaves the rest invisible while reporting a hit, which reads as a working scan",
+          assertions_that_cannot_fail(
+              'check("a", x if y else True)\ncheck("b", 1)\ncheck("c", p if q else True)\n')
+          == [1, 3])
+    check("...and the line it reports is the CHECK's, not the ternary's — they differ whenever the "
+          "assertion wraps, which is most of them here, and a number pointing into the middle of a "
+          "call sends the reader to a line that explains nothing",
+          assertions_that_cannot_fail(
+              'check("a",\n      x\n      if y\n      else True)\n') == [1])
+    check("...and it reaches a ternary NESTED inside a larger condition, which is where this shape "
+          "actually hides — the one found in this repo was a whole clause of an `and`",
+          assertions_that_cannot_fail('check("a", cond and (x if y else True))\n') == [1])
+    check("...and two offending ternaries in ONE check report that line ONCE, so a count of "
+          "findings stays a count of assertions rather than of syntax nodes",
+          assertions_that_cannot_fail(
+              'check("a", (x if y else True) and (p if q else True))\n') == [1])
+    check("...and a ternary in a call that is NOT `check` is ignored — ordinary code is allowed to "
+          "fall back to True, and a gate that fires on it is one people route around",
+          assertions_that_cannot_fail('helper("a", x if y else True)\n') == [])
     _vr_rules, _vr_excl = _gvr.load_manifest()
     _dead_rules, _vr_why = _gvr.vacuous_rules(REPO, _vr_rules)
     check("and THIS repo currently has no vacuous RULE — measured against the real manifest now, "

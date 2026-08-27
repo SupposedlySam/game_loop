@@ -111,6 +111,38 @@ The tell they share: in all four the assertion was GREEN while its subject was B
 what you were hoping for. A check you have never seen fail is a check you have not tested — and
 knowing that rule does not exempt the check you just wrote *because* of it.
 
+## The most expensive shape: a true sentence promoted to a blocker
+
+Three times in one session I reported something as impossible or forbidden, repeated it for hours,
+and was wrong — and every time the sentence I started from was TRUE.
+
+- *"A wake requested and never delivered is invisible from in here."* True of ONE wake: the run that
+  would record it is the run that did not happen. Not true of a declared CADENCE — a path claiming
+  every 10 minutes with nothing landed in 700 is a dead path, visible from inside. The issue had
+  been open on exactly that.
+- *"verify.yaml is a policy edit the guard refuses by design."* True of `INVARIANTS.md`, which
+  denies. Not true of `verify.yaml`, which was allowed on a standing grant. I had assumed two files
+  in one list shared a rule.
+- *"The no-git fallback covers a tarball install."* True that such a tree has no `.git`. Not true
+  that the install path exercises it — it ships no test suite at all.
+
+The shape is always the same: a correct observation about **one case**, generalized into a claim
+about the general case, and never tested in the general form. It survives because re-reading it
+confirms it — the sentence really is true, so checking your reasoning cannot catch it. Only checking
+the WORLD can.
+
+Two questions that would have caught all three:
+
+**"True of what, exactly?"** Name the case the sentence is true of. If the blocker is broader than
+that case, you have not tested the blocker.
+
+**"What would I run to see it?"** A blocker that cannot be reduced to a command is a belief. Each of
+these took one: declare a cadence and backdate a timestamp; feed the guard a payload; look inside a
+finished install.
+
+A blocker is a claim like any other, and the expensive ones are the claims nobody asks you to prove
+because they only ever stop work rather than starting it.
+
 ## Auditing a guard: follow the caller, not the guard
 
 The sharpest miss of the day was not an instrument, it was a QUESTION.

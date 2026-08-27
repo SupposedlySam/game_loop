@@ -1535,7 +1535,9 @@ MUTANTS += [
      "the two refusal protocols collapse into one unreadable answer. This is the exact confusion "
      "that made the first cut of guardtest read this repo's own write guard, mid-refusal, as "
      "allowing everything — the verb built to catch a guard going quietly inert was about to "
-     "certify one.", 7),
+     "certify one. RE-MEASURED 2026-08-27 after the pretty-print fix: 7 -> 13 distinct, because "
+     "that fix added the JSON-scan, unreadable and glyph assertions. A floor measured against a "
+     "function that has since changed is a floor for code nobody runs.", 13),
     ("guardtest_directions -> every fixture claims to exercise both directions",
      ".game_loop/bin/_gl_impl.py::guardtest_directions", '    return True, ""\n',
      ['all expect ALLOW', 'all expect DENY'],

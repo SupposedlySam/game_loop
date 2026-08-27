@@ -919,6 +919,39 @@ def wake_landed_lines(s):
             "  six-hour hole behind this, and only something outside the run can see it."]
 
 
+def authorizations_report(s):
+    """The `authorize` grants this session holds, and what is LEFT of each.
+
+    A grant is a consumable the human paid for, and nothing showed its balance. `authorize` prints
+    the count at grant time and then the number only ever moves silently — so a session cannot see
+    what it holds, cannot see it being spent, and cannot see that it is already gone.
+
+    That is not hypothetical. Twice now a probe of the write guard has consumed a standing grant:
+    feeding a guard a payload is not a read, it decides and DEDUCTS exactly as a real call would.
+    The second time cost two of the human's uses on a question that a throwaway GAME_LOOP_HOME
+    would have answered for nothing. Reporting the balance is what turns "spent without noticing"
+    into a number that was on screen beforehand.
+
+    SPENT GRANTS ARE COUNTED, NOT LISTED. A used-up grant is not clutter to hide — it is the record
+    that a hatch was opened, and a session that sees only live ones cannot tell "never authorized"
+    from "authorized and exhausted", which are different answers to "may I do this".
+    """
+    auth = [a for a in (s.get("authorized") or []) if isinstance(a, dict)]
+    if not auth:
+        return []
+    live = [a for a in auth if int(a.get("uses_left") or 0) > 0]
+    spent = len(auth) - len(live)
+    L = ["", f"authorize grants: {len(live)} live, {spent} spent"]
+    for a in live[:6]:
+        L.append(f"  {int(a.get('uses_left') or 0):>3} left · {a.get('path')}")
+    if len(live) > 6:
+        L.append(f"  ... and {len(live) - 6} more live")
+    L.append("  A GRANT IS A CONSUMABLE, and running a guard SPENDS one — a probe decides and")
+    L.append("  deducts exactly as a real call does. To ask what a guard would say, read its source")
+    L.append("  or point GAME_LOOP_HOME at a throwaway tree.")
+    return L
+
+
 def wake_path_report(s):
     """Say when a mandate is armed and NOBODY HAS SAID how an external signal reaches this run (#95).
 
@@ -10237,6 +10270,7 @@ def cmd_status(s, a):
     # out. Registered, running, returning the code that means allowed, for sixteen hours.
     out(*guards_report())
     out(*wake_path_report(s))
+    out(*authorizations_report(s))  # a consumable the human paid for — show the balance
     out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for
     out(*waiting_report())       # what this run is blocked on — the first question a resume asks
     snap = load_limits()

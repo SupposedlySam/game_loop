@@ -1572,6 +1572,18 @@ MUTANTS += [
 ]
 
 
+MUTANTS += [
+    ("authorizations_report -> the balance of a paid-for grant is invisible again",
+     ".game_loop/bin/_gl_impl.py::authorizations_report", "    return []\n",
+     ['live grant is NAMED', 'SPENT grants are COUNTED', 'guard call SPENDS one'],
+     "status stops showing what is LEFT of an `authorize` grant. Measured at 3, one per decision "
+     "the report makes: name the live ones with their balance, COUNT the spent ones rather than "
+     "listing them (never-authorized and authorized-and-exhausted are different answers), and say "
+     "that running a guard spends one. Its fourth arm — silence when there are no grants — cannot "
+     "be killed by this mutant, because returning [] is exactly what that arm does.", 3),
+]
+
+
 # ── #117's parse gate. ─────────────────────────────────────────────────────────────────────────
 MUTANTS += [
     ("_parses -> every source reads as compilable",

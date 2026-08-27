@@ -3208,6 +3208,38 @@ def main():
         # itself, once a woken run says so — and the report behind this issue caught its six-hour
         # hole only because the transport's doctor watches from OUTSIDE. So this reports the one
         # direction and NAMES the other, rather than implying it covered both.
+        # A GRANT IS A CONSUMABLE THE HUMAN PAID FOR, and nothing showed its balance. `authorize`
+        # prints the count once, at grant time, and the number then only ever moves in silence.
+        # Twice a probe of the write guard has spent one: feeding a guard a payload is not a read,
+        # it decides and DEDUCTS exactly as a real call would. The second time cost two uses on a
+        # question a throwaway GAME_LOOP_HOME answers for nothing.
+        print("an authorize grant is a consumable, and status shows what is left of it:")
+        # LOADED AT THE USE SITE. Fifth time this session that a name bound further down the file
+        # was used above its binding — cheap to avoid, invisible until the section actually runs.
+        _al = importlib.machinery.SourceFileLoader(
+            "gl_auth", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _amod = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_auth", _al))
+        _al.exec_module(_amod)
+        _arep = _amod.authorizations_report
+        check("with no grants at all, status says NOTHING about them — a session that was never "
+              "authorized has no balance to report, and a banner on every run teaches nobody",
+              _arep({}) == [] and _arep({"authorized": []}) == [])
+        _one = {"authorized": [{"path": "/x/y", "uses_left": 3, "reason": "r"}]}
+        _txt = "\n".join(_arep(_one))
+        check("...and a live grant is NAMED with what is LEFT of it, so the balance is on screen "
+              "before it is spent rather than discovered at zero",
+              "/x/y" in _txt and "3 left" in _txt and "1 live" in _txt)
+        _mixed = {"authorized": [{"path": "/a", "uses_left": 0, "reason": "r"},
+                                 {"path": "/b", "uses_left": 2, "reason": "r"}]}
+        _mtxt = "\n".join(_arep(_mixed))
+        check("...and SPENT grants are COUNTED rather than listed — a hatch that was opened is "
+              "part of the record, and a session seeing only live ones cannot tell 'never "
+              "authorized' from 'authorized and exhausted', which answer differently",
+              "1 live, 1 spent" in _mtxt and "/b" in _mtxt and "/a" not in _mtxt)
+        check("...and it says a guard call SPENDS one, which is the fact that cost two uses to "
+              "learn — twice, because the first time was recorded in a form too narrow to stop it",
+              "SPENDS" in _mtxt and "throwaway" in _mtxt)
+
         print("a wake that LANDED is recorded; one that never came cannot be (#95):")
         _wk = "sess-woke"
         gl(proj, "mandate", "--set", "keep going", sid=_wk)

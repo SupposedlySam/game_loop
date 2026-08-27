@@ -142,6 +142,7 @@ missed loudly, it will simply never be enumerated. Default-deny over the shapes 
 strictly better than a hand list; it is not the same thing as complete.
 """
 import ast
+import collections
 import concurrent.futures
 import json
 import os
@@ -2227,6 +2228,49 @@ def coverage_gate(found=None, out=print):
     return 1
 
 
+def universal_killers(kill_names, threshold=0.5):
+    """Assertions that kill MORE than `threshold` of all producers — bookkeeping, not coverage.
+
+    Two of this suite's own checks redden for essentially any neutered producer: one asserts that
+    every declared mutant actually MUTATES its file, the other that `neuter` reaches every
+    candidate. Measured on the clean sweep of 132, they killed 132 and 125. They say nothing about
+    any individual producer and they inflate every count by two.
+
+    WHY FREQUENCY AND NOT THE MARKS. `marks` already separates a genuine kill from collateral, by
+    keyword, per producer — and eleven mark sets are currently flagged as too broad to discriminate,
+    because a common word matched as a substring answers yes to almost anything. This needs no
+    per-producer configuration and cannot be too broad by accident: an assertion either kills most
+    producers or it does not. The two are complements, not rivals — marks say which killers are
+    ABOUT a subject, this says which killers are about NOBODY.
+
+    A threshold rather than "kills all of them", because the second one already misses at 125/132.
+    """
+    if not kill_names:
+        return set()
+    n = len(kill_names)
+    seen = collections.Counter()
+    for ks in kill_names.values():
+        for a in set(ks):
+            seen[a] += 1
+    return {a for a, cnt in seen.items() if cnt > n * threshold}
+
+
+def thin_after_collateral(kill_names, threshold=0.5):
+    """(universal, rows) — producers ranked by the killers that are actually about THEM.
+
+    THE ORDERING THIS FILE ADVERTISES, corrected. `outside_scope_tail` reported 3 kills and read as
+    ordinary; two were the bookkeeping above and the third was SHARED with a sibling, so nothing
+    tested it alone. Its record claimed 11 because a note had been copy-pasted onto it, and at 3 in
+    a list of 132 nobody looks. Adjusted, it sorted to the bottom with three others, and all four
+    turned out to be real: two structurally capped and two genuinely missing assertions.
+
+    Rows are (adjusted, raw, key), ascending — so the head of the list is where to read next.
+    """
+    uni = universal_killers(kill_names, threshold)
+    return uni, sorted((len([a for a in ks if a not in uni]), len(ks), key)
+                       for key, ks in kill_names.items())
+
+
 def killers(baseline, still, marks):
     """(every assertion this mutation killed, the subset whose NAME is about this producer).
 
@@ -3034,6 +3078,25 @@ def main():
         print("  full sweep of the tree it describes, the same rule the drift check asks for in the")
         print("  other direction. Not fatal, because a low floor has never broken a run — it has")
         print("  only ever failed to catch one.")
+    if KILL_NAMES and _is_full_sweep():
+        _uni, _rows = thin_after_collateral(KILL_NAMES)
+        _bare = [r for r in _rows if r[0] <= 1]
+        if _uni and _bare:
+            print(f"COVERAGE AFTER SUBTRACTING UNIVERSAL COLLATERAL ({len(_bare)}) — {len(_uni)} "
+                  "assertion(s) kill more than half")
+            print("  of all producers and are therefore about none of them. Without them, these are "
+                  "what is left:")
+            for _a, _raw, _key in _bare[:12]:
+                print(f"    {_key.split('::')[-1]}  (raw {_raw} → {_a})")
+            print("  A raw count of 3 and a genuine count of 1 read identically in the ordering "
+                  "above, which is how")
+            print("  a producer with ONE assertion — and that one shared with a sibling — sat in "
+                  "the middle of the")
+            print("  list. READ THE ASSERTIONS before adding any: some of these are structurally "
+                  "capped, because a")
+            print("  mutant returns the producer's own nothing-value and every negative-direction "
+                  "assertion survives")
+            print("  it by construction. Adding more of those raises nothing.")
     if drifted:
         print("BELOW THE RECORDED FLOOR: " + " · ".join(drifted))
         print("Coverage that existed is gone — OR the floor is not comparable. CHECK THAT FIRST:")

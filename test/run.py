@@ -15249,6 +15249,51 @@ def main():
            ".game_loop/bin/watchdog::exhausted_windows"} <= set(real_found))
     # The regression this closes: a NEW source file arriving with an undecided producer must fail
     # the run rather than be quietly outside the count.
+    # SUBTRACT WHAT IS ABOUT NOBODY. Two assertions in this suite redden for essentially any
+    # neutered producer — one killed all 132 on the clean sweep, the other 125 — so every raw
+    # count carries two kills that mean nothing. A raw 3 and a genuine 1 read identically in the
+    # ordering this file advertises, which is how `outside_scope_tail` sat mid-list with ONE
+    # assertion covering it, and that one shared with a sibling.
+    _kn = {
+        "f.py::alpha": ["bookkeeping A", "bookkeeping B", "alpha's own"],
+        "f.py::beta":  ["bookkeeping A", "bookkeeping B", "beta one", "beta two", "beta three"],
+        "f.py::gamma": ["bookkeeping A", "bookkeeping B"],
+        "f.py::delta": ["bookkeeping A", "bookkeeping B", "delta one", "delta two"],
+    }
+    _uni = sweep.universal_killers(_kn)
+    check("an assertion that kills MOST producers is universal collateral — it reddens for anything "
+          "neutered at all, so it is evidence about the suite's bookkeeping and about no producer",
+          _uni == {"bookkeeping A", "bookkeeping B"})
+    check("...while an assertion that kills only its own subject is NOT collateral, so the rule "
+          "discriminates rather than sweeping every shared killer out of the count",
+          "beta one" not in _uni and "alpha's own" not in _uni)
+    _u2, _rows = sweep.thin_after_collateral(_kn)
+    check("...and subtracting them RE-RANKS: a producer whose raw count is 3 and whose genuine "
+          "count is 1 now sorts below one with the same raw 3 — which is exactly the pair the raw "
+          "ordering could not tell apart",
+          [r[2].split("::")[-1] for r in _rows] == ["gamma", "alpha", "delta", "beta"]
+          and [r[0] for r in _rows] == [0, 1, 2, 3])
+    check("...and the RAW count is carried alongside, so a reader can see the subtraction happen "
+          "rather than being handed a smaller number with no account of it",
+          [r[1] for r in _rows] == [2, 3, 4, 5])
+    check("...and a producer killed ONLY by bookkeeping lands at zero — nothing in the suite is "
+          "about it, which is the one reading this whole subtraction exists to surface",
+          _rows[0][0] == 0 and _rows[0][2].endswith("gamma"))
+    # THE THRESHOLD IS A PARAMETER, and my first version of this assertion was wrong in the
+    # direction that matters: at 0.99 over four producers the test is `count > 3.96`, which an
+    # assertion killing all FOUR still satisfies. It failed, correctly, and the expectation was
+    # what needed fixing. Driven on its own fixture where one killer reaches 3 of 4.
+    _kn2 = {"f::a": ["wide", "own a"], "f::b": ["wide", "own b"],
+            "f::c": ["wide", "own c"], "f::d": ["own d"]}
+    check("...and the threshold is a real parameter: a killer reaching 3 of 4 producers is "
+          "collateral at the default and is NOT at a stricter cutoff, so the line can be moved "
+          "rather than being a number baked into the rule",
+          sweep.universal_killers(_kn2) == {"wide"}
+          and sweep.universal_killers(_kn2, threshold=0.9) == set())
+    check("an empty killer map yields no collateral rather than raising — a subset run writes no "
+          "killers, and the report must be silent there instead of failing",
+          sweep.universal_killers({}) == set())
+
     _newfile = dict(real_found)
     _newfile["tools/newly_added.py::reports_or_declines"] = ("tools/newly_added.py",
                                                              "reports_or_declines")

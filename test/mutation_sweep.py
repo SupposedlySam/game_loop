@@ -880,14 +880,14 @@ MUTANTS = [
      # Also 2, and also honest: the producer feeds one log line, and both assertions read it. It
      # gates nothing by design, so there is little else to assert about it yet -- which is the
      # point, not a gap.
-     "one log line, read by both arms; it deliberately gates nothing yet", 5),
+     "one log line, read by both arms; it deliberately gates nothing yet", 20),
     ("pinned_sha -> stable can never be evidenced", ".game_loop/bin/_gl_impl.py::pinned_sha",
      "    return None\n", ['and stable', 'producer actually', 'harness actually'],
      # THIN at 2 by construction, and honestly so: this producer feeds exactly one decision -- can
      # `confidence --mark stable` prove the owning agent is running on this commit -- and that
      # decision has two arms, refused-without-pin and allowed-with. There is no third thing to
      # assert about it, which is the shape of the check rather than a gap in it.
-     "one decision, two arms: stable refused without a pin, permitted with one", 20),
+     "one decision, two arms: stable refused without a pin, permitted with one", 2),
     ("installed_confidence_report -> an install never says what level it came from",
      ".game_loop/bin/_gl_impl.py::installed_confidence_report", "    return []\n",
      ['BETA install', 'a PRESENT', 'what stable', 'author DOES', 'an UNRECOGNISED', 'ALPHA commit'],

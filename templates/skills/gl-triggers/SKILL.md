@@ -82,6 +82,35 @@ likely to have covered.
 and `test/trigger_fixtures.py` exercises them in all four shapes above. Read those before writing
 your own — they are the same shapes, already debugged.
 
+## Four ways a two-direction test still cannot fail
+
+Writing a positive case and a negative case is not the same as having a check that can fail. Each of
+these was written by someone who believed they had both directions, and each was found the same way:
+**break the subject on purpose and watch THIS assertion go red** — not the suite, this assertion.
+
+**The observable does not discriminate.** A refusal and a mismatch both exited 3, and both printed
+the case name and the bad value. Every clause in the assertion held whether the thing under test
+worked or not. Ask what the *broken* run would print, not what the working one does.
+
+**An escape that matches nothing.** `"\\u2713"` written inside a raw string compares against a
+literal backslash-u-2-7-1-3, which appears in no output ever. The assertion read as a glyph check
+and was a check for a string that cannot occur. If a test is looking for a character, print what it
+is actually comparing.
+
+**The fixture sits where the subject is exempt.** A write guard allows `/tmp`, `/private/tmp` and
+`/var/folders` outright — so a fixture built with `mktemp` comes back ALLOWED no matter which tree
+the guard thinks it is guarding. The assertion measured the exemption, not the behaviour. Look for
+an observable that survives it: that guard's refusal *names the repo it is protecting*, and that
+still discriminates.
+
+**The check runs in a scope nobody selects.** Assertions placed above a section header join the
+previous section. They run in a full suite and are invisible to `--section`, so a targeted rule that
+claims to cover them covers nothing.
+
+The tell they share: in all four the assertion was GREEN while its subject was BROKEN, and green is
+what you were hoping for. A check you have never seen fail is a check you have not tested — and
+knowing that rule does not exempt the check you just wrote *because* of it.
+
 ## The harness, for the shape it fits
 
 This skill used to close by saying the tooling did not exist and this was the method. That stopped

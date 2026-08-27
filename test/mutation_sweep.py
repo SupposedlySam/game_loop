@@ -2763,7 +2763,11 @@ def main():
             # Emit in MUTANTS order as each prefix becomes ready: the report stays deterministic
             # AND a redirected run still shows progress rather than 40 silent minutes.
             while nxt < len(MUTANTS) and reports[nxt] is not None:
-                print(reports[nxt] + f"  ({elapsed[nxt]:.0f}s)\n", flush=True)
+                # LABELLED "at", because the bare number was read as this producer's DURATION and a
+                # wrong throughput figure was published off it. It is elapsed SINCE THE RUN STARTED,
+                # and the column looks unsorted only because these print in MUTANTS order rather
+                # than completion order — so "duration" is exactly the reading the format invited.
+                print(reports[nxt] + f"  (at {elapsed[nxt]:.0f}s)\n", flush=True)
                 nxt += 1
     # BEFORE THE ARCHIVE IS REMOVED. The first version called this after the summary, 120 lines
     # past `shutil.rmtree(base)` — so it opened a tree that no longer existed, hit OSError, and

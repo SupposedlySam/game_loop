@@ -111,6 +111,48 @@ The tell they share: in all four the assertion was GREEN while its subject was B
 what you were hoping for. A check you have never seen fail is a check you have not tested — and
 knowing that rule does not exempt the check you just wrote *because* of it.
 
+## Auditing a guard: follow the caller, not the guard
+
+The sharpest miss of the day was not an instrument, it was a QUESTION.
+
+A write-guard function's test looked too weak — it counted items processed, which a trimmed run
+satisfies just as well as a full one. Its own docstring warned about exactly the failure that
+weakness would allow. That felt like confirmation, so the search stopped: finding intent and test
+diverged *inside* the function was mistaken for finding the behaviour unprotected.
+
+The protection was one frame up, at the call site, in a plain `if not FAST:` around both writes.
+
+**"This function's check is insufficient" is not "this behaviour is unprotected"** until you have
+followed the call. And a plausible mechanism is the most expensive thing to be wrong about, because
+a mechanism ends the search — you stop looking once you can explain it.
+
+What settled it was the measurement the claim had predicted: the artifacts came back byte-identical
+with unchanged mtimes. **If a claim about behaviour can be measured, measure it before reporting
+it** — the read is a hypothesis, and this one had already survived being written down, drafted a
+fix, and been reported three times.
+
+## And three ways a MEASUREMENT cannot be wrong
+
+The same defect one level up. An assertion that cannot fail and a measurement that cannot be wrong
+are the same thing wearing different clothes — both are green, both feel like evidence, and neither
+was ever at risk of disagreeing with you. All three of these produced a confident number that was
+simply not the quantity anybody wanted.
+
+**Cross-check a derived reading against something you observed independently.** A per-producer
+column read as durations summed to 378 minutes of work — in a run that had visibly taken 70. One
+division against a fact already in hand. If a reading has no independent check available, say so
+when you report it.
+
+**Measure the same quantity, the same way, on both sides.** Three ad-hoc comparisons of two runs
+gave 2.2x, then "3.0x declining to 1.75x", then a decline that did not exist — one of them
+comparing A-excluding-setup against B-including-setup. Completions per minute at matched fractions
+settled it in a single step. Pick the quantity first, then take it identically from both.
+
+**Before controlling for a cause, verify the EFFECT is real.** A hypothesis about why a rate dropped
+got a proper control — which tested whether the drop had that cause, and never whether the rate had
+dropped at all. It had not. A control for a phantom looks exactly like rigour, and reads like it in
+a commit message.
+
 ## The harness, for the shape it fits
 
 This skill used to close by saying the tooling did not exist and this was the method. That stopped

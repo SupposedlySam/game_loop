@@ -14203,6 +14203,45 @@ def main():
     # TOLD, and `duplicate_key_tail` is the telling. It had no assertion anywhere: the tolerance was
     # tested, the signal that justifies it was not. (A sibling's rule: any tolerance that is safe
     # only in a file's current state is a trap armed for the next writer.)
+    # `outside_scope_tail` MEASURED AT 3 KILLS, OF WHICH ONE WAS ITS OWN. The other two are the
+    # sweep's bookkeeping, which reddens for any neutered producer at all, and its single genuine
+    # killer is SHARED with `scope_arg` — so it passed whenever either function worked. Its record
+    # said 11 kills, because the note written for scope_arg had been copy-pasted onto it, and a
+    # number that large is exactly what stops anyone looking. These are the assertions it did not
+    # have: driven directly, so they discriminate this function from its sibling.
+    _vsrc0 = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "verify"))
+    _ost_cap = int(re.search(r"^UNCHECKED_SHOWN = (\d+)", _vsrc0, re.M).group(1))
+    _ost_ns = {"UNCHECKED_SHOWN": _ost_cap}          # read, not hardcoded: the cap may move
+    exec(compile(_vsrc0[_vsrc0.index("def outside_scope_tail("):
+                        _vsrc0.index("def report_coverage(")], "verify-ost", "exec"), _ost_ns)
+    _ost = _ost_ns["outside_scope_tail"]
+    check("nothing skipped means NO out-of-scope tail — a scoped run that looked at everything "
+          "must not print the sentence, or it stops meaning anything on the runs that need it",
+          _ost([]) == "")
+    _ost3 = _ost(["a.py", "b.py", "c.py"])
+    check("...and every skipped path is NAMED, not counted — 'three paths were not looked at' "
+          "sends nobody to the right file",
+          all(p in _ost3 for p in ("a.py", "b.py", "c.py")))
+    check("...and it says these were NOT LOOKED AT rather than 'matched no rule' — the sibling "
+          "sentence `unchecked_tail` owns that one, and they are different blindnesses: a path "
+          "outside the scope was never examined at all",
+          "not in this commit" in _ost3 and "nothing above" in _ost3
+          and "looked at them" in _ost3)
+    _at_cap = _ost([f"p{i}.py" for i in range(_ost_cap)])
+    check("...and at EXACTLY the cap there is no '... more' line, because there is no more — the "
+          "boundary is where an off-by-one would invent paths that do not exist",
+          "more" not in _at_cap
+          and sum(1 for ln in _at_cap.splitlines() if ln.startswith("    p")) == _ost_cap)
+    _over = _ost([f"p{i}.py" for i in range(_ost_cap + 3)])
+    check("...and past the cap it shows the cap and says how many it did NOT show, so a truncated "
+          "list cannot read as a complete one",
+          _over.strip().endswith("... 3 more")
+          and sum(1 for ln in _over.splitlines() if ln.startswith("    p")) == _ost_cap)
+    check("...and the COUNT in the header is the TOTAL skipped, never the number displayed — "
+          "reporting the shown count would tell a reader they had seen everything, which is the "
+          "whole failure a truncation notice exists to prevent",
+          f"{_ost_cap + 3} dirty path(s)" in _over)
+
     _vsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "verify"))
     _vmod = {}
     exec(compile(_vsrc[_vsrc.index("DUPLICATE_KEYS = {}"):_vsrc.index("def load_manifest")],

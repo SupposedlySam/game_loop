@@ -90,6 +90,42 @@ it is worth nothing.
 If the honest answer is "a human who checks", write that. It is the common case, and a run that says
 so is more use to a successor than one that leaves the field blank.
 
+### What a wake path CAN prove, once something arrives
+
+The declaration is one half. The other half is observable, and only from in here:
+
+```bash
+./.game_loop/bin/game_loop note --woke
+```
+
+Run it **first**, every time something outside wakes you. Nothing else can record it, and an
+unrecorded arrival reads exactly like a dead wake path. `status` then reports when the last wake
+LANDED, how long ago, and how many have arrived this session — which is what turns "a cron is
+declared" into "it delivered eleven minutes ago".
+
+It stays honest about the direction it cannot see. A wake that was **requested and never
+delivered** leaves nothing here at all: the run that would have recorded it is the run that did not
+happen. That is the six-hour hole this came from, and only something watching from outside the
+session can see it.
+
+### The prompt the waker should carry
+
+A generic "check your background tasks" ping is nearly worthless — you wake, spend real tokens
+working out where you were, and re-run finished steps. Give the thing that pokes you a prompt that
+carries **this** run:
+
+```bash
+./.game_loop/bin/game_loop note --recovery "<a remedy you learned, that a woken you must not re-derive>"
+./.game_loop/bin/game_loop doorbell     # the prompt itself, assembled from live state
+```
+
+`doorbell` fills in what done means, where to resume, and the recovery paths you recorded. Record
+them **as you learn them**: the known flake and its remedy, which credential actually
+authenticates, the known-good retry for the step that times out. They are the things learned in the
+first hour and forgotten by the fourth, and they are per-run — which is why no static doc can hold
+them. With none recorded, `doorbell` says outright that the prompt mostly buys re-orientation,
+rather than printing a confident one that carries nothing.
+
 ## Park and resume — a human called a break
 
 Parking is **not** clearing. It pauses the gate while leaving the work open, so nothing reads as

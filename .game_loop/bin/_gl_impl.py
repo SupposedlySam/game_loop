@@ -10186,10 +10186,99 @@ def cmd_status(s, a):
 
 
 def cmd_note(s, a):
+    # --recovery IS A NOTE THAT HAS TO REACH SOMEBODY WHO ALREADY FORGOT (#95). A plain note goes
+    # to the log, where it is found by whoever goes looking. A recovery path has to arrive in a
+    # session that has lost the context which would make it go looking — so it lives in state,
+    # where the wake-up prompt can assemble it.
+    _rec = (getattr(a, "recovery", None) or "").strip()
+    if _rec:
+        s.setdefault("recovery", []).append({"text": _rec, "at": now()})
+        save(s)
+        logline({"kind": "recovery_path", "text": _rec})
+        out("recovery path recorded — `game_loop doorbell` will carry it.",
+            f"  {_rec}",
+            f"  {len(s['recovery'])} recorded in this run.")
+        return
     if not a.text:
-        die("note needs --text")
+        die("note needs --text, or --recovery for something a woken session must not re-derive.")
     logline({"kind": "note", "text": a.text})
     out("noted to log.jsonl.")
+
+
+def recovery_paths(s):
+    """The remedies THIS run learned, which is the only place they are true (#95)."""
+    return [r for r in (s.get("recovery") or []) if (r or {}).get("text")]
+
+
+def doorbell_lines(s, repo=""):
+    """The wake-up prompt for THIS run, assembled from live state (#95, proposal 3).
+
+    A consumer kept a long unattended run alive with an external cron and reported that the cron
+    was NOT the part worth stealing: "a generic 'check your background tasks' ping is nearly
+    worthless — the agent wakes, spends real tokens re-deriving where it was, and often re-runs
+    completed steps. The doorbell has to carry THIS run's recovery paths."
+
+    Which is why this is generated and not a file you fill in. The issue says it in its own words:
+    the paths are per-run, "which is why they belong in the doorbell prompt and not in any static
+    doc". A template shipped as prose would be the exact thing that report found insufficient.
+
+    THREE OUTCOMES, because two of them are easy to dress up as the third:
+      - no mandate bound        -> there is nothing to wake this run FOR, and saying so beats
+                                   emitting a confident prompt with a hole where the goal goes
+      - mandate, no paths       -> emitted, and told plainly it mostly buys re-orientation cost
+      - mandate and paths       -> the thing the report says made every wake produce progress
+    """
+    m = s.get("mandate") or {}
+    if not m.get("active"):
+        return ["no mandate is bound here, so there is nothing to wake this run FOR.",
+                "",
+                "A doorbell exists to return a session to a goal it already had. With no goal",
+                "recorded, the prompt would name nothing, and a woken agent would re-derive the",
+                "run from scratch — which is the cost this command exists to avoid.",
+                "",
+                "    game_loop mandate --set \"<what done means>\" --wake-path \"<how a signal lands>\""]
+    paths = recovery_paths(s)
+    L = ["=== WAKE-UP PROMPT" + (f" — {repo}" if repo else "") + " ===",
+         "",
+         "You are resuming an unattended run. IF YOU ARE MID-TASK, DO NOTHING — finish what you",
+         "were doing. This is a poll, not a signal: it fires on a timer whether or not anything",
+         "has happened, so its arrival means nothing by itself.",
+         "",
+         "DONE MEANS:",
+         "  " + (m.get("text") or "").strip(),
+         "",
+         "WHERE YOU WERE: run `game_loop status` and read it before doing anything else. It",
+         "carries the current note. Re-deriving what it already says is the waste this prompt",
+         "is trying to prevent."]
+    if paths:
+        L += ["",
+              "RECOVERY PATHS — learned in THIS run, and the reason this is worth more than a ping:"]
+        L += ["  - " + p["text"].strip() for p in paths]
+    L += ["", "=== end of prompt ==="]
+    if not paths:
+        L += ["",
+              "⚠ NO RECOVERY PATHS ARE RECORDED, so the prompt above mostly buys re-orientation.",
+              "  It will return a session to its goal and nothing else. The paths worth carrying",
+              "  are the ones learned in the first hour and forgotten by the fourth: the known",
+              "  flake and its remedy, which credential actually authenticates, the known-good",
+              "  retry for the step that times out.",
+              "",
+              "    game_loop note --recovery \"<what you learned, and what to do about it>\"",
+              "",
+              "  Recorded per run, because a remedy that was true last week is a guess today."]
+    if m.get("wake_path"):
+        L += ["", f"delivered by (declared): {m['wake_path']}",
+              "  DECLARED, never probed — nothing here has watched a wake land."]
+    else:
+        L += ["", "⚠ NOTHING RECORDS HOW THIS PROMPT REACHES THE SESSION.",
+              "  A doorbell nobody rings is indistinguishable in here from one that never had to",
+              "  ring. Say what delivers it:",
+              "    game_loop mandate --wake-path \"<how a signal reaches this session>\""]
+    return L
+
+
+def cmd_doorbell(s, a):
+    out(*doorbell_lines(s, os.path.basename(REPO_ROOT)))
 
 
 HARDEN_LADDER = [
@@ -10483,6 +10572,10 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
               "--set", "--question", "--predict", "--next",
               # the evidence family's descriptive halves — what a thing MEANS, not where it lives
               "--known-state", "--measures", "--connects", "--recheck",
+              # a recovery path is read by a session that has ALREADY lost the context to spot a
+              # corrupted one, and it is the field most likely to carry a backtick: half of them
+              # name the command to re-run.
+              "--recovery",
               # `contribute --note`. Its help says "one line of judgement" and its real content ran
               # 855 and 1152 chars across four ledger entries — the gate it serves asks which of N
               # hardened learnings name a tool's behaviour, and an honest answer enumerates. So the
@@ -10597,6 +10690,10 @@ def main():
 
     n = sub.add_parser("note")
     n.add_argument("--text")
+    n.add_argument("--recovery", help="a remedy this run learned that a woken session must not "
+                                      "have to re-derive; carried by `doorbell`")
+
+    sub.add_parser("doorbell", help="print the wake-up prompt for THIS run, filled from live state")
 
     hd = sub.add_parser("harden")
     mu = sub.add_parser("mutate")   # a revert-proof the TOOL performs, not one you report (#71)
@@ -10845,6 +10942,7 @@ def main():
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model,
      "successor": cmd_successor, "threads": cmd_threads, "contribute": cmd_contribute,
+     "doorbell": cmd_doorbell,
      "kinds": cmd_kinds}[a.cmd](s, a)
 
 

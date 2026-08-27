@@ -3125,6 +3125,71 @@ def main():
               "answers a question only asked while something is waiting",
               r.returncode != 0 and "nothing to record a wake path for" in (r.stderr + r.stdout))
 
+        # #95 PROPOSAL 3: THE DOORBELL. The consumer who filed this kept a long unattended run
+        # alive with an external cron, and reported that the cron was NOT the part worth stealing:
+        # "a generic 'check your background tasks' ping is nearly worthless — the agent wakes,
+        # spends real tokens re-deriving where it was, and often re-runs completed steps." What
+        # made every wake produce progress was a prompt carrying THAT RUN's recovery paths.
+        #
+        # So it is GENERATED, not a template, and the issue says why in its own words: the paths
+        # are per-run, "which is why they belong in the doorbell prompt and not in any static doc".
+        # A template shipped as prose would be the exact artifact that report found insufficient.
+        print("the doorbell carries THIS run, and says so when it has nothing to carry (#95):")
+        _db = "sess-doorbell"
+        r = gl(proj, "doorbell", sid=_db)
+        check("with no mandate bound, `doorbell` says there is nothing to wake the run FOR rather "
+              "than printing a confident prompt with a hole where the goal goes",
+              r.returncode == 0 and "nothing to wake this run FOR" in r.stdout
+              and "WAKE-UP PROMPT" not in r.stdout)
+        gl(proj, "mandate", "--set", "finish the migration", sid=_db)
+        r = gl(proj, "doorbell", sid=_db)
+        check("...once a mandate is bound it emits a prompt naming what DONE MEANS, in the "
+              "mandate's own words rather than a paraphrase",
+              "WAKE-UP PROMPT" in r.stdout and "finish the migration" in r.stdout)
+        check("...and it tells a woken session to do NOTHING if it is mid-task — a poll fires on a "
+              "timer whether or not anything happened, so its arrival means nothing by itself",
+              "MID-TASK, DO NOTHING" in r.stdout)
+        check("...and with no recovery paths recorded it says outright that the prompt mostly buys "
+              "re-orientation, which is the finding that produced this verb at all",
+              "NO RECOVERY PATHS ARE RECORDED" in r.stdout)
+        check("...and that warning sits BELOW the end-of-prompt marker, so the pasted artifact is "
+              "the prompt and the criticism reaches the OPERATOR rather than the woken session",
+              "=== end of prompt ===" in r.stdout
+              and r.stdout.index("=== end of prompt ===") < r.stdout.index("NO RECOVERY PATHS"))
+        check("...and it names the gap in HOW the prompt arrives too: a doorbell nobody rings "
+              "reads, from inside the session, exactly like one that never had to ring",
+              "NOTHING RECORDS HOW THIS PROMPT REACHES" in r.stdout)
+
+        r = gl(proj, "note", "--recovery",
+               "the FK teardown flake is known: re-run the job, do not chase it", sid=_db)
+        check("`note --recovery` records a remedy and says which verb will carry it, so recording "
+              "one is not an act of faith",
+              r.returncode == 0 and "doorbell" in r.stdout)
+        r = gl(proj, "doorbell", sid=_db)
+        check("...and a LATER, SEPARATE invocation carries it — the whole point is reaching a "
+              "session that has already lost the context that would make it go looking in a log",
+              "RECOVERY PATHS" in r.stdout and "do not chase it" in r.stdout
+              and "NO RECOVERY PATHS ARE RECORDED" not in r.stdout)
+        gl(proj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_db)
+        r = gl(proj, "doorbell", sid=_db)
+        check("...and a declared wake path is named AND labelled declared-never-probed — the same "
+              "honesty the recording verb prints, in the place it will actually be read",
+              "a host cron every 10 minutes" in r.stdout and "never probed" in r.stdout
+              and "NOTHING RECORDS HOW" not in r.stdout)
+        _rf = os.path.join(proj, "recovery-path.txt")
+        with open(_rf, "w") as f:
+            f.write("retry with `make deploy RETRY=1` — a shell would eat those backticks\n")
+        r = gl(proj, "note", "--recovery-file", _rf, sid=_db)
+        r2 = gl(proj, "doorbell", sid=_db)
+        check("--recovery-file exists and carries text a shell argument would mangle — half of "
+              "these name the command to re-run, and a corrupted remedy is read by the one session "
+              "least equipped to notice it is wrong",
+              r.returncode == 0 and "`make deploy RETRY=1`" in r2.stdout)
+        r = gl(proj, "doorbell", sid="sess-doorbell-other")
+        check("...and another session's recovery paths do not reach this one's doorbell — state is "
+              "per-session, and a remedy learned in a different run is a guess here",
+              "make deploy" not in r.stdout)
+
         print("mandate park (a human-called break, #15):")
         pk = "sess-park15"
         gl(proj, "mandate", "--set", "ship the outcomes work", sid=pk)

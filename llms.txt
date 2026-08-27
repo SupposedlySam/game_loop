@@ -94,6 +94,20 @@ keeps showing it, with their verbatim words and the next step) instead of being 
 closure. It buys ONE turn-end, it cannot launder a question, and only `mandate --resume` ends it. It
 is for THEIR break, never your judgement — that is what the log records.
 
+Every gate above fires from INSIDE this session, which is the thing that stops working when a run
+goes quiet. If something outside pokes you on a timer, give it a prompt that carries this run:
+
+```
+./.game_loop/bin/game_loop note --recovery ".."   # a remedy you learned; a woken you must not re-derive it
+./.game_loop/bin/game_loop doorbell               # the wake-up prompt, assembled from live state
+```
+
+A generic "check your background tasks" ping is nearly worthless — you wake, spend real tokens
+working out where you were, and re-run finished steps. What makes the difference is the block of
+things learned in the first hour and forgotten by the fourth: the known flake and its remedy, which
+credential actually authenticates, the known-good retry. Record them AS YOU LEARN THEM; `doorbell`
+tells you outright when it has none, rather than printing a confident prompt that buys nothing.
+
 `arm` requires the path to a file you ALREADY read that did NOT answer the question — if the answer was
 on disk, you don't need the human. `checkpoint` and `arm` are each single-use (consumed on the next
 turn-end). If you can predict the human's answer, don't ask; make the call and carry on.
@@ -265,6 +279,7 @@ instruction.
 #   the PREVIOUS retro actually yielded. Triggers: .game_loop/triggers.json (gitignored; see
 #   templates/triggers.example.json). Nothing is attached by default.
 ./.game_loop/bin/game_loop note --text ".."                                          # append a note to the log
+./.game_loop/bin/game_loop doorbell                                                    # the wake-up prompt for this run
 ./.game_loop/bin/game_loop mandate --park --reason ".." --next ".."                  # the human called a break;
 #   --next is the step to pick back up on resume. A park clears nothing — status keeps showing the
 #   mandate OPEN, and only `mandate --resume` ends it.

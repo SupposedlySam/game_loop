@@ -13201,6 +13201,35 @@ def main():
     if _bad_front:
         print("       offenders: " + ", ".join(_bad_front))
 
+    # SHIPPING A SKILL AND DOCUMENTING NOTHING is silent by construction, which is why it needs a
+    # gate rather than a habit. install.sh globs this directory ("read off disk, so adding a skill
+    # never means editing this question", it says of its own prompt) — so a new skill installs, is
+    # offered, and works. Nothing breaks. The ONLY thing missing is the README row, and a missing
+    # row announces itself to nobody. Found the day gl-triggers shipped: five listed, six on disk.
+    with open(os.path.join(REPO, "README.md")) as f:
+        _rm = f.read()
+    _tbl = re.search(r"\|\s*Skill\s*\|.*\n(?:\|.*\n)+", _rm)
+    _tbl_txt = _tbl.group(0) if _tbl else ""
+    _undoc = [n for n in _sk_names if ("`%s`" % n) not in _tbl_txt]
+    check("every shipped skill has a row in the README's skill table — the installer reads the "
+          "DIRECTORY, so an undocumented skill still installs and still works, which is exactly "
+          "why its absence from the docs is silent (no table found at all fails here too: that "
+          "means the header was reworded and this check lost its subject)",
+          bool(_tbl) and not _undoc)
+    if _undoc:
+        print("       in templates/skills/ but not in the README table: " + ", ".join(_undoc))
+
+    _WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+              "ten", "eleven", "twelve"]
+    _cm = re.search(r"ships\s+(\w+)\s+\*\*user-level\*\*\s+skills", _rm)
+    check("...and the README's spelled-out COUNT of them agrees with how many exist — the row "
+          "check cannot see a stale number, and a sentence saying 'five' above six rows is the "
+          "half a reader believes",
+          bool(_cm) and len(_sk_names) < len(_WORDS)
+          and _cm.group(1) == _WORDS[len(_sk_names)])
+    print("       README says %s; on disk: %d"
+          % (repr(_cm.group(1)) if _cm else "<no such sentence>", len(_sk_names)))
+
     _skh = tempfile.mkdtemp(prefix="gameloop-skills-")
     try:
         _sdest = os.path.join(_skh, "skills")

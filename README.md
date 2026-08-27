@@ -249,7 +249,7 @@ have forgotten it is there.)
 
 ## Optional: Claude Code skills so a session never has to guess
 
-`templates/skills/` ships five **user-level** skills. User-level, because none of them is knowledge
+`templates/skills/` ships six **user-level** skills. User-level, because none of them is knowledge
 about the project being installed into — they teach a session how to install this tool, how to read
 one of its refusals, and how to run under a mandate, which is the same everywhere:
 
@@ -259,6 +259,7 @@ one of its refusals, and how to run under a mandate, which is the same everywher
 | `gl-refused` | a gate just said no — what it means, and which escape hatches are the human's to open |
 | `gl-mandate` | run unattended: bind, checkpoint, arm a question, park/resume, clear |
 | `gl-harden` | turn a learning into something enforced instead of remembered |
+| `gl-triggers` | you want a check that watches for a recurring mistake — how to test that it fires, and that it stays quiet |
 | `game_loop` | is this project guarded at all, and what does `status` actually want right now |
 
 The installer **asks** before installing them, because they land in `~/.claude/skills/` — your home,

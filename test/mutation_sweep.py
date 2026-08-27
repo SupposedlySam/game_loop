@@ -1513,6 +1513,44 @@ MUTANTS += [
 ]
 
 
+# ── guardtest (#91.2), measured the day it shipped. ────────────────────────────────────────────
+# RAW COUNTS MINUS THE ACCOUNTING KILLS, per the trap documented at the top of this list — and the
+# trap has a SECOND face nobody had written down. Undeclared, these fail three bookkeeping
+# assertions on their own; declared, they fail a different one, "every declared producer actually
+# MUTATES its own file", because a producer already neutered no longer changes bytes when its
+# declared body is applied. The artefact does not disappear on declaration, it CHANGES SIDES.
+#
+#   undeclared raw:  hook_decision 10   guardtest_directions 3   run_guard_case 9   (-3 accounting)
+#   declared   raw:  hook_decision 11   guardtest_directions 6   run_guard_case 10  (-4 accounting)
+#
+# The -4 is one assertion counted in four shards, not four assertions: prun's totals are a SUM OVER
+# SHARDS and a shared-fixture outcome re-runs in each shard that needs it. Both routes land on the
+# same floors — 7, 2, 6 — which is the only reason to trust either subtraction. Measured both ways
+# on 2026-08-27 rather than predicted once.
+MUTANTS += [
+    ("hook_decision -> every hook reads as having said nothing at all",
+     ".game_loop/bin/_gl_impl.py::hook_decision", '    return None, ""\n',
+     ['permissionDecision', 'silent', 'never deny', 'REAL guard', 'allow was reached',
+      'does NOT establish', 'script that does nothing'],
+     "the two refusal protocols collapse into one unreadable answer. This is the exact confusion "
+     "that made the first cut of guardtest read this repo's own write guard, mid-refusal, as "
+     "allowing everything — the verb built to catch a guard going quietly inert was about to "
+     "certify one.", 7),
+    ("guardtest_directions -> every fixture claims to exercise both directions",
+     ".game_loop/bin/_gl_impl.py::guardtest_directions", '    return True, ""\n',
+     ['all expect ALLOW', 'all expect DENY'],
+     "the both-controls rule stops discriminating, so a fixture whose cases all point one way is "
+     "accepted and a script that does nothing at all passes its own guard suite. Two kills, one "
+     "per direction, which is the whole of what this producer decides.", 2),
+    ("run_guard_case -> every case reports a match without running anything",
+     ".game_loop/bin/_gl_impl.py::run_guard_case", '    return "match", "", None\n',
+     ['allow was reached', 'script that does nothing', 'cannot be EXECUTED'],
+     "the harness passes unconditionally. Its kills are the three answers that must stay apart: a "
+     "real match, a guard that has gone inert, and a script that could not be executed at all — "
+     "the last of which is not a verdict about the guard in either direction.", 6),
+]
+
+
 NOT_SWEPT = {
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
     # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not

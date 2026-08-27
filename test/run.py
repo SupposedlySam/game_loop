@@ -8478,7 +8478,10 @@ def main():
             "--show", "--test",
             # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
             # silently — the opposite of prose, where the corruption is indistinguishable
-            "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file", "--handoff",
+            "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file",
+            # guardtest's two: a fixture path and the script it runs. Both are checked for
+            # EXISTENCE, which a mangled value fails loudly rather than silently.
+            "--fixture", "--script", "--handoff",
             "--observed", "--path", "--produces", "--read",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
@@ -11480,9 +11483,15 @@ def main():
         "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "cmd_checkpoint", "cmd_harden", "cmd_measure",
+        "cmd_checkpoint", "cmd_guardtest", "cmd_harden", "cmd_measure",
         "cmd_pin", "cmd_status", "instruments_report",
     ]
+    # cmd_guardtest is DEBT rather than pinned on a technicality worth stating: its ✓ IS asserted
+    # line-scoped, and its ✗ and ? are not — the mismatch and could-not-run cases are asserted by
+    # their WORDS. That is the exact shape the pin_state assertion was caught by ("the glyph is
+    # what a human actually scans, and an assertion on the word alone passes with the symbol
+    # reversed"), so one glyph out of three is not a pinned symbol, and calling it one here would
+    # buy the claim with the assertion that already existed.
     # WHICH OF THE PINNED ONES HAVE ACTUALLY KILLED A MUTANT. An assertion that has never failed
     # has never been run in anger, and today proved that twice: the guards_report symbol assertion
     # passed while the mutation it was written for survived, because the word INERT has two arms.
@@ -15243,6 +15252,119 @@ def main():
               "`raise` that did not run — the reason is what a consumer quotes",
               "raise" not in _fv["f-live"][1] and "raise" not in _fv["f-inert"][1]
               and has(_fv["f-inert"][1], "fault"))
+
+        # #91.2: A CONSUMER CANNOT REGRESSION-TEST THE GUARDS IT WRITES. test/run.py proves this
+        # tool's guarantees; a consumer's own triggers and hook scripts had nothing, and the filer
+        # wrote 340 lines of these locally "after watching a guard fire on the case it was built
+        # for and then discovering it had gone inert for a different input".
+        print("a consumer can prove its own guard still fires, in both directions (#91.2):")
+        _hd = _mlm.hook_decision
+        _dec = {
+            "exit-2":      _hd(2, ""),
+            "json-deny":   _hd(0, '{"hookSpecificOutput":{"permissionDecision":"deny"}}'),
+            "json-allow":  _hd(0, '{"hookSpecificOutput":{"permissionDecision":"allow"}}'),
+            "quiet":       _hd(0, ""),
+            "crashed":     _hd(1, "traceback"),
+        }
+        # THE FIRST CUT OF THIS VERB ASSERTED EXIT CODES ONLY, and this repo's own write guard
+        # refuses by printing a JSON decision and exiting 0. So the harness read a working INV3
+        # guard, mid-refusal, as allowing everything — the tool built to stop a guard going quietly
+        # inert was about to certify one. Both protocols, or it certifies the wrong thing.
+        check("#91: a hook that refuses by EXITING 2 and one that refuses by printing a JSON "
+              "permissionDecision are both read as deny — this repo's own write guard uses the "
+              "second, and an exit-code-only harness reads it mid-refusal as allowing everything: "
+              + ", ".join(f"{k}={v[0]}" for k, v in _dec.items()),
+              [_dec[k][0] for k in ("exit-2", "json-deny", "json-allow")]
+              == ["deny", "deny", "allow"])
+        check("#91: ...and exit 0 with NOTHING said is `silent`, its own answer — that is what an "
+              "allow looks like and equally what a guard no longer running looks like, and folding "
+              "the second into the first is the whole of #90",
+              _dec["quiet"][0] == "silent" and has(_dec["quiet"][1], "no longer running"))
+        check("#91: ...and a non-zero exit naming no decision is `error`, never deny — a hook that "
+              "crashed did not judge anything, and counting a crash as a refusal manufactures a "
+              "guard out of a broken script",
+              _dec["crashed"][0] == "error")
+
+        _dirs = _mlm.guardtest_directions
+        _only_allow = [{"expect": "allow"}, {"expect": "allow"}]
+        _only_deny = [{"expect": "deny"}]
+        _both = [{"expect": "deny"}, {"expect": "allow"}]
+        check("#91: a fixture whose cases all expect ALLOW is refused — a script that does nothing "
+              "at all passes it, which is the exact shape #90 was",
+              _dirs(_only_allow)[0] is False and has(_dirs(_only_allow)[1], "does nothing"))
+        check("#91: ...and one whose cases all expect DENY is refused too, since a script that "
+              "blocks everything passes that — both controls, the way `instrument` demands them",
+              _dirs(_only_deny)[0] is False and has(_dirs(_only_deny)[1], "blocks everything"))
+        check("#91: ...and a fixture carrying both directions is accepted, so the two refusals "
+              "above are a discrimination rather than a verb that never runs",
+              _dirs(_both)[0] is True)
+
+        _gt = tempfile.mkdtemp(prefix="gameloop-guardtest-")
+        try:
+            _fx = os.path.join(_gt, "fix.json")
+            # THIS TREE'S OWN COPY of the guard, so its notion of "inside the repo" is _mu — the
+            # tree these cases are about. Pointing at the real repo's copy while GAME_LOOP_HOME
+            # names this one makes the guard answer about a third place, and the allow case fails
+            # for a reason that has nothing to do with the guard.
+            _real = os.path.join(_muh, "bin", "guard-writes.sh")
+            _in_repo = os.path.join(_mu, "README.md")
+
+            def _gtr(*args):
+                return subprocess.run(
+                    [os.path.join(_muh, "bin", "game_loop"), "guardtest", *args],
+                    capture_output=True, text=True, cwd=_mu,
+                    env=dict(os.environ, GAME_LOOP_HOME=_muh))
+            with open(_fx, "w") as f:
+                json.dump({"cases": [
+                    {"name": "refuses a write outside the repo", "expect": "deny",
+                     "expect_output": "READ-ONLY",
+                     "payload": {"tool_name": "Write",
+                                 "tool_input": {"file_path": "/etc/not-ours-at-all.txt"}}},
+                    {"name": "allows one inside it", "expect": "allow",
+                     "payload": {"tool_name": "Write",
+                                 "tool_input": {"file_path": _in_repo}}}]}, f)
+            _g1 = _gtr("--fixture", _fx, "--script", _real)
+            check("#91: the verb runs a REAL guard against recorded payloads and passes — driven "
+                  "here against this repo's own write guard, which is the one hook script whose "
+                  "behaviour the suite can vouch for independently",
+                  _g1.returncode == 0 and has(_g1.stdout, "\u2713 refuses a write outside"))
+            check("#91: ...and it names HOW each allow was reached, counting the ones that allowed "
+                  "by saying nothing — the report distinguishes what the expectation cannot",
+                  has(_g1.stdout, "ALLOWED BY SAYING NOTHING"))
+            check("#91: ...and it states what it does NOT establish: not that the guard is correct, "
+                  "and not that it fires on the case nobody has thought of",
+                  has(_g1.stdout, "WHAT THIS DOES NOT SAY"))
+            # THE ONE THAT MATTERS. Same fixture, a script that does nothing — which is what a
+            # guard looks like after it silently stops firing.
+            _dead = os.path.join(_gt, "dead.sh")
+            with open(_dead, "w") as f:
+                f.write("#!/usr/bin/env bash\nexit 0\n")
+            os.chmod(_dead, 0o755)
+            _g2 = _gtr("--fixture", _fx, "--script", _dead)
+            check("#91: ...and the SAME fixture FAILS against a script that does nothing, which is "
+                  "what a guard looks like once it has silently stopped firing — a harness that "
+                  "passed here would certify the defect it exists to find",
+                  _g2.returncode != 0
+                  and has(_g2.stdout + _g2.stderr, "expected deny, got silent"))
+            _noexec = os.path.join(_gt, "noexec.sh")
+            with open(_noexec, "w") as f:
+                f.write("echo hi\n")
+            os.chmod(_noexec, 0o644)
+            _g3 = _gtr("--fixture", _fx, "--script", _noexec)
+            check("#91: ...and a script that cannot be EXECUTED is 'could not run' rather than a "
+                  "failing guard or a passing one — nothing was established, and calling it an "
+                  "allow is how a harness certifies a guard that never ran",
+                  _g3.returncode != 0
+                  and has(_g3.stdout + _g3.stderr, "COULD NOT RUN")
+                  and has(_g3.stdout + _g3.stderr, "not a verdict about the guard"))
+            with open(_fx + ".empty", "w") as f:
+                json.dump({"cases": []}, f)
+            _g4 = _gtr("--fixture", _fx + ".empty", "--script", _real)
+            check("#91: ...and a fixture declaring NO cases is refused, because a run that checks "
+                  "nothing exits 0 exactly like a suite that ran and passed",
+                  _g4.returncode != 0 and has(_g4.stdout + _g4.stderr, "NO cases"))
+        finally:
+            shutil.rmtree(_gt, ignore_errors=True)
 
         _r4 = _mut("THRESHOLD = 5", "THRESHOLD = 99")
         _t4 = _r4.stderr + _r4.stdout

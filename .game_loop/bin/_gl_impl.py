@@ -10308,6 +10308,187 @@ def doorbell_lines(s, repo=""):
     return L
 
 
+def hook_decision(rc, out):
+    """What a hook actually SAID: (deny|allow|ask|silent|error, why) — #91.2.
+
+    THERE ARE TWO PROTOCOLS AND THIS COST ME THE FIRST VERSION OF THIS VERB. A PreToolUse hook can
+    refuse by exiting 2, or by printing a JSON decision and exiting 0. game_loop's own write guard
+    uses the second — so a harness that asserted only the exit code read a working INV3 guard, mid
+    refusal, as allowing everything. The tool built to stop a guard going quietly inert was about
+    to certify one.
+
+    `silent` is its own answer for the same reason. Exit 0 with nothing said is what a guard that
+    ALLOWED looks like, and equally what a guard that is no longer running looks like, and folding
+    the second into the first is the whole of #90.
+    """
+    if rc == 2:
+        return "deny", "exit 2 — the exit-code protocol"
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if not (line.startswith("{") and "permissionDecision" in line):
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        hso = d.get("hookSpecificOutput") or d
+        dec = str(hso.get("permissionDecision") or "").lower()
+        if dec in ("deny", "allow", "ask"):
+            return dec, f"permissionDecision {dec!r} in its JSON output"
+    if rc != 0:
+        return "error", (f"exit {rc}, and it named no decision — a hook that failed rather than one "
+                         "that judged")
+    return "silent", ("exit 0 and said nothing — which is what an ALLOW looks like, and equally "
+                      "what a guard that is no longer running looks like")
+
+
+def guardtest_directions(cases):
+    """Do these cases exercise BOTH directions? (ok, why) — #91.2.
+
+    A guard suite whose every case expects a BLOCK is passed by a script that blocks everything,
+    and one whose every case expects an ALLOW is passed by a script that does nothing at all. The
+    second is #90 exactly: a guard that silently stopped firing, with its own tests still green.
+
+    So this is the denominator check the mutation sweep and the theme scan both carry, applied to a
+    consumer's fixture: a run over cases that all point one way proves the script can reach that
+    answer, never that it CHOOSES it.
+    """
+    def _denies(c):
+        if "expect" in c:
+            return str(c["expect"]).lower() == "deny"
+        return int(c.get("expect_exit", 0)) != 0
+
+    blocks = [c for c in cases if _denies(c)]
+    allows = [c for c in cases if not _denies(c)]
+    if blocks and allows:
+        return True, f"{len(blocks)} blocking case(s), {len(allows)} allowing"
+    if not blocks:
+        return False, ("no case here expects a DENY — a script that does nothing at all passes "
+                       "this file, which is the exact failure #90 was: a guard that had silently "
+                       "stopped firing, with its own tests still green")
+    return False, ("every case here expects a DENY — a script that blocks everything "
+                   "passes this file, so it establishes the guard CAN refuse, never that it picks "
+                   "its moment")
+
+
+def run_guard_case(script, case, cwd, timeout=30):
+    """Feed one recorded payload to a hook script. (outcome, detail, decision).
+
+    Claude Code hands a hook its payload as JSON on STDIN, so that is what this does. "could not
+    run" is its own outcome and never collapses into "did not fire": a script that is missing, not
+    executable, or times out has told you nothing, and reporting that as an ALLOW is how a harness
+    certifies a guard that never executed.
+    """
+    body = json.dumps(case.get("payload") or {})
+    try:
+        r = subprocess.run([script], input=body, capture_output=True, text=True,
+                           cwd=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "could-not-run", f"timed out after {timeout}s — nothing was established", None
+    except OSError as exc:
+        return "could-not-run", (f"could not execute it: {exc}. A hook script must be executable "
+                                 "and carry a shebang; this is not a verdict about the guard"), None
+    out_all = (r.stdout or "") + (r.stderr or "")
+    dec, why = hook_decision(r.returncode, out_all)
+    want_out = case.get("expect_output")
+    # An explicit exit-code expectation is still honoured for guards that only speak that protocol.
+    if "expect_exit" in case and "expect" not in case:
+        want = int(case["expect_exit"])
+        if r.returncode != want:
+            return "mismatch", f"expected exit {want}, got {r.returncode} ({why})", dec
+    else:
+        want = str(case.get("expect", "allow")).lower()
+        # SILENCE SATISFIES `allow`, BECAUSE MOST GUARDS ALLOW BY SAYING NOTHING and pricing that
+        # out would make the verb unusable. It is never hidden, though: the detail names which of
+        # the two it was, and the summary counts the silent ones — the both-directions rule above
+        # is what actually stops a do-nothing script passing, since it must produce a real DENY.
+        if not (dec == want or (want == "allow" and dec == "silent")):
+            return "mismatch", f"expected {want}, got {dec} — {why}", dec
+    if want_out and want_out not in out_all:
+        return "mismatch", (f"the decision was right, but the output never said {want_out!r} — a "
+                            "guard that refuses for the wrong reason sends you somewhere else"), dec
+    return "match", why + (f", and said {want_out!r}" if want_out else ""), dec
+
+
+def cmd_guardtest(s, a):
+    """Run a consumer's OWN hook script against recorded payloads (#91.2).
+
+    test/run.py proves game_loop's guarantees; a consumer's triggers and hook scripts had nothing.
+    The filer wrote 340 lines of these locally "after watching a guard fire on the case it was
+    built for and then discovering it had gone inert for a different input".
+
+    FIXTURE-DRIVEN ON PURPOSE, so no consumer's logic lands in this repo: the cases are theirs, in
+    their file, and this supplies only the running and the verdict.
+    """
+    if not a.fixture:
+        die("guardtest needs --fixture <path> — a JSON file naming the script and its cases:\n\n"
+            '  {"script": ".game_loop/triggers.d/mine.sh",\n'
+            '   "cases": [\n'
+            '     {"name": "blocks a write outside the repo", "expect_exit": 2,\n'
+            '      "payload": {"tool_name": "Write", "tool_input": {"file_path": "/etc/x"}}},\n'
+            '     {"name": "allows one inside it", "expect_exit": 0,\n'
+            '      "payload": {"tool_name": "Write", "tool_input": {"file_path": "README.md"}}}\n'
+            "   ]}\n\n"
+            "The payload is handed to the script on STDIN as JSON, which is how Claude Code hands a\n"
+            "hook its own.")
+    fx = os.path.realpath(os.path.expanduser(a.fixture))
+    try:
+        with open(fx) as f:
+            spec = json.load(f)
+    except OSError as exc:
+        die(f"--fixture is not readable: {exc}")
+    except ValueError as exc:
+        die(f"--fixture is not valid JSON: {exc}")
+    script = a.script or spec.get("script")
+    if not script:
+        die("no script to run — give --script <path>, or a \"script\" key in the fixture.")
+    script = os.path.realpath(os.path.expanduser(
+        script if os.path.isabs(script) else os.path.join(REPO_ROOT, script)))
+    cases = spec.get("cases") or []
+    if not cases:
+        die(f"the fixture declares NO cases, so this run would check nothing and exit 0 — which is\n"
+            f"byte-identical to a guard suite that ran and passed.\n\n  {fx}")
+    ok_dirs, why_dirs = guardtest_directions(cases)
+    if not ok_dirs:
+        die(f"REFUSED — the cases only go one way.\n\n  {fx}\n  {why_dirs}\n\n"
+            "Both directions are the price of admission here, the same way `instrument` wants a "
+            "null control beside its positive one. Add the case that must NOT fire.")
+    if not os.path.exists(script):
+        die(f"the script does not exist: {script}\n"
+            "That is not a failing guard — it is a fixture pointing somewhere else.")
+    rows, bad, unknown, silent = [], [], [], []
+    for i, c in enumerate(cases):
+        name = c.get("name") or f"case {i + 1}"
+        outcome, detail, dec = run_guard_case(script, c, REPO_ROOT, int(a.timeout or 30))
+        rows.append((outcome, name, detail))
+        if dec == "silent":
+            silent.append(name)
+        if outcome == "mismatch":
+            bad.append(name)
+        elif outcome == "could-not-run":
+            unknown.append(name)
+    glyph = {"match": "✓", "mismatch": "✗", "could-not-run": "?"}
+    lines = [f"guardtest — {os.path.basename(script)}  ({why_dirs})", ""]
+    lines += [f"  {glyph[o]} {n}\n      {d}" for o, n, d in rows]
+    logline({"kind": "guardtest", "script": script, "fixture": fx, "cases": len(cases),
+             "mismatch": len(bad), "could_not_run": len(unknown)})
+    if unknown:
+        lines += ["", f"COULD NOT RUN {len(unknown)} case(s). That is not a passing guard and not a "
+                      "failing one —", "nothing was established for them, and a harness that "
+                      "counted them as ALLOW would", "certify a guard that never executed."]
+    if bad or unknown:
+        out(*lines)
+        die(f"guardtest: {len(bad)} mismatch(es), {len(unknown)} that could not run.", code=REFUSED_EXIT)
+    if silent:
+        lines += ["", f"  {len(silent)} of these ALLOWED BY SAYING NOTHING, which is also what a "
+                      "guard that has", "  stopped running says. The deny case above is what "
+                      "distinguishes them here."]
+    lines += ["", "WHAT THIS DOES NOT SAY: that the guard is correct, or that it fires on the case "
+                  "you have", "not thought of yet. It says these recorded payloads still produce "
+                  "these decisions."]
+    out(*lines)
+
+
 def cmd_doorbell(s, a):
     out(*doorbell_lines(s, os.path.basename(REPO_ROOT)))
 
@@ -10731,6 +10912,12 @@ def main():
 
     sub.add_parser("doorbell", help="print the wake-up prompt for THIS run, filled from live state")
 
+    gt = sub.add_parser("guardtest", help="run a consumer's own hook script against recorded "
+                                          "payloads and assert the exits")
+    gt.add_argument("--fixture", help="JSON file: the script, and the cases with their payloads")
+    gt.add_argument("--script", help="the hook script to run (overrides the fixture's own key)")
+    gt.add_argument("--timeout", type=int, help="seconds per case (default 30)")
+
     hd = sub.add_parser("harden")
     mu = sub.add_parser("mutate")   # a revert-proof the TOOL performs, not one you report (#71)
     mu.add_argument("--prove", help="what this test is claimed to pin")
@@ -10981,7 +11168,7 @@ def main():
      "instrument": cmd_instrument, "measure": cmd_measure,
      "limitprobe": cmd_limitprobe, "model": cmd_model,
      "successor": cmd_successor, "threads": cmd_threads, "contribute": cmd_contribute,
-     "doorbell": cmd_doorbell,
+     "doorbell": cmd_doorbell, "guardtest": cmd_guardtest,
      "kinds": cmd_kinds}[a.cmd](s, a)
 
 

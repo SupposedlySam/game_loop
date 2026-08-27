@@ -290,6 +290,40 @@ game_loop mutate --prove ".." --test ".." --file <path> \
 `{marker}` is substituted by the tool, and it is what separates "the probe stopped this test" from
 "something else did" — a fault without it can never return `live`, so it is refused.
 
+## Testing a guard you wrote yourself
+
+`test/run.py` proves game_loop's own guarantees. For YOUR triggers and hook scripts:
+
+```
+game_loop guardtest --fixture .game_loop/guards.json
+```
+
+The fixture is yours and stays yours — no logic lands in game_loop:
+
+```json
+{"script": ".game_loop/triggers.d/mine.sh",
+ "cases": [
+   {"name": "blocks a write outside the repo", "expect": "deny", "expect_output": "READ-ONLY",
+    "payload": {"tool_name": "Write", "tool_input": {"file_path": "/etc/x"}}},
+   {"name": "allows one inside it", "expect": "allow",
+    "payload": {"tool_name": "Write", "tool_input": {"file_path": "README.md"}}}
+ ]}
+```
+
+The `payload` is handed to your script on STDIN as JSON, which is how Claude Code hands a hook its
+own. `expect` is `deny` / `allow` / `ask`; `expect_exit` is there for a guard that only speaks exit
+codes, and `expect_output` pins the REASON, since a guard refusing for the wrong reason sends you
+somewhere else.
+
+**Both directions or it is refused.** A fixture whose cases all expect `allow` is passed by a
+script that does nothing at all — which is exactly what a guard looks like after it silently stops
+firing. Write the case that must NOT fire.
+
+Two things it reads that are easy to conflate: a hook may refuse by exiting 2 OR by printing a JSON
+`permissionDecision`, and both are a deny. Exiting 0 having said nothing is reported as `silent` —
+that is what an allow looks like and equally what a guard no longer running looks like, so the run
+counts them and says so.
+
 ## Other verbs
 
 ```

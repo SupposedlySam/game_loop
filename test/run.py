@@ -8561,6 +8561,64 @@ def main():
               "--note" in _opts and "--note-file" in gl(pw, "contribute", "--help",
                                                         sid="sess-prose").stdout)
 
+        # THE SAME COMPLETENESS ARGUMENT, ONE LEVEL UP — over VERBS, which had none. #96 derives the
+        # option surface from the parser and makes every member classify itself; nothing did that
+        # for subcommands. Measured the day `doorbell` shipped: scrubbing every mention of it from
+        # README.md AND llms.txt left all 3098 assertions green. A whole verb, documented nowhere,
+        # and the suite's verdict was identical to the verdict on a fully documented tool.
+        #
+        # Same derivation tell as #96: this reads the DECLARATION of a verb, and the defect it fears
+        # — adding one and documenting it nowhere — cannot remove its own declaration. The input
+        # grows with the violation rather than shrinking, so the check gets louder, not quieter.
+        _verbs, _vnonlit = set(), set()
+        for _n in ast.walk(_tree):
+            if not (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+                    and _n.func.attr == "add_parser" and _n.args):
+                continue
+            _a0 = _n.args[0]
+            if isinstance(_a0, ast.Constant) and isinstance(_a0.value, str):
+                _verbs.add(_a0.value)
+            else:
+                _vnonlit.add(ast.dump(_a0)[:40])
+        check("every subcommand is declared under a literal name, so the set below is the whole "
+              "verb surface rather than the part that happened to be written plainly: "
+              + (", ".join(sorted(_vnonlit)) or "none computed"),
+              not _vnonlit)
+        check("...and there are many of them, so a sweep over this set is not passing on an empty "
+              f"denominator: {len(_verbs)} declared",
+              len(_verbs) >= 20)
+        # THE HOOK SHIMS ARE DELIBERATELY UNDOCUMENTED, and the reason is not tidiness. These are
+        # invoked BY Claude Code hooks, never typed. Documenting them as things an agent may run
+        # would advertise that a gate can be driven by hand — and a gate you can run yourself is a
+        # verdict you can author, which is the one thing none of them may become.
+        _HOOK_VERBS = ("limitgate", "sessionstart", "stopgate")
+        with open(os.path.join(REPO, "README.md")) as f:
+            _docs = f.read()
+        with open(os.path.join(REPO, "llms.txt")) as f:
+            _docs += f.read()
+
+        def _named(v):
+            return re.search(r"\b" + re.escape(v) + r"\b", _docs) is not None
+
+        _undocv = sorted(v for v in _verbs if v not in _HOOK_VERBS and not _named(v))
+        check("every verb this tool declares is NAMED in README.md or llms.txt — the two files a "
+              "human and an agent start from — unless it is an explicitly listed hook shim: "
+              + (", ".join(_undocv) or "none"),
+              not _undocv)
+        # THE OTHER DIRECTION, which is what stops the exemption becoming a blanket. An exempt verb
+        # that HAS been documented means the decision not to advertise it no longer holds, and the
+        # list is now describing a repo that does not exist.
+        _leaked = sorted(v for v in _HOOK_VERBS if _named(v))
+        check("...and each exempt hook shim is genuinely absent from both, so the exemption states "
+              "a fact rather than buying silence for whatever gets added to it: "
+              + (", ".join(_leaked) or "none"),
+              not _leaked)
+        _stalev = sorted(v for v in _HOOK_VERBS if v not in _verbs)
+        check("...and no exemption names a verb that no longer exists — a decision spent on a "
+              "surface that is gone, and the verb that eventually takes that name arrives "
+              "pre-exempted: " + (", ".join(_stalev) or "none"),
+              not _stalev)
+
         # #97: THE KEYWORD-NAMED DESTS ARE DERIVED, because the failure mode is silent. argparse
         # cannot store `assert` or `with` under their own names, so both carry a trailing underscore
         # — and resolve_prose SKIPS any option whose dest it cannot find. A missing entry therefore

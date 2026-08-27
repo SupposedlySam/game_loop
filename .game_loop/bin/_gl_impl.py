@@ -10205,7 +10205,19 @@ def cmd_harden(s, a):
         f"  artifact : {', '.join(paths)}",
         f"  mechanism: {a.mechanism}",
         f"  rung     : {a.rung or '(unspecified — which ladder rung?)'}",
-        f"→ enforced by the harness now, not by memory. (hardened so far: {s['hardened_count']})")
+        f"→ enforced by the harness now, not by memory. (hardened so far: {s['hardened_count']})",
+        # WHAT THIS VERB CHECKED IS THAT THE PATH EXISTS (INV6). It cannot read the artifact and
+        # decide whether that file would CATCH the class the learning names — "this contains a check
+        # for this" is not decidable from a path. So the strongest sentence in this output was the
+        # one thing not verified, and the limit was stated only in the REFUSAL text, which nobody
+        # reads on the success path.
+        #
+        # Same shape as a mutant check that passes on "anchor found AND bytes changed": the verb
+        # confirmed the edit LANDED and reported that it MEANS something. Changed is a weaker
+        # property than still means something.
+        "  NOT CHECKED: that the artifact ENFORCES this. The path exists and the record is written;",
+        "  whether that file would CATCH the thing is your claim, in --mechanism, and nothing here",
+        "  can read it. A hardening whose artifact never fires is a learning with a receipt.")
     if general:
         out(f"  general  : {general}")
     elif triggers_for("harden"):

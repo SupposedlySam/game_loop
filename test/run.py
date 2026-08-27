@@ -10552,6 +10552,29 @@ def main():
     _art = os.path.join(fw, ".game_loop", "config.json")
     gl(fw, "harden", "--learning", "x", "--artifact", _art, "--mechanism", "y", "--rung", "3",
        sid="sess-fr")
+    # HARDEN'S SUCCESS LINE MAKES ITS STRONGEST CLAIM ABOUT THE ONE THING IT DID NOT CHECK. The
+    # verb confirms each --artifact path EXISTS; it cannot read the file and decide whether that
+    # file would CATCH the class the learning names, because "this contains a check for this" is not
+    # decidable from a path. "→ enforced by the harness now, not by memory" therefore asserts
+    # something nothing verified, and the limit was stated only in the REFUSAL text — which nobody
+    # reads on the success path (INV6 asks for the opposite).
+    #
+    # Same shape as a mutant check passing on "anchor found AND bytes changed": the verb confirmed
+    # the edit LANDED and reported that it MEANS something.
+    # ITS OWN SANDBOX. Put in `fw`, this second harden made that tree's count 2 and broke the
+    # FIRST-retro assertion below, which expects exactly one. That is the same pollution as driving
+    # the live verb to read its own output — a probe that WRITES belongs somewhere it owns, and
+    # "somewhere it owns" is finer-grained than "a sandbox".
+    _hw = make_sandbox()
+    _hout = gl(_hw, "harden", "--learning", "the caveat",
+               "--artifact", os.path.join(_hw, ".game_loop", "config.json"),
+               "--mechanism", "m", "--rung", "3", sid="sess-hcav").stdout
+    check("harden SAYS what it did not check — the path exists and the record is written, and "
+          "whether the artifact would CATCH the thing is a claim nothing here can read",
+          "NOT CHECKED: that the artifact ENFORCES this" in _hout)
+    check("...and it still says the learning is enforced, because the caveat BOUNDS the claim "
+          "rather than retracting it — a verb that hedged its own success would not be used",
+          "enforced by the harness now" in _hout)
     _first = gl(fw, "stepback", "--notes", "the first retro of this tree", sid="sess-fr").stdout
     check("the FIRST retro reports the work encoded before it — 'no previous retro' is not 'no "
           "previous work', and counting nothing made a real harden invisible to every later reader",

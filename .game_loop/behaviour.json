@@ -461,6 +461,15 @@
       "change": "a load-bearing claim is only reported CONFIRMED LIVE by ITS OWN probe. The check ran the statusline's rate-limit probe for every exercisable claim outside a two-id deny list, and printed that probe's reading as the claim's evidence. Claims with no probe here now get a third outcome — exercisable, nothing here can observe it, the date is a stamp not a reading — and the line names the claim's own `exercised_by` to re-run.",
       "why_it_qualifies": "A consumer who changed nothing stops being told a claim is confirmed when it is not. Observed in this repo's own status: `'saggar-terminal-name-is-not-ours' CONFIRMED LIVE here — five_hour snapshot with used_percentage present ... so it cannot be stale` — a claim about what names a TERMINAL, confirmed by a usage-limit reading, while that claim was in fact BROKEN. Wrong subject, wrong verdict, and an assurance of freshness attached to something that had just gone stale the same day.",
       "consequence": "If your status showed a claim CONFIRMED LIVE and that claim is not about rate limits, the confirmation was not about your claim — re-read it. Claims genuinely covered by a probe (statusline-rate-limits, no-weekly-opus-window, no-rate-limits-in-hooks) are unchanged. WHAT THIS DOES NOT DO: it does not add probes. Most claims still have none, and the honest line says so rather than borrowing one; a claim about another tool is checkable only by running that tool, which is why `exercised_by` is printed beside the verdict now."
+    },
+    {
+      "seq": 48,
+      "sha": "42165c3",
+      "notice": true,
+      "verb": "harden",
+      "change": "the success output now states what the verb did NOT check: that the --artifact path exists and the record is written, but not that the artifact ENFORCES the learning. The line 'enforced by the harness now, not by memory' is unchanged and still printed.",
+      "why_it_qualifies": "A consumer who changed nothing reads a different claim. The strongest sentence in that output asserted the one thing the verb cannot verify — 'this file contains a check that would catch this class' is not decidable from a path — and the limit was stated only in the REFUSAL text, which nobody reads on the success path. INV6 asks a guard to say what it misses, on the path where it passes.",
+      "consequence": "Nothing about what harden accepts or refuses changed. If you were reading 'enforced by the harness now' as the tool having confirmed your artifact fires, it never did and now says so. The claim is yours, in --mechanism. WHAT IS STILL NOT CHECKED, and cannot be: whether the artifact would catch the class, whether it still does after an edit, and whether the mechanism describes what the file actually does."
     }
   ],
   "schema": 1

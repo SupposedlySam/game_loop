@@ -10178,6 +10178,53 @@ def main():
           "failed either",
           "UNKNOWN, not passing" in _prun)
 
+    # NAMES ARE PRUN'S PRIMARY KEY. It merges each shard's outcomes into a dict keyed by assertion
+    # NAME, so two assertions sharing one collapse into a single entry and `--verify`'s name diff
+    # can report parallel and serial in agreement while an assertion has vanished from the
+    # comparison. The EXIT CODE is not at risk — failures are counted from each shard's own trailer,
+    # not from the merged dict — so this is a reporting hazard and a tripwire rather than a fix.
+    # Measured when written: 1959 outcomes, 1959 distinct names, zero collisions.
+    # ASKED OF THE PARSER, NOT THE TEXT. A regex over `check("` matched names inside CONSTRUCTED
+    # SOURCE — fixtures in this file build little programs containing their own check() calls, and
+    # "alpha" and "beta" appear in several of them. The first version reported those as duplicate
+    # assertion names, which is a finding about my regex rather than about this suite. The AST sees
+    # a string literal as a string literal.
+    _dupnames = [_n.args[0].value
+                 for _n in ast.walk(ast.parse(read_or_empty(os.path.join(REPO, "test", "run.py"))))
+                 if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+                 and _n.func.id == "check" and _n.args
+                 and isinstance(_n.args[0], ast.Constant) and isinstance(_n.args[0].value, str)]
+    _dupseen, _dupes = set(), set()
+    for _n in _dupnames:
+        (_dupes if _n in _dupseen else _dupseen).add(_n)
+    check("no two assertions share a NAME — prun merges shard outcomes keyed by name, so a "
+          "collision hides one of them from --verify's diff: " +
+          (", ".join(sorted(_dupes)[:2])[:70] or "none of %d single-literal names" % len(_dupnames)),
+          not _dupes)
+    check("...and that scan actually found names, so the clean answer is a verdict rather than a "
+          "walk that stopped matching this file's `check(` calls",
+          len(_dupnames) > 400)
+
+    def _dupe_names_in(src):
+        _ns = [n.args[0].value for n in ast.walk(ast.parse(src))
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "check"
+               and n.args and isinstance(n.args[0], ast.Constant)
+               and isinstance(n.args[0].value, str)]
+        _seen, _d = set(), set()
+        for _n in _ns:
+            (_d if _n in _seen else _seen).add(_n)
+        return sorted(_d)
+
+    check("...and the rule REPORTS a collision when there is one — 'none of 1820' proves nothing "
+          "until the not-none answer has been produced",
+          _dupe_names_in('check("same name", True)\ncheck("same name", True)\n') == ["same name"])
+    check("...and it does NOT report a name that merely appears inside a constructed source string, "
+          "which is what a regex over `check(\" did: this file builds little programs containing "
+          "their own check() calls, and it reported those as duplicates of each other",
+          _dupe_names_in('src = \'check("inner", True)\\ncheck("inner", True)\'\n'
+                         'check("outer", True)\n') == [])
+
+
     # A SHORT RUN IS NOT A SMALL SUITE (showrunner's #104, arriving here). prun already refuses the
     # ZERO case — `sections()` returning nothing is "refusing to report a pass over nothing". The
     # case that actually happens is SHORT: a header style that stops matching, a parse change, a

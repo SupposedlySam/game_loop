@@ -11478,20 +11478,19 @@ def main():
         return sorted(k for k, v in seen.items() if len(v) > 1)
 
     _SYMBOL_PINNED = [                     # line-scoped assertions on the symbol itself exist
-        "<module>", "cmd_confidence", "cmd_notify", "effector_state", "external_claims_report",
-        "fire_triggers", "fix_state", "guards_report", "mark_publication_state", "pin_state",
-        "triggers_report", "worktree_report",
+        "<module>", "cmd_confidence", "cmd_guardtest", "cmd_notify", "effector_state",
+        "external_claims_report", "fire_triggers", "fix_state", "guards_report",
+        "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "cmd_checkpoint", "cmd_guardtest", "cmd_harden", "cmd_measure",
+        "cmd_checkpoint", "cmd_harden", "cmd_measure",
         "cmd_pin", "cmd_status", "instruments_report",
     ]
-    # cmd_guardtest is DEBT rather than pinned on a technicality worth stating: its ✓ IS asserted
-    # line-scoped, and its ✗ and ? are not — the mismatch and could-not-run cases are asserted by
-    # their WORDS. That is the exact shape the pin_state assertion was caught by ("the glyph is
-    # what a human actually scans, and an assertion on the word alone passes with the symbol
-    # reversed"), so one glyph out of three is not a pinned symbol, and calling it one here would
-    # buy the claim with the assertion that already existed.
+    # cmd_guardtest ARRIVED AS DEBT AND WAS PAID THE SAME DAY, which is the only reason it is up
+    # there. It shipped with its ✓ asserted line-scoped and its ✗ and ? asserted by their WORDS —
+    # one glyph out of three, which is not a pinned symbol, and the exact shape pin_state was
+    # caught by. Both remaining arms now have their own line-scoped assertion AND their own
+    # mutation, run with this repo's own `mutate --prove` against the glyph table itself.
     # WHICH OF THE PINNED ONES HAVE ACTUALLY KILLED A MUTANT. An assertion that has never failed
     # has never been run in anger, and today proved that twice: the guards_report symbol assertion
     # passed while the mutation it was written for survived, because the word INERT has two arms.
@@ -11516,10 +11515,13 @@ def main():
     # THE OTHERS ARE UNVERIFIED, and that is a statement rather than an omission: each costs a full
     # suite run twice (~15 min), so they are owed rather than skipped. Do not read the pinned count
     # as a measured one.
+    #   cmd_guardtest            ✗ → ✓ on the mismatch case's line   PROVED 2026-08-27
+    #   cmd_guardtest            ? → ✓ on could-not-run             PROVED 2026-08-27
+    #                            both against the glyph table itself, both red on the section
     _SYMBOL_MUTATION_VERIFIED = [
-        "<module>", "cmd_confidence", "cmd_notify", "effector_state", "external_claims_report",
-        "fire_triggers", "fix_state", "guards_report", "mark_publication_state", "pin_state",
-        "triggers_report", "worktree_report",
+        "<module>", "cmd_confidence", "cmd_guardtest", "cmd_notify", "effector_state",
+        "external_claims_report", "fire_triggers", "fix_state", "guards_report",
+        "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     check("every producer whose symbol assertion has KILLED A MUTANT is one this suite also claims "
           "to pin — the stronger list cannot name something the weaker one does not, or the record "
@@ -15334,6 +15336,18 @@ def main():
             check("#91: ...and it states what it does NOT establish: not that the guard is correct, "
                   "and not that it fires on the case nobody has thought of",
                   has(_g1.stdout, "WHAT THIS DOES NOT SAY"))
+            # THE GLYPH IS THE PART A HUMAN SCANS, and each case renders it on the line carrying
+            # that case's NAME — so these are scoped to that line rather than searched for in the
+            # whole report, where the OTHER case's symbol would satisfy them. pin_state was caught
+            # by exactly this: an assertion on the word alone passes with the symbol reversed.
+            def _gline(text, subject):
+                return next((l for l in text.splitlines() if subject in l), "")
+
+            _ok_line = _gline(_g1.stdout, "refuses a write outside")
+            check("#91: ...and a matching case carries \u2713 ON ITS OWN LINE — the symbol is what "
+                  "gets read, and searching the whole report for one would be satisfied by a "
+                  "different case's",
+                  "\u2713" in _ok_line and "\u2717" not in _ok_line)
             # THE ONE THAT MATTERS. Same fixture, a script that does nothing — which is what a
             # guard looks like after it silently stops firing.
             _dead = os.path.join(_gt, "dead.sh")
@@ -15346,6 +15360,11 @@ def main():
                   "passed here would certify the defect it exists to find",
                   _g2.returncode != 0
                   and has(_g2.stdout + _g2.stderr, "expected deny, got silent"))
+            _bad_line = _gline(_g2.stdout, "refuses a write outside")
+            check("#91: ...and THAT case carries \u2717 on its own line, not the \u2713 the same "
+                  "case earned against a working guard — one fixture, two guards, and the symbol "
+                  "is the whole of what a reader compares",
+                  "\u2717" in _bad_line and "\u2713" not in _bad_line)
             _noexec = os.path.join(_gt, "noexec.sh")
             with open(_noexec, "w") as f:
                 f.write("echo hi\n")
@@ -15357,6 +15376,15 @@ def main():
                   _g3.returncode != 0
                   and has(_g3.stdout + _g3.stderr, "COULD NOT RUN")
                   and has(_g3.stdout + _g3.stderr, "not a verdict about the guard"))
+            _unk_line = _gline(_g3.stdout, "refuses a write outside")
+            check("#91: ...and it carries a THIRD symbol, neither \u2713 nor \u2717 — could-not-run "
+                  "is not a pass and not a failure, and rendering it as either is how a harness "
+                  "reports a verdict about a guard that never ran",
+                  "?" in _unk_line and "\u2713" not in _unk_line and "\u2717" not in _unk_line)
+            check("#91: ...so the three outcomes render three DIFFERENT symbols — the same fixture "
+                  "against a working guard, an inert one and an unrunnable one, which is the "
+                  "comparison the report exists to make",
+                  len({_ok_line.strip()[:1], _bad_line.strip()[:1], _unk_line.strip()[:1]}) == 3)
             with open(_fx + ".empty", "w") as f:
                 json.dump({"cases": []}, f)
             _g4 = _gtr("--fixture", _fx + ".empty", "--script", _real)

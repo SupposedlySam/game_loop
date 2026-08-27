@@ -13931,6 +13931,28 @@ def main():
             return True                      # not in HEAD at all: the reason still holds
         return not re.search(r"^def " + re.escape(_fnm) + r"\(", _h.stdout, re.M)
 
+    # THE SAME RULE FOR THE OTHER CHECKABLE CLAIM AN EXCLUSION CAN MAKE. A reason saying `neuter`
+    # CANNOT REACH a producer is decidable — ask neuter. Two entries said exactly that, truthfully,
+    # and stopped being true the moment neuter became indent-aware; I wrote both of them hours
+    # earlier the same day. That is the third expired reason here in one day, and the first two
+    # (KNOWN GAPs blocked on "not in HEAD yet") had been wrong for a week.
+    #
+    # Only the reach half expired: both are still excluded because they ARE the instrument, which
+    # is why the entries are corrected rather than removed. An exclusion is a decision about a
+    # moment, and prose does not degrade when the moment passes.
+    _reach_claims = [k for k, v in sweep.NOT_SWEPT.items()
+                     if "cannot reach" in v.lower() and "EXPIRED" not in v]
+    _reach_wrong = []
+    for _k in _reach_claims:
+        _r, _f = _k.split("::", 1)
+        _src = read_or_empty(os.path.join(REPO, _r))
+        if _src and sweep.neuter(_src, _f, "    return None")[1]:
+            _reach_wrong.append(_k)
+    check("no exclusion still claims `neuter` CANNOT REACH a producer that it reaches — that "
+          "reason is decidable by asking neuter, and it expires silently the day neuter grows: " +
+          (", ".join(_reach_wrong) or "none of %d such reason(s)" % len(_reach_claims)),
+          not _reach_wrong)
+
     _head_claims = [k for k, v in sweep.NOT_SWEPT.items() if "IN HEAD" in v.upper()]
     _expired = [k for k in _head_claims if not _absent_from_head(k)]
     check("no exclusion is still citing 'not in HEAD yet' for a producer that IS in HEAD — that "

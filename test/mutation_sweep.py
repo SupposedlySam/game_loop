@@ -1561,17 +1561,10 @@ NOT_SWEPT = {
             "denominator even after the read guards landed. Neutering it to a constant None makes "
             "every assertion that reads producer-written state fail at once, which those "
             "assertions catch directly.",
-    "test/run.py::_multi_symbol_producers": "the scan for producers whose literals can yield more "
-    "than one symbol, nested inside main(). Same ground as _vanishing and _writes_outside_tmp: it "
-    "is the instrument, so neutering it measures the suite's own scan rather than the tool. It "
-    "became visible to the candidate finder only with #115's widening — it always had this shape, "
-    "and `neuter` cannot reach it anyway, because that rewrites module-level defs and this one is "
-    "indented. A CANDIDATE THE MUTATOR CANNOT REACH is its own small gap: `candidates()` walks the "
-    "whole tree deliberately (a class's methods are not module level), while `neuter` matches "
-    "column zero, so the two disagree about what a producer is. Recorded here rather than left as "
-    "an anchor that silently reports NOT FOUND.",
-    "test/run.py::_whole_file_log_readers": "the scan for assertions that read a whole log file, "
-    "nested inside main() — same ground, same reach problem, same reason.",
+    "test/run.py::_multi_symbol_producers":
+        "the scan for producers whose literals can yield more than one symbol, nested inside main(). Same ground as _vanishing and _writes_outside_tmp: it is the instrument, so neutering it measures the suite's own scan rather than the tool. It became visible to the candidate finder only with #115's widening; it always had this shape. THE SECOND HALF OF THIS REASON HAS EXPIRED and is recorded rather than deleted: it used to say `neuter` could not reach an indented def anyway, which was true when written and stopped being true when neuter became indent-aware. The reach gap is closed and every candidate is now reachable, so the ONLY reason this is excluded is the first one — it is the instrument. An exclusion is a decision about a moment, and this is the third time in one day that a reason outlived its moment here.",
+    "test/run.py::_whole_file_log_readers":
+        "the scan for assertions that read a whole log file, nested inside main() — same ground and the same single reason: it is the instrument. It used to say 'same reach problem' too; that half expired when neuter became indent-aware.",
     "test/run.py::_vanishing": "the scan for assertions that can silently not run, inside the "
                                "suite. Its empty list is the ordinary answer — the file has no "
                                "such site — and it is the one producer here whose OWN positive "

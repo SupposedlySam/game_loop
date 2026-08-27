@@ -1134,7 +1134,7 @@ MUTANTS += [
     ('inv_oneline -> status carries no INV summary line at all',
      '.game_loop/bin/_gl_impl.py::inv_oneline', '    return ""\n',
      ['INV:', 'INVARIANTS', 'inv summary', 'one-line INV'],
-     "5 kills, MEASURED by the full sweep of 2026-08-26 against d2411ab — the first reading this producer has ever had. It entered the denominator with #115's widening of the candidate finder, and its first two sweeps produced NOTHING: the declared mutant body carried a literal backslash-n instead of a newline, so the file did not parse and the suite could not start. Comparable: test/run.py is unchanged between that sweep's tree and this commit.", 5),
+     "6 kills as of 2026-08-27; it read 5 when MEASURED by the full sweep of 2026-08-26 against d2411ab — the first reading this producer has ever had. It entered the denominator with #115's widening of the candidate finder, and its first two sweeps produced NOTHING: the declared mutant body carried a literal backslash-n instead of a newline, so the file did not parse and the suite could not start. Comparable: test/run.py is unchanged between that sweep's tree and this commit.", 5),
     ('limits_summary -> the usage window is never summarised for status',
      '.game_loop/bin/_gl_impl.py::limits_summary', '    return None\n',
      ['limits:', 'usage window', '5h ', '7d '],

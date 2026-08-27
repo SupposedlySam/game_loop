@@ -98,6 +98,21 @@ def _env(proj=None, sid=None, **extra):
     # 20s watching the DEVELOPER'S real presence directory — where a terminal they opened by hand
     # would be read as the successor. Tests that mean to exercise discovery set it themselves.
     env["GAME_LOOP_SAGGAR_DISCOVER_SEC"] = "0"
+    # And the MACHINE-WIDE config layer, for the same reason as every scrub above it. Config now
+    # layers ~/.game_loop/config.json under both repo files, and the developer running this suite
+    # may well have one — a context cap, a permission grant, an allow_write_root. Left unpinned,
+    # every "no config at all" control here would silently be "whatever is in that person's home",
+    # so the suite would pass or fail differently on two machines and neither result would mean
+    # anything. Pointed at a path that is never created: tests that mean to exercise the layer set
+    # this variable themselves, to a file they wrote and can clear.
+    # A test that names its own HOME means the machine-wide file UNDER THAT HOME (the MCP layering
+    # cases do exactly this), so the pin follows it rather than fighting it. Everything else gets a
+    # path that is never created — one mechanism, two intents, and no case where the answer is the
+    # developer's own file.
+    env["GAME_LOOP_GLOBAL_CONFIG"] = os.path.join(
+        extra["HOME"] if extra.get("HOME")
+        else os.path.join(tempfile.gettempdir(), "game_loop-suite-absent-home"),
+        ".game_loop", "config.json")
     if proj:
         env["CLAUDE_PROJECT_DIR"] = proj
     if sid:
@@ -2271,19 +2286,78 @@ def main():
               "copies from",
               "TRACKED" in out_tracked and "clones this checkout" in out_tracked)
         succ_skip_clear()
-        # The cost this change CREATED: config() is a shallow top-level update, so adding the
-        # `limits` block the grant lives in replaces the tracked one whole. Found by running it,
-        # not by reading -- a tree with mode "print" reported `configured "auto"`.
+        # THE SHADOWING THIS ONCE WARNED ABOUT NO LONGER HAPPENS, and that is the assertion now.
+        # config() was a shallow top-level update, so adding the `limits` block the grant lives in
+        # replaced the tracked one whole -- a tree with mode "print" reported `configured "auto"`
+        # the moment a local grant appeared. Four lines of warning stood in for a fix; the merge is
+        # the fix, so these check the outcome the warning was describing rather than the warning.
         succ_skip_tracked(True, mode="print")
         succ_skip_bare(True)
         out_shadow = succ_mode(TERM_PROGRAM="Apple_Terminal")
-        check("a local `limits` block NAMES the tracked keys it silently replaced, rather than "
-              "letting them fail toward a default that looks deliberate",
-              "config              : \u26a0" in out_shadow
-              and "successor.mode" in out_shadow)
-        check("...and says what to do about it, since restating them is the only fix",
-              "Restate the ones you still want" in out_shadow)
+        check("a local `limits` block no longer replaces the tracked one whole — a mode set in "
+              "config.json survives a local file that never restated it, which is the regression "
+              "the old warning existed to describe",
+              'configured "print"' in out_shadow)
+        check("...and the local grant still applies through the same merge, so keeping the "
+              "neighbours did not cost the key the file was created for",
+              "--dangerously-skip-permissions" in succ_cmdline(out_shadow))
         succ_skip_clear()
+
+        # ── THE MACHINE-WIDE LAYER (~/.game_loop/config.json) ────────────────────────────────
+        #
+        # "My successors do not stop to ask" is a fact about a MACHINE, and until this layer existed
+        # it had to be restated in every checkout or forgotten. What the layer must NOT do is make
+        # the grant harder to see or harder to withdraw, so both are asserted here rather than
+        # assumed: the file is NAMED in the output, and the narrow file can still say no.
+        ctx_cf_home = os.path.join(proj, "fake-home", ".game_loop", "config.json")
+        os.makedirs(os.path.dirname(ctx_cf_home), exist_ok=True)
+
+        def succ_global(payload):
+            json.dump(payload, open(ctx_cf_home, "w"))
+
+        def succ_global_clear():
+            if os.path.exists(ctx_cf_home):
+                os.remove(ctx_cf_home)
+
+        def succ_g(**envx):
+            return succ_mode(TERM_PROGRAM="Apple_Terminal",
+                             GAME_LOOP_GLOBAL_CONFIG=ctx_cf_home, **envx)
+
+        succ_global({"limits": {"successor": {"skip_permissions": True}}})
+        out_home = succ_g()
+        check("a grant in the MACHINE-WIDE config reaches the successor's command — the layer whose "
+              "absence made this a per-repo decision nobody remembered to re-make",
+              "--dangerously-skip-permissions" in succ_cmdline(out_home))
+        check("...and the output NAMES the file it came from rather than a bare BYPASSED — a grant "
+              "written months ago in a file no repo contains is the one a reader cannot place",
+              "permissions         : BYPASSED" in out_home
+              and "~/.game_loop/config.json" in out_home.replace(ctx_cf_home, "~/.game_loop/config.json"))
+        check("...and it says the grant is MACHINE-WIDE, because its blast radius is every project "
+              "here including ones nobody has opened — the one thing a repo-local grant never means",
+              "MACHINE-WIDE" in out_home)
+
+        # WITHDRAWAL IS THE HALF THAT COULD SILENTLY NOT WORK. A reader that treated `false` as
+        # merely "no grant in this file" would leave the machine-wide true standing, which is the
+        # opposite of what somebody wrote it to mean — and it would look identical in the output to
+        # a repo that never mentioned the key.
+        succ_skip(False)
+        check("a repo saying skip_permissions:false WITHDRAWS a machine-wide grant — the narrow "
+              "file is read last and an explicit false is a decision, not an absence",
+              "--dangerously-skip-permissions" not in succ_cmdline(succ_g()))
+        succ_skip_clear()
+        check("...while a repo that simply never mentions the key leaves the machine-wide grant "
+              "standing, so the withdrawal above is a verdict rather than the only outcome",
+              "--dangerously-skip-permissions" in succ_cmdline(succ_g()))
+
+        # The tracked file is still refused, and the new layer must not have opened a door into it.
+        succ_global_clear()
+        succ_skip_tracked(True)
+        check("the machine-wide layer did NOT make the TRACKED config.json able to grant it — that "
+              "file seeds every clone, and one new readable layer is not a reason to widen another",
+              "--dangerously-skip-permissions" not in succ_cmdline(succ_g()))
+        succ_skip_clear()
+        succ_global_clear()
+
         succ_skip(False)
         off = succ_mode(TERM_PROGRAM="Apple_Terminal")
         check("skip_permissions:false is the default said out loud, not a third state",
@@ -7920,13 +7994,15 @@ def main():
         check("...and the WATCHDOG honours it — the component whose blindness to it was the bug",
               _wd.stdout.strip() == "7")
 
-        # THE MERGE IS SHALLOW ON PURPOSE, and the two implementations have to agree about that or
-        # the war story in _merged_config's own docstring repeats one level down. `config()` says
-        # it outright — "nested keys are replaced whole rather than merged, so 'watchdog' here
-        # means THIS watchdog block and not a half of one" — and the watchdog reimplements the
-        # merge separately. If one deep-merged and the other did not, the same config.local.json
-        # would mean different things in two components, which is the failure this pairing exists
-        # to prevent and is invisible until a setting is honoured in one place and not the other.
+        # THE MERGE IS DEEP, and the implementations have to agree about that or the war story in
+        # _merged_config's own docstring repeats one level down. It was shallow until the
+        # machine-wide layer arrived: a nested block replaced whole means a setting written once in
+        # a home directory vanishes in any project that names the same block for an unrelated
+        # reason. THREE components reimplement this merge — _gl_impl.config(), bin/watchdog, and
+        # the guards' embedded reader — so if one deep-merged and another did not, the same file
+        # would mean different things in different components, which is the failure this pairing
+        # exists to prevent and is invisible until a setting is honoured in one place and not the
+        # other.
         with open(os.path.join(cl, ".game_loop", "config.json")) as f:
             _basec = json.load(f)
         _basec["watchdog"] = {"idle_sec": 11, "settle_sec": 2, "ring_cap": 5}
@@ -7944,10 +8020,11 @@ def main():
             "except SystemExit: pass\n"
             "print(json.dumps(m._merged_config(m.CONFIG_F).get('watchdog')))")],
             capture_output=True, text=True, env=_env(cl))
-        check("the watchdog's merge REPLACES a nested block whole rather than merging into it — a "
-              "local `watchdog` key means THIS watchdog block, so the base file's siblings are "
-              "gone and its own defaults apply. Surprising, deliberate, and now pinned",
-              json_text(_both.stdout.strip()) == {"ring_cap": 7})
+        check("the watchdog's merge goes INTO a nested block rather than replacing it — a local "
+              "`watchdog` key overrides the one key it names and leaves the base file's siblings "
+              "standing, so a partial override cannot silently reset what it did not mention",
+              json_text(_both.stdout.strip())
+              == {"idle_sec": 11, "settle_sec": 2, "ring_cap": 7})
         _mainc = subprocess.run([os.path.join(cl, ".game_loop", "bin", "game_loop"), "status",
                                  "--porcelain"], capture_output=True, text=True,
                                 env=_env(cl, sid="sess-cl"))
@@ -8253,6 +8330,52 @@ def main():
         _global(mcp_writes="disabled")
         _proj(mcp_writes="gated", mcp_standing_writes=[])
         _d1, _r1 = _mcp_call("mcp__unclassifiable__thing")
+        # ── WHAT THE LAYER IS ACTUALLY FOR: settings that are facts about a MACHINE ─────────
+        #
+        # The union keys above are trust lists. The layer earns its keep on ordinary nested
+        # settings too — "cap the context in every project", "successors do not stop to ask" — and
+        # those live inside `limits`, which is precisely where a shallow merge used to destroy
+        # them: any project naming `limits` for an unrelated reason replaced the block whole and
+        # the machine-wide setting vanished with no report. That is the regression these pin.
+        def _cfg_of(key, home):
+            """config() as the real tool computes it, read out of the tool itself."""
+            r = subprocess.run(["python3", "-c", (
+                "import importlib.util,os,json\n"
+                "from importlib.machinery import SourceFileLoader\n"
+                f"os.environ['GAME_LOOP_HOME']={os.path.join(gw, '.game_loop')!r}\n"
+                f"os.environ['GAME_LOOP_GLOBAL_CONFIG']={os.path.join(home, '.game_loop', 'config.json')!r}\n"
+                f"l=SourceFileLoader('gl',{os.path.join(gw, '.game_loop', 'bin', '_gl_impl.py')!r})\n"
+                "s=importlib.util.spec_from_loader('gl',l); m=importlib.util.module_from_spec(s)\n"
+                "try: l.exec_module(m)\n"
+                "except SystemExit: pass\n"
+                f"print(json.dumps(m.config().get({key!r})))")],
+                capture_output=True, text=True, env=_env(gw))
+            return json_text(r.stdout.strip())
+
+        _global(limits={"context": {"enabled": True, "threshold_tokens": 250000}})
+        _proj(limits={"handoff_file": "OTHER.md"})       # names `limits` for an unrelated reason
+        _merged = _cfg_of("limits", gh)
+        check("a context cap set MACHINE-WIDE survives a project that names `limits` for something "
+              "else entirely — the shallow merge dropped it silently, which is a run quietly "
+              "widening itself back to a default nobody re-chose",
+              (_merged or {}).get("context") == {"enabled": True, "threshold_tokens": 250000})
+        check("...and the project's own unrelated key applies at the same time, so the merge kept "
+              "BOTH decisions rather than picking a winner between two files",
+              (_merged or {}).get("handoff_file") == "OTHER.md")
+        check("...and the defaults neither file mentioned are still there, since a layer that "
+              "erases what it did not restate is the same bug one level up",
+              (_merged or {}).get("threshold_pct") == 98)
+
+        # LOCAL OVERRIDES GLOBAL, key by key. The whole point of the layering is that the narrow
+        # file wins where it speaks and stays silent where it does not.
+        _proj(limits={"context": {"threshold_tokens": 90000}})
+        _merged2 = _cfg_of("limits", gh)
+        check("a project overriding ONE key inside a machine-wide block wins on that key and "
+              "leaves its siblings standing — the case a human writes and a shallow merge punishes",
+              (_merged2 or {}).get("context") == {"enabled": True, "threshold_tokens": 90000})
+        _proj(limits={})
+        _global(limits={})
+
         check("a SCALAR key still uses normal override, not union: the project's own mcp_writes "
               "wins over the global default",
               _d1 == "deny" and "disabled" not in _r1)
@@ -14945,7 +15068,44 @@ def main():
           "starts from a number instead of an impression",
           "producer time:" in _out and " at a time" in _out)
     check("...and it says how many ran at once, since a wall-clock figure means nothing without it",
-          "running 3 producers," in _out)
+          "running 3 of 3 producers," in _out)
+    check("...and an unsharded run says so by saying nothing — no shard label, because every run "
+          "before sharding existed was a whole one and the report should still read that way",
+          "[shard" not in _out)
+
+    # SHARDING, because a hosted runner cannot hold the whole sweep in one job (each producer is a
+    # full suite run). The risk that matters is not a shard that runs too little — it is a shard
+    # that runs a SLICE and reports in the whole sweep's voice, since the closing line
+    # "no producer is unprotected" is the one sentence this tool exists to be able to say. Driven
+    # through main() with the same stubs, so the selection is observed rather than reasoned about.
+    def _sharded(spec):
+        _b = io.StringIO()
+        os.environ["GAME_LOOP_SWEEP_SHARD"] = spec
+        try:
+            sweep.run, sweep.run_detail, sweep.MUTANTS = _stub_run, _stub_detail, _fake
+            sweep.coverage_gate = lambda found: False
+            with contextlib.redirect_stdout(_b):
+                sweep.main()
+        finally:
+            (sweep.run, sweep.run_detail, sweep.MUTANTS,
+             sweep.coverage_gate) = _real_run, _real_det, _real_mut, _real_gate
+            os.environ.pop("GAME_LOOP_SWEEP_SHARD", None)
+        return _b.getvalue()
+
+    _s1, _s2 = _sharded("1/2"), _sharded("2/2")
+    check("a shard sweeps its OWN producers and no others — 1/2 takes alpha and gamma, 2/2 takes "
+          "beta, so the two together are the whole list and neither is the whole list alone",
+          "alpha -> x" in _s1 and "gamma -> x" in _s1 and "beta -> x" not in _s1
+          and "beta -> x" in _s2 and "alpha -> x" not in _s2 and "gamma -> x" not in _s2)
+    check("...and it SAYS it is a shard, naming which — a partial run that reads like a whole one "
+          "would put this file's own closing verdict over a slice of the producers",
+          "[shard 1/2]" in _s1 and "[shard 2/2]" in _s2
+          and "running 2 of 3 producers" in _s1 and "running 1 of 3 producers" in _s2)
+    check("...and an unreadable or out-of-range shard spec sweeps EVERYTHING rather than a "
+          "fraction — the safe direction, since the failure being avoided is a confident verdict "
+          "over producers nobody looked at",
+          all("running 3 of 3 producers" in _sharded(bad) and "[shard" not in _sharded(bad)
+              for bad in ("0/2", "3/2", "nonsense", "2/0")))
 
     # neuter() is the whole mechanism: if it returned the source unchanged while reporting success,
     # every producer would come back perfectly protected and nothing would have been mutated.
@@ -15496,6 +15656,41 @@ def main():
     check("neuter() hands back a mutated STRING and writes nothing — the caller chooses where it "
           "lands, and here that is only ever a copy",
           _found and "return False" in _neutered and read_or_empty(_wd_path) == _wd_before)
+
+    print("the nightly sweep workflow cannot silently cover less than it claims:")
+    # THE SWEEP MOVED TO A SCHEDULE, and sharding is what made it fit: a hosted runner sweeps two
+    # producers at a time, so all 134 in one job is roughly eleven hours against a six-hour ceiling.
+    # Twelve shards fit. The failure that buys is a NEW one and it is this repo's signature shape —
+    # the matrix and the denominator are written in two places, and if they drift apart the sweep
+    # runs a fraction, every shard passes, and the run reports green over producers nobody looked
+    # at. Nothing else would notice: there is no failing shard to see.
+    _wf_p = os.path.join(REPO, ".github", "workflows", "mutation-sweep.yml")
+    _wf = read_or_empty(_wf_p)
+    check("the nightly sweep workflow is present and actually runs the sweep — a schedule that "
+          "runs something else is a nightly nobody is getting",
+          "mutation_sweep.py" in _wf and "schedule:" in _wf)
+    _matrix = re.search(r"^\s*shard:\s*\[([^\]]*)\]", _wf, re.M)
+    _shards = [s.strip() for s in (_matrix.group(1) if _matrix else "").split(",") if s.strip()]
+    _denoms = set(re.findall(r"GAME_LOOP_SWEEP_SHARD:\s*\"\$\{\{\s*matrix\.shard\s*\}\}/(\d+)\"", _wf))
+    check("the matrix and the shard DENOMINATOR agree — they are written in two places, and a "
+          "matrix trimmed without the denominator leaves producers nobody sweeps while every "
+          "shard that ran reports clean",
+          len(_shards) > 0 and len(_denoms) == 1
+          and int(next(iter(_denoms))) == len(_shards))
+    check("...and the matrix is exactly 1..N with no gaps or repeats, since the sweep selects by "
+          "`i % n` and a missing index is a slice of producers that is simply never swept",
+          sorted(int(s) for s in _shards) == list(range(1, len(_shards) + 1)))
+    check("...and a shard is given a real time budget under the six-hour ceiling a hosted job "
+          "gets — the default is 360 minutes, and a sweep cut off at the ceiling reports nothing",
+          (lambda m: bool(m) and 0 < int(m.group(1)) < 360)(
+              re.search(r"^\s*timeout-minutes:\s*(\d+)", _wf, re.M)))
+    check("the report job files at most ONE issue and only when a shard did not succeed — a "
+          "nightly that opens an issue every night is a nightly nobody reads",
+          "--state open" in _wf and "needs.sweep.result != 'success'" in _wf
+          and "issue create" in _wf)
+    check("...and it asks for no more than it needs: contents read, issues write, and nothing "
+          "that could push to this repo from a scheduled job",
+          re.search(r"permissions:\s*\n\s*contents:\s*read\s*\n\s*issues:\s*write", _wf))
 
     print("mutation sweep coverage (default-deny over the producers it can find):")
     synth = ("def decides(x):\n"
@@ -18678,6 +18873,24 @@ def main():
     # run died on `ValueError: empty body on Try` before one check ran. Loud, not vacuous — but it
     # made every honest docs/payload/install subset unusable, which is most of what the manifest
     # wants to point at. The selection below is deliberately top-level-only.
+    # THE FIXTURE BOUNDARY. The shared-fixture block was extended to its START for any selection
+    # touching it — sound, and it made 6089 lines indivisible: every subset reaching one section
+    # there paid all 809 assertions before it, and `prun`'s whole wall was that one slab. The cut is
+    # allowed where no kept section READS a name an earlier one DEFINES, which is what makes it
+    # sound about the filesystem too: nothing in this block reaches the shared sandbox except
+    # through a name.
+    _cut = _sel("--section", "coverage --staged").stdout
+    check("a section that builds its own fixture no longer drags the shared block's prefix — the "
+          "cut is announced, so a reader can see WHICH sections were judged irrelevant rather "
+          "than trusting that some were",
+          "fixture boundary:" in _cut and "earlier section(s) build nothing it reads" in _cut)
+    check("...and it still RUNS and passes standing alone, which is the only thing that makes the "
+          "cut a speedup rather than a subset that quietly stopped gating",
+          re.search(r"^\d+ passed, 0 failed", _cut, re.M))
+    check("...while a section that DOES read the shared sandbox keeps its prefix — the boundary "
+          "must be a discrimination, not a blanket permission to skip",
+          "fixture boundary:" not in _sel("--section",
+                                          "limit gate (context-size trigger)").stdout)
     _outside = _sel("--section", "house voice")
     check("a selection naming NO section of the shared-fixture block still RUNS — an empty prefix "
           "is a legal prefix, not a crash before the first check",
@@ -18894,12 +19107,33 @@ def _epilogue(body):
 
 def _run_cli(argv):
     picks = [argv[i + 1] for i, a in enumerate(argv) if a == "--section" and i + 1 < len(argv)]
-    if "--list-sections" not in argv and not picks:
+    if "--list-sections" not in argv and "--list-boundaries" not in argv and not picks:
         return main()                               # the untouched default path
 
     src = open(os.path.abspath(__file__)).read()
     tree = ast.parse(src, filename=__file__)
     segs = _segments(_main_node(tree))
+
+    # THE CUT POINTS, PUBLISHED. test/prun.py packs the shared-fixture block as ONE group because
+    # it had no way to ask where the block could be divided, and that group is the whole suite's
+    # wall. It is the selector that knows, so the selector answers rather than prun guessing: a
+    # section is a boundary when selecting it ALONE needs nothing any earlier section defines.
+    # prun's grouping is only a hint — the boundary rule above re-derives the real prefix for
+    # whatever a shard actually selects, so a wrong hint costs a bigger shard, never a wrong run.
+    if "--list-boundaries" in argv:
+        mainfn = _main_node(tree)
+        for sg in segs:
+            sg["defs"], sg["reads"] = _names(sg["body"][sg["first"]:sg["last"]])
+        for body in _bodies(mainfn):
+            if body is mainfn.body:
+                continue
+            here = [i for i, sg in enumerate(segs) if sg["body"] is body]
+            defs_before = set()
+            for k, i in enumerate(here):
+                if k and not (segs[i]["reads"] & defs_before):
+                    print(segs[i]["name"])
+                defs_before |= segs[i]["defs"]
+        return 0
 
     if "--list-sections" in argv:
         for sg in segs:
@@ -18927,14 +19161,54 @@ def _run_cli(argv):
     # no gate. So any container other than main's own body is extended to a prefix: everything from
     # its start through the last kept section. That is an exact leading slice of the original order,
     # which is the only subset of a stateful sequence that is sound by construction.
+    #
+    # THE PREFIX STARTS AT A FIXTURE BOUNDARY, NOT AT ZERO. Extending to the block's start was the
+    # sound thing to do while the only tool was "names cannot see the filesystem", and it made the
+    # block indivisible: 6089 lines and 809 assertions on every subset that touched any of it, and
+    # the same slab as the atomic group that sets `prun`'s whole wall.
+    #
+    # The refinement is that filesystem sharing in this block is ALWAYS MEDIATED BY A NAME. A
+    # section reaches the shared sandbox by reading `proj`, or a path derived from it and bound
+    # under some other name; there is no section here that reconstructs that path from nothing. So
+    # a cut at index b is sound when no section in [b..last-kept] READS a name that a section in
+    # [0..b-1] DEFINES — that is the same reaching-definition analysis _closure already runs, asked
+    # backwards, and it catches the sandbox variable, every path derived from it, and every local
+    # helper in one question.
+    #
+    # b = 0 always satisfies it, so the worst case is exactly the old behaviour. Measured on this
+    # suite: six fixtures between lines 5082 and 6099 read `proj` zero times, having built their
+    # own sandboxes, and they were paying a 4600-line prefix to prove it.
+    #
+    # THE FAILURE DIRECTION IS STILL THE SAFE ONE. If this cut is ever wrong the skipped statement
+    # is a binding, so the run dies on a NameError or a fixture that is not there — loudly, before
+    # any check reports. It cannot turn an assertion green.
     mainfn = _main_node(tree)
     for body in _bodies(mainfn):
         if body is mainfn.body:
             continue                       # top-level sections each build their own sandbox
         here = [i for i, sg in enumerate(segs) if sg["body"] is body]
         kept_here = [i for i in here if i in keep]
-        if kept_here:
-            keep.update(i for i in here if i <= max(kept_here))
+        if not kept_here:
+            continue
+        lo_k = here.index(min(kept_here))
+        hi_k = here.index(max(kept_here))
+        # reads over [k..hi_k], accumulated backwards
+        suffix, acc = {}, set()
+        for k in range(hi_k, -1, -1):
+            acc = acc | segs[here[k]]["reads"]
+            suffix[k] = set(acc)
+        start, defs_before = 0, set()
+        cuts = []
+        for k in range(0, lo_k + 1):
+            if not (suffix[k] & defs_before):
+                cuts.append(k)
+            defs_before |= segs[here[k]]["defs"]
+        if cuts:
+            start = cuts[-1]               # the LATEST sound boundary at or before the selection
+        keep.update(here[k] for k in range(start, hi_k + 1))
+        if start:
+            print(f"  fixture boundary: this block starts at \"{segs[here[start]]['name'][:60]}\" "
+                  f"— {start} earlier section(s) build nothing it reads.")
 
     for body in _bodies(mainfn):
         drop = set()

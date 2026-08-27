@@ -61,7 +61,7 @@
 #                     the wrong file to buy two minutes on.
 #
 # These are decisions, not omissions, and each is re-checkable with `--list-sections`.
-# THE SEVEN FILES THAT KEEP THE WHOLE SUITE RUN IT IN PARALLEL. `test/prun.py` shards the suite's
+# THE FILES THAT KEEP THE WHOLE SUITE RUN IT IN PARALLEL. `test/prun.py` shards the suite's
 # own top-level sections across processes using the SAME `--section` selector the rules below use,
 # so it inherits the soundness this manifest already depends on rather than inventing its own.
 # Measured 2026-08-25 on 14 cores: 292s serial -> 103s, and a change to bin/game_loop went from a
@@ -69,7 +69,21 @@
 # both ways, 0 absent, 0 extra, 0 differing. That check earned itself immediately — the first
 # sharding lost ten assertions while reporting MORE outcomes than the suite has.
 #
-# The SECTIONED rules below are untouched: they are already the surgical path and already fast.
+# EIGHT OF THESE BECAME FOUR. (The header above said SEVEN and there were eight — install.sh joined
+# the list later and the count was never re-read. Counted here rather than inherited.)
+# bin/verify, bin/watchdog and the two guard shims kept the whole-suite
+# rule out of caution rather than out of measurement, and a four-minute wait on every commit is the
+# kind of tax that gets a rule deleted rather than obeyed -- which is the same argument the
+# sectioned rules further down were already written from. Each now names the sections that are
+# ABOUT it, and says what that skips.
+#
+# THE FOUR THAT KEEP IT, and why the argument does not reach them: bin/game_loop and _gl_impl.py
+# are the door and the room of the tool ITSELF, so nearly every section is about them and a list
+# would be the whole list with a staleness risk attached. test/run.py is the suite, which owes the
+# whole of itself. install.sh decides what a tree's harness is, and a wrong decision there hands
+# somebody a harness that gates nothing.
+#
+# The SECTIONED rules below are untouched: they were already the surgical path and already fast.
 ".game_loop/bin/game_loop":
   - "python3 test/prun.py"
 # THE DOOR AND THE ROOM BOTH OWE THE SUITE. bin/game_loop is now a ~30-line stub that imports
@@ -79,10 +93,23 @@
 # entry point where they expect it.
 ".game_loop/bin/_gl_impl.py":
   - "python3 test/prun.py"
+# WHAT THIS SKIPS: `--section` closes over section NAMES, not over the filesystem, so a section
+# that drives the watchdog without saying "watchdog" anywhere in its title is not selected here. The
+# substring `watchdog` alone reaches eleven of them — per-session isolation, the three slack
+# forwarding cases, the supersede and handover stand-downs, the pid-provenance rule, the exhausted
+# park, both readable seams, and the suite's own bound on the reply poll — and the closure pulls in
+# whatever those read a name from. `slack paging` is named anyway because the forwarding cases run
+# against its fake server, and a fixture reached only through the closure is one edit away from not
+# being reached at all.
 ".game_loop/bin/watchdog":
-  - "python3 test/prun.py"
+  - "python3 test/run.py --section 'house voice' --section watchdog --section 'slack paging' --section 'session GC' --section 'every executable in bin/' --section 'guard nothing calls' --section 'pinned dispatch'"
+# THE DOOR GETS THE ROOM'S RULE. guard-writes.sh is a 23-line shim that resolves a binary and
+# execs guard-writes-impl.sh, so what it can break is what the impl's own sections already drive --
+# and giving the door a WIDER rule than the room would be gating the thin file harder than the
+# thick one. Identical list, deliberately: if the impl's coverage moves, both move together.
 ".game_loop/bin/guard-writes.sh":
-  - "python3 test/prun.py"
+  - "python3 test/run.py --section 'write guard' --section deploy --section 'authorize recurrence' --section 'unreadable commit target' --section 'unharnessed tree' --section 'POLICY is not the' --section 'EMBEDDED in the shell guards' --section 'guard nothing calls' --section 'config paths' --section 'pinned dispatch'"
+  - "python3 test/behaviour_gate.py"
 # A SMALLER COMMAND THAN "EVERYTHING", AND WHAT IT COSTS. These two files are edited often and
 # each edit used to gate on all 1596 checks -- 5:19, nearly all of it about code the change did not
 # touch. That is the kind of tax that gets a rule deleted rather than obeyed, so the rule names the
@@ -99,13 +126,23 @@
 ".game_loop/bin/guard-writes-impl.sh":
   - "python3 test/run.py --section 'write guard' --section deploy --section 'authorize recurrence' --section 'unreadable commit target' --section 'unharnessed tree' --section "POLICY is not the session's" --section 'EMBEDDED in the shell guards' --section 'guard nothing calls' --section 'config paths'"
   - "python3 test/behaviour_gate.py"
+# The same argument as guard-writes.sh above: a 19-line shim in front of guard-mcp-impl.sh.
 ".game_loop/bin/guard-mcp.sh":
-  - "python3 test/prun.py"
+  - "python3 test/run.py --section 'MCP guard' --section 'MCP writes' --section 'guard nothing calls' --section 'EMBEDDED in the shell guards' --section 'pinned dispatch'"
+  - "python3 test/behaviour_gate.py"
 ".game_loop/bin/guard-mcp-impl.sh":
   - "python3 test/run.py --section 'MCP guard' --section 'MCP writes' --section 'guard nothing calls' --section 'EMBEDDED in the shell guards'"
   - "python3 test/behaviour_gate.py"
+# WHAT THIS SKIPS: same closure-over-names caveat as every sectioned rule here. `commit` reaches
+# the eight sections that drive the gate itself (repo scoping, chained work, blast radius, the tree
+# a commit lands in, what the commit CARRIES, provenance by ref, an unreadable target, an
+# unharnessed tree); `coverage` reaches the manifest's own report and its --staged form; `worktree`
+# and `pinned` reach the two ways this binary can be pointed at a tree that is not the one being
+# committed. A section that exercises verify under a title naming none of those words is not
+# covered, and the list was read off `--list-sections` by hand, so it goes stale the way every hand
+# list does.
 ".game_loop/bin/verify":
-  - "python3 test/prun.py"
+  - "python3 test/run.py --section 'house voice' --section commit --section coverage --section worktree --section 'pinned harness' --section 'pinned dispatch' --section 'write guard' --section 'every executable in bin/' --section 'guard nothing calls'"
 # WHAT THIS SKIPS: the sections that name flair are the flair section itself, the default-deny over
 # what bin/ ships, and the orphan scan that would notice nothing calling it. A caller that renders a
 # banner without the word "flair" anywhere in its section name is not covered here. 178 checks, 37s.
@@ -186,6 +223,13 @@
 # something (issue #30: adopt a linked worktree's project rules, or refuse), and a wrong decision
 # there hands a tree a harness that gates nothing. That is behaviour, the suite drives the real
 # installer through its real interface, so it owes the suite like every other gate.
+# THE NIGHTLY SWEEP'S WORKFLOW. What can break here is not the YAML failing loudly -- it is the
+# matrix and the shard denominator drifting apart, which sweeps a fraction of the producers while
+# every shard that ran reports clean. That is a partial run speaking in the whole run's voice, the
+# failure this repo names most often, and no shard failing is exactly why nothing else would catch
+# it. Seconds, and it is the only rule here that gates a file GitHub runs rather than one we do.
+".github/workflows/*.yml":
+  - "python3 test/run.py --section 'nightly sweep workflow' --section 'house voice'"
 "install.sh":
   - "python3 test/prun.py"
 # The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --

@@ -1,0 +1,136 @@
+# The producer mutation sweep, moved OFF the interactive path.
+#
+# The sweep neuters one producer function at a time and re-runs the whole suite to see which
+# assertions actually notice. It is the only instrument this repo has for "does that test test
+# anything", and it costs one full suite run per producer -- about an hour locally, and far more
+# than that on a hosted runner. That price is worth paying periodically and is not worth paying
+# in front of a human waiting to commit, so it is a scheduled job that files an issue rather than
+# a gate that blocks anybody.
+#
+# WHY IT IS SHARDED. Each producer is one full suite run and the sweep's own width is `cpu - 2`, so
+# a small hosted runner sweeps one or two at a time: 134 producers is roughly eleven hours, past
+# the six-hour ceiling a hosted job is allowed. Twelve shards of eleven producers each fit with
+# room to spare. The shards stride rather than slice, so producer cost is spread evenly.
+#
+# WHY macOS. This harness reads `ps -Ao pid,args`, shells out to `open`, and resolves paths the way
+# a Mac does. Every measurement behind these floors was taken on macOS, and a nightly that fails
+# for platform reasons rather than coverage reasons is a nightly people learn to ignore -- which
+# costs more than not having one. Public repos get these runners free.
+
+name: mutation sweep (nightly)
+
+on:
+  schedule:
+    # 08:00 UTC — roughly 1am Pacific / 3am Central, so a failure is waiting in the morning.
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+# Least privilege: read the code, write one issue. Nothing here pushes.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # A sweep still running when the next night arrives should finish, not be raced by a second one.
+  group: mutation-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: sweep ${{ matrix.shard }}/12
+    runs-on: macos-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false        # one shard's coverage loss must not hide the others'
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The sweep runs `git archive HEAD` and the suite makes real git calls of its own.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: run the sweep shard
+        id: sweep
+        env:
+          GAME_LOOP_SWEEP_SHARD: "${{ matrix.shard }}/12"
+          # These runners have 3 cores, and the `cpu - 2` default would sweep one at a time. Two
+          # roughly halves the wall clock; the default's reason for leaving headroom is that a
+          # developer's machine has to stay usable, which is not true of a runner.
+          GAME_LOOP_SWEEP_JOBS: "2"
+        run: |
+          set -o pipefail
+          python3 test/mutation_sweep.py 2>&1 | tee "sweep-${{ matrix.shard }}.log"
+
+      - name: keep the log either way
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-${{ matrix.shard }}
+          path: sweep-${{ matrix.shard }}.log
+          retention-days: 14
+
+  report:
+    name: file an issue if anything regressed
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+
+      - name: open ONE issue, and only if none is open
+        # A nightly that opens an issue every night is a nightly nobody reads. One open issue at a
+        # time: while it stands, later failures are visible in this workflow's own run history, and
+        # closing it is what re-arms the report.
+        if: needs.sweep.result != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          # The label has to exist before it can be filtered on or applied, and a fresh clone of
+          # this repo has no labels but the defaults. Creating it is idempotent.
+          gh label create mutation-sweep --repo "$GITHUB_REPOSITORY" \
+             --color B60205 --description "the nightly producer mutation sweep is not clean" \
+             2>/dev/null || true
+
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+                       --label mutation-sweep --state open \
+                       --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "issue #$existing is already open for this; not filing another."
+            exit 0
+          fi
+
+          # The verdict lines are what a reader needs; the full logs are attached to the run.
+          {
+            echo "The nightly producer mutation sweep did not come back clean."
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            echo "A sweep fails when a producer is UNPROTECTED (neutering it killed no assertion),"
+            echo "INERT (nothing calls it where an assertion can see), NOT MEASURED (the mutant"
+            echo "never applied, or its suite crashed or hung), or has DRIFTED below a recorded"
+            echo "floor. Only the last of those is a regression in coverage; the others are gaps."
+            echo
+            echo "What each shard reported:"
+            echo
+            echo '```'
+            grep -hE '^(UNPROTECTED|INERT|NOT MEASURED|DRIFT|THIN|KNOWN GAPS|no producer)' \
+                 logs/*/sweep-*.log 2>/dev/null | sort -u || echo "(no verdict lines — see the run)"
+            echo '```'
+            echo
+            echo "This issue was opened by \`.github/workflows/mutation-sweep.yml\`. While it stays"
+            echo "open no further issues are filed, so close it once the sweep is clean again."
+          } > body.md
+
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "mutation sweep: a producer is unprotected or has drifted" \
+            --label mutation-sweep \
+            --body-file body.md

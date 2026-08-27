@@ -144,20 +144,50 @@ def set_session(sid):
         PID_PATH = os.path.join(sdir, ".watchdog.pid")
 
 
+_UNION_KEYS = {"read_roots", "allow_write_roots", "deploy_verbs", "generated_globs",
+               "mcp_read_only_tools", "mcp_standing_writes", "mcp_trusted_servers"}
+
+
+def _merge(base, over):
+    """The twin of _config_merge() in bin/_gl_impl.py, and it has to stay one. Deep for nested
+    blocks, union for the trust lists, later-wins for everything else."""
+    out = dict(base)
+    for _k, _v in over.items():
+        _cur = out.get(_k)
+        if _k in _UNION_KEYS and isinstance(_v, list) and isinstance(_cur, list):
+            out[_k] = _cur + [_x for _x in _v if _x not in _cur]
+        elif isinstance(_v, dict) and isinstance(_cur, dict):
+            out[_k] = _merge(_cur, _v)
+        else:
+            out[_k] = _v
+    return out
+
+
 def _merged_config(config_f):
-    """config.json, then config.local.json on top. The local file is GITIGNORED site wiring, and it
-    has to reach every component that reads config -- a setting only some of them honour is worse
-    than one nobody has, because it works in the place you test it and not in the place it matters.
-    (Shipped that way once: the waiting probe lived here and the watchdog could not see it.)"""
+    """~/.game_loop/config.json, then config.json, then config.local.json on top.
+
+    Every layer has to reach every component that reads config -- a setting only some of them
+    honour is worse than one nobody has, because it works in the place you test it and not in the
+    place it matters. (Shipped that way twice, and this file was the victim both times: first the
+    waiting probe lived in the local file the watchdog could not see, then the machine-wide file
+    reached both guards while the watchdog read two files and did not know it.)
+
+    DEEP, for the reason spelled out in _gl_impl.py's _config_merge: a nested block replaced whole
+    means a machine-wide `limits` setting vanishes the instant a project names `limits` for an
+    unrelated reason, and the run falls back to a default nobody re-chose."""
     import json as _json
     import os as _os
+    _gl = (_os.environ.get("GAME_LOOP_GLOBAL_CONFIG")
+           or _os.path.join("~", ".game_loop", "config.json"))
     cfg = {}
-    for _p in (config_f, _os.path.join(_os.path.dirname(config_f), "config.local.json")):
+    for _p in (_os.path.abspath(_os.path.expanduser(_gl)),
+               config_f,
+               _os.path.join(_os.path.dirname(config_f), "config.local.json")):
         try:
             with open(_p) as _f:
                 _d = _json.load(_f)
             if isinstance(_d, dict):
-                cfg.update(_d)
+                cfg = _merge(cfg, _d)
         except (OSError, ValueError):
             continue
     return cfg

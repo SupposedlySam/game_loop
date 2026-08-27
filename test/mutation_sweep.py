@@ -975,8 +975,14 @@ MUTANTS = [
      # asked directly which file it WOULD use in both arms, so the citation is a fact rather than a
      # fixed sentence.
      "the actual path in the status line, and the producer asked directly in both arms", 4),
-    ("config_local_keys -> a local config override is never announced",
-     ".game_loop/bin/_gl_impl.py::config_local_keys", "    return []\n",
+    # RETARGETED, not re-declared. The producer moved one function down when the machine-wide
+    # config layer arrived: config_local_keys became a two-line delegation and config_layer_keys
+    # took over the read, so the old entry pointed at a function that can no longer be neutered --
+    # a mutation that silently stops measuring, which is the exact failure this file exists to
+    # refuse. Same code path, same behaviour, same floor; only the name it is anchored to moved.
+    # It now covers the machine-wide reader too, since both callers go through it.
+    ("config_layer_keys -> a config override is never announced, local or machine-wide",
+     ".game_loop/bin/_gl_impl.py::config_layer_keys", "    return []\n",
      ['reports HOW', 'the overridden', 'the keys'],
      # Measured at 0 when first written -- I shipped config.local.json with no test at all, and this
      # sweep is what said so. Then THIN at 1, with this note already naming the reason: the
@@ -2554,6 +2560,28 @@ def _is_full_sweep():
                          # THAT is building it from a truncated view, which is exactly what I did
                          # first: 40 of 102 producers came back short and the floor check failed
                          # them. The map is written from this, the tool's own structure.
+def _shard_of(raw=None):
+    """Which slice of MUTANTS this run sweeps, read from GAME_LOOP_SWEEP_SHARD as "i/n" (1-based).
+
+    Returns (1, 1) for anything absent or unparseable, which is the WHOLE sweep -- the safe
+    direction, because a shard spec nobody can read must not silently sweep a fraction and then
+    report "no producer is unprotected" about the part it looked at. That sentence is the one thing
+    this file exists to be able to say, and a run that says it over a sixth of the producers is
+    worse than a run that refuses.
+
+    Taken as an argument so it can be exercised directly; the environment is only the default.
+    """
+    raw = os.environ.get("GAME_LOOP_SWEEP_SHARD") if raw is None else raw
+    try:
+        i, n = str(raw).split("/", 1)
+        i, n = int(i), int(n)
+    except (AttributeError, TypeError, ValueError):
+        return 1, 1
+    if n < 1 or i < 1 or i > n:
+        return 1, 1
+    return i, n
+
+
 FAST = os.environ.get("GAME_LOOP_SWEEP_FAST") == "1"
 try:
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -2997,13 +3025,27 @@ def main():
     # cores means the machine stays usable while an hour-long sweep runs — and an unusable machine
     # is how a sweep gets abandoned, which is the failure the comment above is about.
     jobs = int(os.environ.get("GAME_LOOP_SWEEP_JOBS") or 0) or max(1, min(12, (os.cpu_count() or 2) - 2))
-    print(f"running {len(MUTANTS)} producers, {jobs} at a time "
+    # SHARDING, because a hosted runner cannot hold this whole sweep. Each producer costs one full
+    # suite run, the width is `cpu - 2`, and a 4-core runner therefore sweeps 2 at a time: 134
+    # producers is roughly eleven hours, past the six-hour ceiling a hosted job is allowed. Split
+    # across N runners it fits, and no runner needs more cores than the free tier gives.
+    #
+    # ROUND-ROBIN, NOT CONTIGUOUS BLOCKS. Producer cost varies by more than an order of magnitude
+    # (the slowest three are printed below every run), and they are declared in related groups, so
+    # contiguous slicing would hand one shard every expensive neighbour and leave another idle.
+    # Striding interleaves the groups, which is the cheap way to get shards that finish together
+    # without measuring anything.
+    shard, shards = _shard_of()
+    idxs = [i for i in range(len(MUTANTS)) if i % shards == (shard - 1)]
+    _swept = set(idxs)
+    _where = f" [shard {shard}/{shards}]" if shards > 1 else ""
+    print(f"running {len(idxs)} of {len(MUTANTS)} producers{_where}, {jobs} at a time "
           f"(GAME_LOOP_SWEEP_JOBS to change; each is one full suite run)\n", flush=True)
 
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
         futures = {}
-        for i in range(len(MUTANTS)):
+        for i in idxs:
             futures[pool.submit(sweep_one, i)] = (i, time.monotonic())
         nxt = 0
         for fut in concurrent.futures.as_completed(futures):
@@ -3012,7 +3054,10 @@ def main():
             verdicts[i], reports[i] = fut.result()
             # Emit in MUTANTS order as each prefix becomes ready: the report stays deterministic
             # AND a redirected run still shows progress rather than 40 silent minutes.
-            while nxt < len(MUTANTS) and reports[nxt] is not None:
+            while nxt < len(MUTANTS) and (nxt not in _swept or reports[nxt] is not None):
+                if nxt not in _swept:      # another shard's producer: not ours to report
+                    nxt += 1
+                    continue
                 # LABELLED "at", because the bare number was read as this producer's DURATION and a
                 # wrong throughput figure was published off it. It is elapsed SINCE THE RUN STARTED,
                 # and the column looks unsorted only because these print in MUTANTS order rather
@@ -3022,7 +3067,10 @@ def main():
     # BEFORE THE ARCHIVE IS REMOVED. The first version called this after the summary, 120 lines
     # past `shutil.rmtree(base)` — so it opened a tree that no longer existed, hit OSError, and
     # returned SILENTLY. A full sweep ran for 50 minutes and wrote no map, and nothing said so.
-    if not FAST:
+    # A SHARD MUST NOT WRITE EITHER MAP. Both are built from what this run measured, and a shard
+    # measured a slice — writing from it would publish a map that silently omits five sixths of the
+    # producers, which is the short-denominator failure this whole file is about.
+    if not FAST and shards == 1:
         _write_section_map(base)
         _write_killers()
     shutil.rmtree(base, ignore_errors=True)

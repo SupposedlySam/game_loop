@@ -167,16 +167,41 @@ CONFIG_F="$GAMELOOP_DIR/config.json"
 # TRUST-LIST keys UNION across all three sources instead of replacing: a machine-wide grant
 # (~/.game_loop/config.json -> mcp_trusted_servers, say) must never be silently erased by a project
 # that happens to set its OWN, different list for the same key, and a project's own grant must never
-# be shadowed by the machine-wide file either. Everything else keeps normal later-wins replace, so a
-# project can still override a machine-wide scalar default (e.g. mcp_writes).
+# be shadowed by the machine-wide file either.
+#
+# NESTED BLOCKS MERGE KEY BY KEY, for the same reason one layer down: a machine-wide
+# "limits": {"context": {...}} used to be replaced WHOLE by any project that named "limits" for an
+# unrelated reason, so a cap set once in a home directory disappeared in every repo that happened to
+# configure a handoff file. Scalars still keep later-wins replace, so a project can override a
+# machine-wide default (e.g. mcp_writes) by naming it.
 CONFIG_MERGED='{}'   # set BEFORE the computation: the line below exports the whole env
                      # into its own subshell, and under `set -u` that read itself.
 CONFIG_MERGED=$(CONFIG_F="$CONFIG_F" python3 -c '
 import io, json, os
 UNION_KEYS = {"read_roots", "allow_write_roots", "deploy_verbs", "generated_globs",
               "mcp_read_only_tools", "mcp_standing_writes", "mcp_trusted_servers"}
-cfg, union = {}, {}
-paths = [os.path.join(os.path.expanduser("~"), ".game_loop", "config.json"),
+
+
+def merge(base, over):
+    # DEEP, and it must stay the twin of _config_merge() in bin/_gl_impl.py. A shallow merge here
+    # replaced a nested block whole, so a machine-wide "limits" setting vanished the moment a
+    # project named "limits" for any unrelated reason -- which for a rail means falling back to a
+    # default nobody re-chose, silently.
+    out = dict(base)
+    for k, v in over.items():
+        cur = out.get(k)
+        if k in UNION_KEYS and isinstance(v, list) and isinstance(cur, list):
+            out[k] = cur + [x for x in v if x not in cur]
+        elif isinstance(v, dict) and isinstance(cur, dict):
+            out[k] = merge(cur, v)
+        else:
+            out[k] = v
+    return out
+
+
+cfg = {}
+gl = os.environ.get("GAME_LOOP_GLOBAL_CONFIG") or os.path.join("~", ".game_loop", "config.json")
+paths = [os.path.abspath(os.path.expanduser(gl)),
          os.environ["CONFIG_F"],
          os.path.join(os.path.dirname(os.environ["CONFIG_F"]), "config.local.json")]
 for p in paths:
@@ -187,15 +212,7 @@ for p in paths:
         continue
     if not isinstance(d, dict):
         continue
-    for k, v in d.items():
-        if k in UNION_KEYS and isinstance(v, list):
-            bucket = union.setdefault(k, [])
-            for item in v:
-                if item not in bucket:
-                    bucket.append(item)
-        else:
-            cfg[k] = v
-cfg.update(union)
+    cfg = merge(cfg, d)
 print(json.dumps(cfg))
 ' 2>/dev/null)
 [ -n "$CONFIG_MERGED" ] || CONFIG_MERGED='{}'

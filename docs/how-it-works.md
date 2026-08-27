@@ -636,16 +636,23 @@ human asleep. A successor that opens on a permission prompt is a handover that s
 is watching. `--dangerously-skip-permissions` is read at **launch** — the running claude refuses `Cannot set
 permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions`
 — so the command line is the only place the decision exists, and this verb builds the only command line there
-is. When it is on, the output says `permissions : BYPASSED` and names the key; when it is off it says nothing,
-because the exceptional state is the one worth a line.
+is. When it is on, the output says `permissions : BYPASSED` and names **the file the grant came from**; when it is
+off it says nothing, because the exceptional state is the one worth a line.
 
 It is a **config key and not an argument**, deliberately, and `successor --skip-permissions` is refused. A
 session that could hand its own successor a bypass is a session widening its permissions across a handover and
 calling the result a new session.
 
-**And it is read from `.game_loop/config.local.json` only** — never from the tracked `config.json`. Two
-separate reasons, and it is worth being exact about which one each buys, because the first was overclaimed
-once already:
+**Two files may grant it, and the tracked `config.json` is not one of them.** `.game_loop/config.local.json`
+grants it for this checkout; `~/.game_loop/config.json` grants it for **every project on this machine**. The
+machine-wide file exists because "my successors do not stop to ask" is a fact about a machine rather than about
+any one repo, and without a home for it the choice had to be re-made in every checkout or forgotten. The narrow
+file is read **last**, so a repo can set `skip_permissions: false` to withdraw a machine-wide grant — an
+explicit `false` is a decision, not an absence. When the grant is machine-wide the output says so in as many
+words, because its blast radius reaches projects the reader has not opened.
+
+Two separate reasons keep the tracked file out of it, and it is worth being exact about which one each buys,
+because the first was overclaimed once already:
 
 - **Refused by default, and a grant leaves a record.** Both write rails refuse that file by name: `Write`/`Edit`
   since #65, and the shell path — a redirect, `sed -i`, `tee`, a copy onto it — since #86. `config.local.json`

@@ -360,34 +360,101 @@ def now():
 
 CONFIG_LOCAL_F = os.path.join(ROOT, "config.local.json")
 
+# MACHINE-WIDE CONFIG — the layer UNDER both repo files, and not an invention here. The write guard
+# has read ~/.game_loop/config.json for as long as it has had allow_write_roots, and its own comment
+# names the failure that follows when only SOME readers honour a layer: "it works where you test it
+# and not where it matters", which this project shipped once, when a waiting probe lived in a file
+# the watchdog could not see. The python side read two files while the shell guard read three. That
+# is the same shape waiting its turn, so this closes it rather than adding another half.
+#
+# WHY IT EARNS A LAYER. "Cap the context in every project" and "successors do not stop to ask" are
+# facts about a MACHINE, not about any one checkout. With nowhere to say that, the choice had to be
+# re-made per repo — in a tracked file that hands it to every clone, or in a gitignored one nobody
+# remembers to create. Both failure directions are worse than a home for it.
+#
+# ENV-OVERRIDABLE BECAUSE A TEST MUST BE ABLE TO PIN IT. The suite builds throwaway projects, and a
+# reader that reached the developer's real home would make every run depend on a file outside the
+# tree under test — the same reason SAGGAR_PRESENCE_DIR is overridable, and the same race.
+CONFIG_GLOBAL_F = os.path.abspath(os.path.expanduser(
+    os.environ.get("GAME_LOOP_GLOBAL_CONFIG")
+    or os.path.join("~", ".game_loop", "config.json")))
+
+# The layers, BASE FIRST — later wins. One list, so "which files are config" has a single answer
+# instead of one per caller; every reader below walks this rather than naming files itself.
+CONFIG_LAYERS = (CONFIG_GLOBAL_F, CONFIG_F, CONFIG_LOCAL_F)
+
+# Keys that UNION across layers instead of being replaced by the last file to name them. This
+# mirrors bin/guard-writes-impl.sh's own set and must keep mirroring it: these are TRUST LISTS, and
+# a machine-wide grant the guard honours while `claim --read` does not is a divergence that reads as
+# a bug in whichever half you happened to test. Everything else keeps later-wins, so a project can
+# still override a machine-wide scalar.
+CONFIG_UNION_KEYS = frozenset({"read_roots", "allow_write_roots", "deploy_verbs",
+                               "generated_globs", "mcp_read_only_tools", "mcp_standing_writes",
+                               "mcp_trusted_servers"})
+
 
 _CONFIG_UNREADABLE = set()
 
 
+def _config_merge(base, over):
+    """`over` laid onto `base` — dict into dict at EVERY depth, union for the trust lists, replace
+    for everything else.
+
+    DEEP, and it was shallow until the machine-wide layer arrived. Shallow was defensible while
+    there were two files one person edited by hand: "watchdog" meant THIS watchdog block and not
+    half of one, and whoever wrote the override had just read the thing they were replacing. It
+    stops being defensible the moment a layer exists that a DIFFERENT decision wrote — set
+    `limits.context.enabled` in your home, then let any project name `limits` for an unrelated
+    reason, and the cap is silently gone. That is a run widening itself back to the default nobody
+    re-chose, and nothing reports it.
+
+    A partial override quietly losing the keys it did not restate is precisely the hazard
+    `successor` used to print four lines of warning about. Merging is the fix those lines were
+    standing in for, which is why they are gone: the warning described a shape that can no longer
+    occur, and a warning that cannot fire is not coverage.
+
+    LISTS REPLACE unless the key is a trust list. A machine-wide `deploy_verbs` and a project's own
+    both name things that must be BLOCKED, so dropping either half is the unsafe direction and they
+    add up; an ordinary list is a value somebody chose whole, and appending to it would produce a
+    setting neither layer asked for.
+    """
+    out = dict(base)
+    for k, v in over.items():
+        cur = out.get(k)
+        if k in CONFIG_UNION_KEYS and isinstance(v, list) and isinstance(cur, list):
+            out[k] = cur + [x for x in v if x not in cur]
+        elif isinstance(v, dict) and isinstance(cur, dict):
+            out[k] = _config_merge(cur, v)
+        else:
+            out[k] = v
+    return out
+
+
 def config():
-    """config.json, then config.local.json on top — the second one GITIGNORED.
+    """The three layers merged over the defaults: ~/.game_loop/config.json (machine-wide), then
+    .game_loop/config.json (tracked), then .game_loop/config.local.json (GITIGNORED).
 
     config.json is a tracked, user-owned file AND the seed a fresh install copies from. So a value
     that is true of one machine -- a path, a tracked issue queue, a command that only exists here --
     does not merely clutter this repo's config: it becomes the DEFAULT for everybody who installs
     from it. This project has already had to remove one leak of exactly that kind from its docs.
+    The machine-wide file is where such a value belongs: per-machine by construction, inheritable by
+    no clone, and outside the repo — which means both write rails already refuse it.
 
     The precedent is already here and this closes the gap in it: notify.json and triggers.json are
     gitignored because they are site wiring. Config had no such home, so anything site-specific had
     to go in the tracked file or nowhere.
 
-    A shallow update, deliberately, matching how config.json itself layers over the defaults --
-    nested keys are replaced whole rather than merged, so "watchdog" here means THIS watchdog block
-    and not a half of one. `status` names when an override is live, because a config you cannot see
-    is a divergence nobody can explain.
+    A DEEP merge — _config_merge says why it stopped being shallow. `status` names when an override
+    is live, because a config you cannot see is a divergence nobody can explain.
     """
     cfg = dict(DEFAULT_CONFIG)
-    for f_ in (CONFIG_F, CONFIG_LOCAL_F):
+    for f_ in CONFIG_LAYERS:
         try:
             with open(f_) as f:
                 d = json.load(f)
             if isinstance(d, dict):
-                cfg.update(d)
+                cfg = _config_merge(cfg, d)
         except OSError:
             continue            # absent is a FACT: this project set no config here
         except ValueError:
@@ -408,14 +475,31 @@ def config_unreadable():
     return sorted(_CONFIG_UNREADABLE)
 
 
-def config_local_keys():
-    """The keys config.local.json is overriding, for reporting. Never a decision."""
+def config_layer_keys(path):
+    """The top-level keys one config layer sets, for reporting. Never a decision."""
     try:
-        with open(CONFIG_LOCAL_F) as f:
+        with open(path) as f:
             d = json.load(f)
         return sorted(d) if isinstance(d, dict) else []
     except (OSError, ValueError):
         return []
+
+
+def config_local_keys():
+    """The keys config.local.json is overriding, for reporting. Never a decision."""
+    return config_layer_keys(CONFIG_LOCAL_F)
+
+
+def config_global_keys():
+    """The keys ~/.game_loop/config.json is setting for EVERY project on this machine.
+
+    Reported separately from the local ones rather than folded in with them, because the two answer
+    different questions. A local override is a fact about this checkout, which is where the reader
+    already is. A machine-wide one reaches repos they are not looking at, so the surprising case is
+    the one where they open an unrelated project and find a cap or a bypass they set months ago in a
+    file no repo contains — and the only moment that can be said is here.
+    """
+    return config_layer_keys(CONFIG_GLOBAL_F)
 
 
 # Set by load() when state.json EXISTED and would not parse. Not stored in the state dict, because
@@ -7352,26 +7436,45 @@ SUCCESSOR_MODES = ("auto", "print", "warp-tab", "saggar-agent")
 
 
 def skip_permissions_grant():
-    """Whether the successor's command carries --dangerously-skip-permissions, and whether a grant
-    was found in a file that is NOT allowed to make one.
+    """Whether the successor's command carries SKIP_PERMISSIONS_FLAG, WHICH FILE granted it, and
+    whether a grant was found in a file that is NOT allowed to make one.
 
-    Returns (granted, ignored_in_tracked_config, shadowed). The second half is the reason this is a function
-    rather than a dict lookup: `skip_permissions: true` in the tracked config.json used to work, and
-    a key that silently stops working is worse than one that never did. Somebody sets it, reads
-    nothing, walks away -- and the unattended run they armed stalls on the first prompt at 3am,
-    which is the precise failure this whole verb exists to prevent. So the tracked value is read for
-    the sole purpose of SAYING IT WAS IGNORED.
+    Returns (granted, source, ignored_in_tracked_config).
 
-    config.local.json only, read directly. See successor_cfg() for why that file and not the other,
-    and for the three blind spots this does not close.
+    TWO FILES MAY GRANT IT, and neither is the tracked one:
+      ~/.game_loop/config.json      — machine-wide. "My successors do not stop to ask" is a fact
+                                      about this MACHINE, and having to re-decide it in every repo
+                                      is the ask that brought this layer into existence.
+      .game_loop/config.local.json  — this checkout only. Read LAST, so a repo can say no where the
+                                      machine says yes. That direction is the one that matters: a
+                                      narrow file must be able to WITHDRAW a broad grant, and a
+                                      reader that treated `false` as merely "no grant here" would
+                                      leave the machine-wide one standing — the opposite of what
+                                      somebody wrote it to mean.
 
-    `shadowed` is the OTHER cost of naming that file as the only home, and it is one this change
-    CREATED rather than found. config() is a shallow top-level update, so the moment a human adds
-    the `limits` block this key lives in, that block replaces the tracked one WHOLE -- and
-    `mode`, `name`, `threshold_pct`, `exhausted_pct` and `handoff_file` that they never restated
-    are gone, silently. Caught by running it: a tree with mode "print" in config.json reported
-    `configured "auto"` the moment the local grant appeared. Reading skip_permissions directly
-    saves this key and does nothing for its neighbours, so the neighbours get NAMED instead.
+    `ignored` is the reason this is a function rather than a dict lookup: the same key in the
+    tracked config.json used to work, and a key that silently stops working is worse than one that
+    never did. Somebody sets it, reads nothing, walks away -- and the unattended run they armed
+    stalls on the first prompt at 3am, which is the precise failure this whole verb exists to
+    prevent. So the tracked value is read for the sole purpose of SAYING IT WAS IGNORED.
+
+    WHAT KEEPS THE MACHINE-WIDE GRANT HONEST is the property that already keeps the local one
+    honest, arrived at from the other side. config.local.json is refused BY NAME by both write
+    rails; the home file is refused because it is OUTSIDE THIS REPO, which is INV3 and covers it
+    without needing a rule of its own. Either way a session cannot grant itself the bypass: a human
+    spends an `authorize` and their own words land in log.jsonl permanently. successor_cfg() names
+    the blind spots that does NOT close, and they are unchanged by the new layer.
+
+    WHAT IT COSTS, said here because the breadth is both the point and the risk: a grant in the home
+    file reaches EVERY project on this machine, including ones nobody has opened yet. That is what
+    was asked for, not a side effect -- but a bypass whose scope nobody restates is one nobody
+    re-chooses, so `successor` and `status` both name the file it came from rather than reporting a
+    bare true.
+
+    Read DIRECTLY rather than through config(), and that is no longer a question of merge depth --
+    the merge is deep now and would carry this key correctly. It is a question of WHICH LAYERS MAY
+    SPEAK: config() includes the tracked file by design, and a permission bypass is the one setting
+    that has to be able to say "not from there".
     """
     ignored = False
     try:
@@ -7381,41 +7484,21 @@ def skip_permissions_grant():
         ignored = bool(isinstance(tracked, dict) and tracked.get("skip_permissions"))
     except (OSError, ValueError, AttributeError):
         pass                    # unreadable is config()'s problem to report, not this one's
-    granted, shadowed = False, []
-    try:
-        with open(CONFIG_LOCAL_F) as f:
-            d = json.load(f)
-        local_limits = d.get("limits")
-        local = ((local_limits or {}).get("successor") or {})
-        granted = bool(isinstance(local, dict) and local.get("skip_permissions"))
-        if isinstance(local_limits, dict):
-            # The whole tracked block is gone, not just the keys with the same name -- so the
-            # comparison is against config.json's limits directly, never against the merged view,
-            # which by then already reflects the loss.
-            tracked_limits = _tracked_limits()
-            for k, v in sorted(tracked_limits.items()):
-                if k not in local_limits:
-                    shadowed.append(k)
-                elif k == "successor" and isinstance(v, dict):
-                    inner = local_limits.get(k)
-                    if isinstance(inner, dict):
-                        shadowed += [f"successor.{ik}" for ik in sorted(v) if ik not in inner]
-    except (OSError, ValueError, AttributeError):
-        granted = False         # absent is the DEFAULT and the safe direction: no bypass
-    return granted, ignored, shadowed
-
-
-def _tracked_limits():
-    """config.json's own limits block, unmerged. Only skip_permissions_grant() needs this."""
-    try:
-        with open(CONFIG_F) as f:
-            d = json.load(f)
-        lim = d.get("limits")
-        return lim if isinstance(lim, dict) else {}
-    except (OSError, ValueError, AttributeError):
-        return {}
-
-
+    granted, source = False, None
+    for f_ in (CONFIG_GLOBAL_F, CONFIG_LOCAL_F):
+        try:
+            with open(f_) as f:
+                d = json.load(f)
+            c = ((d.get("limits") or {}).get("successor") or {})
+            # PRESENCE, not truthiness. `in` is what lets an explicit false withdraw the grant above
+            # it; `c.get(...)` alone would make a repo's refusal indistinguishable from a repo that
+            # never mentioned the key, and the machine-wide true would survive both.
+            if isinstance(c, dict) and "skip_permissions" in c:
+                granted = bool(c.get("skip_permissions"))
+                source = f_ if granted else None
+        except (OSError, ValueError, AttributeError):
+            continue            # absent is the DEFAULT and the safe direction: no bypass
+    return granted, source, ignored
 def successor_cfg():
     """How `successor` starts the next session: AUTO by default — open a Warp tab under Warp, ask
     saggar for a new agent terminal under saggar, and print the command everywhere else.
@@ -7479,13 +7562,20 @@ def successor_cfg():
     LEAKAGE. config.json is TRACKED and is the seed a fresh install copies from (install.sh:339),
     so a bypass granted there would be handed to everyone who clones the checkout and everyone who
     installs from it. This project shipped exactly that leak once, for the length of one commit,
-    about a different key. A permission bypass has a stronger claim on the gitignored layer than
-    the key that taught us did.
+    about a different key. A permission bypass has a stronger claim on an untracked layer than the
+    key that taught us did.
 
-    Read DIRECTLY rather than through config(), which is a shallow top-level update: a "limits"
-    block in config.local.json would replace the tracked one WHOLE, silently dropping the
-    threshold_pct/handoff_file/mode keys the local file did not happen to restate. Granting one
-    bypass must not quietly reconfigure the rest of the run.
+    THE OTHER UNTRACKED LAYER IS ~/.game_loop/config.json, and it may grant this too. It is the
+    same argument reaching further: a preference about how YOUR successors start is a fact about
+    your machine, and the per-repo file made you restate it in every checkout or forget to. Nothing
+    is loosened by admitting it — the home file is outside this repo, so INV3 already refuses every
+    write to it, and the grant still costs an `authorize`. What IS wider is the blast radius, which
+    is why the file that granted it is named in the output instead of a bare "BYPASSED".
+
+    Read DIRECTLY rather than through config(). That used to be about merge depth and is not any
+    more — config() merges deeply now, and would carry this key correctly. It is about WHICH LAYERS
+    MAY SPEAK: config() reads the tracked file by design, and this is the one setting that has to be
+    able to refuse a value found there.
 
     WHAT IT DOES NOT REACH, for the same reason the session id does not: saggar-agent. `saggar agent`
     takes a provider and a task, not argv (`saggar --help`: `saggar agent <agent> <task…>`), so it
@@ -7494,7 +7584,7 @@ def successor_cfg():
     """
     lc = (config().get("limits") or {})
     c = lc.get("successor") if isinstance(lc.get("successor"), dict) else {}
-    skip, ignored, shadowed = skip_permissions_grant()
+    skip, skip_from, ignored = skip_permissions_grant()
     configured = str(c.get("mode") or "auto")
     if configured not in SUCCESSOR_MODES:
         configured = "auto"
@@ -7505,7 +7595,7 @@ def successor_cfg():
     return {"mode": mode, "configured": configured, "detected": detected, "host": host,
             "term_program": os.environ.get("TERM_PROGRAM") or "",
             "skip_permissions": skip, "skip_permissions_ignored": ignored,
-            "limits_shadowed": shadowed,
+            "skip_permissions_from": skip_from,
             "name": str(c.get("name") or "game-loop-successor")}
 
 
@@ -8382,32 +8472,38 @@ def cmd_successor(s, a):
                   "fresh install, so a",
                   "                      bypass written there would be handed to everyone who "
                   "clones this checkout.",
-                  "                      Move it to .game_loop/config.local.json (gitignored) if "
-                  "you meant it."]
-    # THE COST OF THE FILE WE JUST MADE MANDATORY. Printed whenever the local limits block shadows
-    # tracked keys, grant or no grant: the human came here to set one key and took the whole block
-    # with them, and every dropped key fails toward a default that looks deliberate.
-    if sc["limits_shadowed"]:
-        lines += ["config              : \u26a0 .game_loop/config.local.json has a \"limits\" "
-                  "block, which REPLACES the",
-                  "                      tracked one whole rather than merging into it. These keys "
-                  "from config.json",
-                  "                      are not in effect: " + ", ".join(sc["limits_shadowed"])
-                  + ".",
-                  "                      Restate the ones you still want in config.local.json."]
+                  "                      Move it to .game_loop/config.local.json (this repo) or "
+                  "~/.game_loop/config.json",
+                  "                      (every repo on this machine) if you meant it."]
     # Only when it is ON. The default is the safe direction and announcing it every run would make
     # the exceptional case one more line in a wall of them; a bypass is the thing worth a line.
     if sc["skip_permissions"]:
+        _from = sc["skip_permissions_from"] or ""
+        _machine = bool(_from and _from == CONFIG_GLOBAL_F)
         lines += ["permissions         : BYPASSED — the command carries "
                   + SKIP_PERMISSIONS_FLAG + ",",
                   "                      set by limits.successor.skip_permissions in "
-                  ".game_loop/config.local.json",
-                  "                      — a gitignored file both write rails refuse, so this "
-                  "grant cost an `authorize`",
-                  "                      and a human's words are in log.jsonl.",
+                  + _tilde(_from),
+                  "                      — a file both write rails refuse ("
+                  + ("outside this repo, which is INV3" if _machine
+                     else "by name, since #65 and #86")
+                  + "), so this grant",
+                  "                      cost an `authorize` and a human's words are in log.jsonl.",
                   "                      The successor will not prompt for anything, including the "
                   "calls this",
                   "                      session would have been asked about."]
+        # NAMED BECAUSE IT IS WIDER THAN THE PAGE IT IS PRINTED ON. A repo-local grant is a decision
+        # about the checkout the reader is looking at; a machine-wide one already applies to
+        # projects they have not opened, and the moment they are reading a bypass line is the only
+        # moment that difference can be put in front of them.
+        if _machine:
+            lines += ["                    \u26a0 MACHINE-WIDE — this grant is not this repo's. It "
+                      "applies to EVERY project",
+                      "                      on this machine, including ones nobody has opened "
+                      "yet. Set",
+                      "                      limits.successor.skip_permissions to false in "
+                      ".game_loop/config.local.json",
+                      "                      to withdraw it here without touching the others."]
         # The gap that costs the most, so it is said beside the setting rather than left in the
         # mode's own paragraph: skip_permissions is turned on precisely because nobody will be
         # there, and saggar-agent is the one mode that drops it. It is stated here because here it
@@ -8564,7 +8660,7 @@ def cmd_successor(s, a):
              "host": sc["host"], "title": title,
              "skip_permissions": sc["skip_permissions"],
              "skip_permissions_ignored": sc["skip_permissions_ignored"],
-             "limits_shadowed": sc["limits_shadowed"],
+             "skip_permissions_from": sc["skip_permissions_from"],
              "dry_run": bool(a.dry_run), "auto_handoff": auto, "handed": handed})
     out("\n".join(lines))
 
@@ -10827,6 +10923,17 @@ def cmd_status(s, a):
         out(w)
     out(*session_start_warning())
     out(*installed_confidence_report())
+    # THE MACHINE-WIDE LAYER IS REPORTED FIRST, and separately from the local one, because it is the
+    # layer a reader is least likely to remember. A local override is a fact about the checkout they
+    # are already standing in; this one was written in a file no repo contains, possibly months ago,
+    # and it reaches every project here. Silence about it is the divergence nobody can explain.
+    if (_gk := config_global_keys()):
+        out(f"config: {len(_gk)} key(s) set MACHINE-WIDE by {_tilde(CONFIG_GLOBAL_F)} — "
+            + ", ".join(_gk),
+            "  That file is under this layer, not in any repo, and applies to every project on this "
+            "machine.",
+            "  Both write rails refuse it (it is outside this repo — INV3), so nothing here can "
+            "change it without a human.")
     if (_lk := config_local_keys()):
         out(f"config: {len(_lk)} key(s) overridden by .game_loop/config.local.json (gitignored) — "
             + ", ".join(_lk),

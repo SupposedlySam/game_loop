@@ -204,7 +204,7 @@ with unchanged mtimes. **If a claim about behaviour can be measured, measure it 
 it** — the read is a hypothesis, and this one had already survived being written down, drafted a
 fix, and been reported three times.
 
-## And three ways a MEASUREMENT cannot be wrong
+## And four ways a MEASUREMENT cannot be wrong
 
 The same defect one level up. An assertion that cannot fail and a measurement that cannot be wrong
 are the same thing wearing different clothes — both are green, both feel like evidence, and neither
@@ -220,6 +220,17 @@ when you report it.
 gave 2.2x, then "3.0x declining to 1.75x", then a decline that did not exist — one of them
 comparing A-excluding-setup against B-including-setup. Completions per minute at matched fractions
 settled it in a single step. Pick the quantity first, then take it identically from both.
+
+**Know what your score structurally cannot count — a CORRECT measurement can still rank the wrong
+thing first.** Mutation testing neuters a producer to its *nothing* value, so every assertion
+covering the nothing answer survives by construction: it cannot flip, because the mutant returns
+exactly what that assertion expects. The kill count therefore measures only the something-direction
+assertions, and the tool's headline advice — strengthen the lowest scores first — points hardest at
+whichever producers have the best-tested negative direction. Measured across 132 producers: all
+twelve of the lowest-ranked neuter to their own nothing-answer, and the one at the very bottom had
+four assertions across three directions. Nothing was wrong with the number. It answered a narrower
+question than the ranking implied, and only reading the assertions showed which. When a score drives
+a work queue, write down what it cannot see before you work the queue.
 
 **Before controlling for a cause, verify the EFFECT is real.** A hypothesis about why a rate dropped
 got a proper control — which tested whether the drop had that cause, and never whether the rate had

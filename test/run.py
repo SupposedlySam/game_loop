@@ -13572,9 +13572,24 @@ def main():
     # the way in). A hand-written list of directories is the same defect as a hand-written list of
     # files, in the check written because of that defect. Tracked-and-says-bash is the real
     # property, and it is one command away.
+    # AND A TREE WITH NO .git STILL GETS SCANNED. `git ls-files` returns NOTHING there, so this
+    # scanned zero files: the denominator guard failed loudly while the real check passed VACUOUSLY
+    # on an empty set — loud where it does not matter, green where it does, which is the same shape
+    # as the floor gate's first draft one screen up. Not hypothetical: a `git archive` extract is
+    # such a tree (the sweep's own), and so is a tarball install, which is the `curl | bash` path.
+    #
+    # git first because it is the honest list of what SHIPS; the walk is the fallback, and it skips
+    # the directories a checkout accumulates rather than pretending they are shipped.
     _tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)
+    _rels = [r for r in (_tracked.stdout or "").splitlines() if r]
+    if not _rels:
+        _skip = {".git", "node_modules", "__pycache__", ".game_loop_self", "sessions"}
+        for _root, _dirs, _names in os.walk(REPO):
+            _dirs[:] = [d for d in _dirs if d not in _skip]
+            for _n in _names:
+                _rels.append(os.path.relpath(os.path.join(_root, _n), REPO))
     _sh_files = []
-    for _rel in (_tracked.stdout or "").splitlines():
+    for _rel in _rels:
         _f = os.path.join(REPO, _rel)
         if not os.path.isfile(_f):
             continue

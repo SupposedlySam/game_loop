@@ -914,9 +914,26 @@ def wake_landed_lines(s):
                 "  recorded only by a woken run saying so:  game_loop note --woke"]
     mins = _minutes_since(w.get("at"))
     age = "age unreadable" if mins is None else f"{mins} min ago"
-    return [f"  last wake LANDED: {w.get('at')} ({age}); {w.get('count', 1)} this session.",
-            "  A wake REQUESTED and never delivered is invisible from in here — that is the exact",
-            "  six-hour hole behind this, and only something outside the run can see it."]
+    L = [f"  last wake LANDED: {w.get('at')} ({age}); {w.get('count', 1)} this session."]
+    # A CADENCE GONE SILENT IS OBSERVABLE, and saying only "a missed wake is invisible" was
+    # overclaiming. ONE wake that never arrived leaves nothing here — true. But a path DECLARED to
+    # fire every N minutes, with nothing landed in many multiples of N, is a dead path, and this
+    # run can say so with no help from outside. That gap is the whole of the report behind #95: a
+    # live poller, a healthy heartbeat, and six hours since anything was delivered.
+    every = int((s.get("mandate") or {}).get("wake_every") or 0)
+    if every and mins is not None and mins > 3 * every:
+        L += [f"  ⚠ OVERDUE — that path is declared every {every} min and nothing has landed in "
+              f"{mins}.",
+              f"    About {mins // every} expected wakes did not arrive. One missing wake proves",
+              "    nothing; a cadence this far gone is a path that has stopped delivering."]
+    elif every:
+        L.append(f"  declared every {every} min, and the last is within that — the cadence holds.")
+    else:
+        L += ["  No cadence is declared, so a path that has STOPPED cannot be told from one nobody",
+              "  has needed yet:  mandate --wake-every <minutes>"]
+    L += ["  A single wake requested and never delivered is still invisible from in here — only a",
+          "  CADENCE gone quiet is detectable, and only once one is declared."]
+    return L
 
 
 def authorizations_report(s):
@@ -2597,6 +2614,8 @@ def cmd_mandate(s, a):
                     "A wake path answers 'how does a signal reach this session while it is idle' —\n"
                     "which is only a question while something is waiting on it.")
             m["wake_path"] = a.wake_path
+            if getattr(a, "wake_every", None):
+                m["wake_every"] = int(a.wake_every)
             save(s)
             logline({"kind": "mandate_wake_path", "wake_path": a.wake_path, "text": m.get("text")})
             out("✓ wake path recorded — DECLARED, never probed.",
@@ -2639,6 +2658,8 @@ def cmd_mandate(s, a):
             "nothing. What is refused is losing a live mandate without a decision.")
     if getattr(a, "wake_path", None):
         m["wake_path"] = a.wake_path
+        if getattr(a, "wake_every", None):
+            m["wake_every"] = int(a.wake_every)
     m.pop("parked", None)   # a re-bind supersedes any break; the new words are the mandate now
     # AN IDENTICAL RE-BIND KEEPS THE ORIGINAL `since`. The refusal above explicitly allows
     # re-setting the SAME words "so a retry or a re-bind after compaction costs nothing" — but it
@@ -11166,6 +11187,10 @@ def main():
     md.add_argument("--wake-path", dest="wake_path",
                     help="how an external signal reaches this session while it is idle — a cron, a "
                          "waker, a human. Recorded, not probed")
+    md.add_argument("--wake-every", dest="wake_every", type=int,
+                    help="minutes between expected wakes on that path. With it, a path that has "
+                         "STOPPED delivering becomes visible from inside: one missed wake proves "
+                         "nothing, a cadence gone silent proves the path is dead")
     md.add_argument("--set", help="the mandate, in the human's words")
     md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
     md.add_argument("--notes", help="why it's satisfied")

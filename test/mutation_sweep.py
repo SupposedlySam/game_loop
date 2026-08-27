@@ -1625,7 +1625,7 @@ MUTANTS += [
      ['NO WAKE HAS LANDED', 'how old that is', 'CANNOT see', 'arrivals COUNT'],
      "the whole report disappears while the wake-path DECLARATION stays — which is the pre-#95 "
      "state exactly: a declared path, nothing said about whether it has ever delivered, and an "
-     "inert run reading identically to a healthy one. Four of its seven kills are the #95 report "
+     "inert run reading identically to a healthy one. HELD AT 7, AND OWED A RAISE TO ~16. The cadence check added an OVERDUE verdict, a holding verdict and a third answer for no cadence, each asserted — a hand measurement says 16. The floor stays at 7 until a FULL SWEEP re-measures, because the killer record still describes the older function and this repo's own gate refuses a floor that claims more than the record holds. It refused this raise, which is the gate working. Four of its seven kills are the #95 report "
      "itself; the other three are the orphan check, which fires because this is the only shipped "
      "caller of _minutes_since — real collateral, and named here so the number is not a mystery.", 7),
 ]

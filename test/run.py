@@ -3270,6 +3270,43 @@ def main():
         check("#95: ...and the doorbell prompt ASKS the woken session to record it — nothing else "
               "can, so a prompt that does not say so guarantees the report above stays empty",
               "note --woke" in r.stdout)
+        # A CADENCE GONE SILENT IS OBSERVABLE, and I claimed otherwise. `wake_landed_lines` said
+        # flatly that a wake requested and never delivered is invisible from in here — true of ONE
+        # wake, and I let the true half stand for the whole. A path DECLARED to fire every N
+        # minutes with nothing landed in many multiples of N is a dead path, and this run can say
+        # so with no outside help. That is exactly the six-hour hole #95 was filed about.
+        _we = "sess-wake-every"
+        gl(proj, "mandate", "--set", "keep going", sid=_we)
+        gl(proj, "mandate", "--wake-path", "a cron every 10 minutes", "--wake-every", "10", sid=_we)
+        gl(proj, "note", "--woke", sid=_we)
+        r = gl(proj, "status", sid=_we)
+        check("#95: with a cadence declared and a wake just landed, status says the cadence HOLDS "
+              "rather than warning — the quiet case has to be quiet or the loud one means nothing",
+              "cadence holds" in r.stdout and "OVERDUE" not in r.stdout)
+        _wf = os.path.join(proj, ".game_loop", "sessions", _we, "state.json")
+        _wd = json_or_none(_wf) or {}
+        _wd.setdefault("wake_landed", {})["at"] = "2020-01-01T00:00:00"
+        with open(_wf, "w") as f:
+            json.dump(_wd, f)
+        r = gl(proj, "status", sid=_we)
+        check("#95: ...and a cadence gone SILENT is reported OVERDUE, naming roughly how many "
+              "expected wakes never arrived — the consumer's report was a live poller, a healthy "
+              "heartbeat and six hours of nothing delivered, which nothing here could see",
+              "OVERDUE" in r.stdout and "expected wakes did not arrive" in r.stdout)
+        check("#95: ...and it still states the limit rather than overclaiming: a SINGLE wake that "
+              "never arrived remains invisible, because the run that would record it is the run "
+              "that did not happen — only a cadence is detectable",
+              "single wake requested and never delivered is still invisible" in r.stdout)
+        gl(proj, "mandate", "--clear", "--notes", "d", sid="sess-nocad")
+        gl(proj, "mandate", "--set", "x", sid="sess-nocad")
+        gl(proj, "mandate", "--wake-path", "a human who checks", sid="sess-nocad")
+        gl(proj, "note", "--woke", sid="sess-nocad")
+        r = gl(proj, "status", sid="sess-nocad")
+        check("#95: ...and with NO cadence declared it says a stopped path cannot be told from one "
+              "nobody has needed yet — the third answer, rather than a silence that reads as "
+              "healthy",
+              "cannot be told from one nobody" in r.stdout and "--wake-every" in r.stdout)
+
         # AN UNREADABLE STAMP IS NOT A FRESH ONE. Rendering it as "0 min ago" would produce the
         # healthiest possible reading out of the one case where nothing is known.
         _wl = importlib.machinery.SourceFileLoader(
@@ -8576,6 +8613,7 @@ def main():
             "--observed", "--path", "--produces", "--read",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
+            "--wake-every",
             "--exclude", "--exit-code", "--filed", "--instrument", "--mark", "--metric",
             "--milestone", "--null", "--outcome", "--pin", "--positive", "--prove", "--ref",
             "--register", "--release", "--release-deferred", "--rung", "--scale", "--scope",

@@ -80,7 +80,13 @@ cannot be paraphrased in passing:
 
 ```bash
 ./.game_loop/bin/game_loop mandate --wake-path "<how a signal reaches this session while it is idle>"
+./.game_loop/bin/game_loop mandate --wake-every 10    # minutes between expected wakes, if it has a cadence
 ```
+
+`--wake-every` is what turns a declaration into something checkable. One missed wake proves nothing
+and leaves no trace here; a path declared every 10 minutes with nothing landed in 700 is a path that
+has stopped, and `status` says so. Without it, "stopped delivering" and "nobody has needed it yet"
+are the same silence.
 
 A cron that pokes the session, a Stop-hook waker, a human who checks. **It is DECLARED, never
 probed** — the tool cannot test that the path delivers, and a declared path that has stopped

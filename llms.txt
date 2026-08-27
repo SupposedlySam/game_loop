@@ -99,6 +99,7 @@ goes quiet. If something outside pokes you on a timer, give it a prompt that car
 
 ```
 ./.game_loop/bin/game_loop note --woke             # you were woken from outside — record the ARRIVAL
+./.game_loop/bin/game_loop mandate --wake-every 10 # how often that path SHOULD fire, in minutes
 ./.game_loop/bin/game_loop note --recovery ".."    # a remedy you learned; a woken you must not re-derive it
 ./.game_loop/bin/game_loop doorbell                # the wake-up prompt, assembled from live state
 ```

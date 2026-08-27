@@ -6822,10 +6822,13 @@ def cmd_watchdog(s, a):
             "is a",
             "  missing convenience, not a locked door. Measured here: this repo's own agent "
             "extended its",
-            "  probe mid-run to treat a long measurement as a wait, which was defensible and was "
-            "still",
-            "  the session deciding when its own watchdog stops ringing. If that matters to you, "
-            "the",
+            "  probe mid-run to treat a long measurement as a wait — objective, bounded, "
+            "failing toward",
+            "  ringing, done carefully. THE CARE IS NOT THE POINT: a session deciding when its "
+            "own",
+            "  watchdog stops ringing is the defect regardless of how well it decides, and a "
+            "careless",
+            "  version would have been easier to see. If that matters to you, the",
             "  enforcement to add is the guard refusing those two paths, not another sentence "
             "here.",
             "",

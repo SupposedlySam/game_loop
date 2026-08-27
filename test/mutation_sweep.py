@@ -481,7 +481,7 @@ MUTANTS = [
      "nothing-direction rule this file states in its header, predicted before the run rather than "
      "discovered by it. Neutering it flips five assertions in total, so expect roughly 5 from the "
      "next full sweep; 1 is what I could measure without one, and the rule is that a floor may not "
-     "claim more than was measured. Raise it from the killers file.", 3),
+     "claim more than was measured. Raise it from the killers file.", 2),
     ("pinned_report -> the PINNED CODE block is never reported",
      ".game_loop/bin/_gl_impl.py::pinned_report", "    return None\n",
      ["pinned", "self"], None, 217),
@@ -1121,8 +1121,16 @@ MUTANTS += [
     ("disarm_watchdog -> a handover signals nothing, and reports that it did",
      ".game_loop/bin/_gl_impl.py::disarm_watchdog", "    return None, \"none was armed\"\n",
      ['names each', 'sentence as', 'check FINDS', 'handover says', 'watchdog already', 'no shipped'],
-     "raw 6, genuine 3 — the other three are reachability assertions firing because the neutered "
-     "body orphans watchdog_pid_identity, not because they know anything about handovers.", 8),
+     "5 as of 2026-08-27, DOWN from a floor of 8, and not one kill of coverage was lost. This "
+     "note already had the mechanism — the extra kills are reachability assertions firing "
+     "because the neutered body orphans watchdog_pid_identity, not because they know anything "
+     "about handovers — and reading it first would have saved the investigation. What the "
+     "measurement added is WHY it moved: Morgan's 881476f gave watchdog_pid_identity three "
+     "more call sites, so neutering this one no longer leaves it suite-only and the orphan "
+     "scan stays quiet. Confirmed by applying the same mutant at 37def4c and at HEAD and "
+     "diffing the names that went red: exactly three, all orphan-scan. Those three kill 22 of "
+     "134 producers — collateral in a mid-band this file's universal-collateral rule misses "
+     "at its 50% threshold, which is worth knowing before trusting any floor near it.", 5),
 ]
 
 MUTANTS += [
@@ -1179,7 +1187,7 @@ MUTANTS += [
     ("_write_section_map -> a FAST sweep has no map and silently runs everything",
      "test/mutation_sweep.py::_write_section_map", "    return\n",
      ["section map WRITER", "maps every declared producer", "writes beside the MODULE"],
-     "LOWERED 5 -> 4 on 2026-08-27, and the reason matters more than the number. The sweep of 37def4c measured 4 because an assertion of MINE had stopped killing it: the check that BOTH artifact writers are guarded was a whole-file count, `_is_full_sweep() >= 3`, and commit a34e7da added a fourth unrelated call site, so neutering this producer no longer dropped the count below the threshold. Nobody edited that assertion; the file grew somewhere else. The floor tripwire is the only instrument that could have caught it and did, on the first sweep after the change. The assertion is now asked of each writer BODY and KILLS AGAIN — verified by applying this entry's own declared body through `neuter()` and watching it go red, not by expecting it. So raise this back next sweep. Note the verification took two attempts: hand-inserting `return` after the docstring leaves the original source below it, so the text the assertion reads is unchanged and it wrongly survived. Use `neuter()`, which is what the sweep uses. Lowered rather than held at 5 because a floor may not exceed the last full sweep, and that rule refusing me here is the rule working. Previously: 5 kills on the full sweep of 2026-08-27 against 3b00196; it read 2 when measured by hand on the way out of NOT_SWEPT, and the assertions around it have grown since. This was the repo's LAST declared KNOWN GAP and its entry stated the gap exactly: neutering produces no map, every FAST producer falls back to the whole suite, and the result is correct-but-slow with nothing to notice. Two things were owed and both landed before this moved -- the sweep SAYS SO now when FAST is asked for with no map, and the writer is DRIVEN by assertions rather than only read in source. I claimed this move in 322a6cd's commit message and did not make it: the prerequisites shipped and the entry stayed. The next sweep still reporting KNOWN GAPS (1) is what caught it, which is the instrument outliving my own summary of it.", 4),
+     "LOWERED 5 -> 4 on 2026-08-27, and the reason matters more than the number. The sweep of 37def4c measured 4 because an assertion of MINE had stopped killing it: the check that BOTH artifact writers are guarded was a whole-file count, `_is_full_sweep() >= 3`, and commit a34e7da added a fourth unrelated call site, so neutering this producer no longer dropped the count below the threshold. Nobody edited that assertion; the file grew somewhere else. The floor tripwire is the only instrument that could have caught it and did, on the first sweep after the change. The assertion is now asked of each writer BODY and KILLS AGAIN — verified by applying this entry's own declared body through `neuter()` and watching it go red, not by expecting it. So raise this back next sweep. Note the verification took two attempts: hand-inserting `return` after the docstring leaves the original source below it, so the text the assertion reads is unchanged and it wrongly survived. Use `neuter()`, which is what the sweep uses. Lowered rather than held at 5 because a floor may not exceed the last full sweep, and that rule refusing me here is the rule working. Previously: 5 kills on the full sweep of 2026-08-27 against 3b00196; it read 2 when measured by hand on the way out of NOT_SWEPT, and the assertions around it have grown since. This was the repo's LAST declared KNOWN GAP and its entry stated the gap exactly: neutering produces no map, every FAST producer falls back to the whole suite, and the result is correct-but-slow with nothing to notice. Two things were owed and both landed before this moved -- the sweep SAYS SO now when FAST is asked for with no map, and the writer is DRIVEN by assertions rather than only read in source. I claimed this move in 322a6cd's commit message and did not make it: the prerequisites shipped and the entry stayed. The next sweep still reporting KNOWN GAPS (1) is what caught it, which is the instrument outliving my own summary of it.", 5),
 ]
 
 MUTANTS += [
@@ -1289,7 +1297,7 @@ MUTANTS += [
      ['handover says', 'watchdog already'],
      "same fail-safe shape as _proc_start above, one file over: an unreadable start time reads as "
      "'that pid had already exited', so the handover declines to signal and says so. The two that "
-     "flip are the live kill and the note that must not claim a stop that never happened.", 2),
+     "flip are the live kill and the note that must not claim a stop that never happened.", 12),
 ]
 
 MUTANTS += [
@@ -1582,7 +1590,7 @@ MUTANTS += [
      "the whole report: kills the close, both refusals and the recycled-pid arm at once. That "
      "breadth is the point — a mutant that returns [] is indistinguishable from a healthy run "
      "with nothing to retire, so the assertions have to name the OUTCOME rather than the absence "
-     "of one. Its inputs are excluded below and this is where they are actually measured.", 5),
+     "of one. Its inputs are excluded below and this is where they are actually measured.", 14),
 ]
 
 

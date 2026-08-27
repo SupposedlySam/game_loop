@@ -6814,6 +6814,20 @@ def cmd_watchdog(s, a):
             "  There is no verb that sets it: a wait a session can declare for itself is an off "
             "switch for",
             "  the watchdog, and this verb cannot tell a session from the orchestrator above it.",
+            "  THAT SENTENCE IS NARROWER THAN IT READS, and the difference is the whole of what "
+            "this",
+            "  protects. No VERB sets it — and neither config.local.json nor the script it names "
+            "is a",
+            "  policy file, so a session can widen its own silence by editing either directly. It "
+            "is a",
+            "  missing convenience, not a locked door. Measured here: this repo's own agent "
+            "extended its",
+            "  probe mid-run to treat a long measurement as a wait, which was defensible and was "
+            "still",
+            "  the session deciding when its own watchdog stops ringing. If that matters to you, "
+            "the",
+            "  enforcement to add is the guard refusing those two paths, not another sentence "
+            "here.",
             "",
             "  PASTE THIS, adjusting the command — one file, once per install:",
             '    {"watchdog": {"waiting_probe": "<your command>"}}',

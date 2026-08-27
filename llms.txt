@@ -321,6 +321,14 @@ own. `expect` is `deny` / `allow` / `ask`; `expect_exit` is there for a guard th
 codes, and `expect_output` pins the REASON, since a guard refusing for the wrong reason sends you
 somewhere else.
 
+**RUNNING A GUARD IS NOT A READ.** A guard is a state machine, and feeding it a payload does
+whatever a real tool call would: a path covered by a standing `authorize` grant CONSUMES one of
+that grant's uses, and the guard says so — *"AUTHORIZATION SPENT."* Measured here, on this repo, by
+a probe that cost two human-granted uses. So point your fixtures at paths the guard decides on its
+own, not at paths somebody authorized. If you must test an authorized path, run it against a
+throwaway `GAME_LOOP_HOME` rather than your live one, and check `uses_left` in the session state
+first.
+
 **Both directions or it is refused.** A fixture whose cases all expect `allow` is passed by a
 script that does nothing at all — which is exactly what a guard looks like after it silently stops
 firing. Write the case that must NOT fire.

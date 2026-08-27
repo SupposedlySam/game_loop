@@ -13952,19 +13952,32 @@ def main():
             _reach_un.append(_key)
     _mut_keys = {_m[1] for _m in sweep.MUTANTS}
     _bad_reach = sorted(set(_reach_un) & _mut_keys)
-    check("no producer is declared as a MUTANT that `neuter` cannot reach — its anchor would "
-          "report NOT FOUND on every sweep, and a producer permanently NOT MEASURED looks decided "
-          "while never being measured: " + (", ".join(_bad_reach) or "none"),
-          not _bad_reach)
-    check("...and there ARE unreachable candidates, so the line above is a verdict rather than a "
-          "check with nothing to look at — %d of them, every one excluded WITH a reason"
-          % len(_reach_un),
-          len(_reach_un) > 5 and all(k in sweep.NOT_SWEPT for k in _reach_un))
-    check("...and the reach limit is real, not assumed: neuter finds a module-level def and misses "
-          "the identically-named nested one, which is the whole mismatch in two lines",
-          sweep.neuter("def f(x):\n    return 1\n", "f", "    return None")[1] is True
-          and sweep.neuter("class C:\n    def f(x):\n        return 1\n",
-                           "f", "    return None")[1] is False)
+    # THE MISMATCH IS CLOSED, so this asserts the identity rather than policing the gap. `neuter`
+    # is indent-aware now: it matches a def at any indent and re-indents the body ONE LEVEL deeper
+    # than that def. Verified before shipping that all 122 existing mutants come out byte-identical
+    # — the first version prepended only the def's own indent, so a module-level body written
+    # "    return None" came back at column zero and every single mutant changed.
+    _unreach = [_k for _k in sweep.all_candidates()
+                if read_or_empty(os.path.join(REPO, _k.split("::", 1)[0]))
+                and not sweep.neuter(read_or_empty(os.path.join(REPO, _k.split("::", 1)[0])),
+                                     _k.split("::", 1)[1], "    return None")[1]]
+    check("`neuter` REACHES every candidate the finder produces — they disagreed about what a "
+          "producer IS, and a candidate the mutator cannot reach is declarable but permanently "
+          "unmeasurable: " + (", ".join(_unreach[:3]) or "none of %d" % len(sweep.all_candidates())),
+          not _unreach)
+    check("...and it reaches all three shapes rather than only the one that already worked: a "
+          "module-level def, a CLASS METHOD, and a def nested inside another function",
+          all(sweep.neuter(_src, "f", "    return None")[1] for _src in (
+              "def f(x):\n    return 1\n",
+              "class C:\n    def f(self):\n        return 1\n",
+              "def outer():\n    def f(x):\n        return 1\n    return f\n")))
+    check("...and the body lands ONE LEVEL deeper than its def, so the mutant still parses — "
+          "getting that wrong rewrote all 122 mutants and the diff against the old function caught "
+          "it before anything shipped",
+          _parses(sweep.neuter("class C:\n    def f(self):\n        return 1\n",
+                               "f", "    return None")[0])
+          and "        return None" in sweep.neuter(
+              "class C:\n    def f(self):\n        return 1\n", "f", "    return None")[0])
 
     # AND THE MUTANT MUST STILL PARSE. "Bytes changed" was not enough, and I proved it on myself:
     # eleven producers I declared carried `"    return None\\n"` — a literal backslash-n rather than

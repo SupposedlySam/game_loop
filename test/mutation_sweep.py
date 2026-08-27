@@ -2150,14 +2150,44 @@ def probed_verdict(original, fn, run_mutant):
 
 
 def neuter(src, fn, body):
-    """Replace fn's body with `body`, keeping its signature and dropping its docstring."""
+    """Replace fn's body with `body`, keeping its signature and dropping its docstring.
+
+    INDENT-AWARE, because the finder and the mutator disagreed about what a producer IS.
+    `candidates()` walks the whole tree deliberately — a class's methods are not module level, and
+    that widening was prompted by `limits_lock`'s methods sitting outside the scan — while this
+    matched `^def name(` at COLUMN ZERO. So a nested function or a method could be a candidate the
+    mutator could never reach: declared in MUTANTS, its anchor reports NOT FOUND on every sweep,
+    forever, and a producer permanently NOT MEASURED looks decided while never being measured.
+    Eighteen of 174 candidates were in that state, all of them excluded with reasons, and a gate now
+    refuses declaring one as a mutant — this removes the reason that gate has to exist.
+
+    The BODY is re-indented to the def's own level, so a caller writes it once at the natural
+    four-space depth and it lands correctly whether the target is at column zero or inside a class.
+    Without that, an indent-aware match would produce a file that parses as something else entirely,
+    which is the failure mode this file spent a day learning to check for.
+    """
     lines = src.split("\n")
     for i, l in enumerate(lines):
-        if re.match(rf"^def {re.escape(fn)}\(", l):
-            j = i + 1
-            while j < len(lines) and (lines[j].startswith((" ", "\t")) or not lines[j].strip()):
-                j += 1
-            return "\n".join(lines[:i + 1] + [body.rstrip("\n")] + lines[j:]), True
+        m = re.match(rf"^(\s*)def {re.escape(fn)}\(", l)
+        if not m:
+            continue
+        indent = m.group(1)
+        j = i + 1
+        # The body is every following line indented DEEPER than the def, plus blank lines. At
+        # column zero this is the old rule exactly; deeper in it stops at the next sibling.
+        while j < len(lines) and (not lines[j].strip()
+                                  or (lines[j].startswith(indent)
+                                      and lines[j][len(indent):len(indent) + 1] in (" ", "\t"))):
+            j += 1
+        raw = body.rstrip("\n").split("\n")
+        base = min((len(x) - len(x.lstrip()) for x in raw if x.strip()), default=0)
+        # ONE LEVEL DEEPER THAN THE DEF, not level with it. The first version prepended only the
+        # def's own indent, so at module level (indent "") a body written "    return None" came
+        # back "return None" and every one of the 122 existing mutants changed. Caught by diffing
+        # all of them against the old function before shipping — which is the check this file spent
+        # the day arguing for, run on the change to the file that argues for it.
+        shifted = [indent + "    " + x[base:] if x.strip() else x for x in raw]
+        return "\n".join(lines[:i + 1] + shifted + lines[j:]), True
     return src, False
 
 

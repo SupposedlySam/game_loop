@@ -48,7 +48,7 @@
     "PER-CLAIM VERIFICATION, because the block stamp could not express a partial re-read. This file",
     "promised that the first re-verification would fill in the null and make THAT entry checkable.",
     "With one stamp for six claims, filling it in would have asserted six re-readings where one",
-    "happened \u2014 so the promise was unkeepable as written, which is a small instance of exactly what",
+    "happened — so the promise was unkeepable as written, which is a small instance of exactly what",
     "this file exists to catch. Each claim now carries its own verified_on/verified_against, and the",
     "block values remain the original reading for entries nobody has revisited."
   ],
@@ -68,9 +68,9 @@
         "exercise_note": "the host writes this through our own tap, so a snapshot in the expected shape IS the claim holding, observed on the consumer's machine rather than on the author's",
         "exercisable": "yes",
         "exercisable_why": "exercised: a snapshot in the expected shape IS the claim, and the missing-field arm is its positive control",
-        "verified_on": "2026-08-24",
-        "verified_against": "2.1.241",
-        "verified_how": "EXERCISED: read .game_loop/limits.json, a snapshot captured 2026-08-24 from a real statusline render \u2014 five_hour and seven_day each with used_percentage and resets_at. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "RE-READ at 2.1.246, the binary actually RUNNING this session (CLAUDE_CODE_EXECPATH) rather than the 2.1.247 on PATH — two installations, and the PATH answer names the wrong subject. Every field name is present in that binary (rate_limits, five_hour, seven_day, used_percentage, resets_at), and this machine's live .game_loop/limits.json carries exactly five_hour and seven_day, each with used_percentage and resets_at. Note crossed_at and notified in that file are OUR tap's additions, not the host's."
       },
       {
         "id": "statusline-config-keys",
@@ -80,9 +80,9 @@
         "ledger": "statusLine config keys",
         "exercisable": "no",
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
-        "verified_on": "2026-08-25",
-        "verified_against": "2.1.241",
-        "verified_how": "re-read in THE BINARY THIS SESSION IS ACTUALLY RUNNING, found via lsof on the live pid: .vscode/extensions/anthropic.claude-code-2.1.241-darwin-arm64/resources/native-binary/claude. It reads statusLine:ye({type:Ct(\"command\"),command:H(),padding:Je().optional(),refreshInterval:Je().min(1)... \u2014 all four keys and the 1s floor, from the client's own schema rather than the docs page this claim cites, and the floor confirmed a second time at the consumption site (Math.max(1,t)*1000). Unchanged from the 2.1.223 reading. I FIRST READ THE WRONG BINARY: `which claude` resolves to an npm install at 2.1.243, which is a DIFFERENT installation and not what runs this session. Same schema in both, so the answer was unaffected and the method was still wrong. Verify against the pid, never against PATH."
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "RE-READ in the running binary: `statusLine` (29 occurrences) and `refreshInterval` (3) are present. `padding` appears 407 times and is NOT evidence — it is a common word in a 230MB binary, and counting it as confirmation would be the kind of match that agrees with whatever you hoped. So this re-read confirms two of the three key names and declines to claim the third; the docs URL remains the source for the shape."
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -92,10 +92,10 @@
         "ledger": "Hook payloads carry rate-limit data",
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence and exercisable, not yet exercised: every hook invocation supplies a payload I control, and the payload carrying session_id is the positive control that the read worked while rate_limits was still absent",
-        "verified_on": "2026-08-24",
-        "verified_against": "2.1.241",
+        "verified_on": "2026-08-26",
+        "verified_against": null,
         "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked",
-        "verified_how": "EXERCISED: read probe/claims-observed.json, a real Stop-hook payload recorded 2026-08-24 \u2014 11 top-level keys, zero rate_limit keys, and `control: true` because session_id was present, which is what makes the empty result a reading rather than a payload that never arrived. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_how": "EXERCISED today: .game_loop/probe/claims-observed.json, written by a real Stop hook at 21:46, records rate_limit_keys: [] with control: True — the payload was genuine (session_id present) and carried no rate-limit key anywhere. VERSION NOT ATTRIBUTED, and that is why verified_against is null rather than 2.1.246: the hook ran with no CLAUDE_CODE_EXECPATH in its environment, so the observation cannot name the build it watched. The tool records that as an explicit null with its reason instead of inferring one."
       },
       {
         "id": "no-headless-usage-flag",
@@ -105,9 +105,9 @@
         "ledger": "A headless `claude usage` / `--usage` flag exists",
         "exercisable": "no",
         "exercisable_why": "unconditional: the case where the flag exists is the one I cannot construct, so there is nothing to provoke and no control to pair",
-        "verified_on": "2026-08-24",
-        "verified_against": "2.1.241",
-        "verified_how": "read `claude --help` in full at 2.1.241 (242 lines, captured to a file and grepped rather than eyeballed): no --usage/--limit/--quota option, and none of the 13 subcommands is usage, limits or quota. The only match for 'usage' anywhere in the output is the `Usage:` banner line."
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "RE-READ by running `--help` on the binary actually running this session. 2.1.246's subcommands are: agents, auth, auto-mode, doctor, gateway, import, install, mcp, plugin, project, setup-token, ultrareview, update. No `usage`, and no --usage flag. My first pass counted a grep for 'usage' and got 1 — that was the `Usage: claude [options]` banner, so the count was checked rather than trusted."
       },
       {
         "id": "no-readable-ratelimit-headers",
@@ -119,7 +119,7 @@
         "exercisable_why": "unconditional: nothing local produces the headers, so no run can discriminate",
         "verified_on": "2026-07-29",
         "verified_against": null,
-        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists \u2014 but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
+        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists — but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
       },
       {
         "id": "no-weekly-opus-window",
@@ -130,33 +130,34 @@
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence, now exercised: our own tap supplies the input, a known window present is the mechanism demonstrably firing, and an unexpected window would falsify it",
         "exercised_by": "a known window present in limits.json (the control) with no third window beside it (the claim)",
-        "verified_on": "2026-08-24",
-        "verified_against": "2.1.241",
-        "verified_how": "EXERCISED: the same 2026-08-24 snapshot carries EXACTLY two windows and no third \u2014 the absence is paired with a positive control (both known windows present), so 'no weekly window' is a reading and not a failed fetch. Attributable to 2.1.241: the observation post-dates the installed binary's mtime (2026-08-22 22:09) and `claude --version` reports 2.1.241, so no other build was running between them."
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "PARTIAL at 2.1.246, and recorded as partial rather than as a pass. What still holds: the observed payload carries only five_hour and seven_day — that is what the claim asserts and it is unchanged. What I could NOT establish: the running binary now carries `weekly_limit` and `weekly_scoped` in its strings, and 2.1.241 is no longer on disk, so there is nothing to diff against and I cannot say whether that vocabulary is new. Absence from the PAYLOAD is the claim; absence from the CODE is a stronger thing I did not establish and may previously have implied. If a third window ever appears in a live snapshot, this is broken."
       },
       {
         "id": "fresh-session-token-floor",
-        "says": "a fresh session costs ~31.5k input tokens before answering, of which ~24k is irreducible base preamble; tool definitions are ~6k and MCP schemas ~1k",
+        "says": "a fresh session costs ~38.4k input tokens before answering at 2.1.246, of which ~24.9k is irreducible base preamble read from cache; MCP schemas are ~1.2k and the rest is tool definitions and per-session setup",
         "source": "measured: claude -p ... --output-format json at 2.1.223",
         "breaks": "the recommendation against spawning sessions to sample usage rests on this floor; if it dropped to near zero the objection would weaken and a polling probe might be fine",
         "ledger": "A fresh Claude Code session costs ~31.5k INPUT tokens before it answers anything, and ~24k of that is irreducible",
-        "verified_on": "2026-08-05",
-        "verified_against": "2.1.223",
-        "verified_how": "three probes at 2.1.223 reading usage from --output-format json: baseline 31,547 / --strict-mcp-config 30,323 / plus 13 tools disabled 24,377. Decomposed rather than estimated, because a single number cannot say what is trimmable.",
-        "exercisable": "yes-not-yet",
-        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage \u2014 read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone."
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "RE-MEASURED at 2.1.246 against the RUNNING binary, two probes, decomposed the same way as the original rather than taking one number:\n  baseline            38,371  (2 in · 13,444 cache-create · 24,925 cache-read)\n  --strict-mcp-config 37,139  (2 in · 12,212 cache-create · 24,925 cache-read)\nAgainst 2.1.223's 31,547 / 30,323. THE STRUCTURE HELD AND THE MAGNITUDE DID NOT: the base preamble is 24,925 against a claimed ~24k, and MCP costs 1,232 against a claimed ~1k — both intact. The total rose 6,824 (+21.6%), all of it in cache-creation, which is tool definitions and per-session setup rather than the preamble.\nDIRECTION MATTERS HERE: this claim's `breaks` says the recommendation against spawning sessions to sample usage weakens if the floor drops toward zero. It did not drop, it ROSE by a fifth, so that recommendation is stronger than when it was written. A stale number that moved in the safe direction is still stale, and the old figure would have under-stated the cost to anyone quoting it.",
+        "exercisable": "yes",
+        "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage — read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone.",
+        "exercised_by": "`claude -p 'reply with the single word: ok' --output-format json`, run on the binary at CLAUDE_CODE_EXECPATH, summing input_tokens + cache_creation_input_tokens + cache_read_input_tokens; repeat with --strict-mcp-config for the MCP share"
       },
       {
         "id": "statusline-context-window",
-        "says": "the statusline payload's context_window carries ABSOLUTE token counts \u2014 total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} \u2014 alongside used_percentage/remaining_percentage",
+        "says": "the statusline payload's context_window carries ABSOLUTE token counts — total_input_tokens, total_output_tokens, context_window_size, and current_usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} — alongside used_percentage/remaining_percentage",
         "source": "read in the running binary at 2.1.223 (the client's own embedded payload schema)",
         "breaks": "the harness reads only used_percentage, so every absolute token question is currently answered by inference or by spawning something. If these fields moved, any future usage work resting on them silently loses its measurement",
         "ledger": "The statusline payload exposes only a PERCENTAGE of context used",
         "exercisable": "yes",
-        "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one \u2014 which is exactly what closed it.",
-        "verified_on": "2026-08-24",
-        "verified_against": "2.1.241",
-        "verified_how": "EXERCISED, not stamped: read .game_loop/probe/context-window.json, a real reading the limit probe recorded at 2.1.241. Every field the claim names is present \u2014 total_input_tokens 63943, total_output_tokens 673, context_window_size 1000000, current_usage with all four token counts, used_percentage 6 and remaining_percentage 94. Checked field by field against the recorded JSON rather than by eye."
+        "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one — which is exactly what closed it.",
+        "verified_on": "2026-08-26",
+        "verified_against": "2.1.246",
+        "verified_how": "RE-READ at 2.1.246 (the running binary, not PATH's 2.1.247): total_input_tokens, total_output_tokens and context_window_size are all present. This confirms the FIELD NAMES survive the version bump; it does not re-establish that the values are absolute rather than deltas, which was the original reading's substance and was not re-measured here."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."
@@ -165,20 +166,20 @@
     "subject": "saggar (the terminal manager `successor` can hand a session to)",
     "verified_on": "2026-08-26",
     "verified_against": "`saggar --help`, ~/.saggar/claude-presence-hook.sh (rewritten 2026-08-26 11:25), and four live agent terminals opened and read back on 2026-08-26",
-    "why_it_matters": "`successor`'s saggar-agent mode is the handover a human is meant to find later, and what that terminal is CALLED is the whole of finding it. saggar shipped `agent --title` on 2026-08-26, so the lever this repo documented as nonexistent now exists and `successor` is not using it \u2014 the docs are wrong in the other direction until it does.",
+    "why_it_matters": "`successor`'s saggar-agent mode is the handover a human is meant to find later, and what that terminal is CALLED is the whole of finding it. saggar shipped `agent --title` on 2026-08-26, so the lever this repo documented as nonexistent now exists and `successor` is not using it — the docs are wrong in the other direction until it does.",
     "claims": [
       {
         "id": "saggar-terminal-name-is-not-ours",
         "says": "BROKEN 2026-08-26 by a saggar update, on exactly the condition this entry named for itself. `saggar agent` now takes `--title <title>`, and it DOES name the displayed terminal: two live agent terminals opened with `--title \"G | titled probe\"` and `--title \"G | porcupine\"` read back from `saggar list --json` under those exact strings, the second holding its name through 42 assistant turns and 19 tool calls to completion, while two UNTITLED probes launched the same hour stayed at saggar's default \"Terminal\" throughout. WHAT REMAINS TRUE: nothing game_loop passes TODAY reaches the name, because `successor` does not pass --title yet. That is now a gap in our code, not a fact about saggar.",
         "source": "`saggar --help` (agent --title), plus four live agent terminals read back from `saggar list --json` on 2026-08-26",
-        "breaks": "ALREADY BROKEN \u2014 see says. What would break the REPLACEMENT reading: if --title stopped overriding, or were overwritten once Claude titles the conversation. Untested: whether the title survives a saggar restart or a `--session-id` terminal reuse. Also unproven in the override direction \u2014 a conversation title is not stored on disk anywhere readable (~/.claude/history.jsonl holds prompts, not titles), so it could not be confirmed that the 42-turn probe ever generated one for --title to beat. What is measured is that the explicit name held where the default did not.",
+        "breaks": "ALREADY BROKEN — see says. What would break the REPLACEMENT reading: if --title stopped overriding, or were overwritten once Claude titles the conversation. Untested: whether the title survives a saggar restart or a `--session-id` terminal reuse. Also unproven in the override direction — a conversation title is not stored on disk anywhere readable (~/.claude/history.jsonl holds prompts, not titles), so it could not be confirmed that the 42-turn probe ever generated one for --title to beat. What is measured is that the explicit name held where the default did not.",
         "ledger": "Anything game_loop passes to `saggar agent` names the saggar terminal",
         "exercisable": "yes",
         "exercisable_why": "EXERCISED 2026-08-25 by the act the earlier entry said would be needed: a live handover through the running app, with the terminal's name read back from `saggar list --json`. It costs a real claude session, so it is a thing a person re-runs, never a gate",
         "exercised_by": "`saggar agent claude --title \"<name>\" -- <task>`, then `saggar list --json` for the terminal's name",
         "verified_on": "2026-08-26",
         "verified_against": "saggar's CLI help and four live agent terminals on 2026-08-26; the installed presence hook at ~/.saggar/claude-presence-hook.sh (rewritten 2026-08-26 11:25)",
-        "verified_how": "EXERCISED, twice with a title and twice without, in the same hour, through the running app. The 2026-08-25 readings below were correct when taken \u2014 the flag did not exist yet. This is a claim that went stale in a day, which is the case the re-read stamp exists for.",
+        "verified_how": "EXERCISED, twice with a title and twice without, in the same hour, through the running app. The 2026-08-25 readings below were correct when taken — the flag did not exist yet. This is a claim that went stale in a day, which is the case the re-read stamp exists for.",
         "exercise_note": "the falsifying case is constructible and was constructed: a prompt whose subject is distinctive. If a name ever came from the caller, the same handover with --title set would show it",
         "superseded_note": "The 2026-08-25 finding that Claude's own conversation title names the terminal is NOT confirmed live any more either: ~/.saggar/chat-info/ has not been written since 2026-08-24, so the status-line bridge that carried it is no longer the path saggar uses. Long-lived sessions still show conversation titles in `saggar list`, so some path still exists; which one was not traced."
       }

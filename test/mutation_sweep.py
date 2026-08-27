@@ -482,6 +482,15 @@ MUTANTS = [
      "discovered by it. Neutering it flips five assertions in total, so expect roughly 5 from the "
      "next full sweep; 1 is what I could measure without one, and the rule is that a floor may not "
      "claim more than was measured. Raise it from the killers file.", 2),
+    ("killer_frequency_bands -> the 50% line becomes invisible again",
+     "test/mutation_sweep.py::killer_frequency_bands", "    return []\n",
+     ["frequency band", "widely each killer", "middle band", "50% cut"],
+     "FLOOR 1, MEASURED, and structurally capped the same way as its neighbours: it returns a list "
+     "or an empty one, so every assertion covering the empty answer survives the neutered body by "
+     "construction. Only the positive reads can kill. It exists because the 50% threshold in "
+     "`universal_killers` MISSED a real band — three orphan-scan assertions at 22 of 134 — and that "
+     "miss cost a floor when `disarm_watchdog` read as lost coverage. Printing the distribution "
+     "rather than moving the line, because the band under it is 825 assertions deep.", 1),
     ("pinned_report -> the PINNED CODE block is never reported",
      ".game_loop/bin/_gl_impl.py::pinned_report", "    return None\n",
      ["pinned", "self"], None, 217),
@@ -2308,6 +2317,36 @@ def universal_killers(kill_names, threshold=0.5):
     return {a for a, cnt in seen.items() if cnt > n * threshold}
 
 
+def killer_frequency_bands(kill_names):
+    """[(low, high, [(count, assertion)])] — how widely each killer reaches, in three bands.
+
+    THE THRESHOLD IS A JUDGEMENT AND THIS IS WHERE A READER CAN DISAGREE WITH IT. `universal_killers`
+    subtracts anything killing more than half, and that missed a real band: three orphan-scan
+    assertions kill 22 of 134 producers each, because neutering ANY producer whose body is the sole
+    caller of something leaves that something reachable from the suite alone. They are collateral
+    for a structural reason, and 17% is nowhere near 50%.
+
+    It cost a floor to find. `disarm_watchdog` sat at 8 = 5 genuine + 3 of these, and when a change
+    elsewhere gave the orphaned function more callers the three went quiet and the floor read as
+    lost coverage. It was not.
+
+    Lowering the threshold is the wrong repair — it would start subtracting assertions that really
+    are about their subject, and the band below is 825 assertions deep. Printing the distribution is
+    the right one: llm_chat's argument, that a number somebody picked should show where the line
+    fell so the next reader can move it with evidence rather than taste.
+    """
+    if not kill_names:
+        return []
+    n = len(kill_names)
+    seen = collections.Counter()
+    for ks in kill_names.values():
+        for a in set(ks):
+            seen[a] += 1
+    bands = [(0.5, 1.01), (0.10, 0.5), (0.0, 0.10)]
+    return [(lo, hi, sorted(((c, a) for a, c in seen.items() if lo <= c / n < hi), reverse=True))
+            for lo, hi in bands]
+
+
 def thin_after_collateral(kill_names, threshold=0.5):
     """(universal, rows) — producers ranked by the killers that are actually about THEM.
 
@@ -3150,6 +3189,20 @@ def main():
             print("  mutant returns the producer's own nothing-value and every negative-direction "
                   "assertion survives")
             print("  it by construction. Adding more of those raises nothing.")
+            _bands = killer_frequency_bands(KILL_NAMES)
+            if _bands:
+                print("  HOW WIDELY EACH KILLER REACHES — the line above is drawn at 50%, and this "
+                      "is where to")
+                print("  disagree with it. The middle band is collateral the rule does NOT subtract:")
+                for _lo, _hi, _members in _bands:
+                    _tag = ("subtracted" if _lo >= 0.5 else
+                            "NOT subtracted — check these before trusting a floor" if _lo >= 0.10
+                            else "left alone")
+                    print(f"    {int(_lo * 100):>3}-{int(_hi * 100):<3}% of producers: "
+                          f"{len(_members):>4} assertion(s)  ({_tag})")
+                    if 0.10 <= _lo < 0.5:
+                        for _c, _a in _members[:4]:
+                            print(f"        {_c}/{len(KILL_NAMES)}  {_a[:66]}")
     if drifted:
         print("BELOW THE RECORDED FLOOR: " + " · ".join(drifted))
         print("Coverage that existed is gone — OR the floor is not comparable. CHECK THAT FIRST:")

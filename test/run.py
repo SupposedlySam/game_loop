@@ -15668,6 +15668,37 @@ def main():
     check("an empty killer map yields no collateral rather than raising — a subset run writes no "
           "killers, and the report must be silent there instead of failing",
           sweep.universal_killers({}) == set())
+    # THE THRESHOLD MISSED A REAL BAND AND IT COST A FLOOR. Three orphan-scan assertions kill 22 of
+    # 134 producers each — collateral for a structural reason (neutering any producer whose body is
+    # the sole caller of something orphans that something), and 17% is nowhere near the 50% cut.
+    # `disarm_watchdog` sat at 8 = 5 genuine + 3 of these, and when a change elsewhere gave the
+    # orphaned function more callers the three went quiet and the floor read as lost coverage.
+    # Lowering the cut is the wrong repair — the band below it is 825 assertions deep. Printing the
+    # distribution is the right one, so the next reader can move the line with evidence.
+    _bands = sweep.killer_frequency_bands(_kn)
+    check("the killer distribution comes back in three bands, so the 50% cut is a line a reader can "
+          "SEE rather than a number buried in a function — a threshold nobody can locate is one "
+          "nobody can disagree with",
+          [(lo, hi) for lo, hi, _ in _bands] == [(0.5, 1.01), (0.10, 0.5), (0.0, 0.10)])
+    check("...and each band is ordered widest-first with its count, because the question a reader "
+          "brings is 'what is just under the line' and that is the top of the middle band",
+          all(m == sorted(m, reverse=True) for _, _, m in _bands))
+    # A 4-PRODUCER FIXTURE CANNOT SEPARATE THE BANDS, which my first version of this assertion
+    # missed: one producer out of four is 25%, so a killer that is about exactly one subject lands
+    # in the MIDDLE band and the check failed for a reason that was about the fixture. Twenty
+    # producers put a sole-subject killer at 5% and the collateral at 30%, which is the real shape.
+    _kn3 = {f"f::p{i}": (["wide"] if i < 6 else []) + [f"own{i}"] for i in range(20)}
+    _b3 = sweep.killer_frequency_bands(_kn3)
+    _top = [a for lo, _, mem in _b3 if lo == 0.5 for _c, a in mem]
+    _mid = [a for lo, _, mem in _b3 if lo == 0.10 for _c, a in mem]
+    _low = [a for lo, _, mem in _b3 if lo == 0.0 for _c, a in mem]
+    check("...and a killer reaching 6 of 20 producers lands in the MIDDLE band — the one the "
+          "subtraction does not touch, and exactly where the orphan-scan collateral that cost a "
+          "floor was sitting at 22 of 134",
+          _mid == ["wide"])
+    check("...while a killer about ONE subject lands in the bottom band and the top band is empty, "
+          "so the three bands separate by reach rather than collecting everything in one",
+          _top == [] and len(_low) == 20 and "wide" not in _low)
 
     _newfile = dict(real_found)
     _newfile["tools/newly_added.py::reports_or_declines"] = ("tools/newly_added.py",

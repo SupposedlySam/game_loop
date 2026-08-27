@@ -1748,10 +1748,21 @@ def main():
         ctx_enable(False)
 
         print("the successor verb:")
-        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
-        check("successor refuses when there is nothing to hand over",
-              r.returncode != 0 and "no handoff" in (r.stdout + r.stderr))
+        # THIS ASSERTED A REFUSAL UNTIL 2026-08-27, and the refusal was reachable in exactly one
+        # situation: a session that has not yet finished a turn. The generated handoff is written
+        # by the Stop gate and nowhere else, so "nothing to hand over" does not mean an empty run —
+        # it means a FIRST-TURN run, which is precisely what a session spawned to do one job is.
+        # A live A→B chain hit it: A ran `checkpoint` then `successor` in one turn and was refused,
+        # and the refusal's own advice ("run checkpoint --notes") could not have helped, because
+        # checkpoint records notes for the next generation rather than generating. So the floor is
+        # written here instead — the same stance the block twelve lines below already takes about
+        # the generated handoff, that it beats starting the successor blind.
         hps = os.path.join(proj, ".game_loop", "sessions", "sess-succ", "HANDOFF.md")
+        r = gl(proj, "successor", "--dry-run", sid="sess-succ")
+        check("successor with nothing to hand over WRITES the floor rather than refusing — the "
+              "only run that has no turn-end handoff is a first-turn run, and refusing it is "
+              "refusing the handover a freshly spawned session was spawned to make",
+              r.returncode == 0 and os.path.isfile(hps) and "GENERATED JUST NOW" in r.stdout)
         os.makedirs(os.path.dirname(hps), exist_ok=True)
         with open(hps, "w") as f:
             f.write("# handing over\nthe successor reads this\n")
@@ -1895,75 +1906,65 @@ def main():
               in succ_mode(SAGGAR_SESSION="F1AC5B4E", TERM_PROGRAM="WarpTerminal"))
         # #116 — `saggar agent` gained `--title` and `successor` was not passing it, so the one
         # mode whose whole job is a handover a human finds LATER left its terminal named
-        # "Terminal". The issue reads as blocked on a machine that can run saggar, and that is
-        # true of END-TO-END verification only: whether OUR side passes the flag is decided here.
-        # What genuinely could not be read off this machine is the flag's POSITION, and a
-        # misplaced option is exactly what makes saggar exit 2 — so the titled form is tried
-        # first and a parse failure falls back to today's exact call. Best-effort naming that
-        # cannot cost the handover.
+        # "Terminal". This was first fixed on a machine with no saggar, where the flag's POSITION
+        # could not be read: that version guessed `agent --title <t> claude <task>` and fell back
+        # to the bare call on exit 2, buying insurance against a parse failure it could not rule
+        # out. The guess was wrong. Read off `saggar --help` where saggar exists (2026-08-27), the
+        # options go AFTER the agent name — `saggar agent <agent> <task…>` with `--title`, `--cwd`
+        # and `--` as the agent's own options — and a live terminal confirmed it, coming back as
+        # `claude --session-id <minted> --name "GL | flag probe"` with its cwd where --cwd pointed.
+        # So there is ONE invocation now, and these assert its shape rather than a retry ladder.
         _sag = importlib.machinery.SourceFileLoader(
             "gl_sag", os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
         _sagm = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_sag", _sag))
         _sag.exec_module(_sagm)
-        _av = _sagm.saggar_argv("/bin/saggar", "TASK", "G | scope backups")
-        check("#116: the titled invocation is tried FIRST and carries --title with the name",
-              _av[0][:4] == ["/bin/saggar", "agent", "--title", "G | scope backups"])
-        check("#116: ...and --title sits BEFORE the positional agent name, because the task is "
-              "variadic and an option after it can be read as one more word of the task",
-              _av[0].index("--title") < _av[0].index("claude"))
-        check("#116: ...and the fallback is byte-identical to the call shipped before this change, "
-              "so a saggar that cannot parse the flag behaves exactly as it does today",
-              _av[-1] == ["/bin/saggar", "agent", "claude", "TASK"])
-        check("#116: ...and with NO title there is ONE invocation, not a pointless retry of the "
-              "same argv — the fallback exists for the flag, not as a blanket second attempt",
-              _sagm.saggar_argv("/bin/saggar", "TASK") == [["/bin/saggar", "agent", "claude",
-                                                            "TASK"]])
-        # And the retry itself, driven. A stub stands in for subprocess.run; per the rule this
-        # suite learned today, the calls it saw are asserted, not assumed.
+
         _seen_argv = []
 
         class _R:
             def __init__(self, rc, out=""):
                 self.returncode, self.stdout, self.stderr = rc, out, ""
 
-        def _fake_run(argv, **kw):
-            _seen_argv.append(list(argv))
-            return _R(2) if "--title" in argv else _R(0, "opened")
+        def _drive(title, rc=0):
+            """Run _saggar_agent against a stubbed subprocess and hand back the argv it used."""
+            _seen_argv.clear()
 
-        _real_sp_run, _real_disc = _sagm.subprocess.run, _sagm._saggar_discover
-        _real_which = _sagm.shutil.which
-        try:
-            _sagm.subprocess.run = _fake_run
-            _sagm._saggar_discover = lambda before: ("term-1", None)
-            _sagm.shutil.which = lambda n: "/bin/saggar"
-            _ok, _detail, _found, _why = _sagm._saggar_agent(REPO, "TASK", "G | scope backups")
-        finally:
-            (_sagm.subprocess.run, _sagm._saggar_discover,
-             _sagm.shutil.which) = _real_sp_run, _real_disc, _real_which
-        check("#116: a saggar that exits 2 on --title is RETRIED bare, and the handover still "
-              "happens — a naming nicety must never cost the handover it was meant to label",
-              len(_seen_argv) == 2 and "--title" in _seen_argv[0]
-              and "--title" not in _seen_argv[1] and _ok is True)
-        check("#116: ...and it SAYS the label was lost rather than reporting a clean open — the "
-              "terminal a human goes looking for is now named something else, and silence there "
-              "is the whole failure this issue is about",
-              "could not parse --title" in _detail and "handover still happened" in _detail)
+            def _fake_run(argv, **kw):
+                _seen_argv.append(list(argv))
+                return _R(rc, "opened" if rc == 0 else "")
 
-        _seen2 = []
+            _real = (_sagm.subprocess.run, _sagm._saggar_discover, _sagm.shutil.which)
+            try:
+                _sagm.subprocess.run = _fake_run
+                _sagm._saggar_discover = lambda before: ("term-1", None)
+                _sagm.shutil.which = lambda n: "/bin/saggar"
+                return _sagm._saggar_agent("/some/repo", "TASK", title)
+            finally:
+                (_sagm.subprocess.run, _sagm._saggar_discover, _sagm.shutil.which) = _real
 
-        def _fake_refuse(argv, **kw):
-            _seen2.append(list(argv))
-            return _R(1)
-
-        try:
-            _sagm.subprocess.run = _fake_refuse
-            _sagm.shutil.which = lambda n: "/bin/saggar"
-            _ok2, _detail2, _, _ = _sagm._saggar_agent(REPO, "TASK", "G | scope backups")
-        finally:
-            _sagm.subprocess.run, _sagm.shutil.which = _real_sp_run, _real_which
-        check("#116: ...while exit 1 is a REAL refusal and is not retried — the fallback is scoped "
-              "to 'could not parse', or a saggar saying no would be asked twice and reported once",
-              len(_seen2) == 1 and _ok2 is False and "exited 1" in _detail2)
+        _ok, _detail, _found, _why = _drive("scope backups")
+        _av = _seen_argv[0]
+        check("#116: ONE invocation, whose shape is measured rather than guessed — the retry "
+              "ladder existed to hedge a flag position that has since been read and exercised",
+              len(_seen_argv) == 1 and _ok is True)
+        check("#116: ...and the options sit AFTER the positional agent name, which is where "
+              "saggar's own help puts them — the earlier guess placed them before it",
+              _av[:3] == ["/bin/saggar", "agent", "claude"]
+              and _av.index("--title") > _av.index("claude"))
+        check("#116: ...carrying the title, the cwd, and a `--` before the task — the task is a "
+              "PROMPT this repo composes, so a leading dash must not be readable as an option",
+              _av[_av.index("--title") + 1] == "scope backups"
+              and _av[_av.index("--cwd") + 1] == "/some/repo"
+              and _av[-2:] == ["--", "TASK"])
+        _ok_nt, _, _, _ = _drive(None)
+        check("#116: ...and with NO title the flag is absent rather than passed empty — an "
+              "empty --title is a name, and it is the wrong one",
+              "--title" not in _seen_argv[0] and _seen_argv[0][-2:] == ["--", "TASK"]
+              and len(_seen_argv) == 1)
+        _ok2, _detail2, _, _ = _drive("scope backups", rc=1)
+        check("#116: ...and a refusal is reported as it stands, once — with no ladder left, a "
+              "non-zero exit is saggar's answer rather than a rung",
+              len(_seen_argv) == 1 and _ok2 is False and "exited 1" in _detail2)
 
         check("saggar-agent still prints the portable command, and says the id did not reach it",
               "successor session id" in succ_mode(SAGGAR_SESSION="F1AC5B4E")
@@ -2321,24 +2322,34 @@ def main():
         # reported its successor as "titled O | session 6acce140", and the tab said "Game loop
         # implementation". A field that cannot act in the mode it is printed in is not a field.
         sag_t = succ_mode(SAGGAR_SESSION="F1AC5B4E")
-        check("saggar-agent prints NO tab title — a value a reader has no reason to doubt is worse "
-              "than no value where nothing can apply it",
-              "tab title" not in sag_t and "terminal name       : NOT SET FROM HERE" in sag_t)
-        check("...and names what DOES title it, rather than leaving the mechanism to be inferred",
-              "Claude renames it" in sag_t and "conversation" in sag_t)
-        # THE REASON CHANGED UNDER THIS LINE, which is why it now pins the attribution and not only
-        # the mechanism. The field said the name was not ours because saggar took no such argument.
-        # `saggar agent` gained `--title` on 2026-08-26 and it does name the terminal — measured by
-        # another session, recorded in claims.json, and NOT re-verified here (saggar is not on this
-        # machine's PATH). The sentence stayed true while its reason inverted: nothing carries the
-        # name because OUR code does not pass one. A true sentence with a dead reason sends its
-        # reader to the wrong repo, and nothing about the sentence degrades when that happens.
-        check("...and says the gap is OURS — `saggar agent` takes --title now, so 'not from here' "
-              "is a fact about `successor` rather than about saggar, and a reader chasing it must "
-              "land in this repo",
-              "OUR gap" in sag_t and "--title" in sag_t and "does not pass it yet" in sag_t)
-        check("...and still shows the string, so what was lost is visible rather than merely absent",
-              "is what a Warp tab would" in sag_t)
+        # THE FIELD HAS BEEN WRONG IN BOTH DIRECTIONS HERE, so it is pinned in both. It once printed
+        # `tab title` in a mode that could not apply one (observed 2026-08-25: a session reported
+        # its successor "titled O | session 6acce140" while the tab said "Game loop
+        # implementation"). Then it said NOT SET FROM HERE and correctly named the gap as ours —
+        # and stayed that way, an accurate paragraph in front of a call that still passed no title,
+        # so every terminal read saggar's default "Terminal". Both states print something a reader
+        # cannot act on, which is why the assertion is now that the NAME is shown and attributed to
+        # the flag that carries it.
+        sag_name = re.search(r"terminal name       : (.*?)  \(passed to", sag_t).group(1)
+        check("saggar-agent names the terminal, and says which flag does it — the mode carries "
+              "--title now, so the field is a field again rather than a rumour or an apology",
+              sag_name and "saggar agent --title" in sag_t and "NOT SET FROM HERE" not in sag_t)
+        # THE PREFIX IS SPENT WHERE THE LIST IS FLAT AND SAVED WHERE IT IS NOT. A Warp window draws
+        # one row of tabs from every repo at once, so `G | ` is the only thing telling two of them
+        # apart; saggar groups terminals under the project's own folder and prints its name above
+        # them, so the initial re-states the folder in four characters — at the FRONT, the end that
+        # survives truncation. Asserted by SHAPE rather than against one repo's letter, so a
+        # checkout whose directory starts with any other character is held to the same rule.
+        check("...and under saggar it carries NO `<R> | ` prefix — the folder already names the "
+              "project, and the characters are spent at the end that truncation eats first",
+              not re.match(r"^[A-Za-z0-9?] \| ", sag_name))
+        check("...while Warp keeps it, so this is a fact about the SURFACE and not a rename — a "
+              "flat row of tabs from eight repos has nothing else to tell two of them apart",
+              re.search(r"tab title           : [A-Za-z0-9?] \| ",
+                        succ_mode(TERM_PROGRAM="WarpTerminal")))
+        check("...and it is NOT called a tab title — saggar names a terminal, Warp names a tab, and "
+              "the field a reader chases has to match the thing they will go looking at",
+              "tab title" not in sag_t)
         check("warp-tab keeps the field — it is the one mode that writes the title",
               "tab title" in succ_mode(TERM_PROGRAM="WarpTerminal"))
         check("print marks it a SUGGESTION — the command it hands a human sets no title either",
@@ -2415,8 +2426,14 @@ def main():
         # neither cost, which is why the branch is reachable at all.
         fakebin = os.path.join(proj, "fakebin")
         os.makedirs(fakebin, exist_ok=True)
+        # IT RECORDS ITS ARGV, because the printed block is not the wire. `successor` spent a day
+        # printing a paragraph about the terminal's name being our gap while the call it made
+        # carried no --title at all, and a test reading only stdout would have passed through the
+        # whole of it. What is asserted below is the argument list saggar was handed.
+        sag_argv = os.path.join(proj, "saggar-argv.txt")
         with open(os.path.join(fakebin, "saggar"), "w") as f:
-            f.write("#!/bin/sh\necho 'agent terminal opened'\nexit 0\n")
+            f.write("#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shlex.quote(sag_argv)
+                    + "\necho 'agent terminal opened'\nexit 0\n")
         os.chmod(os.path.join(fakebin, "saggar"), 0o755)
         succ_cfg("saggar-agent")
         # A REAL armed watchdog to stand down. The kill is proved against a live process, because a
@@ -2439,6 +2456,250 @@ def main():
               (json.load(open(hstate)).get("handed_off") or {}).get("to") == to)
         check("...and says so where the run will actually read it",
               "handover recorded" in r.stdout and "STOOD DOWN" in r.stdout)
+        # THE WIRE, not the paragraph. `saggar agent` grew `--title` on 2026-08-26; this repo
+        # updated its EXPLANATION of the gap and left the call alone, so terminals kept opening as
+        # saggar's default "Terminal" for a day underneath a block that described the situation
+        # accurately. Read from the argv the fake binary recorded: the name has to be on the wire.
+        sag_args = open(sag_argv).read().split("\n")
+        check("saggar-agent puts the title ON THE CALL — a printed field is not an argument, and "
+              "this is the one assertion the day-long gap would have failed",
+              "--title" in sag_args
+              and sag_args[sag_args.index("--title") + 1]
+              and not re.match(r"^[A-Za-z0-9?] \| ", sag_args[sag_args.index("--title") + 1]))
+        # `saggar --help`: `--` "end agent options before the task". The task is the successor
+        # PROMPT — a subject-prefixed sentence this repo builds, never a string vetted for a leading
+        # dash — so without the separator a handover fails on the shape of its own first word.
+        check("...after a `--`, so a prompt beginning with a dash is a task and not an option",
+              "--" in sag_args
+              and sag_args.index("--") > sag_args.index("--title") + 1
+              and sag_args.index("--") == len(sag_args) - 3)
+        # THE SAME GAP ONE FLAG OVER. `saggar agent` also takes `--cwd <path>`, and until it was
+        # passed the terminal opened wherever the CALLING terminal happened to be — this repo only
+        # while nobody had cd'd away, and a successor in the wrong tree reads a handoff path that
+        # does not resolve. subprocess's own cwd= places the SHIM, not the terminal the app opens,
+        # so it is not a substitute and asserting on it would prove the wrong thing.
+        check("saggar-agent directs the new terminal with --cwd, so the successor opens in the "
+              "repo the handoff is written about rather than wherever the caller had wandered",
+              "--cwd" in sag_args
+              and os.path.realpath(sag_args[sag_args.index("--cwd") + 1])
+              == os.path.realpath(proj))
+        check("...and BOTH flags sit before the `--`, which is where saggar's own help puts agent "
+              "options — a flag after the separator is a word in the task, silently",
+              sag_args.index("--cwd") < sag_args.index("--")
+              and sag_args.index("--title") < sag_args.index("--"))
+
+        # ── the predecessor's terminal is retired BY THE SUCCESSOR ────────────────────────────
+        #
+        # `saggar close` refuses a terminal with a live process in it (measured 2026-08-27:
+        # "<name> is still running", exit 1), and the process it refuses is the one that would have
+        # to make the call. So a session cannot close its own terminal, and the whole design falls
+        # out of that: the predecessor writes down who it is, the successor does the closing, and
+        # the closing is a KILL followed by a close rather than a close.
+        # ── the handoff floor exists BEFORE a turn has ended ──────────────────────────────────
+        #
+        # The generated handoff is written by the Stop gate and nowhere else, so a session that has
+        # not finished a turn has none — and handing over inside the first turn is exactly what a
+        # fresh session spawned to do one job does. Measured 2026-08-27 by a live A→B chain: A ran
+        # `checkpoint` then `successor` in one turn and successor refused. The refusal's advice
+        # ("run checkpoint --notes") could not work, because checkpoint records notes for the NEXT
+        # generation rather than generating.
+        fsid = "sess-firstturn"
+        fdir = os.path.join(proj, ".game_loop", "sessions", fsid)
+        os.makedirs(fdir, exist_ok=True)
+        check("a session with no turn-end behind it has NO handoff — the generated one is a "
+              "turn-end artifact, which is the timing the whole refusal turned on",
+              not os.path.exists(os.path.join(fdir, "HANDOFF.md")))
+        gl(proj, "checkpoint", "--notes", "words for the next generation", sid=fsid)
+        check("...and `checkpoint` does not write one either, so the advice the old refusal gave "
+              "was a command that succeeds and changes nothing about the thing being refused",
+              not os.path.exists(os.path.join(fdir, "HANDOFF.md")))
+        r = gl(proj, "successor", "--dry-run", sid=fsid)
+        check("...so successor writes the floor itself rather than refusing — the generated floor "
+              "beats starting a successor blind, which is what this verb already says about the "
+              "generated handoff it accepts",
+              r.returncode == 0 and os.path.isfile(os.path.join(fdir, "HANDOFF.md")))
+        check("...and SAYS it generated one just now, because 'written at turn-end' and 'written "
+              "in this call' are different documents and only one of them saw the run work",
+              "GENERATED JUST NOW" in r.stdout)
+        # An explicitly named file is never invented at: naming a path that does not exist is a
+        # typo, and writing content there would bury it under a file the caller did not ask for.
+        missing = os.path.join(proj, "no-such-handoff.md")
+        r = gl(proj, "successor", "--handoff", missing, "--dry-run", sid=fsid)
+        check("an explicit --handoff that does not exist is still REFUSED, not generated over — a "
+              "named path that is absent is a typo, and inventing content there buries it",
+              r.returncode != 0 and not os.path.exists(missing))
+
+        print("a successor retires the terminal it was handed over from:")
+        # `saggar close` refuses a terminal with a live process in it (measured 2026-08-27:
+        # "<name> is still running", exit 1), and the process it refuses is the one that would have
+        # to make the call. So a session cannot close its own terminal, and the whole design falls
+        # out of that: the predecessor writes down who it is, the successor does the closing, and
+        # the closing is a KILL followed by a close rather than a close.
+        close_log = os.path.join(proj, "saggar-close.txt")
+        open(close_log, "w").close()
+
+        # A fake `saggar` answering the three verbs this feature uses. `read --json` is the one that
+        # matters: a terminal's ADDRESSABLE id comes from asking saggar, not from SAGGAR_SESSION,
+        # which is a different uuid space the CLI refuses.
+        def _write_fake_saggar():
+            with open(os.path.join(fakebin, "saggar"), "w") as fh:
+                fh.write(
+                    "#!/bin/sh\n"
+                    "if [ \"$1\" = \"read\" ]; then\n"
+                    "  echo \"{\\\"id\\\": \\\"${FAKE_TERM_ID:-TERM-FAKE}\\\"}\"\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "if [ \"$1\" = \"close\" ]; then\n"
+                    "  printf '%s\\n' \"$@\" >> " + shlex.quote(close_log) + "\n"
+                    "  echo \"closed $2\"\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "printf '%s\\n' \"$@\" > " + shlex.quote(sag_argv) + "\n"
+                    "echo 'agent terminal opened'\n"
+                    "exit 0\n")
+            os.chmod(os.path.join(fakebin, "saggar"), 0o755)
+
+        _write_fake_saggar()
+        rpath = fakebin + os.pathsep + os.environ.get("PATH", "")
+
+        def _in_term(term_id, **kw):
+            """Run as a session sitting in saggar terminal `term_id`."""
+            return dict(kw, SAGGAR_SESSION="not-the-addressable-id", FAKE_TERM_ID=term_id,
+                        PATH=rpath)
+
+        rsid = "sess-retire-a"
+        rdir = os.path.join(proj, ".game_loop", "sessions", rsid)
+        os.makedirs(rdir, exist_ok=True)
+        with open(os.path.join(rdir, "HANDOFF.md"), "w") as f:
+            f.write("# retiring\nwhat the successor reads\n")
+        # THE WALK IS EXERCISED, against a comm this suite is allowed to have. A test that arranged
+        # a real `claude` in its ancestry would be a test that kills one, so the name it climbs to
+        # is substituted through the environment — the walk itself, ps and all, is the real code.
+        own_comm = os.path.basename(subprocess.run(
+            ["ps", "-o", "comm=", "-p", str(os.getpid())],
+            capture_output=True, text=True).stdout.strip())
+        gl(proj, "successor", sid=rsid,
+           **_in_term("TERM-AAA", GAME_LOOP_AGENT_COMM=own_comm))
+        ft = (json.load(open(os.path.join(rdir, "state.json"))).get("handed_off")
+              or {}).get("from_terminal") or {}
+        # SAGGAR_SESSION is deliberately NOT the expected answer here, so a regression to reading
+        # it fails rather than passing by coincidence. It is a different uuid space from the one
+        # saggar's CLI resolves — measured in a live terminal on 2026-08-27, where
+        # `saggar read $SAGGAR_SESSION` answered "no terminal matching" — and a live A->B chain
+        # failed on exactly that, with `saggar close` refusing an id nothing could address.
+        check("the PREDECESSOR writes down its own terminal, asking SAGGAR for the addressable id "
+              "rather than trusting SAGGAR_SESSION, which is a different uuid the CLI refuses",
+              ft.get("id") == "TERM-AAA")
+        check("...with the claude pid found by CLIMBING the process tree, not assumed at a fixed "
+              "depth — a hook or a Bash wrapper moves that depth and a guessed parent is a stranger",
+              isinstance(ft.get("pid"), int) and ft["pid"] > 0)
+        check("...and with the START TIME that pins the pid — whatever reads this later SIGNALS "
+              "it, and by then the OS may have handed the number to somebody else",
+              bool(ft.get("identity")))
+
+        # From here the record is hand-built against a process this suite owns. The pid above
+        # belongs to a game_loop that has already exited; what follows sends a real SIGTERM, and it
+        # is going to send it to `sleep`, not to anything the suite needs.
+        def _retire_fixture(sid_from, term, pid, identity, to):
+            d = os.path.join(proj, ".game_loop", "sessions", sid_from)
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "state.json"), "w") as fh:
+                json.dump({"handed_off": {"to": to, "at": "now", "handoff": "H.md",
+                                          "mode": "saggar-agent",
+                                          "from_terminal": {"id": term, "pid": pid,
+                                                            "identity": identity}}}, fh)
+            os.makedirs(os.path.join(proj, ".game_loop", "sessions", to), exist_ok=True)
+            return d
+
+        # NOBODY ELSE'S. The record names the ONE session it was handed to, and every other session
+        # in the checkout runs this same code on every status — a match on anything looser would
+        # have each of them racing to close a stranger's terminal.
+        victim = subprocess.Popen(["sleep", "60"])
+        _retire_fixture("sess-ret-1", "TERM-A1", victim.pid, _start_of(victim.pid), "sess-ret-1b")
+        r = gl(proj, "status", sid="sess-ret-bystander", **_in_term("TERM-MINE"))
+        check("a session that is NOT the named successor retires nothing — every session in the "
+              "checkout runs this on every status, so a looser match is all of them racing to "
+              "close a stranger's terminal",
+              "predecessor terminal" not in r.stdout and victim.poll() is None
+              and open(close_log).read() == "")
+
+        r = gl(proj, "status", sid="sess-ret-1b", **_in_term("TERM-MINE"))
+        check("...while the successor NAMED in the record does close it, once it is real enough to "
+              "have a state file of its own",
+              "CLOSED" in r.stdout and "TERM-A1" in r.stdout)
+        for _ in range(60):
+            if victim.poll() is not None:
+                break
+            time.sleep(0.1)
+        check("...and the claude in it was actually SIGNALLED, not merely reported — `saggar close` "
+              "refuses a terminal with a live process, so a close that skipped the kill is a close "
+              "that silently did nothing",
+              victim.poll() is not None)
+        check("...and `saggar close` was called with the terminal id, after the kill",
+              "TERM-A1" in open(close_log).read())
+        check("...and the destruction is REPORTED, because the scrollback it costs is not "
+              "recoverable and a silent removal is indistinguishable from a tab that crashed",
+              "scrollback is gone" in r.stdout)
+
+        # ONCE. A refusal re-tried on every status of a long session is a per-turn `ps` and a
+        # per-turn `saggar close` against a terminal that is not going anywhere.
+        open(close_log, "w").close()
+        r = gl(proj, "status", sid="sess-ret-1b", **_in_term("TERM-MINE"))
+        check("...and it is attempted ONCE — the outcome is written into the predecessor's state, "
+              "so a long session does not re-close a terminal on every status",
+              "predecessor terminal" not in r.stdout and open(close_log).read() == "")
+        vd = ((json.load(open(os.path.join(proj, ".game_loop", "sessions", "sess-ret-1",
+                                           "state.json")))["handed_off"]).get("terminal_retired")
+              or {})
+        check("...and what is written is the VERDICT, not a boolean — 'did not act, and why' is "
+              "the whole of what a later reader wants from this field",
+              vd.get("verdict") == "closed")
+
+        # THE ONE THAT WOULD BE FATAL. If this ever matched, the terminal signalled would be the
+        # one running the code doing the signalling.
+        survivor = subprocess.Popen(["sleep", "60"])
+        _retire_fixture("sess-ret-2", "TERM-SELF", survivor.pid, _start_of(survivor.pid),
+                        "sess-ret-2b")
+        open(close_log, "w").close()
+        r = gl(proj, "status", sid="sess-ret-2b", **_in_term("TERM-SELF"))
+        time.sleep(0.5)
+        check("a successor REFUSES to retire its own terminal — every arm below this signals and "
+              "closes, so a match here would be the session killing itself mid-turn",
+              "REFUSED" in r.stdout and survivor.poll() is None
+              and open(close_log).read() == "")
+
+        # AND IT FAILS CLOSED. "I could not find out which terminal I am" must refuse too: the cost
+        # of stopping is a tab left on screen, the cost of guessing is the run. Reached here by
+        # running outside a saggar terminal at all, which is the honest shape of not knowing.
+        _retire_fixture("sess-ret-3", "TERM-A3", survivor.pid, _start_of(survivor.pid),
+                        "sess-ret-3b")
+        open(close_log, "w").close()
+        r = gl(proj, "status", sid="sess-ret-3b", PATH=rpath)
+        time.sleep(0.5)
+        print("DEBUG-FAILCLOSED>>>", repr(r.stdout[:400]), "survivor:", survivor.poll(),
+              "closelog:", repr(open(close_log).read()))
+        check("...and a session that cannot establish which terminal it is in refuses as well — a "
+              "guard whose failure mode is killing yourself must fail CLOSED, and 'not me' is not "
+              "something an unanswered question proves",
+              "REFUSED" in r.stdout and "nothing here could establish" in r.stdout
+              and survivor.poll() is None and open(close_log).read() == "")
+        survivor.kill()
+
+        # THE OTHER DIRECTION, and the reason the start time is recorded at all: a pid that is
+        # alive but is NOT the process that was written down.
+        stranger = subprocess.Popen(["sleep", "60"])
+        _retire_fixture("sess-ret-4", "TERM-A4", stranger.pid, "Thu Jan  1 00:00:00 1970",
+                        "sess-ret-4b")
+        open(close_log, "w").close()
+        r = gl(proj, "status", sid="sess-ret-4b", **_in_term("TERM-MINE"))
+        time.sleep(0.5)
+        check("a recycled pid is NOT signalled and its terminal is left standing — the number "
+              "alone cannot tell the predecessor's claude from whoever inherited it",
+              "NOT signalled" in r.stdout and stranger.poll() is None
+              and open(close_log).read() == "")
+        stranger.kill()
+
+        _write_fake_saggar()   # leave it as the rest of this section expects to find it
         for _ in range(50):
             if sleeper.poll() is not None:
                 break
@@ -11875,8 +12136,13 @@ def main():
           "`f() or \"?\"` render an unknown timestamp or sha, chosen by absence rather than by a "
           "producer deciding anything, and counting them listed five functions as owing a "
           "distinction they never make",
+          # QUOTED SO PYTHON 3.9 CAN PARSE IT. The fixture is source text handed to ast.parse, and
+          # nesting the same quote inside an f-string is PEP 701 — 3.12 and up. macOS ships 3.9 as
+          # `python3`, which is the interpreter .game_loop/verify.yaml names, so this one fixture
+          # made the repo's own commit gate die on a SyntaxError before it could gate anything.
+          # The inner quotes are swapped; the AST this asserts about is unchanged.
           _multi_symbol_producers(
-              'def r(d):\n    return f"✓ {d.get(\'t\', \"?\")}"\n') == []
+              'def r(d):\n    return f\'✓ {d.get("t", "?")}\'\n') == []
           and _multi_symbol_producers(
               'def r(d):\n    if d:\n        return "✓ y"\n    return "?"\n') == ["r"])
 

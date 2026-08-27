@@ -99,6 +99,75 @@ _Things we read the source for and confirmed are NOT the case. Not "tried once a
   Source: `~/.saggar/claude-status-bridge.sh` and `~/.saggar/chat-info/*.json`, read 2026-08-25.
   Filed as a claim the same day with both probes (`--task`/`--title`, and the subject line).
 
+  **CLOSED 2026-08-27 — and the entry inverted twice, which is the whole lesson.** saggar shipped
+  `saggar agent --title <title>` on 2026-08-26; four live terminals that day showed titled ones
+  reading back their exact string from `saggar list --json` while untitled ones stayed at saggar's
+  default `Terminal`. The impossibility was gone. What replaced it was worse than a wrong belief:
+  a **correct** one that nothing acted on. This repo rewrote the printed block to say "NOT SET FROM
+  HERE — and that is OUR gap now", rewrote its comments, rewrote its test to assert that sentence —
+  and left `_saggar_agent` calling `[saggar, agent, claude, prompt]`. Every handover for a day
+  opened a terminal named `Terminal` underneath an accurate paragraph explaining why it would.
+
+  The human found it, not the harness: *"I thought that we had updated saggar to use the --title
+  with the new tab? I'm just getting Terminal now."* Nothing in the checkout could have found it,
+  because the test asserted the STDOUT and the gap was in the ARGV. That is the transferable part —
+  a test that reads the explanation of a call cannot see the call. `test/run.py`'s fake `saggar`
+  now records `"$@"` to a file, and the assertions are on that list: `--title`, a value, and a `--`
+  before the task. Source: `saggar --help` at `~/.local/bin/saggar`, read 2026-08-27.
+
+  **EXERCISED the same day, and one instrument lied on the way.** `--cwd` was wired in the same
+  pass, then both flags were put through a live probe: `saggar agent claude --title "GL | flag
+  probe" --cwd /tmp -- <task>`, run FROM this repo so the caller's project and `--cwd` disagree.
+  saggar invoked `claude --session-id <minted> --name "GL | flag probe" -- <task>` with its process
+  cwd at `/private/tmp`; the control — a terminal opened by the old call in another repo the same
+  hour — read `--name Terminal` with cwd the caller's project. So `--title` becomes claude's own
+  `--name`, and `--cwd` places the session. Effector `saggar-agent-flags`.
+
+  The lie: `saggar list --json` reports `projectPath`, and for the probe it read *this repo*, not
+  `/tmp` — which is exactly what "--cwd was ignored" looks like. It is not the process's directory;
+  it is the saggar PROJECT the terminal is docked under, which stays the caller's either way. The
+  answer came from `lsof -a -p <pid> -d cwd`. A session that reached for the obvious JSON field
+  would have removed a flag that works, and would have had a screenshot to justify it.
+
+  **`status.kind` lies in the same shape**, found while answering whether a successor could close
+  its predecessor's terminal. `saggar list --json` reported the probe as `{"kind": "idle"}` and
+  `saggar close` refused it — *"GL | flag probe is still running"*, exit 1. `idle` there means the
+  agent is not generating; `close`'s "idle terminal" means no live process in it. Killing the
+  claude process made the same call succeed (`closed GL | flag probe`, exit 0). Two fields in one
+  JSON document, both answering a neighbouring question rather than the one asked.
+
+  **THE SAME SHAPE A FOURTH TIME, and this one had a workaround already half-built.** Closing a
+  predecessor's terminal needs the terminal's id, and `SAGGAR_SESSION` is the obvious candidate:
+  it names a terminal, it keys `~/.saggar/presence/<id>.json`, and `in_saggar()` already reads it.
+  It is a DIFFERENT UUID from the one saggar's CLI resolves. Measured in a live terminal:
+  `SAGGAR_SESSION=84F15D66`, `saggar read 84F15D66` → "no terminal matching"; the addressable id
+  was `B80719A7`, and `saggar read B80719A7` returned that terminal's own tail. `~/.saggar/
+  sessions.json` is keyed by the first, `saggar list --json` by the second, and no document holds
+  both. A terminal learns its real id by ASKING: `saggar read --json` with no id defaults to this
+  terminal and returns `{id, name, projectName}`.
+
+  It cost a live A→B chain to find, and the code was already written on the wrong id. What caught
+  it was not a test — it was the verdict the retire path recorded when `saggar close` answered
+  "no terminal matching <SAGGAR_SESSION>", because that path was built to write down what happened
+  instead of assuming it worked. The claim gate then refused the first filing of the finding for
+  being a SET claim with one member, which is exactly what it was: the tell it names — "you start
+  building a workaround" — was true at that moment.
+
+  **AND A TIMING NOBODY WOULD GUESS, from the same chain.** The generated handoff is written by the
+  Stop gate and nowhere else, so a session that has not finished a turn has NO handoff — and
+  handing over inside the first turn is precisely what a freshly spawned one-job session does. A
+  ran `checkpoint` then `successor` in one turn and was refused. The refusal's own advice ("run
+  `checkpoint --notes`") could not have worked: checkpoint records notes for the NEXT generation
+  rather than generating one. `successor` now writes the floor itself, which is the stance its own
+  docstring already took about the generated handoff it accepts.
+
+  **The prefix went too, on the user's instruction (2026-08-27).** A saggar terminal is titled
+  `<task>` with no `<R> | `: saggar groups terminals under the project's own folder and prints its
+  name above them, so the initial re-states the folder in four characters, spent at the front —
+  the end truncation eats first. Warp keeps it, because a Warp window is one flat row of tabs from
+  every repo at once and the initial is the only thing telling two of them apart. The assertion is
+  on the SHAPE (`^[A-Za-z0-9?] \| `), not on one repo's letter.
+
 ## OPEN
 
 _Questions still outstanding. What would close each one._

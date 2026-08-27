@@ -1570,6 +1570,19 @@ MUTANTS += [
     ("_saggar_discover -> the successor's real id is never read back, and the minted one stands",
      ".game_loop/bin/_gl_impl.py::_saggar_discover", '    return None, ""\n',
      ['printed as', 'miss says', 'no presence', 'id RECORDED', 'two terminals'], "the inner half: the terminal opens, the file appears, and nothing looks. Its kills are the three outcomes that have to be told apart — an id read back, two terminals that cannot be told apart, and a miss that says COULD NOT CONFIRM rather than DID NOT START.", 5),
+    # THE ONE THAT DESTROYS SOMETHING, so it is swept rather than excluded. Neutered, a successor
+    # silently retires nothing: the predecessor's terminal stays on screen and every arm that had
+    # to be told apart — closed, refused as self, refused as unidentifiable, refused as a recycled
+    # pid — collapses into the same silence, which is exactly what "it worked" looks like from
+    # outside.
+    ("retire_predecessor -> a successor never closes the terminal it was handed over from",
+     ".game_loop/bin/_gl_impl.py::retire_predecessor", "    return []\n",
+     ['does close it', 'REFUSES to retire its own', 'cannot establish which terminal',
+      'recycled pid is NOT signalled', 'scrollback is gone'],
+     "the whole report: kills the close, both refusals and the recycled-pid arm at once. That "
+     "breadth is the point — a mutant that returns [] is indistinguishable from a healthy run "
+     "with nothing to retire, so the assertions have to name the OUTCOME rather than the absence "
+     "of one. Its inputs are excluded below and this is where they are actually measured.", 5),
 ]
 
 
@@ -1817,6 +1830,29 @@ NOT_SWEPT = {
                 "`game_loop attribute` is asserted on; none of them can report by silence",
     ".game_loop/bin/_gl_impl.py::_rev": "pure git helper — None is 'that ref does not resolve'. Its one caller is cmd_self "
             "(`self --pin`), which dies on it; that refusal is loud and asserted, never silent",
+
+    # ── THE FOUR LOOKUPS BEHIND retire_predecessor ────────────────────────────────────────────
+    # Each answers one question and returns None when it cannot. Neutering any of them lands in
+    # exactly one place — retire_predecessor's report — and that report IS swept, above, by a
+    # mutant that kills all four of its outcomes at once. Sweeping these separately would count
+    # four more users of one assertion rather than four more assertions, which is the
+    # short-denominator shape this file exists to refuse.
+    ".game_loop/bin/_gl_impl.py::_claude_ancestor": "climbs ps to the agent process this verb runs "
+            "under. Its silence is consumed by own_saggar_terminal(), whose own silence is "
+            "consumed by the swept report — and its POSITIVE arm is asserted directly in-suite, "
+            "against a substituted comm, by the check that the recorded pid is a real one",
+    ".game_loop/bin/_gl_impl.py::saggar_self_id": "asks saggar which terminal this process is in. "
+            "Its None is the FAIL-CLOSED input to the self-guard, and that arm is asserted "
+            "directly: a session with no saggar around it must refuse to retire anything and say "
+            "it could not establish which terminal it is",
+    ".game_loop/bin/_gl_impl.py::own_saggar_terminal": "pairs the two lookups above into the record "
+            "a handover writes down. Neutered, `from_terminal` is simply absent and the successor "
+            "finds nothing to retire — the same observable as the swept mutant, and asserted "
+            "positively by the check that the record carries an addressable id",
+    ".game_loop/bin/_gl_impl.py::_predecessor_record": "scans the checkout for the session that "
+            "handed over to this one. Neutered it reports no predecessor, which is the swept "
+            "mutant's own output; its DISCRIMINATION — matching only the named successor, never a "
+            "bystander — is asserted directly by running status as a session nobody handed to",
 
     ".game_loop/bin/_gl_impl.py::_saggar_agent": "asks saggar to open the successor's terminal (#79), "
             "reporting through a (started, detail) pair. Its DECLINE arm is asserted directly "

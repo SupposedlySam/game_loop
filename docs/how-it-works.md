@@ -559,23 +559,76 @@ could not have been written if the variable were absent where hooks run. So `aut
 and `saggar-agent` is an override for completeness rather than one anybody should need.
 
 **What the saggar path cannot carry**, stated because the Warp path carries it: `saggar agent` takes a
-provider and a *task*, not argv, so it builds its own claude invocation. The successor's session id does not
-reach it, `--task`/`--title` do not reach it either, and it starts in the calling terminal's directory rather
-than `--cwd`. All three are named in the output every time, and the portable command is printed in **every**
-mode precisely because it is the one that still carries them. What it does not cost is INV3: `saggar agent` is
-a call to a running app, so unlike `warp-tab` it writes nothing anywhere.
+provider and a *task*, not argv, so it builds its own claude invocation, and the successor's **session id**
+does not reach it. That one gap is named in the output every time, and the portable command is printed in
+**every** mode precisely because it is the one that still carries it. What it does not cost is INV3:
+`saggar agent` is a call to a running app, so unlike `warp-tab` it writes nothing anywhere.
 
-**Nothing here names the terminal — and this page said otherwise until it was measured.** The correction is
-worth keeping rather than quietly overwriting, because the wrong version was load-bearing: it was the reason
-to believe `--title` was worth routing through saggar somehow, and it is the justification a subject line
-would most naturally have reached for. What saggar displays is `session_name` out of Claude Code's **own
-status-line payload**, which `~/.saggar/claude-status-bridge.sh` mirrors into
-`~/.saggar/chat-info/<SAGGAR_SESSION>.json` — Claude's auto-generated *conversation title*, not a string
-saggar or this verb supplies. Two live handovers on 2026-08-25 both came out named `HANDOFF-<timestamp>
-continuation`, the second one *after* its prompt led with the subject `confirm saggar names the terminal from
-the subject line`; the titler keyed off the handoff **filename** both times, as did a third sample on the
-machine (`DELEGATION-barbell`, from a doc whose filename carried a slug). So the lever on a saggar terminal's
-name is what the handoff file is CALLED, and no argument to this verb is a substitute for naming it well.
+**The terminal's NAME does reach it, and the history of that sentence is worth more than the sentence.**
+This page first said saggar named the terminal from the task — wrong, and load-bearing in the wrong
+direction: it made "route `--title` through somehow" look like an impossibility. Measured on 2026-08-25, what
+saggar displayed was `session_name` out of Claude Code's **own status-line payload**, mirrored by
+`~/.saggar/claude-status-bridge.sh` into `~/.saggar/chat-info/<SAGGAR_SESSION>.json` — Claude's auto-generated
+*conversation title*, with no field for a caller to fill. Then on 2026-08-26 saggar shipped
+`saggar agent --title <title>`, and four live terminals settled it: two opened with `--title` read back from
+`saggar list --json` under exactly those strings, two opened without stayed at saggar's default `Terminal`.
+
+For a day after that, this repo updated its *explanation* and not its call: `successor` printed a careful
+paragraph about the name being our gap while `_saggar_agent` went on invoking the untitled form, so every
+handover opened a terminal called `Terminal`. It now passes `--title <task>` and a `--` separator (the
+task is a prompt this repo builds, not a string vetted for a leading dash), and `test/run.py` asserts against
+the **argv the call was handed**, not the line the block printed — because an accurate paragraph in front of
+an unchanged call is exactly what the day-long gap looked like from the inside.
+
+**`--cwd` went the same way, and is held to a weaker claim on purpose.** The terminal used to open wherever
+the *calling* terminal happened to be — this repo only while nobody had `cd`'d away, and a successor in the
+wrong tree reads a handoff path that does not resolve. `subprocess.run(cwd=…)` is no substitute: it places
+the shim, and the shim is a message to a running app that picks the new terminal's directory itself. Both are
+now set, and both were **exercised** on 2026-08-27 rather than left as a reading: one live probe launched
+from this repo with `--cwd /tmp` came back as `claude --session-id <minted> --name "GL | flag probe" --
+<task>` with its process cwd at `/private/tmp`, against a control terminal opened by the old call in another
+repo the same hour (`--name Terminal`, cwd the caller's project). Recorded as effector `saggar-agent-flags`.
+So `--title` is passed through to claude's own `--name`, and `--cwd` places the session.
+
+**One instrument here lies, and it lies in the convincing direction.** `saggar list --json` reports a
+`projectPath`, and for that probe it read *this repo* rather than `/tmp` — which looks exactly like `--cwd`
+being ignored. It is not the process's directory; it is the saggar **project the terminal is docked under**,
+which stays the caller's either way. The working directory is answered by `lsof -a -p <pid> -d cwd`. A
+session that had reached for the obvious JSON field would have concluded the flag was dead and removed it.
+
+**The successor closes the terminal it came from.** A chain of handovers used to leave a row of dead
+terminals behind it, and the obvious fix — have the predecessor close itself — is impossible: `saggar close`
+refuses a terminal with a live process in it (*"<name> is still running"*, exit 1), and the process it
+refuses is the one that would have to make the call. So the predecessor writes down **who it is** and the
+successor does the closing, as a **kill followed by a close** rather than a close.
+
+It happens in `status`, which the SessionStart hook already runs, and only once the successor is real — its
+own state file, the same artifact `bin/watchdog` accepts as proof a handover was taken up. A successor that
+dies during boot leaves its predecessor's terminal standing, because at that point that terminal is the only
+place the run still exists. The outcome is written back into the predecessor's state as a **verdict**, not a
+boolean, so it is attempted once and "did not act, and why" survives.
+
+The guards are the feature, and two of them fail closed. It refuses when the target is **this** terminal;
+it refuses when it **cannot tell** which terminal this is, because "not me" is not something an unanswered
+question proves and the cost of guessing is the run; and it refuses a pid whose recorded start time does not
+match, because the OS recycles numbers and what follows is a `SIGTERM`. What it costs when it works is the
+predecessor's scrollback, which is why every arm reports what it did.
+
+**Which uuid names a terminal is a trap, and this repo fell in it.** `SAGGAR_SESSION` looks like the answer:
+it names a terminal, it keys `~/.saggar/presence/<id>.json`, and it is what mode detection reads. It is also
+a **different uuid** from the one saggar's CLI resolves. Measured in a live terminal on 2026-08-27:
+`SAGGAR_SESSION=84F15D66` and `saggar read 84F15D66` → *"no terminal matching"*, while the addressable id
+was `B80719A7` and `saggar read B80719A7` returned that terminal's own tail. A live A→B chain failed on
+exactly this, with `saggar close` refusing an id nothing could address. A terminal learns its real id by
+**asking**: `saggar read --json` with no id argument defaults to this terminal and returns its metadata.
+
+**A first-turn session has no handoff, and `successor` writes the floor rather than refusing.** The generated
+handoff is a **turn-end** artifact — `refresh_handoff()` runs in the Stop gate and nowhere else — so a
+session that has not finished a turn has none, and handing over inside the first turn is exactly what a
+freshly spawned session doing one job does. The old refusal told the reader to run `checkpoint --notes`,
+which could not help: checkpoint records notes for the *next* generation, it does not generate. An explicit
+`--handoff <path>` that does not exist is still refused, because a named path that is absent is a typo and
+inventing content there would bury it.
 
 **The successor can be launched with permission prompts bypassed** — `limits.successor.skip_permissions`,
 default `false`. A handover happens at the worst moment there is: the gate closed, the context full, the
@@ -619,12 +672,16 @@ One cost this creates, named because it is real: `config()` is a shallow top-lev
 rather than letting them fail toward a default that looks deliberate.
 
 It does **not** reach `saggar-agent`, for the same reason the session id does not: `saggar agent <agent>
-<task…>` takes a task, not argv. That gap is the one that costs the most — the setting is bought precisely
+<task…>` takes a task, not argv. (`--title` is the exception, and only because saggar grew a flag for it —
+there is no such flag for a permission bypass.) That gap is the one that costs the most — the setting is bought precisely
 because nobody will be there — so it is printed beside the setting in every saggar run, dry or live, rather
 than left for a successor to discover by stalling on a prompt at 3am. Only `print` and `warp-tab` carry it.
 
-The tab is titled `<R> | <task>` — the repo's initial so a row of tabs stays readable, plus what that
-session is doing. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than
+The Warp tab is titled `<R> | <task>` — the repo's initial so a flat row of tabs stays readable, plus what
+that session is doing. **A saggar terminal drops the prefix** and is titled `<task>` alone: saggar groups
+terminals under the project's own folder and prints its name above them, so the initial re-states the folder
+in four characters, spent at the front — the end truncation eats first. The prefix is about the surface, not
+the name. `--task` is capped at 3 words / 20 chars and **refuses** anything longer rather than
 letting a narrow tab truncate it; `--title` is the uncapped, verbatim override. This is the same
 convention as the `handoff` skill's `new-tab.sh`, which uses the same Warp mechanism.
 

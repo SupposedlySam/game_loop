@@ -13430,6 +13430,29 @@ def main():
           "states; the line above says which): "
           + ("; ".join(f"{k.split('::')[-1]} floor {f} > {n}" for k, f, n in _over) or "none"),
           not _over)
+    # THE OTHER DIRECTION, REPORTED RATHER THAN FAILED. A floor far BELOW its measurement is not
+    # wrong, it is slack — the sweep calls it STALE-LOW and says so itself: "not fatal, because a
+    # low floor has never broken a run, it has only ever failed to catch one."
+    #
+    # It is here because a raise can go missing SILENTLY. A commit raised 28 floors with a
+    # positional search that cascaded — one producer's number landed on the next entry, and
+    # `refresh_handoff` got nothing at all. The audit afterwards compared only the entries that
+    # CHANGED, so an entry that should have changed and did not was invisible to it, and the miss
+    # was then visible only in an hour-long sweep nobody runs per commit. Here it costs nothing.
+    _slack = sorted((k, _floors[k], len(_killers[k])) for k in _floors
+                    if _have and k in _killers and len(_killers[k]) > 2 * _floors[k])
+    if _slack:
+        print("       %d floor(s) permit losing more than HALF of what was measured — slack, not "
+              "wrong:" % len(_slack))
+        for _k, _f, _n in _slack[:6]:
+            print(f"         {_k.split('::')[-1]:32s} floor {_f:>3}  measured {_n}")
+        if len(_slack) > 6:
+            print(f"         ... and {len(_slack) - 6} more")
+    check("...and floors that are merely SLACK are reported, never failed on — the sweep's own "
+          "verdict is that a low floor has never broken a run, only failed to catch one, so this "
+          f"says it out loud and blocks nothing: {len(_slack)} with slack",
+          isinstance(_slack, list))
+
     check("...and the rule FIRES on the exact corruption that produced it — floor 20 against 4 "
           "recorded killers — so the clean answer above is a verdict and not a scan that matches "
           "nothing (skipped, honestly, with no record present)",

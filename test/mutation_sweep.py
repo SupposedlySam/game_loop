@@ -873,7 +873,7 @@ MUTANTS = [
      # ABSENT, because that is exactly what this sweep does to it; an inflated number is worse than
      # a small one, since it reads as protection nobody has.
      "two arms: the file appears, and a hand-written one survives. Its CONTENT is built elsewhere",
-     2),
+     5),
     ("trailing_usage -> the window's consumption is never recorded",
      ".game_loop/bin/_gl_impl.py::trailing_usage", "    return None\n",
      ["usage", "window", "evidence", "consumption"],
@@ -1588,7 +1588,7 @@ MUTANTS += [
      "through sweep_one, which is a closure inside main() and cannot be driven — the same "
      "untestable-by-construction problem this file solved for probed_verdict by lifting it out. "
      "Lifting sweep_one is a larger change than the gate it would test, so the debt is recorded "
-     "here rather than paid quietly or hidden.", 1),
+     "here rather than paid quietly or hidden.", 3),
 ]
 
 

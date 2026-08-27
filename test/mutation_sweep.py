@@ -1550,6 +1550,33 @@ MUTANTS += [
      "the harness passes unconditionally. Its kills are the three answers that must stay apart: a "
      "real match, a guard that has gone inert, and a script that could not be executed at all — "
      "the last of which is not a verdict about the guard in either direction.", 6),
+    ("guardtest_bad_expects -> every fixture's expectations read as understood",
+     ".game_loop/bin/_gl_impl.py::guardtest_bad_expects", "    return []\n",
+     ['FIXTURE defect', 'END TO END', 'NO case was run'],
+     "a misspelt `expect` goes back to being reported as a FAILING GUARD. Measured at 1 when only "
+     "the function was asserted; the two end-to-end checks took it to 3, and those exist because "
+     "disconnecting the die() that calls this left the unit checks passing while the verb blamed a "
+     "guard that was behaving correctly.", 3),
+]
+
+
+# ── #117's parse gate. ─────────────────────────────────────────────────────────────────────────
+MUTANTS += [
+    ("_parses -> every source reads as compilable",
+     "test/mutation_sweep.py::_parses", "    return True\n",
+     ['DOES NOT PARSE', 'parse check answers BOTH ways'],
+     "the question stops discriminating, so the gate below it can never fire. It was measured at 1 "
+     "and killed by the SAME single assertion as its only caller — identical results from "
+     "neutering either, which is the shape of a helper nothing measures on its own. A direct "
+     "assertion that it answers both ways took it to 2 and gave it a killer of its own.", 2),
+    ("declared_mutant_unparseable -> a malformed mutant body reads as fine",
+     "test/mutation_sweep.py::declared_mutant_unparseable", '    return False, ""\n',
+     ['DOES NOT PARSE'],
+     "why it is thin: ONE kill, and the ceiling is structural. Its verdict is only observable "
+     "through sweep_one, which is a closure inside main() and cannot be driven — the same "
+     "untestable-by-construction problem this file solved for probed_verdict by lifting it out. "
+     "Lifting sweep_one is a larger change than the gate it would test, so the debt is recorded "
+     "here rather than paid quietly or hidden.", 1),
 ]
 
 
@@ -2209,6 +2236,31 @@ def probed_verdict(original, fn, run_mutant):
     return UNPROTECTED, why
 
 
+def _parses(src):
+    """Does this source compile? A boolean, so the caller reads as a question (#117)."""
+    try:
+        ast.parse(src)
+    except (SyntaxError, ValueError):
+        return False
+    return True
+
+
+def declared_mutant_unparseable(original, mutated):
+    """Did the DECLARED body stop this being a program? (bool, why) — #117.
+
+    MODULE-LEVEL SO IT CAN BE DRIVEN, which is this file's own precedent: `probed_verdict` was
+    lifted out of a nested closure for exactly that reason, because untestable-by-construction was
+    the whole of the admission.
+
+    Asked only where the ORIGINAL parses, so a mutated JSON fixture is never refused for having
+    stopped being a program it never was.
+    """
+    if not _parses(original) or _parses(mutated):
+        return False, ""
+    return True, ("the body declared for it in MUTANTS is malformed, so the file stopped being a "
+                  "program and NOTHING was exercised")
+
+
 def neuter(src, fn, body):
     """Replace fn's body with `body`, keeping its signature and dropping its docstring.
 
@@ -2491,6 +2543,19 @@ def main():
             return ((key, None, NOT_MEASURED, floor),
                     f"  !! {key}: NOT FOUND in {rel} — renamed, or gone. NOT MEASURED: nothing was "
                     f"mutated, so this says nothing about coverage either way.\n")
+        # A MUTANT THAT NEVER PARSED DID NOT RUN AT ALL (#117), and until now it arrived at the
+        # same sentence as a mutant that took the suite down: "the suite did not finish". Same
+        # words, opposite repairs. A crash means the mutation was too broad and the producer may
+        # be fine; a parse failure means the DECLARED BODY in this file is malformed and no code
+        # was ever exercised. Nine producers sat NOT MEASURED across two sweeps for exactly that —
+        # a literal backslash-n in the body — and the message never once pointed at the entry.
+        _unparseable, _why = declared_mutant_unparseable(original, mutated)
+        if _unparseable:
+            return ((key, None, NOT_MEASURED, floor),
+                    f"  !! {key}: THE DECLARED MUTANT DOES NOT PARSE — {_why}.\n"
+                    f"     NOT MEASURED, and it is a defect in THIS file rather than a coverage\n"
+                    f"     finding: fix the body. A mutant that CRASHES the suite is a different\n"
+                    f"     report; this one never ran at all.\n")
         if mutated == original:
             # THE OTHER HALF OF "NEVER APPLIED", and NOT_MEASURED's own header already claimed it.
             # `neuter` reports `hit` when it FINDS the function, not when the edit changes anything,

@@ -2547,6 +2547,17 @@ def cmd_mandate(s, a):
         # actually said the words. That warning appears later than the binding by construction, so
         # the broken case was the normal one, not an edge. Measured here: the field was unusable for
         # its own purpose, and the honest move was to skip it and write the finding down elsewhere.
+        # AN EMPTY --wake-path IS FALSY, so it fell past this block and out to the generic "mandate
+        # needs --set" usage text — the right refusal reached by the wrong road, telling the caller
+        # nothing about the flag they actually typed. Same shape as `--fault ""` and the misspelt
+        # `expect`: a verdict that is correct while its reason sends you somewhere else.
+        if getattr(a, "wake_path", None) == "":
+            die("--wake-path was given but is EMPTY.\n\n"
+                "The field answers 'how does a signal reach this session while it is idle', and an\n"
+                "empty answer is worse than none: `status` would stop warning while nothing had\n"
+                "actually been arranged, which is the silence this field exists to break.\n\n"
+                "    mandate --wake-path \"a cron every 10 minutes\"\n"
+                "    mandate --wake-path \"a human who checks\"   <- the common case, and honest")
         if getattr(a, "wake_path", None):
             if not m.get("active"):
                 die("no mandate is bound here, so there is nothing to record a wake path for.\n"
@@ -3494,6 +3505,19 @@ def cmd_mutate(s, a):
     # THE POSITIVE CONTROL, BEFORE THE RESULT IT QUALIFIES (#80). Run first so a green mutated run
     # can be attributed: without it, "the test does not cover this" and "the mutation never ran"
     # are the same observation, and the verb was reporting the first for both.
+    # AN EMPTY --fault WAS SILENTLY DISCARDED. It is falsy, so it skipped the marker check below
+    # AND the fault path in mutation_liveness, and the run fell back to the built-in Python probe
+    # without a word — on a shell file, that means "unknown" and a COULD NOT PROVE the caller reads
+    # as a fact about their test. They asked for a control and were given none, silently, which is
+    # the substitution this verb exists to refuse. Passing the flag is a request; an empty one is a
+    # mistake, and the two must not look the same.
+    if getattr(a, "fault", None) == "":
+        die("--fault was given but is EMPTY.\n\n"
+            "An empty fault cannot abort anything, so the liveness probe would fall back to the\n"
+            "built-in Python one — silently, and on a non-Python file that means it does not run\n"
+            "at all. You would get COULD NOT PROVE and read it as a fact about your test.\n\n"
+            "    --fault 'throw new Error(\"{marker}\")'\n\n"
+            "Or drop the flag entirely, which asks for the built-in probe on purpose.")
     if getattr(a, "fault", None) and "{marker}" not in a.fault:
         die("--fault must contain {marker} — the tool substitutes its own token there.\n\n"
             f"  got: {a.fault!r}\n\n"
@@ -10416,6 +10440,35 @@ def hook_decision(rc, out):
                       "what a guard that is no longer running looks like")
 
 
+GUARDTEST_EXPECTS = ("deny", "allow", "ask")
+
+
+def guardtest_bad_expects(cases):
+    """Cases whose `expect` is not one this understands: [(name, value)] — #91.2.
+
+    A MISSPELT EXPECTATION IS A DEFECT IN THE FIXTURE, and without this it is reported as a defect
+    in the GUARD. Both spellings were measured against this repo's own write guard, which was
+    behaving correctly throughout:
+
+      "expect": "denied"  -> no case counted as a deny, so the run was refused with "the cases only
+                             go one way … add the case that must NOT fire" — the right verdict for
+                             the wrong reason, sending you to write a case you already had.
+      "expect": "alow"    -> worse: the directions check passed, the case could never match, and the
+                             report said the guard failed.
+
+    Two different repairs behind one observable, which is the substitution this whole verb exists to
+    refuse. So the set is CLOSED and a stranger is named.
+    """
+    bad = []
+    for i, c in enumerate(cases):
+        if "expect" not in c:
+            continue                       # an expect_exit case is a different contract, not a gap
+        v = str(c.get("expect") or "").lower()
+        if v not in GUARDTEST_EXPECTS:
+            bad.append((c.get("name") or f"case {i + 1}", c.get("expect")))
+    return bad
+
+
 def guardtest_directions(cases):
     """Do these cases exercise BOTH directions? (ok, why) — #91.2.
 
@@ -10513,6 +10566,23 @@ def cmd_guardtest(s, a):
         die(f"--fixture is not readable: {exc}")
     except ValueError as exc:
         die(f"--fixture is not valid JSON: {exc}")
+    # THE SHAPE, BEFORE ANYTHING READS A KEY OFF IT. A fixture that parsed as valid JSON but is a
+    # list — or a string, or a number — reached `spec.get("cases")` and died with an AttributeError
+    # traceback at exit 1. A genuine refusal here exits 3 (#91 part 3), so a user's malformed
+    # fixture was arriving as a CRASH: indistinguishable from a bug in this tool, and invisible to
+    # anything reading the exit code, which is the contract that issue established.
+    if not isinstance(spec, dict):
+        die(f"--fixture must be a JSON OBJECT, not {type(spec).__name__}.\n\n  {fx}\n\n"
+            "The shape is {\"script\": \"..\", \"cases\": [ .. ]}. A bare list is the common near-miss:\n"
+            "the cases go UNDER a \"cases\" key, because the object also carries the script.")
+    if not isinstance(spec.get("cases", []), list):
+        die(f"--fixture's \"cases\" must be a LIST, not "
+            f"{type(spec.get('cases')).__name__}.\n\n  {fx}")
+    _nd = [i for i, c in enumerate(spec.get("cases") or []) if not isinstance(c, dict)]
+    if _nd:
+        die("every case must be a JSON object; these are not: "
+            + ", ".join(f"#{i + 1}" for i in _nd) + f"\n\n  {fx}\n\n"
+            "Each one needs at least a payload and an expectation.")
     script = a.script or spec.get("script")
     if not script:
         die("no script to run — give --script <path>, or a \"script\" key in the fixture.")
@@ -10522,6 +10592,15 @@ def cmd_guardtest(s, a):
     if not cases:
         die(f"the fixture declares NO cases, so this run would check nothing and exit 0 — which is\n"
             f"byte-identical to a guard suite that ran and passed.\n\n  {fx}")
+    _bad_exp = guardtest_bad_expects(cases)
+    if _bad_exp:
+        die("REFUSED — a case expects something this does not understand.\n\n  " + fx + "\n"
+            + "".join(f"    {n}: {v!r}\n" for n, v in _bad_exp)
+            + "\n  known: " + ", ".join(GUARDTEST_EXPECTS)
+            + " (or expect_exit for a guard that only speaks exit codes)\n\n"
+            "A misspelt expectation can never match, and without this it is reported as a FAILING "
+            "GUARD — measured against this project's own write guard while it was refusing "
+            "correctly. 'Your fixture is wrong' and 'your guard is wrong' take opposite repairs.")
     ok_dirs, why_dirs = guardtest_directions(cases)
     if not ok_dirs:
         die(f"REFUSED — the cases only go one way.\n\n  {fx}\n  {why_dirs}\n\n"

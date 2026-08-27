@@ -3120,6 +3120,19 @@ def main():
         check("...but DIFFERENT words restamp it: a new mandate is a new mandate, and this is what "
               "says the checks above are preserving a value rather than freezing one",
               _mandate(wk).get("since") != _since0)
+        # AN EMPTY VALUE IS FALSY, so it fell past the wake-path block entirely and out to the
+        # generic "mandate needs --set" usage text — the right refusal by the wrong road, saying
+        # nothing about the flag actually typed. Same shape as `--fault ""` and a misspelt
+        # `expect`: a correct verdict whose reason sends you somewhere else.
+        _we = gl(proj, "mandate", "--wake-path", "", sid=wk)
+        check("#95: an EMPTY --wake-path is refused AS an empty wake path — an empty answer is "
+              "worse than none, because `status` would stop warning while nothing had actually "
+              "been arranged, and the generic usage text never mentioned the flag at all",
+              _we.returncode == 3 and "EMPTY" in (_we.stdout + _we.stderr)
+              and "wake-path" in (_we.stdout + _we.stderr))
+        check("#95: ...and the mandate's recorded wake path is UNTOUCHED by that refusal, so a "
+              "typo cannot quietly erase the one that was already arranged",
+              _mandate(wk).get("wake_path") == "a cron every 10 minutes")
         r = gl(proj, "mandate", "--wake-path", "x", sid="sess-wake95-none")
         check("--wake-path with NO mandate bound is refused, not silently stored — a wake path "
               "answers a question only asked while something is waiting",
@@ -14246,6 +14259,41 @@ def main():
               sweep.neuter("def f(x):\n    return 1\n", "f",
                            "    return None" + chr(92) + "n")[0]))
 
+    # #117: AND THE SWEEP ITSELF SAYS WHICH IT WAS. The assertions above stop a malformed body
+    # reaching main; they do nothing for a sweep run over an edited tree, which is how every
+    # measurement in this session was taken. Until now a mutant that never PARSED reached the same
+    # sentence as one that took the suite down — "the suite did not finish" — and the two take
+    # opposite repairs: a crash means the mutation was too broad, a parse failure means the entry
+    # in MUTANTS is wrong and no code ran at all.
+    _wf, _ = sweep.neuter("def f(x):\n    return 1\n", "f", "    return None\n")
+    _bs, _ = sweep.neuter("def f(x):\n    return 1\n", "f", "    return None" + chr(92) + "n")
+    check("#117: the sweep flags a DECLARED mutant that does not parse, and says the fault is the "
+          "declaration rather than the code — nine producers sat NOT MEASURED across two sweeps on "
+          "this exact shape and the message never pointed at the entry",
+          sweep.declared_mutant_unparseable("def f(x):\n    return 1\n", _bs)[0]
+          and "MUTANTS" in sweep.declared_mutant_unparseable("def f(x):\n    return 1\n", _bs)[1])
+    # `_parses` GETS ITS OWN ASSERTION, because without one it and its only caller were killed by
+    # exactly the same check — neutering either produced an identical result, which is the shape of
+    # a helper nothing measures independently. A one-line wrapper is still a decision: it must
+    # answer False for source that does not compile, and True for source that does.
+    check("#117: the sweep's parse check answers BOTH ways — True for source that compiles, False "
+          "for source that does not, so the gate above rests on a question that discriminates "
+          "rather than on a function that always agrees",
+          sweep._parses("x = 1\n") is True and sweep._parses("x = (\n") is False
+          and sweep._parses("def f():\n    return 1\n") is True)
+
+    check("#117: ...and a well-formed mutant is NOT flagged, so the gate is a discrimination "
+          "rather than a verb that refuses every mutation it is shown",
+          not sweep.declared_mutant_unparseable("def f(x):\n    return 1\n", _wf)[0])
+    check("#117: ...and a file that never parsed as Python to begin with is skipped — a mutated "
+          "JSON fixture must not be refused for having stopped being a program it never was",
+          not sweep.declared_mutant_unparseable("not code {{{", "still not code")[0])
+    _mtxt = read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))
+    check("#117: ...and the two NOT MEASURED reasons are DIFFERENT SENTENCES in the source — a "
+          "mutant that never ran and a mutant that ran and killed the suite are the third case "
+          "INV8 is missing, and a shared message is exactly how they stayed indistinguishable",
+          "DOES NOT PARSE" in _mtxt and "did not finish under this mutant" in _mtxt)
+
     check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
           "— so no producer is scored on a tree identical to the baseline: " +
           (("no-op: " + ", ".join(_noops)) if _noops else "") +
@@ -15296,6 +15344,30 @@ def main():
         # function's comments are about: the built-in spelling standing in for whatever actually
         # ran. It shipped that way for one run and the wording was wrong in exactly the verdict a
         # consumer would paste into a bug report.
+        # THE TWO WAYS A --fault IS WRONG, both driven through the binary because both are
+        # refusals rather than verdicts. An EMPTY one was silently discarded: falsy, so it skipped
+        # the marker check AND the fault path, and fell back to the built-in Python probe without a
+        # word — on a shell file that is no probe at all, and the caller reads the resulting COULD
+        # NOT PROVE as a fact about their test. Asking for a control and being given none, quietly.
+        def _mutx(*extra):
+            return subprocess.run(
+                [os.path.join(_muh, "bin", "game_loop"), "mutate", "--prove", "p",
+                 "--test", f"python3 {_tst}", "--file", _sub,
+                 "--replace", "    return 5", "--with", "    return 6", *extra],
+                capture_output=True, text=True, cwd=_mu,
+                env=dict(os.environ, GAME_LOOP_HOME=_muh))
+
+        _ef = _mutx("--fault", "")
+        check("#91: an EMPTY --fault is REFUSED rather than ignored — it is falsy, so it used to "
+              "skip both the marker check and the probe and fall back silently to the built-in "
+              "one, which on a non-Python file is no probe at all",
+              _ef.returncode == 3 and "EMPTY" in (_ef.stdout + _ef.stderr))
+        _nm = _mutx("--fault", "exit 99")
+        check("#91: ...and a --fault with no {marker} is refused too, because the marker is the "
+              "only thing separating 'the probe stopped this test' from 'something else did' — "
+              "without it the probe can never return live",
+              _nm.returncode == 3 and "marker" in (_nm.stdout + _nm.stderr))
+
         check("#91: ...and a supplied fault's verdicts describe THE FAULT rather than the built-in "
               "`raise` that did not run — the reason is what a consumer quotes",
               "raise" not in _fv["f-live"][1] and "raise" not in _fv["f-inert"][1]
@@ -15366,6 +15438,25 @@ def main():
         check("#91: ...and a fixture carrying both directions is accepted, so the two refusals "
               "above are a discrimination rather than a verb that never runs",
               _dirs(_both)[0] is True)
+
+        # A MISSPELT EXPECTATION IS A DEFECT IN THE FIXTURE, and it was reported as a defect in the
+        # GUARD. Both spellings measured against this repo's own write guard while it refused
+        # correctly: "denied" made no case count as a deny, so the run was refused with "the cases
+        # only go one way — add the case that must NOT fire", the right verdict for the wrong
+        # reason; "alow" was worse, passing the directions check and then reporting the guard as
+        # failing. Opposite repairs behind one observable.
+        _bad = _mlm.guardtest_bad_expects
+        check("#91: an `expect` this does not understand is named as a FIXTURE defect — a misspelt "
+              "expectation can never match, and reporting it as a failing guard sends you to fix a "
+              "guard that is behaving correctly",
+              [n for n, _ in _bad([{"name": "x", "expect": "denied"}])] == ["x"]
+              and [v for _, v in _bad([{"name": "y", "expect": "alow"}])] == ["alow"])
+        check("#91: ...and every spelling it DOES understand is accepted, case-insensitively, so "
+              "the check above is a closed set rather than a new way to refuse a good fixture",
+              not _bad([{"expect": "deny"}, {"expect": "ALLOW"}, {"expect": "ask"}]))
+        check("#91: ...and an expect_exit case is left alone — that is a different contract for a "
+              "guard that only speaks exit codes, not a case missing its expectation",
+              not _bad([{"name": "z", "expect_exit": 2}]))
 
         _gt = tempfile.mkdtemp(prefix="gameloop-guardtest-")
         try:
@@ -15453,6 +15544,72 @@ def main():
                   len({_ok_line.strip()[:1], _bad_line.strip()[:1], _unk_line.strip()[:1]}) == 3)
             with open(_fx + ".empty", "w") as f:
                 json.dump({"cases": []}, f)
+            # A MALFORMED FIXTURE WAS ARRIVING AS A CRASH. Valid JSON of the wrong SHAPE — a bare
+            # list, a string — reached `spec.get("cases")` and died with an AttributeError
+            # traceback at exit 1, while every real refusal here exits 3. So a user's typo was
+            # indistinguishable from a bug in this tool, and invisible to anything reading the exit
+            # code — which is the contract #91's own third part established.
+            _shapes = os.path.join(_gt, "shapes")
+            os.makedirs(_shapes, exist_ok=True)
+            for _nm, _txt in (("arr.json", "[]"), ("str.json", '"nope"'),
+                              ("num.json", "42")):
+                with open(os.path.join(_shapes, _nm), "w") as f:
+                    f.write(_txt)
+            _shape_runs = {_nm: _gtr("--fixture", os.path.join(_shapes, _nm), "--script", _real)
+                           for _nm in ("arr.json", "str.json", "num.json")}
+            check("#91: a fixture that is valid JSON of the WRONG SHAPE is refused, naming the "
+                  "shape — a bare list, a string and a number each used to reach a key lookup and "
+                  "die with a traceback",
+                  all("must be a JSON OBJECT" in (r.stdout + r.stderr)
+                      for r in _shape_runs.values()))
+            check("#91: ...and each of those exits 3 like every other refusal, never 1 — a crash "
+                  "and a refusal take opposite readings, and a wrapper watching the exit code "
+                  "cannot tell a user's typo from a bug in this tool: "
+                  + ", ".join(f"{k}={v.returncode}" for k, v in _shape_runs.items()),
+                  all(r.returncode == 3 for r in _shape_runs.values()))
+            _badcase = os.path.join(_shapes, "badcase.json")
+            with open(_badcase, "w") as f:
+                json.dump({"cases": [{"name": "ok", "expect": "deny", "payload": {}}, "oops"]}, f)
+            # AND THE WIRING, not just the function. The three checks above drive
+            # `guardtest_bad_expects` directly; delete the `die()` that calls it and every one of
+            # them still passes while the verb goes back to blaming the guard. A producer nothing
+            # calls enforces nothing — which is a rule this repo already has for the shipped
+            # surface, applied here to a gate added the same day.
+            _typo_fx = os.path.join(_shapes, "typo.json")
+            with open(_typo_fx, "w") as f:
+                json.dump({"cases": [
+                    {"name": "a real deny", "expect": "deny",
+                     "payload": {"tool_name": "Write",
+                                 "tool_input": {"file_path": "/etc/not-ours-at-all.txt"}}},
+                    {"name": "typo on the allow side", "expect": "alow",
+                     "payload": {"tool_name": "Write", "tool_input": {"file_path": _in_repo}}}]}, f)
+            _tp = _gtr("--fixture", _typo_fx, "--script", _real)
+            _tpo = _tp.stdout + _tp.stderr
+            # BOTH OF THESE WERE VACUOUS ON THE FIRST WRITING, and unwiring the refusal in a copy
+            # is what showed it — 395 passed with the gate disconnected. (1) `returncode == 3` does
+            # not discriminate: a MISMATCH exits 3 too, and the case name and the bad value both
+            # appear in a mismatch report, so every clause held either way. (2) the glyph test was
+            # written "\\u2713" inside a raw string, so it compared against a literal backslash-u
+            # that appears in no output ever — a check that cannot fail, in the pair added to catch
+            # a check that cannot fail. Now keyed on text only the REFUSAL produces.
+            check("#91: END TO END, a misspelt expectation stops the run before any case is tried, "
+                  "naming the case and the value — the unit checks pass with this refusal "
+                  "disconnected, and the verb goes back to reporting a correct guard as failing",
+                  _tp.returncode == 3
+                  and "does not understand" in _tpo
+                  and "alow" in _tpo and "typo on the allow side" in _tpo)
+            # NOT "no glyph anywhere": `die` prints its own ✗ banner, so that spelling failed on
+            # the WIRED tree too — an assertion wrong in the safe direction, caught only by running
+            # it against the healthy tree as well as the broken one.
+            check("#91: ...and NO case was run — the per-case report never opens and no mismatch "
+                  "is tallied, so a fixture defect never arrives dressed as a verdict about the "
+                  "script",
+                  "guardtest \u2014 " not in _tpo and "mismatch(es)" not in _tpo)
+            _bc = _gtr("--fixture", _badcase, "--script", _real)
+            check("#91: ...and a case that is not an object is named BY POSITION, so a fixture with "
+                  "twenty cases says which one rather than that something somewhere is wrong",
+                  _bc.returncode == 3 and "#2" in (_bc.stdout + _bc.stderr))
+
             _g4 = _gtr("--fixture", _fx + ".empty", "--script", _real)
             check("#91: ...and a fixture declaring NO cases is refused, because a run that checks "
                   "nothing exits 0 exactly like a suite that ran and passed",

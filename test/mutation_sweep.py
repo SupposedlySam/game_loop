@@ -485,7 +485,13 @@ MUTANTS = [
     ("_pin_marker_sha -> a pin's own commit stamp is never read, so `self` cannot tell a "
      "consumer their gates are running older code than the tree they guard",
      ".game_loop/bin/_gl_impl.py::_pin_marker_sha", "    return None\n",
-     ["pin", "wiring", "marker"], None, 3),
+     ["pin", "wiring", "marker"],
+     "3 kills, and the ceiling is STRUCTURAL — do not try to raise it. This "
+     "returns a sha or None, so the neutered body IS its nothing-answer, and the two assertions "
+     "covering the absent-marker and corrupt-marker paths survive by construction. They earn their "
+     "place (they would catch a raise, or a bare \"\" reported as agreement between pin and HEAD) "
+     "and they can never kill THIS mutant. Only the positive read can, and there is exactly one of "
+     "those to have. Adding more nothing-direction assertions raises nothing.", 3),
     ("parse_events -> no per-event distribution is ever seen",
      ".game_loop/bin/_gl_impl.py::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),
@@ -1628,7 +1634,7 @@ MUTANTS += [
     ("declared_mutant_unparseable -> a malformed mutant body reads as fine",
      "test/mutation_sweep.py::declared_mutant_unparseable", '    return False, ""\n',
      ['DOES NOT PARSE'],
-     "why it is thin: ONE kill, and the ceiling is structural. Its verdict is only observable "
+     "3 kills as of the clean sweep of 2026-08-27 (it read ONE when this note was written, and the note said so long after that stopped being true — a count in prose beside the count the line already prints is a second copy that drifts). The ceiling is still structural in the way that matters: the FUNCTION is driven directly by four assertions here, but its VERDICT is only observable "
      "through sweep_one, which is a closure inside main() and cannot be driven — the same "
      "untestable-by-construction problem this file solved for probed_verdict by lifting it out. "
      "Lifting sweep_one is a larger change than the gate it would test, so the debt is recorded "

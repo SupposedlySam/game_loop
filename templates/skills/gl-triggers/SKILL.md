@@ -204,12 +204,13 @@ with unchanged mtimes. **If a claim about behaviour can be measured, measure it 
 it** — the read is a hypothesis, and this one had already survived being written down, drafted a
 fix, and been reported three times.
 
-## And four ways a MEASUREMENT cannot be wrong
+## And five ways a MEASUREMENT cannot be wrong
 
 The same defect one level up. An assertion that cannot fail and a measurement that cannot be wrong
 are the same thing wearing different clothes — both are green, both feel like evidence, and neither
-was ever at risk of disagreeing with you. All three of these produced a confident number that was
-simply not the quantity anybody wanted.
+was ever at risk of disagreeing with you. Every one of these produced a confident number that was
+simply not the quantity anybody wanted — and the count in this sentence said THREE for as long
+as there were five, which is the smallest instance of it on the page.
 
 **Cross-check a derived reading against something you observed independently.** A per-producer
 column read as durations summed to 378 minutes of work — in a run that had visibly taken 70. One
@@ -231,6 +232,22 @@ twelve of the lowest-ranked neuter to their own nothing-answer, and the one at t
 four assertions across three directions. Nothing was wrong with the number. It answered a narrower
 question than the ranking implied, and only reading the assertions showed which. When a score drives
 a work queue, write down what it cannot see before you work the queue.
+
+**Check the THING, not a proxy that usually travels with it.** Five times in one day my own
+verification matched something adjacent to its subject. Greps for a verdict word (`BELOW FLOOR`,
+`NOT MEASURED`) matched assertion *names* that quote the tool's vocabulary — in a repo whose tests
+are written in that vocabulary, the words cannot separate a verdict from prose about verdicts; the
+column layout can. A `diff` of section headings, run to see whether an edit had lost content, was
+order-sensitive in a file whose order I had just changed, so it reported everything moved as gone. A
+set comparison of the same headings then reported restored content as missing, because I had renamed
+it. Only comparing SENTENCES found the one thing actually dropped. Elsewhere the same day, someone
+compared two set sizes, found 19 and 19, and reported that the sets partitioned a tree identically —
+equal cardinality, different members.
+
+The tell is that the proxy is easier to extract than the subject: names are greppable and content is
+not, sizes are one call and membership is a loop. **Ask what the check would say if the subject were
+wrong but the proxy unchanged** — and when an edit is what you are auditing, never verify it with a
+property the edit changed.
 
 **Before controlling for a cause, verify the EFFECT is real.** A hypothesis about why a rate dropped
 got a proper control — which tested whether the drop had that cause, and never whether the rate had

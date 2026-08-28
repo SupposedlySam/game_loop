@@ -11217,9 +11217,29 @@ def main():
           "somebody asked for the speedup",
           "NO SECTION MAP" not in _sw2.fast_without_map_notice(False, {}))
 
-    check("...and it is written only on a FULL sweep, beside the section map — a trimmed run has "
-          "not observed what it did not execute, and would ratchet the sets toward its own subset",
-          "_write_section_map(base)\n        _write_killers()" in _msrc)
+    # THE NAME PROMISED THE GUARD AND THE CONDITION CHECKED INDENTATION. It read
+    # `"_write_section_map(base)\n        _write_killers()" in _msrc` — two calls adjacent with
+    # exactly eight spaces — while claiming "written only on a FULL sweep". The full-sweep part is
+    # not in that string at all; it is `_is_full_sweep()` inside each writer's body, and the
+    # assertion above covers it. So this one verified formatting and took credit for a guard, and
+    # would have broken on a reindent for a reason unrelated to its subject.
+    # What it is actually worth asserting: both writers fire from the SAME call site, so a full
+    # sweep cannot write one artifact and not the other. Parsed, not matched.
+    def _writers_share_a_caller():
+        _t = ast.parse(_msrc)
+        for _f in ast.walk(_t):
+            if not isinstance(_f, ast.FunctionDef):
+                continue
+            _called = {c.func.id for c in ast.walk(_f)
+                       if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+            if {"_write_section_map", "_write_killers"} <= _called:
+                return _f.name
+        return ""
+
+    check("...and both artifact writers fire from the SAME caller, so a full sweep cannot write the "
+          "section map and skip the killer sets — the FULL-sweep guard itself is asserted above, in "
+          "each writer's own body, which is where it lives",
+          _writers_share_a_caller() != "")
     check("the sweep parses argv at the ENTRY POINT, never inside main(), so a caller that drives "
           "main() programmatically is not judged by its own command line",
           "_parse_argv(sys.argv[1:])" in _msrc

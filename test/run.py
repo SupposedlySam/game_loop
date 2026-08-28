@@ -12449,6 +12449,38 @@ def main():
                         got.add(c.slice.value)
         return got
 
+    # THE #113 REGRESSION, ENCODED. `git commit -m x 2>&1` reached the commit scan as a trailing
+    # token that does not start with "-", so it was parsed as a PATHSPEC. A pathspec matching
+    # nothing resolves to an EMPTY scope, the gate hands verify that empty scope, verify correctly
+    # reports nothing owed, and a STALE COMMIT IS ALLOWED. It hid for 300+ commits because the one
+    # form that escapes the gate — a redirection — is the form output gets captured in, so every
+    # probe anyone wrote carried it. Bisected to 7814c3d; fixed in 4a9aa38.
+    _gsrc_r = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "guard-writes-impl.sh"))
+    _sr_ns = {"re": re}
+    _sr_start = _gsrc_r.index('_AMP = "&"')
+    exec(compile(_gsrc_r[_sr_start:_gsrc_r.index("\n\n", _gsrc_r.index("    return out", _sr_start))],
+                 "strip-redirections", "exec"), _sr_ns)
+    _strip = _sr_ns["strip_redirections"]
+    check("a shell redirection is STRIPPED from a commit's argv — it belongs to the shell and was "
+          "being read as a pathspec, which resolved to an empty scope and let a stale commit "
+          "through for 300+ commits (#113 regression, fixed 4a9aa38)",
+          _strip(["commit", "-m", "x", "2>&1"]) == ["commit", "-m", "x"])
+    check("...and a redirection whose target is a SEPARATE token takes that token with it, or the "
+          "filename becomes the phantom pathspec instead",
+          _strip(["commit", "-m", "x", ">", "log"]) == ["commit", "-m", "x"]
+          and _strip(["commit", "-m", "x", "2>", "log"]) == ["commit", "-m", "x"])
+    check("...and an attached-target form is stripped whole", 
+          _strip(["commit", "-m", "x", ">/tmp/log"]) == ["commit", "-m", "x"]
+          and _strip(["commit", "-m", "x", "2>/tmp/log"]) == ["commit", "-m", "x"])
+    check("...while a REAL pathspec is never eaten — the whole point is that the gate keeps "
+          "narrowing to what the commit carries, and a fix that dropped paths would disable it in "
+          "the other direction",
+          _strip(["commit", "-m", "x", "--", "test/run.py"])
+          == ["commit", "-m", "x", "--", "test/run.py"])
+    check("...and a filename that merely CONTAINS an angle bracket is left alone, so the stripper "
+          "is about token shape rather than any character it happens to hold",
+          _strip(["commit", "-m", "x", "--", "a>b.txt"]) == ["commit", "-m", "x", "--", "a>b.txt"])
+
     _gates = set()
     for _bf in ("_gl_impl.py", "verify", "watchdog", "notify.py"):
         _gates |= _env_gates(read_or_empty(os.path.join(REPO, ".game_loop", "bin", _bf)))

@@ -1725,6 +1725,10 @@ NOT_SWEPT = {
     "test/run.py::after_marker": "a suite helper, same reason — and its own contract (raise rather "
         "than split, so a renamed heading fails HERE) is asserted directly elsewhere",
     "test/run.py::why": "a suite helper for rendering a refusal reason in a message",
+    "test/run.py::_writers_share_a_caller": "a suite helper: it answers whether both sweep artifact "
+        "writers are invoked from one function, for the assertion directly below it. Neutering it "
+        "to the empty answer fails that assertion — which is the assertion doing its job, not a "
+        "coverage reading about this helper. Same shape as the other helpers here.",
     "test/run.py::_marks_section_rendered": "a suite helper, and it became a candidate only "
         "because a guard was added INSIDE it: it now returns False early when the stubbed seam "
         "was never reached, which is the check that stops it verdicting on a run nobody "

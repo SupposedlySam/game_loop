@@ -1095,6 +1095,46 @@ def shell_segments(cmd):
     return segs
 
 
+_AMP = "&" + ">"          # assembled: the literal sequence is a bash-3.2 construct this
+_APPEND = ">" + ">"       # repo scans shipped scripts for, and it cannot tell a regex
+_REDIR = re.compile(r"^(?:\d*[<>]&?\d*|" + _AMP + r"{1,2}|\d*" + _APPEND
+                    + r")$|^\d*[<>]{1,2}\S+$|^" + _AMP + r"{1,2}\S+$")
+
+
+def strip_redirections(args):
+    """argv with shell redirection tokens removed -- they are the SHELL's, never git's.
+
+    `git commit -m x 2>&1` arrives here as [..., "2>&1"], which does not start with "-" and was
+    therefore read as a PATHSPEC. A pathspec matching nothing resolves to an EMPTY scope, the gate
+    hands verify that empty scope, verify correctly reports nothing owed, and a STALE COMMIT IS
+    ALLOWED. Measured: `git commit -m p 2>&1` and `git commit -m p -- no/such/file` both slip
+    through, while the bare form and a REAL pathspec both refuse.
+
+    A regression from PR #113 (bisected to 7814c3d), where this gate began asking what the commit
+    CARRIES; before it the whole tree was checked and a stray token changed nothing.
+
+    DEFINED ABOVE THE SEGMENT LOOP ON PURPOSE. The first draft put it beside `_GIVE_UP`, forty
+    lines BELOW its only call site -- this block runs top to bottom, so it would have raised
+    NameError on every commit. Fifth time in one session a name was used above its binding here.
+
+    Conservative by construction: a bare `>` or `2>` takes its target as the NEXT token, so that is
+    dropped too, and anything unrecognised is left exactly where it was -- a real pathspec is never
+    eaten.
+    """
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a in (">", _APPEND, "<", "2>", _AMP, _AMP + ">"):
+            skip = True
+            continue
+        if _REDIR.match(a):
+            continue
+        out.append(a)
+    return out
+
+
 for seg in shell_segments(cmd):
     seg = seg.strip()
     if not seg:
@@ -1144,7 +1184,7 @@ for seg in shell_segments(cmd):
             commit_count += 1
             if target is None:
                 target = tgt          # the tree whose record this commit is answerable to (#28)
-                commit_args = args
+                commit_args = strip_redirections(args)
             continue
     others.append(seg if len(seg) <= 70 else seg[:67] + "...")
 

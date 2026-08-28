@@ -1790,11 +1790,125 @@ hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)
 
 WRITING ABOUT THE VERB RATHER THAN RUNNING IT? A commit message, an issue body, a doc quoting a
 command — then your PROSE tripped this, not a deploy. Put the text in a file and pass the path:
-  git commit -F <file>   ·   gh issue comment --body-file <file>   ·   <verb> --<option>-file <file>
+  git commit -F <file>   ·   <verb> --<option>-file <file>   ·   <verb> --<option> "$(cat <file>)"
 The whole word in prose is matched deliberately: narrowing to command position would miss a real
 deploy nested in an interpreter argument, and missing a real publish is the expensive direction.
 That trade is worth stating here rather than only in the source, because this message is where
 somebody meets it."
+    fi
+
+    # 1b. OUTWARD `gh` AT COMMAND POSITION (#118). The MCP door refuses an issue comment and
+    #     demands a logged hatch; this door let the identical action through, silently, exit 0 --
+    #     and the deploy refusal above used to recommend it BY NAME as the way to pass prose. Two
+    #     doors to one irreversible outward act, one gated and one not, is the guard's own argument
+    #     for gating MCP read backwards: "just as irreversible as one through Bash, and the write
+    #     guard never sees it."
+    #
+    #     COMMAND POSITION, NOT PROSE, and that is the whole difference from deploy_verbs above.
+    #     That matcher is deliberately substring-in-prose because missing a nested real publish is
+    #     the expensive direction. Here the calculus inverts: `gh issue comment` is a phrase this
+    #     project WRITES about constantly -- it blocked a grep of this very file, and it sits in the
+    #     body of the issue that asked for this check -- so a prose matcher would refuse the repo's
+    #     own documentation of the rule. A verb nested in an interpreter argument is the gap that
+    #     buys, and it is stated here rather than discovered.
+    gh_hit=$(CMD="$scan_cmd" python3 <<'PY'
+import os, re, shlex
+# noun -> verbs that are OUTWARD and irreversible: other people see them, under the account
+# owner's name. Reads (list, view, status, diff, checks) are deliberately absent.
+OUTWARD = {
+    "issue":   {"comment", "create", "close", "reopen", "edit", "delete", "transfer", "pin", "lock"},
+    "pr":      {"comment", "create", "close", "reopen", "edit", "merge", "review", "ready"},
+    "release": {"create", "delete", "edit", "upload"},
+    "repo":    {"create", "delete", "edit", "archive", "rename"},
+    "gist":    {"create", "delete", "edit"},
+}
+cmd = os.environ.get("CMD", "")
+# Split on shell operators only; each piece's FIRST token is a command position.
+for piece in re.split(r"(?:\|\||&&|[;|&\n])", cmd):
+    try:
+        argv = shlex.split(piece)
+    except ValueError:
+        argv = piece.split()
+    # step past leading env assignments (FOO=bar gh ...) so they cannot hide the verb
+    i = 0
+    while i < len(argv) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i]):
+        i += 1
+    argv = argv[i:]
+    if len(argv) < 3:
+        continue
+    if os.path.basename(argv[0]) != "gh":
+        continue
+    noun, verb = argv[1], argv[2]
+    if verb in OUTWARD.get(noun, ()):
+        print("gh %s %s" % (noun, verb))
+        break
+    # `gh api` with a mutating method is the same act wearing a read-shaped name.
+    if noun == "api" and re.search(r"(?:^|\s)(?:-X|--method)\s+(POST|PUT|PATCH|DELETE)\b", piece):
+        print("gh api (mutating method)")
+        break
+PY
+)
+    if [ -n "$gh_hit" ]; then
+      gh_auth=$(OFFENDER="$gh_hit" STATE_F="$STATE_F" GAMELOOP_DIR="$GAMELOOP_DIR" SID="$SID" python3 <<'PY'
+# THE SAME HATCH THE MCP DOOR SPENDS, matched on the verb string rather than a path, exactly as
+# guard-mcp does for a tool name. `authorize` realpaths what it is given, so "gh issue comment"
+# is recorded as "<cwd>/gh issue comment"; the basename is what carries meaning. Requiring the
+# candidate to start with "gh " keeps the hatches separate in both directions -- a path grant can
+# never be spent by a gh call, nor a gh grant by a filesystem write.
+import datetime, json, os, sys
+off = os.environ["OFFENDER"]
+state_f = os.environ["STATE_F"]
+try:
+    with open(state_f) as f:
+        st = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+for a in st.get("authorized", []):
+    if a.get("uses_left", 0) <= 0:
+        continue
+    for cand in (a.get("path", "") or "", os.path.basename(a.get("path", "") or "")):
+        if not cand.startswith("gh "):
+            continue
+        if off == cand or off.startswith(cand):
+            a["uses_left"] -= 1
+            try:
+                with open(state_f, "w") as f:
+                    json.dump(st, f, indent=2); f.write("\n")
+                with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
+                    rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+                    sid = os.environ.get("SID", "")
+                    if sid:
+                        rec["sid"] = sid[:8]
+                    rec.update({"kind": "authorized_gh", "verb": off,
+                                "reason": a.get("reason"), "uses_left": a["uses_left"]})
+                    f.write(json.dumps(rec) + "\n")
+            except OSError:
+                sys.exit(0)
+            print("yes")
+            print((a.get("reason") or "").replace("\n", " ").strip())
+            sys.exit(0)
+PY
+)
+      if [ -n "$gh_auth" ]; then
+        printf '%s\n' "gh: '$gh_hit' allowed by a spent human authorization — $(printf '%s' "$gh_auth" | sed -n 2p)" >&2
+      else
+        deny "BLOCKED: outward GitHub write at command position -> $gh_hit
+
+This is visible to other people, under the account owner's name, and it does not come back. The MCP
+door refuses the identical action and asks for a hatch; this one used to let it through in silence,
+which made the log read as MORE controlled than the tool actually was — every MCP call carried the
+human's words, and the shell equivalent carried nothing.
+
+READS ARE UNTOUCHED: gh issue list, gh pr view, gh pr checks, gh api without -X. Only the verbs
+somebody else can see are here.
+
+If a HUMAN has explicitly authorized this, quote them and try again:
+  game_loop authorize --path \"$gh_hit\" --reason \"<their exact words>\" [--uses N]
+One authorization per USE, logged permanently — the same hatch, and the same cost, as the MCP door.
+
+WRITING ABOUT THE VERB RATHER THAN RUNNING IT? You are not: this matches COMMAND POSITION only, so
+prose quoting the command is not affected, and neither is a --body-file whose CONTENTS mention it."
+      fi
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.

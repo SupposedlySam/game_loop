@@ -1317,6 +1317,45 @@ def main():
         check("allows a redirect char inside a sed script",
               allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}}))
+
+        # #118: TWO DOORS TO ONE OUTWARD ACT. The MCP guard refuses an issue comment and demands a
+        # logged hatch; this door let the identical action through in silence, exit 0, nothing
+        # recorded — and the deploy refusal above named `gh issue comment --body-file` as the way
+        # to pass prose, so the gate signposted the way around itself. Measured by driving BOTH
+        # doors, not by reading either.
+        print("write guard (outward gh is a door, #118):")
+        for _c, _what in (("gh issue comment 60 --body-file /tmp/b", "an issue comment"),
+                          ("gh issue create --title t --body-file /tmp/b", "opening an issue"),
+                          ("gh pr merge 5 --squash", "merging a PR"),
+                          ("gh api -X POST /repos/o/r/issues", "a POST through gh api")):
+            check("refuses %s at command position — other people see it, under the account "
+                  "owner's name, and it does not come back" % _what,
+                  denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": _c}})))
+        for _c, _what in (("gh issue list --state open", "gh issue list"),
+                          ("gh pr view 1 --json title", "gh pr view"),
+                          ("gh api /repos/o/r", "gh api with no method")):
+            check("...but %s is a READ and stays free — a gate that costs a hatch to look at a "
+                  "queue is one people work around" % _what,
+                  allowed(wgproj, {"tool_name": "Bash", "tool_input": {"command": _c}}))
+        # THE CASE THAT SEPARATES THIS FROM deploy_verbs, which matches its verbs in PROSE. That is
+        # right for a publish (missing a nested real one is the expensive direction) and wrong here:
+        # `gh issue comment` is a phrase this project writes constantly — it blocked a grep of the
+        # guard's own source, and it appears throughout the issue that asked for this check. A prose
+        # matcher would refuse the repo's own documentation of its own rule.
+        check("a commit message that MENTIONS the verb is prose, not a command — this matches "
+              "command position only, which is the whole difference from the deploy-verb matcher",
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": 'git commit -m "see gh issue comment for the rule"'}}))
+        _ghauth = gl(wgproj, "authorize", "--path", "gh issue comment",
+                     "--reason", "the human said to, in these words")
+        check("...and a HUMAN authorization opens it — the same hatch, at the same cost, as the "
+              "MCP door, rather than a second mechanism with its own rules",
+              _ghauth.returncode == 0 and allowed(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "gh issue comment 60 --body-file /tmp/b"}}))
+        check("...and the hatch is SPENT by that use, so a standing grant cannot be re-spent by "
+              "the next unrelated outward write",
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "gh issue comment 60 --body-file /tmp/b"}})))
         check("still denies a real redirect to a QUOTED out-of-repo target",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo x > "$HOME/gl_outside.txt"'}})))

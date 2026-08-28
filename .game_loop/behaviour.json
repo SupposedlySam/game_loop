@@ -479,6 +479,15 @@
       "change": "a claim whose own `verified_how` records PARTIAL now gets its own marker and a line telling the reader to open `verified_how` before quoting it, instead of the tick a complete re-read earns.",
       "why_it_qualifies": "The staleness check compares a DATE and a VERSION, and both advance whether the reader re-established the whole claim or one corner of it — so a partial re-read cleared the warning exactly like a complete one and then reported as fully current. Measured here: three of seven claims re-read against 2.1.246 established only part of themselves, each said so in prose, and nothing read it back.",
       "consequence": "If you re-verify a claim and can only establish part of it, write PARTIAL in `verified_how` and the report will say so. WHAT THIS IS NOT: it does not judge completeness — the marker is the writer's own word, deliberately, because sniffing for hedged wording would fire on careful writing. A partial re-read that does not say so still reads as complete, and nothing here can tell."
+    },
+    {
+      "seq": 50,
+      "sha": "3b46c34",
+      "notice": true,
+      "verb": "write guard (Bash)",
+      "change": "outward `gh` verbs at COMMAND POSITION are now refused and require a human authorization: issue/pr comment, create, close, reopen, edit, merge, review, ready; release and repo and gist mutations; and `gh api` with -X POST/PUT/PATCH/DELETE. Reads are untouched — gh issue list, gh pr view, gh pr checks, gh api with no method.",
+      "why_it_qualifies": "The MCP door already refused the identical action and demanded a logged, single-use hatch; this door allowed it silently, exit 0, nothing recorded. Driven rather than read: `gh issue comment 60 --body-file /tmp/x` through guard-writes.sh returned no output and exit 0, while mcp__github__addIssueComment was refused in the same session. The guard's own MCP refusal makes the argument — 'just as irreversible as one through Bash, and the write guard never sees it' — and the converse held here. The log understated as a result: every hatch spent carried the human's words, and the shell equivalent carried nothing.",
+      "consequence": "A consumer who scripts `gh issue comment` or `gh pr merge` from an agent will now be refused until a human authorizes it: `game_loop authorize --path \"gh issue comment\" --reason \"<their words>\" [--uses N]` — the same hatch, at the same cost, as the MCP door. WHAT THIS IS NOT: it is not a prose matcher. Unlike deploy_verbs, this matches command position only, so a commit message, doc or issue body quoting `gh issue comment` is unaffected — which is deliberate, because that phrase is one this project writes constantly and a prose matcher would refuse the repo's own documentation of the rule. The gap that buys is a verb nested inside an interpreter argument, stated here rather than discovered. The deploy refusal no longer recommends `gh issue comment --body-file` as the way to pass prose, since it would now be naming a gated door."
     }
   ],
   "schema": 1

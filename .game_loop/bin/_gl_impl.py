@@ -4008,7 +4008,16 @@ def cmd_authorize(s, a):
         f"  path  : {real}",
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
-        ("  asked : via an armed question — the reply is words you did not write"
+        # NAME THE LIVE QUESTION TOO. The spent branch below was fixed to print WHICH question,
+        # because "some question was asked earlier" would let an unrelated hatch inherit its
+        # diligence — and this branch still had exactly that defect, one step over. Observed while
+        # taking a hatch for GitHub writes with a question about the WATCHDOG armed: it printed
+        # "via an armed question", truthfully, about a question with nothing to do with the act.
+        # The tool cannot judge relevance and should not try; it can refuse to hide the question
+        # from the person who can.
+        (("  asked : via an armed question — the reply is words you did not write. IT ASKS:\n"
+          "          \"" + (auth["arm_question"] or "").splitlines()[0][:100] + "\"\n"
+          "          Judge for yourself whether that question covers THIS hatch.")
          if auth["asked_via_arm"] else
          ("  asked : a question WAS put to the human in this session and has been answered —\n"
           "          \"" + (auth["asked_spent"] or "").splitlines()[0][:100] + "\"\n"

@@ -628,6 +628,15 @@ def main():
         check("...and it NAMES the question rather than counting it, because 'some question was "
               "asked earlier' would let an unrelated later hatch inherit that diligence",
               "which color?" in _azo)
+        # THE SAME DEFECT ON THE LIVE BRANCH, one step over and found by using the tool: a hatch
+        # taken for GitHub writes printed "via an armed question" while the armed question was
+        # about the WATCHDOG. True, and about something else entirely.
+        gl(proj, "arm", "--question", "which watchdog fix?", "--read", real, "--predict", "the blunt one")
+        _azl = gl(proj, "authorize", "--path", "/private/tmp/gl-live-probe", "--reason", "they said so")
+        _azlo = _azl.stdout + _azl.stderr
+        check("a hatch taken while a question is LIVE names that question too — otherwise an "
+              "unrelated hatch inherits the diligence of whatever happens to be armed",
+              _azl.returncode == 0 and "which watchdog fix?" in _azlo)
         _azn = gl(proj, "authorize", "--path", "/private/tmp/gl-asked-probe-2",
                   "--reason", "nobody asked", sid="sess-never-armed")
         check("...and a session that never armed anything still says so — the control, without "

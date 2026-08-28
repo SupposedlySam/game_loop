@@ -3682,6 +3682,31 @@ def main():
               "answers a question only asked while something is waiting",
               r.returncode != 0 and "nothing to record a wake path for" in (r.stderr + r.stdout))
 
+        # A REPLACEMENT PRINTED THE SAME LINE AS A FIRST RECORDING, and this repo's own log is the
+        # evidence rather than the argument: a careful 751-character declaration was overwritten by
+        # a probe of this very flag with the value "x". Both writes said "wake path recorded",
+        # nothing named what was lost, and `status` went on reporting a declared wake path because
+        # ANY non-empty string satisfies that check — so the loud warning this field exists to
+        # raise had been switched off by a placeholder, in the live state, for hours.
+        _rep = gl(wpproj, "mandate", "--wake-path", "x", sid=wk)
+        check("#95: replacing a wake path NAMES the declaration it replaced — a clobber printing "
+              "the same success line as a first recording is exactly how a real answer became 'x' "
+              "in this repo's own state",
+              _rep.returncode == 0
+              and "REPLACED AN EXISTING DECLARATION" in (_rep.stdout + _rep.stderr)
+              and "a cron every 10 minutes" in (_rep.stdout + _rep.stderr))
+        with open(os.path.join(wpproj, ".game_loop", "log.jsonl")) as _wf:
+            _wl = [json.loads(_l) for _l in _wf if '"mandate_wake_path"' in _l]
+        check("...and the LOG carries the value that was overwritten, so a clobber is RECOVERABLE "
+              "and not merely announced — the real one was recovered from exactly this field",
+              any(e.get("replaced") == "a cron every 10 minutes" for e in _wl))
+        _same = gl(wpproj, "mandate", "--wake-path", "x", sid=wk)
+        check("...but re-recording the SAME value announces no replacement — a warning that fires "
+              "on every write is one nobody reads, which is the failure mode of the thing it warns "
+              "about",
+              _same.returncode == 0
+              and "REPLACED AN EXISTING DECLARATION" not in (_same.stdout + _same.stderr))
+
         # #95 PROPOSAL 3: THE DOORBELL. The consumer who filed this kept a long unattended run
         # alive with an external cron, and reported that the cron was NOT the part worth stealing:
         # "a generic 'check your background tasks' ping is nearly worthless — the agent wakes,
@@ -12394,9 +12419,15 @@ def main():
         "mark_publication_state", "pin_state", "triggers_report", "worktree_report",
     ]
     _SYMBOL_NOT_PINNED = [                 # counted debt, not a claim of safety
-        "cmd_checkpoint", "cmd_harden", "cmd_measure",
+        "cmd_checkpoint", "cmd_harden", "cmd_mandate", "cmd_measure",
         "cmd_pin", "cmd_status", "instruments_report", "pin_wiring_lines",
     ]
+    # cmd_mandate ARRIVES AS DEBT ON THE SAME TERMS, and it arrived by this check catching it. It
+    # became a multi-symbol producer when the wake-path replacement notice added a ⚠ beside its ✓;
+    # three assertions cover that notice and all three match by WORDS ("REPLACED AN EXISTING
+    # DECLARATION"), not line-scoped to the glyph. So the honest list is this one. Writing the
+    # assertions is not the same as pinning the symbol, and the gate refusing to let a new producer
+    # join the majority by default is what made the distinction unavoidable rather than optional.
     # pin_wiring_lines ARRIVES AS DEBT, deliberately. Its ⚠ and ✓ arms both have assertions and
     # both have been seen to fire — but they match by WORDS ("byte-identical", "NOT WITH THE
     # WIRING THIS VERB GENERATES"), not line-scoped to the symbol. That is precisely the shape

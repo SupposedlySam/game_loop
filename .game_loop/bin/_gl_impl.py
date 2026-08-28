@@ -2697,11 +2697,39 @@ def cmd_mandate(s, a):
                 die("no mandate is bound here, so there is nothing to record a wake path for.\n"
                     "A wake path answers 'how does a signal reach this session while it is idle' —\n"
                     "which is only a question while something is waiting on it.")
+            # A REPLACEMENT IS NOT A RECORDING, and until now they printed the same line (#95).
+            # OBSERVED, in this repo's own log: a session declared a careful 751-character wake
+            # path — the honest one, "a human who checks", spelling out that nothing here wakes an
+            # inert run — and a later probe of this very flag overwrote it with "x". Both writes
+            # printed the same success line, nothing named what was lost, and `status` went on
+            # reporting a declared wake path, because ANY non-empty string satisfies that check.
+            # The warning this field exists to raise had been silenced by a placeholder — which is
+            # worse than the empty value two branches up, and that one is refused outright.
+            #
+            # LOUD, NOT REFUSED. Updating a wake path is legitimate and common — the run that
+            # arranges a cron after starting without one is the good case — so refusing would be
+            # wrong. What was missing is that the old answer left without being named.
+            _prev = m.get("wake_path")
+            _replaced = []
+            if _prev and _prev != a.wake_path:
+                _lines = _prev.splitlines() or [""]
+                _replaced = ["⚠ THIS REPLACED AN EXISTING DECLARATION, which said:",
+                             "    " + _lines[0][:150]]
+                if len(_lines) > 1:
+                    _replaced.append("    (+%d more line(s), %d chars in total)"
+                                     % (len(_lines) - 1, len(_prev)))
+                _replaced += [
+                    "  Named here so a clobber is visible rather than inferred. A probe of this",
+                    "  flag writes to the REAL record, which is how the observed one happened; the",
+                    "  previous value is in .game_loop/log.jsonl under kind=mandate_wake_path.", ""]
             m["wake_path"] = a.wake_path
             if getattr(a, "wake_every", None):
                 m["wake_every"] = int(a.wake_every)
             save(s)
-            logline({"kind": "mandate_wake_path", "wake_path": a.wake_path, "text": m.get("text")})
+            logline({"kind": "mandate_wake_path", "wake_path": a.wake_path, "text": m.get("text"),
+                     "replaced": _prev})
+            if _replaced:
+                out(*_replaced)
             out("✓ wake path recorded — DECLARED, never probed.",
                 f"  mandate : {m.get('text')}",
                 f"  wake    : {a.wake_path}",

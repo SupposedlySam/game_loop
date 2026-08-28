@@ -5,8 +5,10 @@ Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) ins
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
 import ast
+import atexit
 import contextlib
 import datetime
+import glob
 import io
 import importlib.machinery
 import importlib.util
@@ -39,9 +41,62 @@ def check(name, cond):
         print(f"  FAIL {name}")
 
 
+_SANDBOXES = []          # every sandbox THIS PROCESS created -- the reaper's whole world
+
+
+def _reap_sandboxes(paths=None):
+    """Remove the sandboxes this run made, and the guard traces they left in the shared tmp.
+
+    make_sandbox was the only fixture helper in this repo with no teardown, and it is the one 2680
+    assertions call: trigger_fixtures and mutation_sweep both rmtree in a finally, so the leak was
+    never a policy, just the one place nobody wrote it. Unreaped it had reached 38,397 directories
+    and ~55 GB, and -- the part that actually cost people time -- enough files in one directory to
+    push it past the shell's ARG_MAX, which turns every glob there into a command that cannot run
+    and prints nothing. Three agents in three repos read that emptiness as a clean result on the
+    same evening. This is a cleanup whose real payload is that a search over tmp keeps working.
+
+    ONLY paths in _SANDBOXES, never a glob over the tempdir. This repo's third invariant is that
+    everything outside it is read-only, and a suite that swept tmp by pattern would be exactly the
+    blast radius that rule exists to refuse -- it would also, on a shared machine, delete a
+    concurrent run's fixtures. A list of what we ourselves created cannot reach either.
+
+    GL_KEEP_SANDBOXES=1 keeps them, for the debugging session that wants to open the fixture a
+    failing assertion was looking at.
+    """
+    # `paths` exists so the test below can drive this on a list of its own. Reaping the real
+    # _SANDBOXES from inside a test would delete fixtures the sections around it are still using.
+    targets = _SANDBOXES if paths is None else paths
+    quiet = paths is not None
+    if os.environ.get("GL_KEEP_SANDBOXES"):
+        if not quiet:
+            print(f"\n  kept {len(targets)} sandbox(es): GL_KEEP_SANDBOXES is set")
+        return
+    dirs = traces = 0
+    for proj in targets:
+        if os.path.isdir(proj):
+            shutil.rmtree(proj, ignore_errors=True)
+            dirs += 1
+        # The guard keys its scope/verify traces on the REAL path of the tree it gated, so each
+        # sandbox orphans a file in /tmp under a slug that can never recur. Matching on the
+        # sandbox's own basename rather than rebuilding the guard's slug rule keeps this correct
+        # if that rule changes, and the basename is a mkdtemp suffix -- it matches nothing else.
+        for f in glob.glob("/tmp/.game_loop_*" + os.path.basename(proj) + "*"):
+            try:
+                os.unlink(f)
+                traces += 1
+            except OSError:
+                pass
+    if (dirs or traces) and not quiet:
+        print(f"\n  reaped {dirs} sandbox(es), {traces} tmp trace file(s)")
+
+
+atexit.register(_reap_sandboxes)
+
+
 def make_sandbox():
     """A temp project with a fresh .game_loop (real scripts, empty state)."""
     proj = tempfile.mkdtemp(prefix="gameloop-test-")
+    _SANDBOXES.append(proj)
     dst = os.path.join(proj, ".game_loop")
     os.makedirs(os.path.join(dst, "bin"))
     # _gl_impl.py IS THE TOOL. `game_loop` is a ~30-line door that imports it, so a fixture that
@@ -18987,6 +19042,38 @@ def main():
           "path" not in _su and "out" not in _su and "OUTER" in _su)
     check("...nor a comprehension target, which does not leak out of the comprehension either",
           "q" not in _su and "_helper" in _sd and "_r" in _sd)
+
+    print("suite hygiene (the fixture that cleans up after itself):")
+    # make_sandbox was the ONLY fixture helper here with no teardown, and it is the one nearly
+    # every assertion calls. Unreaped it had left 38,397 directories and ~55 GB in the machine's
+    # tmp -- and the harm was not disk. Enough entries in one directory push it past ARG_MAX, and
+    # from then on every glob there is a command that CANNOT RUN and prints nothing, which reads
+    # exactly like a clean result. Three agents in three repos were misled by it in one evening.
+    # So this is checked rather than remembered: the failure it prevents is silent by nature.
+    _hy_before = len(_SANDBOXES)
+    _hy = make_sandbox()
+    check("make_sandbox REGISTERS its sandbox for teardown -- without this the reaper is a "
+          "function nothing ever hands anything to, which passes every test of its own body",
+          _hy in _SANDBOXES and len(_SANDBOXES) == _hy_before + 1)
+    _iso = tempfile.mkdtemp(prefix="gameloop-test-")
+    _iso_trace = "/tmp/.game_loop_verify." + os.path.basename(_iso)
+    with open(_iso_trace, "w") as _f:
+        _f.write("x")
+    _reap_sandboxes([_iso])
+    check("the reaper removes the sandbox directory", not os.path.isdir(_iso))
+    check("...AND the tmp trace the guard keyed to it -- the directory is the disk, the trace is "
+          "the file count, and only the second one broke anybody's search",
+          not os.path.exists(_iso_trace))
+    _keep = tempfile.mkdtemp(prefix="gameloop-test-")
+    os.environ["GL_KEEP_SANDBOXES"] = "1"
+    try:
+        _reap_sandboxes([_keep])
+    finally:
+        os.environ.pop("GL_KEEP_SANDBOXES", None)
+    check("GL_KEEP_SANDBOXES=1 keeps them, so the fixture a failing assertion was looking at is "
+          "still there to open -- a cleanup with no escape hatch gets deleted instead of used",
+          os.path.isdir(_keep))
+    shutil.rmtree(_keep, ignore_errors=True)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

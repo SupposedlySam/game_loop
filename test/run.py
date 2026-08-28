@@ -11028,9 +11028,27 @@ def main():
           "cannot report that the code shrank",
           isinstance(_floor.get("distinct"), int) and isinstance(_floor.get("groups"), int)
           and _floor["distinct"] > 100)
+    # WAS A SUBSTRING OF THE EXIT EXPRESSION — `"or below)" in source` — which is why it carried a
+    # second spelling for when the terms got reordered. It claims a BEHAVIOUR ("exits non-zero") and
+    # checked for prose, so any reordering breaks it and any sentence containing the fragment
+    # satisfies it. `main()` runs the whole suite, so the exit code genuinely cannot be driven here;
+    # what CAN be tightened is reading the return statement instead of the characters around it.
+    # Parsed, this survives reordering and renaming of the other terms and fails on the one thing it
+    # names: `below` no longer reaching the exit code.
+    def _prun_exit_terms():
+        for _n in ast.walk(ast.parse(_prun)):
+            if isinstance(_n, ast.FunctionDef) and _n.name == "main":
+                for _r in ast.walk(_n):
+                    if isinstance(_r, ast.Return) and _r.value is not None:
+                        _names = {x.id for x in ast.walk(_r.value) if isinstance(x, ast.Name)}
+                        if "below" in _names or "failed" in _names:
+                            return _names
+        return set()
+
     check("...and prun EXITS non-zero on a breach, not merely prints one — verify reads the exit "
-          "code and nothing else from this runner",
-          "or below)" in source_flat(_prun) or "below or" in source_flat(_prun))
+          "code and nothing else from this runner, and this reads the RETURN rather than the "
+          "characters near it, so reordering the terms cannot quietly satisfy it",
+          "below" in _prun_exit_terms())
     # THE RULE IS DRIVEN, not read. It lives at module level in prun for exactly this reason: a
     # floor nobody can exercise is one that gets believed rather than checked.
     _fb = _prun_mod.floor_breaches

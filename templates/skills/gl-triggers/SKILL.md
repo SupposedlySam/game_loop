@@ -232,7 +232,7 @@ with unchanged mtimes. **If a claim about behaviour can be measured, measure it 
 it** — the read is a hypothesis, and this one had already survived being written down, drafted a
 fix, and been reported three times.
 
-## And five ways a MEASUREMENT cannot be wrong
+## And six ways a MEASUREMENT cannot be wrong
 
 The same defect one level up. An assertion that cannot fail and a measurement that cannot be wrong
 are the same thing wearing different clothes — both are green, both feel like evidence, and neither
@@ -277,10 +277,48 @@ not, sizes are one call and membership is a loop. **Ask what the check would say
 wrong but the proxy unchanged** — and when an edit is what you are auditing, never verify it with a
 property the edit changed.
 
+**An instrument that COULD NOT RUN prints exactly what one that found nothing prints.** A directory
+that has quietly grown past the shell's argument limit turns every glob over it into a command that
+never executes. In one evening four searches across three repos hit it — `ls /tmp/.game_loop_*`,
+`rm -f /tmp/.game_loop_verify.*`, a `find /tmp` that followed no symlink on a machine where the real
+path is `/private/tmp`, and one more — and every one came back empty and was read as a clean result.
+One of them would have inverted a control: a file believed cleared was still sitting there, so the
+next reading would have been attributed to the wrong writer. Nobody's repo was at fault; it was a
+property of the machine, arriving as good news four times.
+
+That is what makes this class expensive rather than merely annoying: **it fails toward the
+reassuring answer every time.** A search that errors gets investigated; a search that returns
+nothing gets believed. And the two are one keystroke apart — `2>/dev/null` on a command that was
+willing to tell you, or a wrapper that keeps stdout and drops the exit status.
+
+The tell is directional. **If your search coming back empty would be good news, it has to earn the
+emptiness**: run it once against a case you know exists, or check the exit status rather than the
+output. One command, and it separates "there is nothing there" from "I never looked."
+
 **Before controlling for a cause, verify the EFFECT is real.** A hypothesis about why a rate dropped
 got a proper control — which tested whether the drop had that cause, and never whether the rate had
 dropped at all. It had not. A control for a phantom looks exactly like rigour, and reads like it in
 a commit message.
+
+## A fix lands where the attention was — then measure the places it did not
+
+A leak is found at its loudest point, so the repair lands exactly where you were already looking.
+This suite was orphaning ~2,680 fixture directories a run from one helper that had no teardown while
+both of its neighbours cleaned up in a `finally`. I fixed it, measured a per-run delta of zero, and
+said so. Counting the prefixes I had NOT just repaired found four more still leaking sixteen a run —
+one of them 6,584 directories deep, accumulated ten at a time while every eye in the investigation,
+mine included, was on the obvious pile.
+
+Sixteen against 2,680 is what survives a fix, and its survival is not bad luck. The big producer is
+the reason anyone investigated at all, so it is the one that gets repaired, committed and announced;
+the small one was never what anybody was looking at. Left alone it is the big number again later,
+and the next person to hit it finds a fix commit dated today telling them this was already handled.
+**A partial fix does not merely leave the leak — it inoculates the area against being investigated
+again.**
+
+The cheap part is that the instrument which found the leak is usually still loaded and one command
+from telling you whether it was the only one. Point it at everything it can see, not only the thing
+you came in for, and do it before you write the sentence saying you are done.
 
 ## The harness, for the shape it fits
 

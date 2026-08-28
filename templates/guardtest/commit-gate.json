@@ -1,0 +1,22 @@
+{
+  "//": "RUN THIS AGAINST A TREE WITH SOMETHING OWED, or every deny case fails for the wrong reason. Stage a change to a file your verify.yaml has a rule for, do NOT run the owed check, then: game_loop guardtest --fixture .game_loop/../templates/guardtest/commit-gate.json  — on a clean tree nothing is owed, allowing is CORRECT, and this fixture cannot tell that from a dead gate.",
+  "//why": "game_loop releases between PR #113 (7814c3d) and the fix (4a9aa38) parse a shell redirection as a pathspec. A pathspec matching nothing empties the commit scope, verify correctly reports nothing owed, and a stale commit is allowed. It fails GREEN: the gate runs, says nothing, and every commit lands. The `2>&1` case below is the one that catches it.",
+  "script": ".game_loop/bin/guard-writes.sh",
+  "cases": [
+    {"name": "a commit carrying an unverified change is REFUSED",
+     "expect": "deny",
+     "payload": {"tool_name": "Bash",
+                 "tool_input": {"command": "git commit -m guardtest-probe"}}},
+    {"name": "...and STILL refused when the command redirects — this is the #113 regression, and the form output is usually captured in",
+     "expect": "deny",
+     "payload": {"tool_name": "Bash",
+                 "tool_input": {"command": "git commit -m guardtest-probe 2>&1"}}},
+    {"name": "...and still refused when it is also piped, which is how a probe usually gets read",
+     "expect": "deny",
+     "payload": {"tool_name": "Bash",
+                 "tool_input": {"command": "git commit -m guardtest-probe 2>&1 | tail -5"}}},
+    {"name": "an ordinary read passes untouched, so a guard that refuses everything does not pass this file",
+     "expect": "allow",
+     "payload": {"tool_name": "Bash", "tool_input": {"command": "cat README.md"}}}
+  ]
+}

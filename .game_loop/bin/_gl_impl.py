@@ -3993,19 +3993,29 @@ def cmd_authorize(s, a):
     _armed = s.get("t3_armed") or {}
     auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1),
             "asked_via_arm": bool(_armed.get("question")),
+            # A SPENT question is recorded SEPARATELY from a live one rather than folded into the
+            # same flag. "This exact question is open" and "some question was put to the human
+            # earlier in this session" are different claims, and collapsing them would recreate the
+            # defect one level up — a later, unrelated hatch would inherit the diligence of a
+            # question asked hours before. So the text is carried and the reader judges.
+            "asked_spent": ((s.get("t3_last_asked") or {}).get("question") or None),
             "arm_question": (_armed.get("question") or None)}
     s.setdefault("authorized", []).append(auth)
     save(s)
     logline({"kind": "authorize", "path": real, "reason": a.reason, "uses": auth["uses_left"],
-             "asked_via_arm": auth["asked_via_arm"]})
+             "asked_via_arm": auth["asked_via_arm"], "asked_spent": auth["asked_spent"]})
     out("✓ AUTHORIZED — one mutation outside this repo.",
         f"  path  : {real}",
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
         ("  asked : via an armed question — the reply is words you did not write"
          if auth["asked_via_arm"] else
-         "  asked : NO armed question in this session — the record says so, because a hatch spent "
-         "with\n          nobody asked and one spent after asking must not read the same later"),
+         ("  asked : a question WAS put to the human in this session and has been answered —\n"
+          "          \"" + (auth["asked_spent"] or "").splitlines()[0][:100] + "\"\n"
+          "          Named, not merely counted: judge for yourself whether it covers THIS hatch."
+          if auth["asked_spent"] else
+          "  asked : NO armed question in this session — the record says so, because a hatch spent "
+          "with\n          nobody asked and one spent after asking must not read the same later")),
         "→ the guard will consume this and log the use. It is permanent in log.jsonl.",
         *recur)
 
@@ -6376,6 +6386,16 @@ def cmd_stopgate(s, a, payload):
             # the run (poll_slack_replies reads t3_armed.slack_ts). `spent` stops the SAME arm from
             # re-opening the gate on a later turn-end, so the one-interruption invariant still holds.
             # A plain arm (no slack_ts) is nulled outright, exactly as before.
+            # KEEP WHAT WAS ASKED. The arm is the only record that a human was put in front of a
+            # question, and nulling it destroyed that record at the exact moment it was earned —
+            # so `authorize` two minutes later, acting ON the answer, read the live arm, found
+            # nothing, and logged `asked_via_arm: false` permanently. Its own line says a hatch
+            # spent with nobody asked and one spent after asking must not read the same later, and
+            # this made them read the same, in the direction that matters: the diligent order —
+            # ask, get an answer, then act — was the one recorded as careless. Observed twice in
+            # one session, on two authorizations the human had explicitly granted out loud.
+            s["t3_last_asked"] = {"question": (s["t3_armed"].get("question") or ""),
+                                  "at": now()}
             if s["t3_armed"].get("slack_ts"):
                 s["t3_armed"]["spent"] = True
             else:

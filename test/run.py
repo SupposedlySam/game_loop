@@ -610,6 +610,29 @@ def main():
         check("arm is consumed (next question blocks), with the gate's own words — a spent arm "
               "and a dead binary both exit 2, and only one of them says why",
               r.returncode == 2 and "STOP GATE CLOSED" in (r.stdout + r.stderr))
+
+        # SPENDING THE ARM DESTROYED THE ONLY RECORD THAT ANYBODY HAD BEEN ASKED. `authorize` reads
+        # the LIVE arm, so a hatch taken two minutes later — acting ON the answer, which is the
+        # correct order — found nothing armed and logged `asked_via_arm: false` permanently. Its own
+        # line promises that a hatch spent with nobody asked and one spent after asking must not
+        # read the same later, and it made them read the same in the direction that matters: the
+        # diligent sequence was the one recorded as careless. Observed twice in one session, on two
+        # authorizations the human had granted out loud.
+        _az = gl(proj, "authorize", "--path", "/private/tmp/gl-asked-probe",
+                 "--reason", "the human said to")
+        _azo = _az.stdout + _az.stderr
+        check("a hatch taken AFTER the question was answered says a human was asked — the arm is "
+              "spent by the asking, so reading only the live arm records the careful order as the "
+              "careless one",
+              _az.returncode == 0 and "a question WAS put to the human" in _azo)
+        check("...and it NAMES the question rather than counting it, because 'some question was "
+              "asked earlier' would let an unrelated later hatch inherit that diligence",
+              "which color?" in _azo)
+        _azn = gl(proj, "authorize", "--path", "/private/tmp/gl-asked-probe-2",
+                  "--reason", "nobody asked", sid="sess-never-armed")
+        check("...and a session that never armed anything still says so — the control, without "
+              "which the line above would be a sentence that is always printed",
+              "NO armed question in this session" in (_azn.stdout + _azn.stderr))
         gl(proj, "mandate", "--clear", "--notes", "done")
 
         print("write guard:")

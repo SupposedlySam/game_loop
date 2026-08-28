@@ -410,7 +410,38 @@ def in_order(hay, first, second):
 
 def main():
     proj = make_sandbox()
+    # Sandboxes a section built for ITSELF. Torn down with the shared one; see _own().
+    detached = []
     try:
+        def _own():
+            """A sandbox belonging to ONE section, so that section stops reading the shared `proj`.
+
+            THE SHARED SANDBOX IS WHAT MAKES THIS BLOCK INDIVISIBLE. Sections here write to one
+            tree and later ones read what earlier ones left, a dependency that runs through the
+            filesystem where no name analysis can see it — so selecting any section extends the
+            selection back to whichever earlier one defines a name it reads, and for anything
+            touching `proj` that is the top of the block. 6089 lines, 809 assertions, on every
+            subset that reaches one of them.
+
+            A section that takes its own sandbox stops reading `proj`, becomes its own boundary,
+            and costs a subset only itself. The price is one more tree copied — about ten
+            milliseconds against the minutes a prefix costs.
+
+            DEFINED BEFORE THE FIRST SECTION HEADER ON PURPOSE. Statements above section zero
+            belong to no section, so the pruner never drops them AND the closure finds no section
+            that defines this name — meaning reaching for it adds no dependency edge. A helper
+            defined one line lower would make every caller depend on the section holding it, which
+            is the prefix arriving again through the door marked exit.
+
+            NOT EVERY SECTION CAN TAKE ONE. Some genuinely assert on accumulated history — a log
+            that has grown, a grant already spent. Those must keep the shared tree, and they say so
+            by still reading `proj`. The failure mode when this is used wrongly is loud: the
+            section runs against an empty tree and its assertions go red, never quietly green.
+            """
+            p = make_sandbox()
+            detached.append(p)
+            return p
+
         def _logk(kind, _p=None):
             """How many records of `kind` the shared log holds — the ALLOW side's only evidence.
 
@@ -1021,10 +1052,11 @@ def main():
         # refusal — a human may legitimately re-authorize a path, and INV5 forbids a guard that
         # blocks its own fix, which here would be the write that repairs a wrong allow root.
         print("authorize recurrence (LOUD, never blocking):")
-        r1 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-a"),
+        arproj = _own()
+        r1 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-a"),
                 "--reason", "morgan said do the sweep")
         check("a first grant says nothing about recurrence", "BOUGHT A HATCH BEFORE" not in r1.stdout)
-        r2 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-b"),
+        r2 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-b"),
                 "--reason", "morgan said do the sweep")
         check("a SECOND distinct path under one reason is called out",
               "BOUGHT A HATCH BEFORE" in r2.stdout)
@@ -1042,14 +1074,14 @@ def main():
         check("it is LOUD, not a refusal — the grant still stands (INV5)",
               r2.returncode == 0 and "✓ AUTHORIZED" in r2.stdout)
         check("the recurrent grant is still spendable",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {"command": "touch ~/recur-b/x"}}))
+              allowed(arproj, {"tool_name": "Bash", "tool_input": {"command": "touch ~/recur-b/x"}}))
         check("the callout states what it misses", "REWORDED" in r2.stdout)
         # Reason matching is normalized for case and whitespace, and no further.
-        r3 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-c"),
+        r3 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-c"),
                 "--reason", "MORGAN   said Do The   Sweep")
         check("reason matching is case- and whitespace-normalized",
               "BOUGHT A HATCH BEFORE" in r3.stdout)
-        r4 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+        r4 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")
         check("an unrelated reason does not trip it", "BOUGHT A HATCH BEFORE" not in r4.stdout)
         # AND THE THIRD ANSWER. `authorize_recurrence` returned [] when the log could not be OPENED,
@@ -1074,17 +1106,17 @@ def main():
               "the first grant into a warning",
               _recm.recurrence_lines("some reason", "/tmp/p", "/tmp/p") == [])
         # ONE path re-granted once is an ordinary retry and must stay silent; the third says config.
-        r5 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+        r5 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")
         check("re-granting ONE path once is a retry, not a pattern",
               "BOUGHT A HATCH BEFORE" not in r5.stdout)
-        r6 = gl(proj, "authorize", "--path", os.path.expanduser("~/recur-d"),
+        r6 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")
         check("the same path bought a third time IS a pattern",
               "BOUGHT A HATCH BEFORE" in r6.stdout)
         # An MCP grant has a different remedy, and pointing at allow_write_roots would be wrong.
-        gl(proj, "authorize", "--path", "mcp__mail__archive", "--reason", "morgan okayed the mail run")
-        r7 = gl(proj, "authorize", "--path", "mcp__mail__label",
+        gl(arproj, "authorize", "--path", "mcp__mail__archive", "--reason", "morgan okayed the mail run")
+        r7 = gl(arproj, "authorize", "--path", "mcp__mail__label",
                 "--reason", "morgan okayed the mail run")
         check("a recurring MCP grant points at mcp_standing_writes, not allow_write_roots",
               "mcp_standing_writes" in r7.stdout and "allow_write_roots" not in r7.stdout)
@@ -3308,7 +3340,8 @@ def main():
         # unimplemented subcommand also exits non-zero, and a test that passes for that reason is a
         # test that cannot fail.
         print("environment pins:")
-        dep = os.path.join(proj, "dep-checkout")
+        epproj = _own()
+        dep = os.path.join(epproj, "dep-checkout")
         os.makedirs(dep, exist_ok=True)
         head_f = os.path.join(dep, "HEAD")      # stand-in for a checkout's .git/HEAD
         with open(head_f, "w") as f:
@@ -3317,22 +3350,22 @@ def main():
                   "--reason", "the merge API only exists on that commit; default branch lacks it",
                   "--path", head_f, "--expect", "abc123def456",
                   "--restore", "git -C dep-checkout checkout abc123def456"]
-        r = gl(proj, *pinned)
+        r = gl(epproj, *pinned)
         check("registers a pin anchored to a real path", r.returncode == 0 and "PIN" in r.stdout)
-        r = gl(proj, "status")
+        r = gl(epproj, "status")
         check("the pin survives into status, with the reason it is load-bearing",
               "dep-checkout is pinned to abc123def456" in r.stdout
               and "the merge API only exists on that commit" in r.stdout
               and "git -C dep-checkout checkout abc123def456" in r.stdout)
-        check("pin --list shows the live pin", "abc123def456" in gl(proj, "pin", "--list").stdout)
-        r = gl(proj, "pin", "--fact", "toolchain is 3.11", "--reason", "the build needs it",
-               "--path", os.path.join(proj, "no-such-checkout"))
+        check("pin --list shows the live pin", "abc123def456" in gl(epproj, "pin", "--list").stdout)
+        r = gl(epproj, "pin", "--fact", "toolchain is 3.11", "--reason", "the build needs it",
+               "--path", os.path.join(epproj, "no-such-checkout"))
         check("refuses a pin whose --path names nothing on disk",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
-        r = gl(proj, "pin", "--fact", "toolchain is 3.11", "--path", head_f)
+        r = gl(epproj, "pin", "--fact", "toolchain is 3.11", "--path", head_f)
         check("refuses a pin with no --reason (an unexplained pin is the invisible state again)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
-        r = gl(proj, "pin", "--fact", "dep is at deadbeef", "--reason", "why",
+        r = gl(epproj, "pin", "--fact", "dep is at deadbeef", "--reason", "why",
                "--path", head_f, "--expect", "deadbeef")
         check("refuses an --expect that does not already hold (a check born red is no check)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
@@ -3340,7 +3373,7 @@ def main():
         with open(head_f, "w") as f:
             f.write("ref: refs/heads/main\n")
         check("status flags a pin whose anchor drifted out from under it",
-              "DRIFTED" in gl(proj, "status").stdout)
+              "DRIFTED" in gl(epproj, "status").stdout)
         with open(head_f, "w") as f:
             f.write("abc123def456\n")
         # #31 — INVERTED, deliberately, and this assertion used to say the opposite. #18 shipped
@@ -3352,39 +3385,39 @@ def main():
         # #17 answered the same question for refuted claims the other way and wrote down why: a
         # negative result is knowledge about the CHECKOUT. That argument is stronger for a pin,
         # which is knowledge about the ENVIRONMENT two sessions genuinely share.
-        gl(proj, "pin", "--fact", "sess-pin-A only", "--reason", "A's build needs it",
+        gl(epproj, "pin", "--fact", "sess-pin-A only", "--reason", "A's build needs it",
            "--path", head_f, sid="pinA0001")
-        _other = gl(proj, "status", sid="pinB0002").stdout
+        _other = gl(epproj, "status", sid="pinB0002").stdout
         check("a pin registered in one session DOES reach another's status — the run that tidies "
               "it away is the one that never knew why it was there",
               "sess-pin-A only" in _other
-              and "sess-pin-A only" in gl(proj, "status", sid="pinA0001").stdout)
+              and "sess-pin-A only" in gl(epproj, "status", sid="pinA0001").stdout)
         check("...and the other session is told WHO pinned it, so there is somebody to ask",
               "pinned by" in _other)
         # The effector/instrument/fix registries stay session-scoped on purpose: a proof that a verb
         # acts, or that a metric is controlled, is a PERISHABLE fact about this run's regime, and
         # inheriting one is the "assumed to have survived the change" failure. Asserted here so the
         # sharing above reads as a decision about pins rather than a drift toward sharing everything.
-        gl(proj, "effector", "--prove", "scroll31", "--known-state", "k",
+        gl(epproj, "effector", "--prove", "scroll31", "--known-state", "k",
            "--before", head_f, "--observed", head_f, sid="pinA0001")
         check("...while an effector proof stays SESSION-scoped — perishable facts are not shared",
-              "scroll31" not in gl(proj, "status", sid="pinB0002").stdout)
-        r = gl(proj, "pin", "--release", "p1")
+              "scroll31" not in gl(epproj, "status", sid="pinB0002").stdout)
+        r = gl(epproj, "pin", "--release", "p1")
         check("refuses to release a pin without --notes (the revert must stay a stated decision)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
-        r = gl(proj, "pin", "--release", "p1", "--notes", "the API landed on the default branch")
+        r = gl(epproj, "pin", "--release", "p1", "--notes", "the API landed on the default branch")
         check("releases a pin by id", r.returncode == 0 and "RELEASED" in r.stdout)
-        r = gl(proj, "status")   # a bare absence would pass against an unimplemented verb, so this
+        r = gl(epproj, "status")   # a bare absence would pass against an unimplemented verb, so this
         check("a released pin is gone from status, while pins nobody released stay — the list is "
               "the CHECKOUT's now, so 'none left' is no longer the same claim as 'this one went'",
               "dep-checkout is pinned to abc123def456" not in r.stdout
               and "sess-pin-A only" in r.stdout)
-        r2 = gl(proj, "pin", "--release", "p2", "--notes", "A's build moved on")
+        r2 = gl(epproj, "pin", "--release", "p2", "--notes", "A's build moved on")
         check("...and releasing another session's pin SAYS whose it was — the run tidying up is by "
               "construction the one that never knew why the state was unusual",
               r2.returncode == 0 and "registered by ANOTHER session" in r2.stdout)
         check("...and with every pin released the empty-pins line is back",
-              "pins: none" in gl(proj, "status").stdout)
+              "pins: none" in gl(epproj, "status").stdout)
         # "NONE REGISTERED" IS A CLAIM, and one path could not make it. `shared_pins` returned []
         # when the shared log would not OPEN, which renders as that same affirmative line — so a
         # checkout whose log is unreadable told the reader there is nothing load-bearing here. That
@@ -3412,13 +3445,13 @@ def main():
         # `raise` on that line does not redden the suite, so nothing here executes it. The question
         # came from lamp-owner, whose measurement was that a glyph is the least-asserted part of a
         # CLI because it looks too obvious to test; mine turned out to be one step worse than that.
-        _gone = os.path.join(proj, "vanishing-anchor.txt")
+        _gone = os.path.join(epproj, "vanishing-anchor.txt")
         with open(_gone, "w") as f:
             f.write("this file is about to stop existing\n")
-        gl(proj, "pin", "--fact", "the anchor exists", "--reason", "it is about to not",
+        gl(epproj, "pin", "--fact", "the anchor exists", "--reason", "it is about to not",
            "--path", _gone)
         os.remove(_gone)
-        _missing = gl(proj, "status").stdout
+        _missing = gl(epproj, "status").stdout
         check("status reports a pin whose anchor is GONE — the failure pins exist for, and the one "
               "arm of pin_state nothing was executing",
               has(_missing, "MISSING") and has(_missing, "vanishing-anchor.txt"))
@@ -3431,7 +3464,7 @@ def main():
               "rendered on a different line from the word MISSING, and an assertion on the word "
               "alone passes with the symbol reversed",
               _glyph_line.strip().startswith("✗"))
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+        with open(os.path.join(epproj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("both the pin and its release are permanent in the log",
               '"pin"' in log and '"pin_release"' in log
@@ -3514,13 +3547,14 @@ def main():
         # answer the warning was to re-bind and silently move the record of when the human spoke.
         # The field was unusable for its own purpose in the normal case, not an edge one.
         print("a wake path can be recorded without re-binding the mandate (#95):")
+        wpproj = _own()
         wk = "sess-wake95"
-        gl(proj, "mandate", "--set", "keep the crawl going", sid=wk)
+        gl(wpproj, "mandate", "--set", "keep the crawl going", sid=wk)
 
         def _mandate(sid):
             for rel in (os.path.join(".game_loop", "sessions", sid, "state.json"),
                         os.path.join(".game_loop", "state.json")):
-                d = json_or_none(os.path.join(proj, rel)) or {}
+                d = json_or_none(os.path.join(wpproj, rel)) or {}
                 m = d.get("mandate") or {}
                 if m.get("active"):
                     return m
@@ -3530,7 +3564,7 @@ def main():
         check("a mandate records WHEN it was bound, which is the thing the rest of this protects",
               bool(_since0))
         time.sleep(1.1)                      # the stamp has second resolution; make a change visible
-        r = gl(proj, "mandate", "--wake-path", "a cron every 10 minutes", sid=wk)
+        r = gl(wpproj, "mandate", "--wake-path", "a cron every 10 minutes", sid=wk)
         _m = _mandate(wk)
         check("--wake-path alone is accepted on a live mandate — no --set, so the human's words "
               "are not retyped and cannot be paraphrased in passing",
@@ -3546,15 +3580,15 @@ def main():
         # The same protection on the documented allowance: the replace-refusal says re-setting the
         # SAME words costs nothing, and it did cost `since` silently.
         time.sleep(1.1)
-        gl(proj, "mandate", "--set", "keep the crawl going", sid=wk)
+        gl(wpproj, "mandate", "--set", "keep the crawl going", sid=wk)
         check("...and an IDENTICAL re-bind keeps `since` too — the refusal above promises a re-bind "
               "after compaction costs nothing, and moving the stamp is a cost",
               _mandate(wk).get("since") == _since0)
         # THE NEGATIVE ARM. If `since` were simply never restamped, all of the above would pass and
         # the field would be frozen at the first mandate a session ever had.
         time.sleep(1.1)
-        gl(proj, "mandate", "--clear", "--notes", "done", sid=wk)
-        gl(proj, "mandate", "--set", "a genuinely different mandate", sid=wk)
+        gl(wpproj, "mandate", "--clear", "--notes", "done", sid=wk)
+        gl(wpproj, "mandate", "--set", "a genuinely different mandate", sid=wk)
         check("...but DIFFERENT words restamp it: a new mandate is a new mandate, and this is what "
               "says the checks above are preserving a value rather than freezing one",
               _mandate(wk).get("since") != _since0)
@@ -3562,7 +3596,7 @@ def main():
         # generic "mandate needs --set" usage text — the right refusal by the wrong road, saying
         # nothing about the flag actually typed. Same shape as `--fault ""` and a misspelt
         # `expect`: a correct verdict whose reason sends you somewhere else.
-        _we = gl(proj, "mandate", "--wake-path", "", sid=wk)
+        _we = gl(wpproj, "mandate", "--wake-path", "", sid=wk)
         check("#95: an EMPTY --wake-path is refused AS an empty wake path — an empty answer is "
               "worse than none, because `status` would stop warning while nothing had actually "
               "been arranged, and the generic usage text never mentioned the flag at all",
@@ -3571,7 +3605,7 @@ def main():
         check("#95: ...and the mandate's recorded wake path is UNTOUCHED by that refusal, so a "
               "typo cannot quietly erase the one that was already arranged",
               _mandate(wk).get("wake_path") == "a cron every 10 minutes")
-        r = gl(proj, "mandate", "--wake-path", "x", sid="sess-wake95-none")
+        r = gl(wpproj, "mandate", "--wake-path", "x", sid="sess-wake95-none")
         check("--wake-path with NO mandate bound is refused, not silently stored — a wake path "
               "answers a question only asked while something is waiting",
               r.returncode != 0 and "nothing to record a wake path for" in (r.stderr + r.stdout))
@@ -3586,14 +3620,15 @@ def main():
         # are per-run, "which is why they belong in the doorbell prompt and not in any static doc".
         # A template shipped as prose would be the exact artifact that report found insufficient.
         print("the doorbell carries THIS run, and says so when it has nothing to carry (#95):")
+        dbproj = _own()
         _db = "sess-doorbell"
-        r = gl(proj, "doorbell", sid=_db)
+        r = gl(dbproj, "doorbell", sid=_db)
         check("with no mandate bound, `doorbell` says there is nothing to wake the run FOR rather "
               "than printing a confident prompt with a hole where the goal goes",
               r.returncode == 0 and "nothing to wake this run FOR" in r.stdout
               and "WAKE-UP PROMPT" not in r.stdout)
-        gl(proj, "mandate", "--set", "finish the migration", sid=_db)
-        r = gl(proj, "doorbell", sid=_db)
+        gl(dbproj, "mandate", "--set", "finish the migration", sid=_db)
+        r = gl(dbproj, "doorbell", sid=_db)
         check("...once a mandate is bound it emits a prompt naming what DONE MEANS, in the "
               "mandate's own words rather than a paraphrase",
               "WAKE-UP PROMPT" in r.stdout and "finish the migration" in r.stdout)
@@ -3611,32 +3646,32 @@ def main():
               "reads, from inside the session, exactly like one that never had to ring",
               "NOTHING RECORDS HOW THIS PROMPT REACHES" in r.stdout)
 
-        r = gl(proj, "note", "--recovery",
+        r = gl(dbproj, "note", "--recovery",
                "the FK teardown flake is known: re-run the job, do not chase it", sid=_db)
         check("`note --recovery` records a remedy and says which verb will carry it, so recording "
               "one is not an act of faith",
               r.returncode == 0 and "doorbell" in r.stdout)
-        r = gl(proj, "doorbell", sid=_db)
+        r = gl(dbproj, "doorbell", sid=_db)
         check("...and a LATER, SEPARATE invocation carries it — the whole point is reaching a "
               "session that has already lost the context that would make it go looking in a log",
               "RECOVERY PATHS" in r.stdout and "do not chase it" in r.stdout
               and "NO RECOVERY PATHS ARE RECORDED" not in r.stdout)
-        gl(proj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_db)
-        r = gl(proj, "doorbell", sid=_db)
+        gl(dbproj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_db)
+        r = gl(dbproj, "doorbell", sid=_db)
         check("...and a declared wake path is named AND labelled declared-never-probed — the same "
               "honesty the recording verb prints, in the place it will actually be read",
               "a host cron every 10 minutes" in r.stdout and "never probed" in r.stdout
               and "NOTHING RECORDS HOW" not in r.stdout)
-        _rf = os.path.join(proj, "recovery-path.txt")
+        _rf = os.path.join(dbproj, "recovery-path.txt")
         with open(_rf, "w") as f:
             f.write("retry with `make deploy RETRY=1` — a shell would eat those backticks\n")
-        r = gl(proj, "note", "--recovery-file", _rf, sid=_db)
-        r2 = gl(proj, "doorbell", sid=_db)
+        r = gl(dbproj, "note", "--recovery-file", _rf, sid=_db)
+        r2 = gl(dbproj, "doorbell", sid=_db)
         check("--recovery-file exists and carries text a shell argument would mangle — half of "
               "these name the command to re-run, and a corrupted remedy is read by the one session "
               "least equipped to notice it is wrong",
               r.returncode == 0 and "`make deploy RETRY=1`" in r2.stdout)
-        r = gl(proj, "doorbell", sid="sess-doorbell-other")
+        r = gl(dbproj, "doorbell", sid="sess-doorbell-other")
         check("...and another session's recovery paths do not reach this one's doorbell — state is "
               "per-session, and a remedy learned in a different run is a guess here",
               "make deploy" not in r.stdout)
@@ -3772,32 +3807,33 @@ def main():
                   _wtext("/p/.game_loop", _wire(_mkwire(_hk(_PINCMD), _hk(_PINCMD))))))
 
         print("a wake that LANDED is recorded; one that never came cannot be (#95):")
+        wkproj = _own()
         _wk = "sess-woke"
-        gl(proj, "mandate", "--set", "keep going", sid=_wk)
-        gl(proj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_wk)
-        r = gl(proj, "status", sid=_wk)
+        gl(wkproj, "mandate", "--set", "keep going", sid=_wk)
+        gl(wkproj, "mandate", "--wake-path", "a host cron every 10 minutes", sid=_wk)
+        r = gl(wkproj, "status", sid=_wk)
         check("#95: with a wake path declared and nothing recorded, status says NO WAKE HAS LANDED "
               "— and says that is not evidence none did, since only a woken run can record one and "
               "a run that never woke could not have",
               "NO WAKE IS RECORDED" in r.stdout and "not evidence none did" in r.stdout)
-        r = gl(proj, "note", "--woke", sid=_wk)
+        r = gl(wkproj, "note", "--woke", sid=_wk)
         check("#95: `note --woke` records an arrival, and says plainly that this is the only "
               "direction observable from in here",
               r.returncode == 0 and "LANDED" in r.stdout
               and "cannot record its own absence" in r.stdout)
-        r = gl(proj, "status", sid=_wk)
+        r = gl(wkproj, "status", sid=_wk)
         check("#95: ...and status then reports WHEN it landed and how old that is — the six-hour "
               "hole was a wake path that had not delivered, which an age is what shows",
               "last wake LANDED" in r.stdout and "min ago" in r.stdout)
         check("#95: ...and it still names what it CANNOT see: a wake requested and never delivered "
               "leaves nothing here, which is why this is not the probe the issue asked for",
               "invisible from in here" in r.stdout)
-        gl(proj, "note", "--woke", sid=_wk)
-        r = gl(proj, "status", sid=_wk)
+        gl(wkproj, "note", "--woke", sid=_wk)
+        r = gl(wkproj, "status", sid=_wk)
         check("#95: ...and arrivals COUNT rather than overwrite, so a path delivering once and one "
               "delivering all morning are not the same reading",
               "2 this session" in r.stdout)
-        r = gl(proj, "doorbell", sid=_wk)
+        r = gl(wkproj, "doorbell", sid=_wk)
         check("#95: ...and the doorbell prompt ASKS the woken session to record it — nothing else "
               "can, so a prompt that does not say so guarantees the report above stays empty",
               "note --woke" in r.stdout)
@@ -3807,19 +3843,19 @@ def main():
         # minutes with nothing landed in many multiples of N is a dead path, and this run can say
         # so with no outside help. That is exactly the six-hour hole #95 was filed about.
         _we = "sess-wake-every"
-        gl(proj, "mandate", "--set", "keep going", sid=_we)
-        gl(proj, "mandate", "--wake-path", "a cron every 10 minutes", "--wake-every", "10", sid=_we)
-        gl(proj, "note", "--woke", sid=_we)
-        r = gl(proj, "status", sid=_we)
+        gl(wkproj, "mandate", "--set", "keep going", sid=_we)
+        gl(wkproj, "mandate", "--wake-path", "a cron every 10 minutes", "--wake-every", "10", sid=_we)
+        gl(wkproj, "note", "--woke", sid=_we)
+        r = gl(wkproj, "status", sid=_we)
         check("#95: with a cadence declared and a wake just landed, status says the cadence HOLDS "
               "rather than warning — the quiet case has to be quiet or the loud one means nothing",
               "cadence holds" in r.stdout and "OVERDUE" not in r.stdout)
-        _wf = os.path.join(proj, ".game_loop", "sessions", _we, "state.json")
+        _wf = os.path.join(wkproj, ".game_loop", "sessions", _we, "state.json")
         _wd = json_or_none(_wf) or {}
         _wd.setdefault("wake_landed", {})["at"] = "2020-01-01T00:00:00"
         with open(_wf, "w") as f:
             json.dump(_wd, f)
-        r = gl(proj, "status", sid=_we)
+        r = gl(wkproj, "status", sid=_we)
         check("#95: ...and a cadence gone SILENT is reported OVERDUE, naming roughly how many "
               "expected wakes never arrived — the consumer's report was a live poller, a healthy "
               "heartbeat and six hours of nothing delivered, which nothing here could see",
@@ -3828,11 +3864,11 @@ def main():
               "never arrived remains invisible, because the run that would record it is the run "
               "that did not happen — only a cadence is detectable",
               "single wake requested and never delivered is still invisible" in r.stdout)
-        gl(proj, "mandate", "--clear", "--notes", "d", sid="sess-nocad")
-        gl(proj, "mandate", "--set", "x", sid="sess-nocad")
-        gl(proj, "mandate", "--wake-path", "a human who checks", sid="sess-nocad")
-        gl(proj, "note", "--woke", sid="sess-nocad")
-        r = gl(proj, "status", sid="sess-nocad")
+        gl(wkproj, "mandate", "--clear", "--notes", "d", sid="sess-nocad")
+        gl(wkproj, "mandate", "--set", "x", sid="sess-nocad")
+        gl(wkproj, "mandate", "--wake-path", "a human who checks", sid="sess-nocad")
+        gl(wkproj, "note", "--woke", sid="sess-nocad")
+        r = gl(wkproj, "status", sid="sess-nocad")
         check("#95: ...and with NO cadence declared it says a stopped path cannot be told from one "
               "nobody has needed yet — the third answer, rather than a silence that reads as "
               "healthy",
@@ -3908,18 +3944,19 @@ def main():
         # distinct from a success, must carry the control that killed it, and must cost no more than
         # any other claim — the incentive to quietly move on is the bug being fixed.
         print("claim outcomes (being wrong is first-class, #17):")
-        r = gl(proj, "claim", "--assert", "the cache is invalidated on write",
+        coproj = _own()
+        r = gl(coproj, "claim", "--assert", "the cache is invalidated on write",
                "--read", real, "--outcome", "refuted")
         check("a refuted claim REFUSES without the disproving evidence",
               r.returncode != 0 and "--evidence" in r.stderr)
-        r = gl(proj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
+        r = gl(coproj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
                "--outcome", "refuted", "--evidence", "/no/such/control.log")
         check("a refuted claim refuses evidence that isn't a real file",
               r.returncode != 0 and "don't resolve to a real" in r.stderr)
-        control = os.path.join(proj, "control.log")
+        control = os.path.join(coproj, "control.log")
         with open(control, "w") as f:
             f.write("control run: the cache was NOT invalidated\n")
-        r = gl(proj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
+        r = gl(coproj, "claim", "--assert", "the cache is invalidated on write", "--read", real,
                "--outcome", "refuted", "--evidence", control)
         check("a refuted claim with real evidence is recorded",
               r.returncode == 0 and "REFUTED" in r.stdout)
@@ -3929,7 +3966,7 @@ def main():
         # ruled-out path as a sourced one, in the verb this whole harness is built around. `"REFUTED"
         # in stdout` is satisfied by that line whatever character precedes it.
         _refuted_out = r.stdout
-        r = gl(proj, "claim", "--assert", "the retry budget is three", "--read", real,
+        r = gl(coproj, "claim", "--assert", "the retry budget is three", "--read", real,
                "--outcome", "inconclusive", "--evidence", control)
         _inconc = r.stdout
         check("a claim that DID NOT SETTLE is its own outcome — recorded, and not quietly filed as "
@@ -3941,16 +3978,16 @@ def main():
               "ruled-out path wearing the success symbol is the record training the wrong lesson",
               _hl(_refuted_out, "REFUTED").strip().startswith("✗")
               and _hl(_inconc, "INCONCLUSIVE").strip().startswith("~")
-              and _hl(gl(proj, "claim", "--assert", "the flag defaults off", "--read", real).stdout,
+              and _hl(gl(coproj, "claim", "--assert", "the flag defaults off", "--read", real).stdout,
                       "CLAIM sourced").strip().startswith("✓"))
-        r = gl(proj, "claim", "--assert", "x", "--read", real, "--outcome", "nonsense")
+        r = gl(coproj, "claim", "--assert", "x", "--read", real, "--outcome", "nonsense")
         check("an unknown --outcome is refused",
               r.returncode != 0 and "inconclusive" in r.stderr)
-        r = gl(proj, "claim", "--assert", "the flag defaults on", "--outcome", "refuted",
+        r = gl(coproj, "claim", "--assert", "the flag defaults on", "--outcome", "refuted",
                "--evidence", control)
         check("a retraction costs exactly one real path (evidence stands in for --read)",
               r.returncode == 0)
-        r = gl(proj, "status")
+        r = gl(coproj, "status")
         check("status surfaces the standing RULED-OUT list",
               "RULED OUT" in r.stdout and "the cache is invalidated on write" in r.stdout)
         check("the ruled-out entry names the control that killed it", "control.log" in r.stdout)
@@ -3958,9 +3995,9 @@ def main():
         # cannot see, and all three are what a resumed run actually depends on. The header count is
         # how you know whether the five shown are the whole story.
         for _i in range(6):
-            gl(proj, "claim", "--assert", f"dead path number {_i}", "--outcome", "refuted",
+            gl(coproj, "claim", "--assert", f"dead path number {_i}", "--outcome", "refuted",
                "--evidence", control)
-        _ro = gl(proj, "status").stdout
+        _ro = gl(coproj, "status").stdout
         check("...and the list is COUNTED in its header, so five shown out of many is visibly a "
               "sample rather than the whole standing list",
               has(_ro, "RULED OUT (8)"))
@@ -3983,7 +4020,7 @@ def main():
         # re-walk a dead path is usually a LATER session holding none of this one's state. Every
         # assertion above ran under one session id, so a version that had quietly become
         # per-session would have passed all of them.
-        _later = gl(proj, "status", sid="sess-a-completely-different-run").stdout
+        _later = gl(coproj, "status", sid="sess-a-completely-different-run").stdout
         check("...and a DIFFERENT session inherits the whole standing list — a negative result is "
               "knowledge about the CHECKOUT, and the run that must not re-walk a dead path is the "
               "one holding none of the state that recorded it",
@@ -3996,14 +4033,14 @@ def main():
 
         # TOLERANT, because status must print everything else even when this cannot be read. A
         # half-written line is what an interrupted append leaves, and it must not take status down.
-        with open(os.path.join(proj, ".game_loop", "log.jsonl"), "a") as f:
+        with open(os.path.join(coproj, ".game_loop", "log.jsonl"), "a") as f:
             f.write('{"kind": "claim", "outcome": "refu\n')
-        _tor = gl(proj, "status")
+        _tor = gl(coproj, "status")
         check("...and a half-written log line is SKIPPED rather than fatal — an interrupted append "
               "is the ordinary state of an append-only file, and status owes its other sections",
               _tor.returncode == 0 and has(_tor.stdout, "RULED OUT")
               and has(_tor.stdout, "dead path number 5"))
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+        with open(os.path.join(coproj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("a refutation is greppable in the log as an outcome, not a success",
               '"outcome": "refuted"' in log)
@@ -4014,7 +4051,8 @@ def main():
         # return code: the keystone is a before/after pair THIS TOOL compares, never an assertion
         # that something moved.
         print("effector proofs (a verb that actually acts, #19):")
-        cap = os.path.join(proj, "captures")
+        efproj = _own()
+        cap = os.path.join(efproj, "captures")
         os.makedirs(cap, exist_ok=True)
         before = os.path.join(cap, "before.txt")
         after = os.path.join(cap, "after.txt")
@@ -4025,40 +4063,40 @@ def main():
             f.write("comps: row1\ncomps: row2\n")   # byte-identical: `cliclick w:` waited, exit 0
         with open(after, "w") as f:
             f.write("comps: row1\ncomps: row2\ncomps: row3 BELOW THE FOLD\n")
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--exit-code", "0")
         check("a proof backed only by an exit code is refused, by name",
               r.returncode != 0 and "EXIT CODE IS NOT THE ASSERTION" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--observed", after)
         check("a result with nothing to compare it against is refused",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--before" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--before", before, "--observed", after)
+        r = gl(efproj, "effector", "--prove", "scroll", "--before", before, "--observed", after)
         check("a proof without a known-response state is refused",
               r.returncode != 0 and "--known-state" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--before", before, "--observed", "/no/such/capture.png")
         check("a proof whose observed artifact does not resolve is refused",
               r.returncode != 0 and "--observed does not resolve" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--before", "/no/such/capture.png", "--observed", after)
         check("a proof whose before artifact does not resolve is refused",
               r.returncode != 0 and "--before does not resolve" in r.stderr)
         # THE keystone. This is the `cliclick w:` incident exactly: exit 0, nothing scrolled, and
         # "the app cannot scroll at all" filed as the run's top-severity finding.
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--before", before, "--observed", unchanged)
         check("an identical before/after pair is refused — the world did not move",
               r.returncode != 0 and "IDENTICAL" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--before", before, "--observed", after, "--expect", "row9 NEVER RENDERED")
         check("--expect absent from the observed capture is refused (something changed, not THAT)",
               r.returncode != 0 and "does not appear in the observed capture" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state", "the comps list overflows",
                "--before", before, "--observed", after, "--expect", "comps: row1")
         check("--expect that was ALREADY true before the act is refused",
               r.returncode != 0 and "ALREADY in the before capture" in r.stderr)
-        r = gl(proj, "effector", "--prove", "scroll", "--known-state",
+        r = gl(efproj, "effector", "--prove", "scroll", "--known-state",
                "the comps list overflows the fold", "--before", before, "--observed", after,
                "--expect", "row3 BELOW THE FOLD", "--scale", "1.73")
         check("a proof naming a known-response state and a real observed change is accepted",
@@ -4072,7 +4110,7 @@ def main():
         _eline = lambda out, nm: next((l for l in out.splitlines()
                                        if l.strip().startswith(("✓", "•", "✗", "?"))
                                        and nm in l), "")
-        _es = gl(proj, "status").stdout
+        _es = gl(efproj, "status").stdout
         check("a proved effector renders ✓ and names the change it asserted — the ordinary case, "
               "and the one every claim leaning on an effector is standing on",
               has(_es, "acted, and the change was the asserted one")
@@ -4082,9 +4120,9 @@ def main():
             f.write("panel: closed\n")
         with open(_ua, "w") as f:
             f.write("panel: open\n")
-        gl(proj, "effector", "--prove", "toggle", "--known-state", "the panel starts closed",
+        gl(efproj, "effector", "--prove", "toggle", "--known-state", "the panel starts closed",
            "--before", _ub, "--observed", _ua)
-        _us = gl(proj, "status").stdout
+        _us = gl(efproj, "status").stdout
         check("...and one proved with NO --expect renders • and says UNCHECKED — the pair proves "
               "SOMETHING changed, which is not the same claim as the asserted thing changing",
               has(_us, "acted (UNCHECKED — no --expect")
@@ -4092,7 +4130,7 @@ def main():
         # AND THE PROVE LINE ITSELF carries the same symbol, from the same producer — `{sym}
         # EFFECTOR PROVED` is the sentence an agent reads at the moment it decides the proof is
         # good, and "EFFECTOR PROVED" is identical whether the symbol says checked or unchecked.
-        _tog = gl(proj, "effector", "--prove", "toggle2", "--known-state", "the panel starts closed",
+        _tog = gl(efproj, "effector", "--prove", "toggle2", "--known-state", "the panel starts closed",
                   "--before", _ub, "--observed", _ua)
         check("...and the ACCEPT line carries the symbol too: an unchecked proof announces itself "
               "as • at the moment it is granted, not only later in status",
@@ -4100,54 +4138,54 @@ def main():
               and _tog.stdout.strip().startswith("•"))
         with open(_ua, "w") as f:
             f.write("panel: open, and then something else wrote here\n")
-        _os_ = gl(proj, "status").stdout
+        _os_ = gl(efproj, "status").stdout
         check("...and an artifact OVERWRITTEN since the comparison is ? unverifiable, not ✓ — the "
               "file at that path is no longer the one that was compared, and a proof pointing at "
               "different bytes than it was made from is not a proof of anything",
               has(_os_, "no longer the one that was compared")
               and _eline(_os_, "toggle").strip().startswith("?"))
         os.remove(_ua)
-        _ms = gl(proj, "status").stdout
+        _ms = gl(efproj, "status").stdout
         check("...and a GONE artifact is ✗ MISSING, which is a different answer again: overwritten "
               "means the evidence changed, missing means there is none to inspect",
               has(_ms, "MISSING — the observed artifact is gone")
               and _eline(_ms, "toggle").strip().startswith("✗"))
-        r = gl(proj, "claim", "--assert", "the app cannot scroll at all", "--read", real,
+        r = gl(efproj, "claim", "--assert", "the app cannot scroll at all", "--read", real,
                "--effector", "click")
         check("a claim depending on an unproven effector is refused",
               r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
-        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+        r = gl(efproj, "claim", "--assert", "the comps table renders below the fold",
                "--effector", "scroll")
         check("a claim on a proved effector is admitted, its pair standing in for --read",
               r.returncode == 0 and "effector  : scroll" in r.stdout)
         # A proof is a perishable fact about THIS run's environment (this display awake, this helper
         # wired to this binary), so it must not admit a sibling session's findings.
-        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+        r = gl(efproj, "claim", "--assert", "the comps table renders below the fold",
                "--effector", "scroll", sid="sess-eff-b")
         check("an effector proof does not leak into another session's admissions",
               r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
         # "Arithmetic in the harness is a defect generator": 640x1.73 was the conversion whose
         # author got it wrong on the very next run, so the tool does it.
-        r = gl(proj, "effector", "--aim", "scroll", "--at", "640,480")
+        r = gl(efproj, "effector", "--aim", "scroll", "--at", "640,480")
         check("the tool converts coordinates so the caller never multiplies by hand",
               r.returncode == 0 and "1107,830" in r.stdout)
-        r = gl(proj, "effector", "--aim", "nosuch", "--at", "1,1")
+        r = gl(efproj, "effector", "--aim", "nosuch", "--at", "1,1")
         check("aiming an unproven effector is refused (arithmetic on a guess)",
               r.returncode != 0 and "nothing to aim" in r.stderr)
-        r = gl(proj, "status")
+        r = gl(efproj, "status")
         check("status carries the proof and its known-response state through compaction",
               "EFFECTORS" in r.stdout and "the comps list overflows the fold" in r.stdout)
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+        with open(os.path.join(efproj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("the proof is greppable in the log as a compared PAIR, not a verdict",
               '"kind": "effector_proof"' in log and '"before_digest"' in log
               and '"observed_digest"' in log)
-        r = gl(proj, "effector", "--release", "scroll")
+        r = gl(efproj, "effector", "--release", "scroll")
         check("refuses to retire a proof without --notes (findings were admitted on it)",
               r.returncode != 0 and "--notes" in r.stderr)
-        r = gl(proj, "effector", "--release", "scroll", "--notes", "the display slept mid-run")
+        r = gl(efproj, "effector", "--release", "scroll", "--notes", "the display slept mid-run")
         check("releases a proof by name", r.returncode == 0 and "RELEASED" in r.stdout)
-        r = gl(proj, "claim", "--assert", "the comps table renders below the fold",
+        r = gl(efproj, "claim", "--assert", "the comps table renders below the fold",
                "--effector", "scroll")
         check("after a release, a claim leaning on that effector is refused again",
               r.returncode != 0 and "nothing in this session proves it did" in r.stderr)
@@ -4223,6 +4261,7 @@ def main():
         # game_loop's own message text, never a bare non-zero exit: argparse's "invalid choice" also
         # exits non-zero, and a test that passes for THAT reason is a test that cannot fail.
         print("instruments (a number is evidence only once it is controlled, #14 #11 #13):")
+        inproj = _own()
         HARM = "audible dropouts the listener actually hears"
         CONN = "each underrun empties the ring buffer, and an empty buffer plays as silence"
         reg = ["instrument", "--register", "underruns", "--measures", HARM, "--connects", CONN,
@@ -4232,73 +4271,73 @@ def main():
             i = reg.index(flag)
             return reg[:i] + reg[i + 2:]
 
-        r = gl(proj, *without("--measures"))
+        r = gl(inproj, *without("--measures"))
         check("refuses an instrument that declares no user-visible harm (#13)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--measures" in r.stderr)
-        r = gl(proj, *without("--connects"))
+        r = gl(inproj, *without("--connects"))
         check("refuses an instrument that never says HOW the number reaches that harm (#13)",
               r.returncode != 0 and "--connects" in r.stderr)
-        r = gl(proj, *without("--null"))
+        r = gl(inproj, *without("--null"))
         check("refuses an instrument with no null control (#11)",
               r.returncode != 0 and "no null control" in r.stderr)
-        r = gl(proj, *without("--positive"))
+        r = gl(inproj, *without("--positive"))
         check("refuses an instrument with no positive control (#11)",
               r.returncode != 0 and "no positive control" in r.stderr)
-        r = gl(proj, *(without("--null") + ["--null", "4053"]))
+        r = gl(inproj, *(without("--null") + ["--null", "4053"]))
         check("refuses a control given as ONE absolute value — a control is a delta too (#14)",
               r.returncode != 0 and "TWO endpoint" in r.stderr)
-        r = gl(proj, *(without("--null") + ["--null", "0,4053"]))
+        r = gl(inproj, *(without("--null") + ["--null", "0,4053"]))
         check("a NON-ZERO null control is refused, and the refusal NAMES it (#11)",
               r.returncode != 0 and "null control is NOT zero" in r.stderr and "4053" in r.stderr)
-        r = gl(proj, *(without("--positive") + ["--positive", "7,7"]))
+        r = gl(inproj, *(without("--positive") + ["--positive", "7,7"]))
         check("refuses an instrument whose positive control never caught anything (#11)",
               r.returncode != 0 and "positive control never moved" in r.stderr)
-        r = gl(proj, *reg)
+        r = gl(inproj, *reg)
         check("admits an instrument with a declared harm and both controls",
               r.returncode == 0 and "INSTRUMENT ADMITTED" in r.stdout)
-        r = gl(proj, *reg)
+        r = gl(inproj, *reg)
         check("refuses to silently re-register an admitted instrument (re-controlling is logged)",
               r.returncode != 0 and "already admitted" in r.stderr)
         # #14's incident, in the refusal: 157839 of 176001 read as a 90% failure rate; deltas across
         # the interaction showed zero in thirty trials, because the rest accrued while idle.
-        r = gl(proj, "measure", "--instrument", "underruns", "--before", "176001")
+        r = gl(inproj, "measure", "--instrument", "underruns", "--before", "176001")
         check("refuses a single absolute reading — a reading is two endpoints (#14)",
               r.returncode != 0 and "TWO endpoints" in r.stderr and "157839" in r.stderr)
-        r = gl(proj, "measure", "--instrument", "no-such-counter", "--before", "0", "--after", "1")
+        r = gl(inproj, "measure", "--instrument", "no-such-counter", "--before", "0", "--after", "1")
         check("refuses a reading of an instrument that was never admitted",
               r.returncode != 0 and "never admitted" in r.stderr)
         # 40 → 290 is Δ250: the delta appears NOWHERE in the arguments, so only the tool can print it.
-        r = gl(proj, "measure", "--instrument", "underruns", "--before", "40", "--after", "290",
+        r = gl(inproj, "measure", "--instrument", "underruns", "--before", "40", "--after", "290",
                "--notes", "thirty trials, active playback only")
         check("accepts a two-endpoint reading and computes the delta ITSELF (#14)",
               r.returncode == 0 and "Δ 250" in r.stdout)
-        r = gl(proj, "claim", "--assert", "underruns dropped", "--metric", "no-such-counter")
+        r = gl(inproj, "claim", "--assert", "underruns dropped", "--metric", "no-such-counter")
         check("a claim citing an unregistered instrument is refused (#11)",
               r.returncode != 0 and "never admitted" in r.stderr
               and "instrument --register" in r.stderr)
-        r = gl(proj, "claim", "--assert", "the fix cut underruns", "--metric", "underruns")
+        r = gl(inproj, "claim", "--assert", "the fix cut underruns", "--metric", "underruns")
         check("a claim backed by an admitted instrument's reading is accepted",
               r.returncode == 0 and "Δ 250" in r.stdout)
         # 250 → 143 is the #13 incident's 43% reduction: real, correctly computed, on a counter that
         # had decoupled from the harm in exactly the regime the fix created. The tool does that
         # arithmetic; the caller is never asked for a ratio.
-        gl(proj, "measure", "--instrument", "underruns", "--before", "300", "--after", "443")
-        r = gl(proj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns")
+        gl(inproj, "measure", "--instrument", "underruns", "--before", "300", "--after", "443")
+        r = gl(inproj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns")
         check("once the metric MOVES, the claim is refused until the connection is re-checked (#13)",
               r.returncode != 0 and "--recheck" in r.stderr and "42.8%" in r.stderr)
         check("the re-check refusal names the harm the proxy stands for, not just the number (#13)",
               HARM in r.stderr)
-        r = gl(proj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns",
+        r = gl(inproj, "claim", "--assert", "the fix cut underruns 43%", "--metric", "underruns",
                "--recheck", "listened to 20 clips: no dropout reached the ear, the count still tracks")
         check("a re-checked connection admits the moved metric", r.returncode == 0)
-        r = gl(proj, "status")
+        r = gl(inproj, "status")
         check("the declared harm survives into status, so it can be re-checked later (#13)",
               HARM in r.stdout and CONN in r.stdout)
         check("status states what these controls do NOT catch — the RIGHT metric (INV6)",
               "RIGHT metric" in r.stdout)
         check("instrument --list shows the admitted instrument",
-              "underruns" in gl(proj, "instrument", "--list").stdout)
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+              "underruns" in gl(inproj, "instrument", "--list").stdout)
+        with open(os.path.join(inproj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("the log carries both endpoints and the delta, so the reading is reproducible later",
               '"kind": "measure"' in log and '"before": 40' in log and '"after": 290' in log
@@ -4311,21 +4350,21 @@ def main():
         # instruments are per-session state like pins: a control is a MEASUREMENT taken in one run's
         # regime, and a control inherited by a later run is exactly the "assumed to have survived"
         # failure #13 describes. (The reading itself is in the shared log, where it is reproducible.)
-        r = gl(proj, "claim", "--assert", "x", "--metric", "underruns", sid="sess-instr-b")
+        r = gl(inproj, "claim", "--assert", "x", "--metric", "underruns", sid="sess-instr-b")
         check("an instrument admitted in one session is not evidence in another",
               r.returncode != 0 and "never admitted" in r.stderr)
-        r = gl(proj, "instrument", "--release", "underruns")
+        r = gl(inproj, "instrument", "--release", "underruns")
         check("refuses to retire an instrument without --notes (retiring is a stated decision)",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr)
-        r = gl(proj, "instrument", "--release", "underruns", "--notes", "corrected instrument lands")
+        r = gl(inproj, "instrument", "--release", "underruns", "--notes", "corrected instrument lands")
         check("retires an instrument by name", r.returncode == 0 and "RETIRED" in r.stdout)
-        r = gl(proj, "claim", "--assert", "z", "--metric", "underruns")
+        r = gl(inproj, "claim", "--assert", "z", "--metric", "underruns")
         check("a retired instrument no longer backs a claim",
               r.returncode != 0 and "never admitted" in r.stderr)
         # REGRESSION GUARD, and it passes in BOTH states by construction: --metric ADDS a kind of
         # evidence, it must not touch the document path that INV2 rests on.
         check("the document path is unchanged — --read alone still sources a claim",
-              gl(proj, "claim", "--assert", "y", "--read", real).returncode == 0)
+              gl(inproj, "claim", "--assert", "y", "--read", real).returncode == 0)
 
         # #21: the commit gate asks whether a change was VERIFIED. It never asked whether it was
         # INTENDED. A formatter run against a whole directory reformatted a dozen files the session
@@ -4717,7 +4756,8 @@ def main():
         # unimplemented subcommand also exits non-zero, and a test that passes for that reason is a
         # test that cannot fail.
         print("fix proofs (a verified diagnosis is not a verified fix, #27):")
-        fxd = os.path.join(proj, "fixwork")
+        fxproj = _own()
+        fxd = os.path.join(fxproj, "fixwork")
         os.makedirs(fxd, exist_ok=True)
 
         def fxfile(name, body):
@@ -4739,46 +4779,46 @@ def main():
 
         base = ["fix", "--prove", "null-id", "--promises",
                 "the generated model compiles and accepts a null id"]
-        r = gl(proj, *base, "--produces", produces, "--before", vbefore, "--observed", vafter)
+        r = gl(fxproj, *base, "--produces", produces, "--before", vbefore, "--observed", vafter)
         check("a fix proof that never names the diagnosis's repro is refused",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--diagnosis" in r.stderr)
-        r = gl(proj, *base, "--diagnosis", repro, "--before", vbefore, "--observed", vafter)
+        r = gl(fxproj, *base, "--diagnosis", repro, "--before", vbefore, "--observed", vafter)
         check("a fix proof that never names the fix's own output is refused",
               r.returncode != 0 and "GAMELOOP ✗" in r.stderr and "--produces" in r.stderr)
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro,
                "--before", "/no/such/verdict.txt", "--observed", vafter)
         check("a fix proof whose before verdict does not resolve is refused",
               r.returncode != 0 and "--before does not resolve" in r.stderr)
-        r = gl(proj, *base, "--produces", "/no/such/generated.dart", "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", "/no/such/generated.dart", "--diagnosis", repro,
                "--before", vbefore, "--observed", vafter)
         check("a fix proof whose produced output does not resolve is refused",
               r.returncode != 0 and "--produces does not resolve" in r.stderr)
         # naming the repro as the thing the fix emits is the collapse, one flag early.
-        r = gl(proj, *base, "--produces", repro, "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", repro, "--diagnosis", repro,
                "--before", vbefore, "--observed", vafter)
         check("naming the repro as the fix's own output is refused",
               r.returncode != 0 and "--produces and --diagnosis are the same file" in r.stderr)
         # THE refusal. "the diagnosis's reproduction still reproduced — it was never a test of the
         # fix." If one artifact can satisfy both claims, the gate is already defeated.
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro,
                "--before", vbefore, "--observed", repro)
         check("a proof that is merely the diagnosis repro is refused",
               r.returncode != 0 and "the observed verdict IS the diagnosis's repro" in r.stderr
               and "COMING BACK GOOD" in r.stderr)
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro,
                "--before", vbefore, "--observed", repro_copy)
         check("a byte-identical COPY of the repro is refused too (a rename is not a proof)",
               r.returncode != 0 and "byte-identical" in r.stderr)
         # the consumer re-run after the "fix" and saying exactly what it said before: the incident.
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro,
                "--before", vbefore, "--observed", vbefore_again)
         check("an unmoved verdict is refused — the generated code still does not compile",
               r.returncode != 0 and "IDENTICAL" in r.stderr and "STILL REPRODUCES" in r.stderr)
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
                "--observed", vafter, "--expect", "0 warnings")
         check("--expect absent from the observed verdict is refused (it moved, but not to the promise)",
               r.returncode != 0 and "does not appear in the observed verdict" in r.stderr)
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
                "--observed", vafter, "--expect", "generated_model.dart")
         check("--expect that was ALREADY true before the fix is refused",
               r.returncode != 0 and "ALREADY in the before verdict" in r.stderr)
@@ -4786,7 +4826,7 @@ def main():
         # Each of the three checks below is a DIFFERENTIAL against `warned`, not a bare absence: a
         # harness that never printed the warning at all would satisfy "stays quiet" and "is
         # silenced" for free, and a check that passes when the feature is missing is not a check.
-        warned = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        warned = gl(fxproj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
         check("a fix reported at a handback with no proof of the fixed artifact is warned about",
               warned.returncode == 0 and "FIX CLAIMED, NOT PROVED" in warned.stdout
               and "verified diagnosis is not a verified fix" in warned.stdout)
@@ -4796,12 +4836,12 @@ def main():
         check("the fix warning says what it does NOT catch (INV6)",
               "any rephrasing walks straight past it" in warned.stdout
               and "not evidence the fix holds" in warned.stdout)
-        r = gl(proj, "checkpoint", "--notes", "still tracing the generator's null handling")
+        r = gl(fxproj, "checkpoint", "--notes", "still tracing the generator's null handling")
         check("notes that report no fix stay quiet (no evidence, no noise)",
               r.returncode == 0 and "FIX CLAIMED" in warned.stdout
               and "FIX CLAIMED" not in r.stdout)
         # a real before/after on the fix's own output, and the promise named in --expect.
-        r = gl(proj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
+        r = gl(fxproj, *base, "--produces", produces, "--diagnosis", repro, "--before", vbefore,
                "--observed", vafter, "--expect", "0 errors")
         check("a real before/after on the fixed artifact's own output is accepted",
               r.returncode == 0 and "FIX PROVED" in r.stdout
@@ -4809,11 +4849,11 @@ def main():
         check("an accepted fix proof states what it does NOT catch (INV6)",
               "DOES NOT CATCH" in r.stdout and "really regenerated" in r.stdout
               and "not to the right fix" in r.stdout)
-        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        r = gl(fxproj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
         check("a proved fix silences the handback warning (same notes that warned a moment ago)",
               r.returncode == 0 and "✓ CHECKPOINT" in r.stdout
               and "FIX CLAIMED" in warned.stdout and "FIX CLAIMED" not in r.stdout)
-        r = gl(proj, "status")
+        r = gl(fxproj, "status")
         check("status carries the fix proof and its promised outcome through compaction",
               "FIXES" in r.stdout and "accepts a null id" in r.stdout
               and "the repro, kept separate on purpose" in r.stdout)
@@ -4890,7 +4930,7 @@ def main():
               "the symbol for a fix that holds, is the strongest wrong thing this report could say",
               _fline(_f4, "two-id").strip().startswith("✗"))
 
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+        with open(os.path.join(fxproj, ".game_loop", "log.jsonl")) as f:
             fxlog = f.read()
         check("the proof is greppable in the log as compared artifacts, not a verdict",
               '"kind": "fix_proof"' in fxlog and '"before_digest"' in fxlog
@@ -4898,20 +4938,20 @@ def main():
         check("a fix reported without proof is permanent in the log (INV4 wants the entry)",
               '"kind": "fix_unproved"' in fxlog)
         # a fix proof is a fact about THIS tree at ONE moment — it cannot quiet a sibling's handback.
-        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash", sid="sess-fix-b")
+        r = gl(fxproj, "checkpoint", "--notes", "fixed the null-id crash", sid="sess-fix-b")
         check("a fix proof does not leak into another session's handback",
               r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout)
-        r = gl(proj, "fix", "--release", "null-id")
+        r = gl(fxproj, "fix", "--release", "null-id")
         check("refuses to retire a fix proof without --notes (a handback went quiet on it)",
               r.returncode != 0 and "--notes" in r.stderr)
-        r = gl(proj, "fix", "--release", "null-id", "--notes", "the generator was rewritten since")
+        r = gl(fxproj, "fix", "--release", "null-id", "--notes", "the generator was rewritten since")
         check("releases a fix proof by name",
               r.returncode == 0 and "FIX PROOF RELEASED" in r.stdout)
-        r = gl(proj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
+        r = gl(fxproj, "checkpoint", "--notes", "fixed the null-id crash in the generator")
         check("after a release, the handback warns about that fix again",
               r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout)
-        gl(proj, "mandate", "--set", "land the generator fix")
-        r = gl(proj, "mandate", "--clear", "--notes", "shipped — the null-id bug is fixed")
+        gl(fxproj, "mandate", "--set", "land the generator fix")
+        r = gl(fxproj, "mandate", "--clear", "--notes", "shipped — the null-id bug is fixed")
         check("mandate --clear warns about an unproved fix too (the loudest 'shipped' there is)",
               r.returncode == 0 and "FIX CLAIMED, NOT PROVED" in r.stdout
               and "✓ MANDATE released" in r.stdout)
@@ -6526,6 +6566,8 @@ def main():
         finally:
             shutil.rmtree(adopt, ignore_errors=True)
     finally:
+        for _d in detached:
+            shutil.rmtree(_d, ignore_errors=True)
         shutil.rmtree(proj, ignore_errors=True)
 
     # #34: the hooks-live warning claims only what the probe supports, and names the remedy for the

@@ -542,41 +542,42 @@ def main():
         gl(proj, "mandate", "--clear", "--notes", "done")
 
         print("write guard:")
-        inside = os.path.join(proj, "file.txt")
+        wgproj = _own()
+        inside = os.path.join(wgproj, "file.txt")
         # `allowed`, not `not denied`: for a guard whose allow is silence, the verdict alone is also
         # what a guard that never ran produces, so each of these requires the guard's mark to have
         # advanced too (#41 — see allowed()).
         check("allows a write inside the repo",
-              allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
+              allowed(wgproj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
         check("denies a write to another dir",
-              denied(guard(proj, {"tool_name": "Write",
+              denied(guard(wgproj, {"tool_name": "Write",
                                   "tool_input": {"file_path": os.path.expanduser("~/evil.txt")}})))
         check("denies rm behind a cd into another tree",
-              denied(guard(proj, {"tool_name": "Bash",
+              denied(guard(wgproj, {"tool_name": "Bash",
                                   "tool_input": {"command": "cd ~ && rm -rf somedir"}})))
         check("allows normal in-repo bash",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "rm -f file.txt && echo hi > b.txt"}}))
         check("allows cp OUT of another tree into the repo",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "cp ~/.bashrc ./copy"}}))
         check("allows redirecting to /dev/null (a discard device)",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "grep x file.txt 2>/dev/null"}}))
         check("allows redirecting to a std stream (/dev/stderr)",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "echo hi >/dev/stderr"}}))
         # #7: a DATA heredoc body (fed to cat/tee) is not executed shell — redirect-like prose in it
         # must not be flagged. But a CODE heredoc body (fed to bash/sh/...) DOES run and must stay
         # guarded, or the fix would open a bypass. Both directions are asserted.
         check("allows out-of-repo redirect text inside a cat (data) heredoc body",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "cat <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}}))
         check("still denies rm of an out-of-repo path inside a bash (code) heredoc body",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\nrm -rf ~/outside\nEOF"}})))
         check("still denies an out-of-repo redirect inside a bash (code) heredoc body",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
         # #114: WHICH WORD NAMES THE CONSUMER. The data/code split above asks "is the thing reading
@@ -590,29 +591,29 @@ def main():
         # out-of-repo redirect to another agent was refused by the guard whose subject is
         # out-of-repo redirects.
         check("#114: a chat message body is prose, not code - quoting a redirect in it is allowed",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "llm_chat say room --file - <<'EOF'\necho x > ~/outside.txt\nEOF"}}))
         check("#114: and the same when the sender is named by absolute path",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "/x/bin/llm_chat say room --file - <<'EOF'\nrm -rf ~/outside\nEOF"}}))
 
         # BYPASS (found while fixing that, and the more serious half): the same rule let a CODE
         # heredoc claim to be data by ENDING in a sink's name. `bash /dev/stdin cat HD X` runs the
         # body as a script with $1=cat — measured actually writing outside the repo before the fix.
         check("#114: a code heredoc cannot masquerade as data by ending in a sink's name",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash /dev/stdin cat <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
         check("#114: nor with -c",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash -c cat <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
         # The consumer is the LAST command in the line, so a pipeline is read at its end and a sink
         # earlier in it does not vouch for a shell later.
         check("#114: a sink earlier in the pipeline does not vouch for the shell that ends it",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "cat f | bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
         check("#114: same across a semicolon",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "cat f ; bash <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
         # WHAT THIS STILL MISSES, stated rather than implied: DATA_SINKS is a list of SPELLINGS, so
@@ -637,10 +638,10 @@ def main():
         # path, most often in a comment. Their detector approximated this guard instead of running
         # it, so the count did not transfer — and the message states the trigger I measured.
         check("#114: a refusal caused by a python heredoc body SAYS that body was scanned as shell",
-              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "python3 - <<'PY'\nx = 1  # echo q > ~/outside.txt\nPY"}}).stdout)
         check("...and the same for node, so the note is about non-shell interpreters, not one name",
-              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+              "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "node <<'JS'\nvar x = 1  // echo q > ~/outside.txt\nJS"}}).stdout)
         # BOTH NEGATIVE ARMS, because a note that fires everywhere carries no information. A bash
         # heredoc body IS shell, so annotating it would be a lie. And a command that merely CONTAINS
@@ -649,17 +650,17 @@ def main():
         # against a body holding the unresolved `~/...` and therefore fired never, silently, on the
         # only case that prompted it.
         check("...but a bash heredoc gets NO such note — that body really is shell",
-              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "bash <<'EOF'\necho q > ~/outside.txt\nEOF"}}).stdout)
         check("...nor a plain redirect with no heredoc anywhere in the command",
-              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "echo q > ~/outside.txt"}}).stdout)
         check("...nor when a python heredoc is present but the offender came from OUTSIDE it",
-              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(proj, {"tool_name": "Bash",
+              not "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "echo q > ~/outside.txt ; python3 - <<'PY'\nprint(1)\nPY"}}).stdout)
 
         check("#114: an UNKNOWN consumer's heredoc is still scanned as code (fail-closed default)",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "notasink <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
         # Drift guard: the fallback that CAUSED the bypass must not come back. Keeping `words[-1]`
@@ -693,7 +694,7 @@ def main():
                       "echo x >>! /Users/nobody/outside.txt"):
             check("a clobber-override redirect to an out-of-repo path is refused (%s)"
                   % _clob.split()[2],
-                  denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
+                  denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": _clob}})))
         # AND THE OTHER GUARD CANNOT HAVE THIS DEFECT, which is worth pinning because it explains
         # why only one of them needs the discipline. guard-mcp DEFAULTS TO DENY, so a verb missing
         # from its lists costs a false refusal a human clears; guard-writes sees every Bash command
@@ -707,9 +708,9 @@ def main():
             would have read as `1188 passed, 0 failed`, exit 0.
             """
             return subprocess.run(
-                [os.path.join(proj, ".game_loop", "bin", "guard-mcp.sh")],
+                [os.path.join(wgproj, ".game_loop", "bin", "guard-mcp.sh")],
                 input=json.dumps({"tool_name": tool, "tool_input": {}}),
-                capture_output=True, text=True, env=_env(proj))
+                capture_output=True, text=True, env=_env(wgproj))
 
         for _unk in ("mcp__db__frobnicate_everything", "mcp__db__row_delete", "mcp__db__x"):
             check("an MCP tool whose verb this guard does not recognise is REFUSED (%s) — the "
@@ -798,12 +799,12 @@ def main():
             ("git clone INTO the repo", "git clone https://x/y ./y"),
         ]
         _vmiss = [n for n, c in _VERB_WRITES
-                  if not denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+                  if not denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
         check("every write-capable verb the SCOPE names is checked against its destination "
               "(%d of them) — a hand-written list is only honest if the header names it" % len(_VERB_WRITES),
               not _vmiss)
         _vfalse = [n for n, c in _VERB_READS
-                   if denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+                   if denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
         check("...and the same verbs READING from outside, or writing inside, are untouched (%d "
               "cases) — a gate that refuses ordinary work is one that gets routed around"
               % len(_VERB_READS),
@@ -835,13 +836,13 @@ def main():
             ("read <", f"cat < {_OUT}"),
         ]
         _missed = [n for n, c in _WRITES
-                   if not denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+                   if not denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
         check("every redirect form in the shell grammar that CREATES OR TRUNCATES a file is seen "
               "as a write (%d forms) — the list is the grammar's, not the ones somebody remembered"
               % len(_WRITES),
               not _missed)
         _false = [n for n, c in _NOT_WRITES
-                  if denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+                  if denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
         check("...and the forms that name NO file are still allowed (%d of them) — descriptor "
               "duplication and a plain read must not become refusals when the write list widens"
               % len(_NOT_WRITES),
@@ -855,29 +856,29 @@ def main():
         # at the forms I happened to think of first.
         for _amp in ("echo x >& /Users/nobody/outside.txt", "echo x >>& /Users/nobody/outside.txt"):
             check("a csh-style redirect to an out-of-repo path is refused (%s)" % _amp.split()[2],
-                  denied(guard(proj, {"tool_name": "Bash", "tool_input": {"command": _amp}})))
+                  denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": _amp}})))
         check("...and file-descriptor DUPLICATION is untouched — `2>&1` names no file, so consuming "
               "the `&` there would invent a target called 1 and refuse an ordinary redirect",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "grep -q x f 2>&1"}})
-              and allowed(proj, {"tool_name": "Bash",
+              and allowed(wgproj, {"tool_name": "Bash",
                                  "tool_input": {"command": "echo oops >&2"}}))
         check("...while the SAME operator inside the repo is allowed — the fix reads past the "
               "override, it does not refuse the override",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "echo x >| inside.txt"}}))
         check("...and a REAL pipe still splits, so teaching the splitter about `>|` did not make "
               "every pipe part of a redirect",
-              allowed(proj, {"tool_name": "Bash",
+              allowed(wgproj, {"tool_name": "Bash",
                              "tool_input": {"command": "jq -r '.a | .b' f.json"}}))
         check("a jq filter's quoted > is DATA, even when a quoted | precedes it",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "jq -r '.a | select(.p > \"/etc/passwd\")' f.json"}}))
         check("...and a quoted | does not hide a REAL redirect in the tail from the guard",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "echo 'a | b' > /etc/passwd"}})))
         check("a backslash-escaped quote does not close the string and expose a redirect",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a \\" b" > /etc/passwd'}})))
         # TWO OF THE SEVEN BELOW ARE TRIPWIRES, NOT KILLS, and saying so is cheaper than letting
         # a later reader assume otherwise: this one and the "keeps the other refusal's wording" one
@@ -885,19 +886,19 @@ def main():
         # (drop it and an unbalanced quote swallows the rest of the command, checking nothing); the
         # second pins the separation between the two refusals. The other five fail against HEAD.
         check("an unbalanced quote falls back to the blind split rather than stopping the checks",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a ; rm -rf /etc/passwd'}})))
         # THREE OUTCOMES, NOT TWO. A target holding a variable the guard cannot expand is UNKNOWN,
         # and #110 was reported partly because the refusal printed the unexpanded string joined onto
         # a directory and asserted it as the target. Same decision, different words — and the two
         # refusals must not share bytes, or "could not tell" is indistinguishable from "known bad".
-        _unres = guard(proj, {"tool_name": "Bash", "tool_input": {
+        _unres = guard(wgproj, {"tool_name": "Bash", "tool_input": {
             "command": "cd ~/development/$r && echo hi > out.txt"}})
         check("an unexpandable target is refused AS UNRESOLVED, not as a resolved path",
               denied(_unres) and "could not be RESOLVED" in _unres.stdout)
         check("...and it never asserts the half-substituted string as the target",
               "as far as I got" in _unres.stdout)
-        _res = guard(proj, {"tool_name": "Bash",
+        _res = guard(wgproj, {"tool_name": "Bash",
                             "tool_input": {"command": "echo hi > ~/evil.txt"}})
         check("...while a fully RESOLVED out-of-repo target keeps the other refusal's wording",
               denied(_res) and "could not be RESOLVED" not in _res.stdout)
@@ -920,12 +921,12 @@ def main():
 
         # #8: a malformed guard must FAIL OPEN, never exit-2 block — otherwise a broken guard blocks
         # its own repair. The shim `bash -n`s the impl and allows the tool when the impl won't parse.
-        impl_f = os.path.join(proj, ".game_loop", "bin", "guard-writes-impl.sh")
+        impl_f = os.path.join(wgproj, ".game_loop", "bin", "guard-writes-impl.sh")
         with open(impl_f) as f:
             impl_src = f.read()
         with open(impl_f, "w") as f:
             f.write("this is ( not valid bash\n")
-        broken = guard(proj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
+        broken = guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
         check("fails OPEN when the guard impl is malformed (can't block its own fix)",
               not denied(broken))
         # #39: failing open is right; failing open in SILENCE is not. With no output at all, a
@@ -946,26 +947,26 @@ def main():
         # So the guard carries a MARK it advances before its first early return, and these assert the
         # mark's contract — the thing every permissive assertion above now leans on.
         print("write guard (a silent allow must still carry evidence the guard ran — #41):")
-        probe_f = _probe_f(proj, {})
+        probe_f = _probe_f(wgproj, {})
         n0 = _probe_count(probe_f)
-        guard(proj, {"tool_name": "Write", "tool_input": {}})
+        guard(wgproj, {"tool_name": "Write", "tool_input": {}})
         check("the mark advances on a Write with no file_path — the guard's EARLIEST early return",
               _probe_count(probe_f) > n0)
         n0 = _probe_count(probe_f)
-        guard(proj, {"tool_name": "Read", "tool_input": {"file_path": inside}})
+        guard(wgproj, {"tool_name": "Read", "tool_input": {"file_path": inside}})
         check("...and on a tool the guard's case statement never names",
               _probe_count(probe_f) > n0)
         n0 = _probe_count(probe_f)
-        d = guard(proj, {"tool_name": "Write",
+        d = guard(wgproj, {"tool_name": "Write",
                          "tool_input": {"file_path": os.path.expanduser("~/evil2.txt")}})
         check("...and on a DENY: the mark says the guard RAN, never what it decided",
               denied(d) and _probe_count(probe_f) > n0)
-        sprobe = _probe_f(proj, {}, sid="sess-probe")
-        guard(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}, sid="sess-probe")
+        sprobe = _probe_f(wgproj, {}, sid="sess-probe")
+        guard(wgproj, {"tool_name": "Write", "tool_input": {"file_path": inside}}, sid="sess-probe")
         check("the mark is per-session, beside that session's state — scoped like edited.txt",
               _probe_count(sprobe) > 0
               and os.path.dirname(sprobe) == os.path.dirname(
-                  os.path.join(proj, ".game_loop", "sessions", "sess-probe", "state.json")))
+                  os.path.join(wgproj, ".game_loop", "sessions", "sess-probe", "state.json")))
 
         # THE DEFECT ITSELF, encoded so it cannot come back: a guard that is present, wired, live and
         # checking nothing. It PARSES, so the shim execs it and the fail-open notice stays silent —
@@ -973,42 +974,42 @@ def main():
         with open(impl_f, "w") as f:
             f.write("#!/usr/bin/env bash\nexit 0\n")
         os.chmod(impl_f, 0o755)
-        dead = guard(proj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
+        dead = guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/outside"}})
         check("a guard that PARSES and checks nothing still allows, and says nothing (the defect)",
               not denied(dead) and "WRITE GUARD IS NOT RUNNING" not in dead.stdout)
         check("...but it CANNOT advance the mark, so a permissive assertion now fails on it",
-              not allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
+              not allowed(wgproj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
         with open(impl_f, "w") as f:                 # restore so later checks use the real guard
             f.write(impl_src)
         os.chmod(impl_f, 0o755)
         check("...and the real guard passes that same assertion (the probe is not always-false)",
-              allowed(proj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
+              allowed(wgproj, {"tool_name": "Write", "tool_input": {"file_path": inside}}))
 
         # INV5: a probe that can break the thing it observes is worse than no probe. Make the mark
         # unwritable in the only way no permission bit can undo — the path is a DIRECTORY — and the
         # guard must go on guarding.
-        os.makedirs(_probe_f(proj, {}, sid="sess-noprobe"), exist_ok=True)
-        blocked = guard(proj, {"tool_name": "Write",
+        os.makedirs(_probe_f(wgproj, {}, sid="sess-noprobe"), exist_ok=True)
+        blocked = guard(wgproj, {"tool_name": "Write",
                                "tool_input": {"file_path": os.path.expanduser("~/evil3.txt")}},
                         sid="sess-noprobe")
         check("a mark that cannot be written costs the MARK, never the guarding (INV5)",
               blocked.returncode == 0 and denied(blocked))
 
         print("write guard (authorize → consume):")
-        gl(proj, "authorize", "--path", os.path.expanduser("~/authztest"),
+        gl(wgproj, "authorize", "--path", os.path.expanduser("~/authztest"),
                "--reason", "user said ok")
         p = {"tool_name": "Bash", "tool_input": {"command": "touch ~/authztest/x"}}
-        check("authorized path allowed once", allowed(proj, p))
-        check("authorization is single-use (spent → denied)", denied(guard(proj, p)))
+        check("authorized path allowed once", allowed(wgproj, p))
+        check("authorization is single-use (spent → denied)", denied(guard(wgproj, p)))
         # #1: the escape hatch must work for the Write/Edit tools too, not just Bash mutators —
         # the deny message points at `authorize`, so `authorize` has to unblock this path.
-        gl(proj, "authorize", "--path", os.path.expanduser("~/authztest-write"),
+        gl(wgproj, "authorize", "--path", os.path.expanduser("~/authztest-write"),
                "--reason", "user said ok")
         pw = {"tool_name": "Write",
               "tool_input": {"file_path": os.path.expanduser("~/authztest-write/x.md")}}
-        check("authorized path allowed once via Write", allowed(proj, pw))
-        check("Write authorization is single-use (spent → denied)", denied(guard(proj, pw)))
-        with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
+        check("authorized path allowed once via Write", allowed(wgproj, pw))
+        check("Write authorization is single-use (spent → denied)", denied(guard(wgproj, pw)))
+        with open(os.path.join(wgproj, ".game_loop", "log.jsonl")) as f:
             log = f.read()
         check("a Write spend is logged as authorized_write",
               '"authorized_write"' in log and "authztest-write" in log)
@@ -1214,22 +1215,22 @@ def main():
         # regex let it through). Interpreter args are not message flags and stay guarded.
         print("write guard (quoted text is data):")
         check("allows a redirect mentioned inside a commit -m message",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'git commit -m "note: echo x > ~/outside.txt"'}}))
         check("allows a deploy verb mentioned inside a commit -m message",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'git commit -m "docs: describe the npm publish flow"'}}))
         check("allows a redirect char inside a sed script",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}}))
         check("still denies a real redirect to a QUOTED out-of-repo target",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo x > "$HOME/gl_outside.txt"'}})))
         check("still denies a deploy verb inside an interpreter arg (bash -c executes)",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "bash -c 'npm publish'"}})))
         check("allows a data heredoc whose opener also has a redirect (consumer is cat, not the target)",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "cat > out.md <<'EOF'\nnote: echo x > ~/outside.txt\nEOF"}}))
 
         # #4: the commit gate applies only to commits that TARGET this repo — verify.yaml describes
@@ -1297,16 +1298,16 @@ def main():
         # with a CLEAN path in the message.
         print("write guard (redirect targets stop at shell metacharacters):")
         check("allows the live case: 2>/dev/null inside a $(...) loop header",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'for source in $(find /a /b -type f -name "*.rs" 2>/dev/null); '
                              'do echo $source; done'}}))
         check("allows >/dev/stdout inside a command substitution",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "echo $(cat file.txt >/dev/stdout)"}}))
         check("allows 2>/dev/tty inside a command substitution",
-              allowed(proj, {"tool_name": "Bash", "tool_input": {
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "echo $(grep -c x file.txt 2>/dev/tty)"}}))
-        r = guard(proj, {"tool_name": "Bash", "tool_input": {
+        r = guard(wgproj, {"tool_name": "Bash", "tool_input": {
             "command": "echo $(cat file.txt > ~/gl_paren_outside.txt)"}})
         check("still denies a real out-of-repo redirect inside a command substitution",
               denied(r) and "gl_paren_outside.txt" in r.stdout)
@@ -1319,7 +1320,7 @@ def main():
         # #5 must not regress: a QUOTED target after a real redirect is still a genuine write,
         # command substitution or not.
         check("still denies a QUOTED out-of-repo redirect target inside a command substitution",
-              denied(guard(proj, {"tool_name": "Bash", "tool_input": {
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo $(cat file.txt > "$HOME/gl_qparen_outside.txt")'}})))
 
         # #6: stale sessions are pruned on `status` — old + no active mandate goes, an active mandate

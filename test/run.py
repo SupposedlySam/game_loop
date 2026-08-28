@@ -93,6 +93,22 @@ def _reap_sandboxes(paths=None):
 atexit.register(_reap_sandboxes)
 
 
+def _tmpdir(prefix):
+    """mkdtemp whose directory the reaper will collect, for fixtures with no natural finally.
+
+    Most helpers here already rmtree in a finally; these did not, and I only found them because I
+    measured the OTHER prefixes after fixing make_sandbox instead of stopping at the one I had
+    just repaired. Five call sites were still leaking ~16 directories a run -- small next to the
+    2,680 make_sandbox produced, and small is how a leak survives being noticed.
+
+    Registration rather than a finally is deliberate for these: they sit inside loops and
+    assertions where the cleanup line has to be written five times and forgotten once.
+    """
+    d = tempfile.mkdtemp(prefix=prefix)
+    _SANDBOXES.append(d)
+    return d
+
+
 def make_sandbox():
     """A temp project with a fresh .game_loop (real scripts, empty state)."""
     proj = tempfile.mkdtemp(prefix="gameloop-test-")
@@ -3787,7 +3803,7 @@ def main():
         _wire, _wtext = _wmodl.hook_wiring, _wmodl.pin_wiring_lines
 
         def _mkwire(settings=None, local=None):
-            r = tempfile.mkdtemp(prefix="glwire-")
+            r = _tmpdir("glwire-")
             os.makedirs(os.path.join(r, ".claude"))
             for fn, d in (("settings.json", settings), ("settings.local.json", local)):
                 if d is None:
@@ -3836,7 +3852,7 @@ def main():
         _pm = _wmodl._pin_marker_sha
 
         def _mkpin(marker=None):
-            d = tempfile.mkdtemp(prefix="glpin-")
+            d = _tmpdir("glpin-")
             if marker is not None:
                 with open(os.path.join(d, "PINNED"), "w", encoding="utf-8") as f:
                     f.write(marker if isinstance(marker, str) else json.dumps(marker))
@@ -6279,7 +6295,7 @@ def main():
         # already knows which case is which — so the project's own files are the right default there
         # and no one has to know a flag. Where git cannot connect two trees, --same-as says it by hand.
         print("install into a linked worktree carries the PROJECT's rules, not blank ones (#30):")
-        adopt = tempfile.mkdtemp(prefix="gameloop-adopt-")
+        adopt = _tmpdir("gameloop-adopt-")
         try:
             def agit(cwd, *args):
                 return subprocess.run(["git", "-c", "user.email=t@example.invalid",
@@ -15694,7 +15710,7 @@ def main():
 
     # A git that fails must degrade to silence, never a traceback: this is status output.
     cpgit("add", ".game_loop/config.json")
-    fakebin = tempfile.mkdtemp(prefix="gameloop-nogit-")
+    fakebin = _tmpdir("gameloop-nogit-")
     with open(os.path.join(fakebin, "git"), "w") as f:
         f.write("#!/bin/sh\nexit 1\n")
     os.chmod(os.path.join(fakebin, "git"), 0o755)
@@ -16106,7 +16122,7 @@ def main():
     check("`run` still answers with stdout alone, so every existing caller is unchanged while the "
           "diagnosis rides along beside it rather than replacing it",
           sweep.run.__doc__ and sweep.run_detail.__doc__
-          and len(sweep.run_detail(tempfile.mkdtemp(prefix="glrd-"), timeout=60)) == 3)
+          and len(sweep.run_detail(_tmpdir("glrd-"), timeout=60)) == 3)
 
     # The owning agent runs the harness it would SHIP, not the one it is editing: every game_loop
     # hook prefers a pinned checkout when one exists and falls back to the repo's own bin/ when it

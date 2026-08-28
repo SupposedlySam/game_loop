@@ -482,7 +482,7 @@
     },
     {
       "seq": 50,
-      "sha": "3b46c34",
+      "sha": "f9a0f9a",
       "notice": true,
       "verb": "write guard (Bash)",
       "change": "outward `gh` verbs at COMMAND POSITION are now refused and require a human authorization: issue/pr comment, create, close, reopen, edit, merge, review, ready; release and repo and gist mutations; and `gh api` with -X POST/PUT/PATCH/DELETE. Reads are untouched — gh issue list, gh pr view, gh pr checks, gh api with no method.",

@@ -120,6 +120,34 @@ The tell they share: in all five the assertion was GREEN while its subject was B
 what you were hoping for. A check you have never seen fail is a check you have not tested — and
 knowing that rule does not exempt the check you just wrote *because* of it.
 
+## When you probe a guard, VARY THE INVOCATION — your habit may be the hole
+
+I spent an evening concluding a commit gate was broken. It was not. Every probe I wrote ended
+`2>&1 | head -N`, because that is how I capture output in order to read it — and `2>&1` is exactly
+what makes that gate not fire. **I tested it three times, over an hour, exclusively through the one
+form that escapes it, and never once ran the bare command.**
+
+The bill: six theories, all mine, all dead — the gate's own directory, the pinned code, a temp
+file's key, the inherited environment, the harness's permission mode, and finally "it is local to
+this checkout". That last one I stated confidently on the strength of two other repos failing to
+reproduce it, and it sent three of us looking in the wrong place for an hour. **They had run the
+BARE form.** Their gates worked because of how they invoked, not because of what they had.
+
+What would have caught it on the first probe, cheaply:
+
+- **Run the plainest possible form once.** Not as the experiment — as the control. If the bare
+  command behaves differently from your convenient one, the difference IS the finding.
+- **Vary one token of the invocation at a time.** `cmd`, `cmd | x`, `cmd 2>&1`, `cmd 2>&1 | x`. That
+  table took four minutes and localised what an hour of theorising could not.
+- **Notice when every reproduction shares an accident.** Mine all shared a redirection I had never
+  thought about, because it was in my fingers rather than in my hypothesis.
+
+The general form: **a guard reads the caller's command TEXT, so the shape of your probe is part of
+the experiment, not part of the plumbing.** An agent writes commands in a habitual house style —
+piped, redirected, chained — and a habit applied to every probe is a constant, not a control. The
+measured facts survived all six rounds here; every inference layered on them died, and the one that
+survived came from changing the invocation rather than the reasoning.
+
 ## The most expensive shape: a true sentence promoted to a blocker
 
 Three times in one session I reported something as impossible or forbidden, repeated it for hours,

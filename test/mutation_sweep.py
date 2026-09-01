@@ -451,7 +451,13 @@ MUTANTS = [
      "`neuter REACHES every candidate the finder produces`, which is about the mutator's own reach "
      "and not about wiring at all — collateral by subject. Rather than invent a mechanism I left it "
      "out of the floor, because a tripwire resting on an unexplained kill fires the day that kill "
-     "stops happening and says nothing true when it does.", 5),
+     "stops happening and says nothing true when it does. "
+     "THEN THE SWEEP REFUTED THE METHOD AND THE FLOOR CAME DOWN TO 4. I recorded 5 and wrote that "
+     "subset scoping 'can only UNDERSTATE a floor'. It does not: a full sweep measured 4 here, so "
+     "the scoped run OVERSTATED by one even after the collateral was held out. The first full run "
+     "after the entry landed reported BELOW FLOOR on it, which is the tripwire doing its job on the "
+     "person who wrote it. 4 is the measured number; the reasoning that produced 5 was wrong and is "
+     "left here rather than tidied away, because the wrong claim is the useful part.", 4),
     ("hook_integrity_report -> `status` says nothing about the file that wires every gate",
      ".game_loop/bin/_gl_impl.py::hook_integrity_report", "    return []\n",
      ['hook wiring', 'DETECTION, NOT PREVENTION', 'NOT pinned', 'NOT THERE'],
@@ -460,7 +466,10 @@ MUTANTS = [
      "ungated (#121), while the byte-identity check that would notice lived only in `game_loop "
      "self`, a verb no hook invokes and which this project's own session-start instruction does not "
      "include. So the assertions that kill this are about a REPORT rather than a refusal, and that "
-     "is the point: it is detection, and this entry must not be read as protection.", 6),
+     "is the point: it is detection, and this entry must not be read as protection. "
+     "LOWERED 6 -> 5 for the same reason as its neighbour: a full sweep measured 5, so the scoped "
+     "hand measurement overstated by one. Both entries were written claiming scoping could only "
+     "understate; one full run refuted that for both, on the first sweep after they landed.", 5),
     # ── TWO KNOWN GAPS CLOSED, and the arithmetic that nearly let one through. ─────────────────
     # Both sat in NOT_SWEPT as declared debt. Measured by hand against an archived HEAD before
     # moving them here, and the raw numbers were FLATTERING: neutering a producer that is still IN
@@ -1745,6 +1754,21 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    # ── DECLARED DEBT, NOT A WAIVER: two producers added the same day, floors OWED ─────────────
+    # These are swept-worthy and I am not pretending otherwise. What I will not do is invent their
+    # floors, because I just watched hand measurement OVERSTATE: `wiring_drift` and
+    # `hook_integrity_report` were recorded at 5 and 6 from a scoped run whose method I claimed
+    # "can only understate", and the first full sweep after they landed reported both BELOW FLOOR
+    # at 4 and 5. The tripwire caught the person who wrote it, on its first run.
+    #
+    # So these two sit here with the number owed rather than guessed, and the next FULL sweep is
+    # what pays it. A floor typed from a subset would be a tripwire calibrated by the same method
+    # that was refuted an hour ago.
+    "test/mutation_sweep.py::concurrent_suites": "added with this commit; floor owed at the next "
+        "FULL sweep rather than typed from a scoped run, after that method overstated by one on "
+        "each of the two producers measured the same day",
+    # overlap_line is deliberately NOT here: it always returns a string, so it is not a
+    # candidate at all, and naming it made a STALE entry the accounting gate caught.
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────
     # `_returns_nothing` did not count `""`, so these thirteen were never candidates: not swept, not
     # excluded, NEVER ENUMERATED. Same hole as the tuple-payload one, different shape. They are
@@ -2683,6 +2707,72 @@ def died_how(rc, err):
     return f"exit {rc}; stderr: " + " / ".join(t[:150] for t in tail)
 
 
+def concurrent_suites(ps_out=None, me=None):
+    """PIDs of test/run.py processes on this machine that are NOT this sweep's own descendants.
+
+    THREE OUTCOMES, NOT TWO, because the reason this exists is a verdict that could not tell two
+    causes apart. None means COULD NOT TELL (no usable ps); [] means none were running; a non-empty
+    list means this sweep was overlapped and its NOT MEASURED verdicts are suspect.
+
+    OBSERVED TWICE. `died_how` above records twelve CONTIGUOUS producers reported NOT MEASURED
+    within two seconds of each other, every one with empty stdout, in a sweep that overlapped other
+    full-suite runs on the same machine — twelve functions blamed that were fine, and an hour spent
+    on it. It happened again on 2026-09-01: a sibling agent session started test/run.py in this
+    checkout three minutes into a sweep. Both times the machine state was knowable and nobody looked.
+
+    The sweep cannot stop somebody else running a suite. It can refuse to report a verdict that
+    depends on the machine being quiet without saying whether it was.
+    """
+    # INJECTABLE for the same reason hook_integrity_report is: the arm that matters here fires only
+    # when somebody else happens to be running a suite, so on a quiet machine it would ship having
+    # never run. A constructed process table exercises the exclusion in both directions.
+    if ps_out is None:
+        try:
+            ps_out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="],
+                                    capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+    out = ps_out
+    rows, ppid = [], {}
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid, par = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        ppid[pid] = par
+        rows.append((pid, parts[2]))
+    me = os.getpid() if me is None else me
+    # DESCENDANTS COMPUTED FORWARD, not by walking each pid back to init. Two reasons, and the
+    # second is the one that changed the code: growing a set downward is cycle-safe by construction
+    # (a pid is only ever added, never revisited), and it needs no nested helper — a nested def here
+    # was itself picked up as a mutation candidate called `mine`, which is a meaningless name to
+    # declare a floor for and a producer nobody would recognise in a report.
+    mine = {me}
+    growing = True
+    while growing:
+        growing = False
+        for pid, par in ppid.items():
+            if par in mine and pid not in mine:
+                mine.add(pid)
+                growing = True
+    return sorted(p for p, cmd in rows if "test/run.py" in cmd and p not in mine)
+
+
+def overlap_line(pids):
+    """One line about machine contention, in the three shapes concurrent_suites can return."""
+    if pids is None:
+        return ("  concurrent suites: COULD NOT TELL — ps was unreadable, so nothing here says "
+                "whether this run had the machine to itself.")
+    if not pids:
+        return "  concurrent suites: none seen at this moment."
+    return ("  ⚠ CONCURRENT SUITE RUNS: %s — this sweep did NOT have the machine to itself, so any "
+            "NOT MEASURED below (especially a contiguous block) is suspect as contention rather "
+            "than a fact about the mutant." % ", ".join(str(p) for p in pids))
+
+
 def passing(out):
     return [m.group(1) for m in re.finditer(r"^  ok   (.*)$", out, re.M)]
 
@@ -3070,6 +3160,9 @@ def main():
     _where = f" [shard {shard}/{shards}]" if shards > 1 else ""
     print(f"running {len(idxs)} of {len(MUTANTS)} producers{_where}, {jobs} at a time "
           f"(GAME_LOOP_SWEEP_JOBS to change; each is one full suite run)\n", flush=True)
+    # SAMPLED AT BOTH ENDS, because a run can be overlapped halfway through and one check at the
+    # start would report a quiet machine for a run that did not have one.
+    print(overlap_line(concurrent_suites()) + "\n", flush=True)
 
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -3308,6 +3401,17 @@ def main():
         print("callers are somewhere no assertion can see fail — a subprocess whose stderr nobody")
         print("reads. Both are different bugs from 'unasserted', and both are worse: an assertion")
         print("added here would pass forever without ever executing the code it names.")
+    # SAMPLED AGAIN AT THE END, and this is the sample that matters: a run overlapped only halfway
+    # through would pass a start-of-run check and still have its NOT MEASURED verdicts manufactured
+    # by contention. Printed BEFORE the unscored block below so the reader meets the caveat before
+    # the verdicts it qualifies.
+    _late = concurrent_suites()
+    if _late is None or _late:
+        print(overlap_line(_late))
+        if unscored:
+            print("  ...and there ARE NOT MEASURED verdicts below. Read them as UNESTABLISHED "
+                  "rather than as findings: contention manufactures exactly this outcome, and this "
+                  "file's own history has twelve contiguous producers wrongly blamed for it.")
     # UNSCOREABLE IS NOT THIN, AND IT IS NOT CLEAN EITHER. Its own group, because the whole defect
     # was a per-item caveat being flattened into an aggregate with no room for it.
     if unscored:

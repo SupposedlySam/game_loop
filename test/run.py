@@ -15756,6 +15756,36 @@ def main():
           "INV8 is missing, and a shared message is exactly how they stayed indistinguishable",
           "DOES NOT PARSE" in _mtxt and "did not finish under this mutant" in _mtxt)
 
+    # THE SWEEP COULD NOT TELL IT HAD BEEN OVERLAPPED, and that has cost an hour twice. Its own
+    # died_how docstring records twelve CONTIGUOUS producers reported NOT MEASURED within two
+    # seconds of each other "in a sweep that overlapped other full-suite runs on the same
+    # machine" — twelve functions blamed that were fine. It happened again on 2026-09-01: a
+    # sibling agent session ran repeated suites in this checkout DURING a sweep, and the run had
+    # no way to say so. The sweep cannot stop somebody else using the machine; it can refuse to
+    # report a verdict that depends on a quiet machine without saying whether it had one.
+    print("sweep says whether it had the machine to itself:")
+    _cs = sweep.concurrent_suites
+    # 100 is the sweep, 101/102 its own workers, 200 a stranger's suite, 300 unrelated python.
+    _tbl = ("100 1 python test/mutation_sweep.py\n101 100 python test/run.py\n"
+            "102 100 python test/run.py\n200 199 python test/run.py\n"
+            "199 1 /bin/zsh -c something\n300 1 python something_else.py")
+    check("the sweep's own workers are NOT reported as contention — a warning that fires on "
+          "every run is one nobody reads, and this one would fire twelve times a sweep",
+          _cs(_tbl, me=100) == [200])
+    check("...and the SAME table read from an unrelated pid names all three, so the exclusion "
+          "is doing work rather than the filter simply matching nothing",
+          _cs(_tbl, me=999) == [101, 102, 200])
+    check("...and a machine with no suites running is [] — NONE SEEN, which must not share a "
+          "representation with 'could not tell'",
+          _cs("1 0 launchd", me=1) == [])
+    check("...and a parent pointing back at its own child does not hang the ancestry walk",
+          _cs("5 6 python test/run.py\n6 5 python x", me=1) == [5])
+    _lines = [sweep.overlap_line(None), sweep.overlap_line([]), sweep.overlap_line([200])]
+    check("three outcomes, three DIFFERENT sentences: could-not-tell, none-seen, and named "
+          "pids — the incident this exists for was a verdict that could not tell two apart",
+          len(set(_lines)) == 3 and "COULD NOT TELL" in _lines[0]
+          and "none seen" in _lines[1] and "200" in _lines[2])
+
     check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
           "— so no producer is scored on a tree identical to the baseline: " +
           (("no-op: " + ", ".join(_noops)) if _noops else "") +

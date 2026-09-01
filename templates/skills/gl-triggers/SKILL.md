@@ -320,6 +320,38 @@ The cheap part is that the instrument which found the leak is usually still load
 from telling you whether it was the only one. Point it at everything it can see, not only the thing
 you came in for, and do it before you write the sentence saying you are done.
 
+## A check that only runs when somebody asks for it is a check you do not have
+
+The strongest version of this is not a missing check. It is a **correct, tested check living
+somewhere nothing invokes**, which reads as coverage in every review and fires on nobody.
+
+Here, the file wiring every gate — write guard, MCP guard, stop gate, watchdog — is not itself
+guarded. A byte-identity comparison of the live hook commands against the ones the tool generates
+already existed, already worked, and already had assertions. It lived in a verb no hook calls, which
+the project's own session-start instruction does not mention, and the report every session DOES run
+carried zero occurrences of it. Unguarded switch, opt-in detector. Eleven installs on that machine
+had the same shape.
+
+Nobody skipped a step. Someone wrote a real check and put it where a person would have to already
+suspect the problem before running it — which is the state the check was written to rescue them from.
+
+**So when you add a check, the question is not "is it correct" but "who runs it, and when".** Three
+answers, and only one of them is enforcement:
+
+- **A hook, a gate, a commit path** — it runs whether or not anybody remembers. Enforcement.
+- **The report your workflow already runs every session** — it runs when someone looks, which is
+  often enough to be worth having, and honest if the report says which it is.
+- **A verb somebody has to choose** — that is documentation with a CLI, and belongs on the same rung
+  as a comment. It is not nothing; it is just not what its presence implies.
+
+The tell is cheap: **grep for the invocation, not the definition.** If the only hits are the
+definition and its tests, nothing runs it. Do that with the exact call, too — grepping the bare word
+`self` for this one matched the `.game_loop_self` pin path and reported the opposite of the truth.
+
+And when you move such a check somewhere it does run, test that it is WIRED, not merely that it
+works. Four assertions passing a state straight into the report all stayed green while it was
+disconnected from the command that shows it.
+
 ## The harness, for the shape it fits
 
 This skill used to close by saying the tooling did not exist and this was the method. That stopped

@@ -10466,6 +10466,85 @@ def hook_wiring(repo_root):
     return out_
 
 
+def wiring_drift(code, w):
+    """The pinned hook command lines as SETTINGS has them vs as this tool GENERATES them.
+
+    Extracted so `self` and `status` cannot disagree about drift. Two hand-maintained copies of one
+    comparison is the very defect the comparison exists to find, and putting a second copy in the
+    report that runs every session would have been the joke writing itself.
+
+    Returns None when there is nothing to compare — no generated block, or no pinned hooks.
+    """
+    gen = {l.strip() for l in self_hooks_block(code)
+           if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/')}
+    have = {c.strip() for _e, c in w["pinned"]}
+    if not gen or not have:
+        return None
+    return {"generated": gen, "in_settings": have}
+
+
+def hook_integrity_report(w=None, code=None):
+    """Whether the hook commands still match what this tool generates — IN THE REPORT EVERY SESSION
+    RUNS.
+
+    .claude/settings.json is where every gate is wired: the write guard, the MCP guard, the stop
+    gate, the watchdog. The write guard does not cover that file, so a session can edit it — and
+    the byte-identity check that would notice lived ONLY in `game_loop self`, a verb nothing runs
+    automatically and which this project's own session-start instruction does not include. So the
+    master switch was unguarded AND its detector was opt-in, which is the pair this repo exists to
+    refuse: the check existed, and nobody was going to run it.
+
+    This does not GATE the file. It makes tampering answer for itself in the report the next
+    session reads, which is the cheap rung, and says plainly that it is detection rather than
+    prevention.
+    """
+    # INJECTABLE, because the loud arm is the one that never fires on a healthy repo. Reading the
+    # real settings.json only ever exercises the quiet branch, so the drift arm would ship having
+    # never run — which is the failure this whole report is about, one level up.
+    if code is None:
+        code = os.path.join(REPO_ROOT, PINNED_DIRNAME, ".game_loop")
+    # NO PIN IS NOT NO ANSWER, and gating the whole report on the pinned directory existing was
+    # silence for exactly the installs most exposed: a consumer who never pins still has every gate
+    # wired in the same unguarded settings.json, and "unknown" and "not pinned" are answers that
+    # need no pinned tree to give. Only the BYTE COMPARISON needs one, so only it is skipped.
+    if w is None:
+        try:
+            w = hook_wiring(REPO_ROOT)
+        except Exception:
+            return []
+    if w["state"] == "unknown":
+        return ["", "hook wiring: UNKNOWN — no readable .claude/settings*.json, so nothing here can "
+                "say whether the gates are wired at all."]
+    if w["state"] != "wired":
+        return ["", "hook wiring: NOT pinned — the hooks run this tree's .game_loop/bin/, so an "
+                "edit here changes the gates guarding this session."]
+    if not os.path.isdir(code):
+        return ["", "hook wiring: WIRED TO A PINNED CHECKOUT THAT IS NOT THERE — the hook commands "
+                f"name {PINNED_DIRNAME}/, which does not exist.",
+                "  Each falls back to this tree's own bin/, so the gates still run; what is lost is "
+                "the protection",
+                "  the pin exists for. `game_loop self --pin HEAD` restores it."]
+    d = wiring_drift(code, w)
+    if not d:
+        return ["", "hook wiring: pinned, but nothing to compare — no generated block, or no pinned "
+                "hook commands to compare it against."]
+    extra = sorted(d["in_settings"] - d["generated"])
+    missing = sorted(d["generated"] - d["in_settings"])
+    if not extra and not missing:
+        return ["", f"hook wiring: {len(d['in_settings'])} command(s) byte-identical to what "
+                "`game_loop self` generates.",
+                "  DETECTION, NOT PREVENTION: the write guard does not cover .claude/settings.json, "
+                "so this",
+                "  is the line that would notice if something rewrote the gates."]
+    L = ["", "⚠ HOOK WIRING HAS DRIFTED FROM WHAT THIS TOOL GENERATES — the file that wires every",
+         "  gate (write guard, MCP guard, stop gate, watchdog) does not match its own instructions."]
+    L += ["    settings.json has : " + c for c in extra]
+    L += ["    self would print  : " + c for c in missing]
+    L += ["  Benign drift and a disabled gate look identical from here, so read them before "
+          "assuming the first."]
+    return L
+
+
 def pin_wiring_lines(code, w):
     """What `self` says about a pin that exists, having READ the wiring rather than guessed it."""
     n_pin, n_plain = len(w["pinned"]), len(w["plain"])
@@ -10489,9 +10568,8 @@ def pin_wiring_lines(code, w):
             L.append("  ⚠ game_loop hooks appear in BOTH settings files, which MERGE rather than "
                      "override —")
             L.append("    every gate is running twice. Delete the ones in settings.local.json.")
-        gen = {l.strip() for l in self_hooks_block(code)
-               if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/')}
-        have = {c.strip() for _e, c in w["pinned"]}
+        _d = wiring_drift(code, w)
+        gen, have = (_d["generated"], _d["in_settings"]) if _d else (set(), set())
         if gen and have and gen != have:
             L += ["",
                   "  ⚠ WIRED — BUT NOT WITH THE WIRING THIS VERB GENERATES. These are two "
@@ -10964,6 +11042,7 @@ def cmd_status(s, a):
     # AND A GUARD DISABLED BY THE STATE IT READS (#90) — the same equivalence one process boundary
     # out. Registered, running, returning the code that means allowed, for sixteen hours.
     out(*guards_report())
+    out(*hook_integrity_report())  # the file that wires every gate is not itself guarded
     out(*wake_path_report(s))
     out(*authorizations_report(s))  # a consumable the human paid for — show the balance
     out(*working_tree_report())  # which tree is being edited vs which one this harness speaks for

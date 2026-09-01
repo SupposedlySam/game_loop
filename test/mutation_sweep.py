@@ -432,6 +432,35 @@ def verdict(killed):
 # still catches the loss it exists to catch.
 
 MUTANTS = [
+    # THE TWO NEWEST PRODUCERS, and the only ones here whose floors were measured BY HAND. This
+    # file has no per-producer selector, so a floor for a new entry otherwise costs a full ~1h run.
+    # Method: this file's own neuter() + in_a_copy_of(), and a SET DIFFERENCE OF ASSERTION NAMES
+    # against a baseline — never a count, because ten assertions reading one line flip together and
+    # a count cannot tell that from ten behaviours. Scoped to the two sections that own them, the
+    # SAME SUBSET ON BOTH SIDES, which is this file's own FAST discipline: it can only UNDERSTATE a
+    # floor, and understating is the safe direction for a tripwire.
+    #
+    # AND ONE MEASUREMENT WAS THROWN AWAY RATHER THAN USED. The first attempt ran while I was still
+    # editing _gl_impl.py, and in_a_copy_of copies the tree per call — so its baseline and its
+    # mutants came from different trees. A measurement of a moving subject is what this file exists
+    # to refuse, so it was discarded and re-run against a frozen tree.
+    ("wiring_drift -> nothing ever compares the live hook wiring to what the tool generates",
+     ".game_loop/bin/_gl_impl.py::wiring_drift", "    return None\n",
+     ['byte-identical', 'DRIFTED', 'wiring'],
+     "MEASURED 6, RECORDED 5, and the gap is a kill I could not explain: one of the six was "
+     "`neuter REACHES every candidate the finder produces`, which is about the mutator's own reach "
+     "and not about wiring at all — collateral by subject. Rather than invent a mechanism I left it "
+     "out of the floor, because a tripwire resting on an unexplained kill fires the day that kill "
+     "stops happening and says nothing true when it does.", 5),
+    ("hook_integrity_report -> `status` says nothing about the file that wires every gate",
+     ".game_loop/bin/_gl_impl.py::hook_integrity_report", "    return []\n",
+     ['hook wiring', 'DETECTION, NOT PREVENTION', 'NOT pinned', 'NOT THERE'],
+     "MEASURED 7, RECORDED 6 — same unexplained `neuter REACHES` collateral held out, for the same "
+     "reason. The producer exists because .claude/settings.json wires every gate here and is "
+     "ungated (#121), while the byte-identity check that would notice lived only in `game_loop "
+     "self`, a verb no hook invokes and which this project's own session-start instruction does not "
+     "include. So the assertions that kill this are about a REPORT rather than a refusal, and that "
+     "is the point: it is detection, and this entry must not be read as protection.", 6),
     # ── TWO KNOWN GAPS CLOSED, and the arithmetic that nearly let one through. ─────────────────
     # Both sat in NOT_SWEPT as declared debt. Measured by hand against an archived HEAD before
     # moving them here, and the raw numbers were FLATTERING: neutering a producer that is still IN

@@ -16321,6 +16321,55 @@ def main():
                                    "game_loop stopgate", "game_loop sessionstart",
                                    "watchdog")) for c in _cmds))
 
+    # THE CHECK EXISTED AND NOBODY WAS GOING TO RUN IT. Everything above proves `self` reports
+    # drift — and `self` is a verb nothing invokes automatically, which this project's own
+    # session-start instruction (`game_loop status`) does not include. .claude/settings.json wires
+    # every gate here: write guard, MCP guard, stop gate, watchdog. The write guard does not cover
+    # that file. So the master switch was unguarded AND its detector was opt-in.
+    _pin_code = os.path.join(REPO, PIN_DIRNAME_FOR_TEST, ".game_loop")
+    _hi_ok = "\n".join(_sbmod.hook_integrity_report(_wired_state, _pin_code))
+    check("`status` — the report every session runs — now says whether the hook wiring still "
+          "matches what the tool generates, instead of that living only in a verb nobody invokes",
+          "byte-identical" in _hi_ok)
+    check("...and it says DETECTION, NOT PREVENTION in the same breath, because settings.json is "
+          "not gated and a line that implied otherwise would be worse than no line",
+          "DETECTION, NOT PREVENTION" in _hi_ok)
+    _hi_drift = "\n".join(_sbmod.hook_integrity_report(_drift_state, _pin_code))
+    check("...and a DRIFTED settings.json is loud there, printing both versions — the arm that "
+          "fires on a healthy repo is the quiet one, so the loud arm needs its own proof",
+          "HAS DRIFTED" in _hi_drift and "guard-STALE-" in _hi_drift
+          and "byte-identical" not in _hi_drift)
+    _hi_unwired = "\n".join(_sbmod.hook_integrity_report(
+        dict(_wired_state, state="unwired"), _pin_code))
+    check("...and an UNWIRED repo is a third answer, not silence and not drift — the gates running "
+          "this tree's own bin/ is a different fact from them having been edited",
+          "NOT pinned" in _hi_unwired and "DRIFTED" not in _hi_unwired)
+    # AND THAT IT IS ACTUALLY WIRED INTO status. The four checks above pass a state straight to the
+    # function, so they hold just as well for a report NOTHING CALLS — I unwired it from cmd_status
+    # to see, and not one of them failed. That is the stub-for-one-of-two-seams shape this repo
+    # keeps paying for: the piece under test was fine and the piece that invokes it was gone.
+    _cs = [n for n in ast.walk(ast.parse(read_or_empty(
+        os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))))
+        if isinstance(n, ast.FunctionDef) and n.name == "cmd_status"]
+    _cs_calls = {c.func.id for n in _cs for c in ast.walk(n)
+                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+    check("...and `cmd_status` actually CALLS it — the assertions above pass a state straight in, "
+          "so they would all stay green for a report no command invokes",
+          bool(_cs) and "hook_integrity_report" in _cs_calls)
+    # AND AN INSTALL WITH NO PIN STILL GETS AN ANSWER. Gating the whole report on the pinned
+    # directory existing made it silent for exactly the consumers most exposed — no pin does not
+    # mean no gates, it means the same unguarded settings.json with nothing pinned behind it.
+    _hi_nopin = "\n".join(_sbmod.hook_integrity_report(
+        dict(_wired_state, state="unwired"), os.path.join(REPO, "no-such-pin-dir", ".game_loop")))
+    check("an install with NO pinned checkout still gets a wiring answer — the report used to "
+          "return nothing at all there, which is silence for the installs with least protection",
+          _hi_nopin.strip() != "" and "NOT pinned" in _hi_nopin)
+    _hi_broken = "\n".join(_sbmod.hook_integrity_report(
+        _wired_state, os.path.join(REPO, "no-such-pin-dir", ".game_loop")))
+    check("...and hooks naming a pinned checkout that DOES NOT EXIST is its own answer — the gates "
+          "still run by fallback, so this is a lost protection rather than a lost gate",
+          "NOT THERE" in _hi_broken)
+
     def _select(root, pinned):
         """Run only the dispatcher's path-resolution half and report which tree it chose."""
         sel = ('d="$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop"; '

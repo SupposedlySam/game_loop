@@ -1269,6 +1269,18 @@ with open(settings_f, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 print("  merged  .claude/settings.json (PreToolUse guard + limitgate + Stop gate + watchdog)")
+# SAY WHICH FILE, AND WHAT THAT MEANS. This is the SHARED, source-controlled settings file, and
+# .game_loop/ is tracked too, so committing this turns the gates on for everyone who clones the
+# repo — which is the design, and was never told to the person choosing it. "merged
+# .claude/settings.json" carries that news only to a reader who already knows Claude Code's
+# convention that settings.json is shared and settings.local.json is machine-local. Somebody
+# installing this as a personal tool should not learn it from a colleague's pull.
+print("          ^ that file is SOURCE-CONTROLLED, and .game_loop/ is tracked too — so once you")
+print("            commit, everyone who clones this repo gets the payload and the gates. That is")
+print("            the design (a guardrail the team shares), not an accident.")
+print("            Want it for yourself only? Move the \"hooks\" block into")
+print("            .claude/settings.local.json (machine-local, gitignored) and gitignore")
+print("            .game_loop/ — then nothing here reaches anybody else.")
 
 # The statusline is the ONLY place Claude Code exposes subscription rate limits, so it is the tap
 # that feeds the limitgate and the watchdog's limit-park. Set it only when the project has none —

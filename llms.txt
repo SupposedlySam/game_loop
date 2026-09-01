@@ -506,7 +506,18 @@ From a clone of game_loop:
 ./install.sh /path/to/this/project
 ```
 
-That copies `.game_loop/` in and merges the hooks into `.claude/settings.json`. Then edit
+That copies `.game_loop/` in and merges the hooks into `.claude/settings.json` — the
+SOURCE-CONTROLLED one. Both it and `.game_loop/` are tracked, so once committed, everyone who clones
+gets the payload and the gates. That is deliberate: the guardrail is the team's.
+
+For a machine-local install that reaches nobody else, use `--local`, which writes the hooks to
+`.claude/settings.local.json` and gitignores `.game_loop/`:
+
+```
+./install.sh --local /path/to/this/project
+```
+
+The installer says which of the two it did. Then edit
 `.game_loop/INVARIANTS.md` (the project's north star) and `.game_loop/config.json` (read roots, allowed
 write roots, deploy verbs, watchdog timing), and run `./.game_loop/bin/game_loop status`.
 

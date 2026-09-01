@@ -153,7 +153,7 @@ fi
 
 usage() {
   cat <<'USAGE'
-usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--skills|--no-skills]
+usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--local] [--skills|--no-skills]
                     /path/to/your/project
        ./install.sh --skills-only          (user-level skills, no project touched)
        (or pipe via curl: ... | bash -s -- .)
@@ -187,6 +187,13 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--skills|--no-
                         the same question N times. A run with no terminal to ask at leaves it off.
                         A target whose config already decides this is never asked and never
                         rewritten.
+  --local               install for YOU, not for the team. Hooks go into
+                        .claude/settings.local.json (machine-local, gitignored by Claude Code)
+                        instead of the source-controlled .claude/settings.json, and .game_loop/ is
+                        added to this repo's .gitignore. Nothing this installs then reaches anybody
+                        who clones the repo. WITHOUT this flag the install is SHARED, which is the
+                        design: the payload and the gates are committed, and everyone who clones
+                        gets both.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
                         shims that run it from a shared, machine-wide install instead (set up once
                         with `game_loop self --pin <ref> --dest ~/.claude/game_loop-central`, or
@@ -198,6 +205,7 @@ USAGE
 }
 
 TARGET=""
+LOCAL_INSTALL=0        # --local: hooks to settings.local.json, and gitignore .game_loop/
 OVER_VENDORED=0
 OVER_BLESSED=0
 SAME_AS=""
@@ -210,6 +218,7 @@ CONTEXT_CAP_TOKENS=300000
 CONTEXT_CAP_WHY=""         # HOW the answer was reached — printed, so nothing decides this silently
 while [ $# -gt 0 ]; do
   case "$1" in
+    --local)       LOCAL_INSTALL=1; shift ;;
     --skills)      WANT_SKILLS="yes"; shift ;;
     --no-skills)   WANT_SKILLS="no";  shift ;;
     --skills-only) SKILLS_ONLY=1; WANT_SKILLS="yes"; shift ;;
@@ -1220,9 +1229,13 @@ if c.get("project_name") in (None, "", "game_loop"):
 PY
 fi
 
-# Merge the hooks into .claude/settings.json (create it if missing), idempotently.
+# Merge the hooks into the settings file, idempotently. WHICH FILE IS THE WHOLE OF --local:
+# settings.json is source-controlled and reaches everyone who clones; settings.local.json is
+# machine-local and reaches nobody. Same merge either way — only the destination changes.
 mkdir -p "$TARGET/.claude"
-python3 - "$SRC/templates/settings.hooks.json" "$TARGET/.claude/settings.json" <<'PY'
+SETTINGS_BASENAME="settings.json"
+[ "$LOCAL_INSTALL" = "1" ] && SETTINGS_BASENAME="settings.local.json"
+python3 - "$SRC/templates/settings.hooks.json" "$TARGET/.claude/$SETTINGS_BASENAME" <<'PY'
 import json, os, sys
 block_f, settings_f = sys.argv[1], sys.argv[2]
 with open(block_f) as f:
@@ -1268,19 +1281,24 @@ for event, new_entries in block.items():
 with open(settings_f, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
-print("  merged  .claude/settings.json (PreToolUse guard + limitgate + Stop gate + watchdog)")
+print("  merged  .claude/" + os.path.basename(settings_f)
+      + " (PreToolUse guard + limitgate + Stop gate + watchdog)")
 # SAY WHICH FILE, AND WHAT THAT MEANS. This is the SHARED, source-controlled settings file, and
 # .game_loop/ is tracked too, so committing this turns the gates on for everyone who clones the
 # repo — which is the design, and was never told to the person choosing it. "merged
 # .claude/settings.json" carries that news only to a reader who already knows Claude Code's
 # convention that settings.json is shared and settings.local.json is machine-local. Somebody
 # installing this as a personal tool should not learn it from a colleague's pull.
-print("          ^ that file is SOURCE-CONTROLLED, and .game_loop/ is tracked too — so once you")
-print("            commit, everyone who clones this repo gets the payload and the gates. That is")
-print("            the design (a guardrail the team shares), not an accident.")
-print("            Want it for yourself only? Move the \"hooks\" block into")
-print("            .claude/settings.local.json (machine-local, gitignored) and gitignore")
-print("            .game_loop/ — then nothing here reaches anybody else.")
+if os.path.basename(settings_f) == "settings.local.json":
+    print("          ^ machine-local and gitignored, so NOTHING installed here reaches anybody who")
+    print("            clones this repo — including your teammates. Re-run without --local to make")
+    print("            it the team's guardrail instead.")
+else:
+    print("          ^ that file is SOURCE-CONTROLLED, and .game_loop/ is tracked too — so once you")
+    print("            commit, everyone who clones this repo gets the payload and the gates. That is")
+    print("            the design (a guardrail the team shares), not an accident.")
+    print("            Want it for yourself only? Re-run with --local, which writes the hooks to")
+    print("            .claude/settings.local.json and gitignores .game_loop/ instead.")
 
 # The statusline is the ONLY place Claude Code exposes subscription rate limits, so it is the tap
 # that feeds the limitgate and the watchdog's limit-park. Set it only when the project has none —
@@ -1307,6 +1325,24 @@ elif ".game_loop/bin/game_loop" not in json.dumps(sl):
     print('      tee >("${CLAUDE_PROJECT_DIR:-.}"/.game_loop/bin/game_loop statusline >/dev/null) | <your script>')
     print("    or replace your statusLine command with: " + GL_STATUSLINE)
 PY
+
+# --local's OTHER HALF. Hooks in settings.local.json reach nobody, but a committed .game_loop/ still
+# would — the payload, the state, the log. A "for me only" install that ships the harness to the team
+# anyway would be the disclosure problem again wearing a flag. Appended to the repo's own .gitignore,
+# idempotently, and only when asked: the SHARED install deliberately tracks .game_loop/ and must not
+# have it ignored out from under it.
+if [ "$LOCAL_INSTALL" = "1" ]; then
+  GI_ROOT="$TARGET/.gitignore"
+  if ! grep -qxF ".game_loop/" "$GI_ROOT" 2>/dev/null; then
+    { [ -s "$GI_ROOT" ] && [ -n "$(tail -c 1 "$GI_ROOT")" ] && echo ""; } >> "$GI_ROOT" 2>/dev/null || true
+    printf '%s\n' "" "# game_loop, installed with --local: for this machine only, not the team." \
+      ".game_loop/" >> "$GI_ROOT"
+    echo "  wrote   .gitignore (+ .game_loop/ — --local keeps the payload out of the repo)"
+  else
+    echo "  ok      .gitignore already ignores .game_loop/"
+  fi
+fi
+
 
 # Ignore the runtime files.
 GI="$TARGET/.game_loop/.gitignore"

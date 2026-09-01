@@ -13273,6 +13273,49 @@ def main():
     finally:
         shutil.rmtree(u_main, ignore_errors=True)
 
+    # #122: WHICH SETTINGS FILE IS A DECISION THE USER NEVER GOT TO MAKE. The installer wrote its
+    # hooks into .claude/settings.json — the SOURCE-CONTROLLED one — and said only "merged
+    # .claude/settings.json", which carries the news solely to a reader who already knows Claude
+    # Code's convention. Committing that turns the gates on for everyone who clones, and .game_loop/
+    # is tracked too, so a personal install silently became the team's. `--local` is the other mode.
+    #
+    # DRIVEN, NOT READ, and that is not incidental: the first version of the --local gitignore half
+    # landed INSIDE the installer's embedded python heredoc. `bash -n` passed it, because a heredoc
+    # body is not shell code to bash, so only running the installer could see it.
+    print("install.sh: shared by default, --local for one machine (#122):")
+    _li_root = _tmpdir("gl-local-")
+    def _install_into(*flags):
+        d = os.path.join(_li_root, "t" + str(len(os.listdir(_li_root))))
+        os.makedirs(d)
+        subprocess.run(["git", "init", "-q", "."], cwd=d, capture_output=True)
+        r = subprocess.run(["bash", os.path.join(REPO, "install.sh"), *flags, d],
+                           capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL)
+        return d, (r.stdout or "") + (r.stderr or "")
+    _shared_d, _shared_out = _install_into()
+    check("#122: the DEFAULT install writes the source-controlled settings.json, and says so — "
+          "'merged .claude/settings.json' alone names a file, not a consequence",
+          os.path.isfile(os.path.join(_shared_d, ".claude", "settings.json"))
+          and "SOURCE-CONTROLLED" in _shared_out and "everyone who clones" in _shared_out)
+    check("...and it does NOT gitignore .game_loop/, because the shared install tracks the payload "
+          "on purpose — the disclosure would be a lie if the flag's half leaked into the default",
+          ".game_loop/" not in read_or_empty(os.path.join(_shared_d, ".gitignore")))
+    _local_d, _local_out = _install_into("--local")
+    check("#122: --local writes .claude/settings.local.json INSTEAD, so nothing installed reaches "
+          "anybody who clones",
+          os.path.isfile(os.path.join(_local_d, ".claude", "settings.local.json"))
+          and not os.path.isfile(os.path.join(_local_d, ".claude", "settings.json")))
+    check("...and gitignores .game_loop/ too — hooks that reach nobody while the payload is still "
+          "committed would be the same disclosure problem wearing a flag",
+          ".game_loop/" in read_or_empty(os.path.join(_local_d, ".gitignore")))
+    check("...and says it reaches nobody, rather than reusing the shared wording",
+          "reaches anybody" in _local_out and "SOURCE-CONTROLLED" not in _local_out)
+    _, _again_out = None, subprocess.run(
+        ["bash", os.path.join(REPO, "install.sh"), "--local", _local_d],
+        capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
+    check("...and a second --local run does not append the ignore twice — an installer people re-run "
+          "is one that must be idempotent in what it writes to files they own",
+          read_or_empty(os.path.join(_local_d, ".gitignore")).count("\n.game_loop/") == 1)
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")

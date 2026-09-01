@@ -119,6 +119,21 @@ Then **restart Claude Code** (hooks are read when a session starts) and confirm:
 Installing adds a `.game_loop/` directory and merges its hooks into `.claude/settings.json`. It never
 overwrites files you own.
 
+**Two modes, and the default is the team's.** `.claude/settings.json` is source-controlled and
+`.game_loop/` is tracked, so once you commit, **everyone who clones this repo gets the payload and
+the gates**. That is the design — a guardrail a team shares — and it is what you get by default.
+
+If you want it for yourself and not for your colleagues, install with `--local`:
+
+```bash
+./install.sh --local .
+```
+
+That writes the hooks to `.claude/settings.local.json` (machine-local, gitignored) and adds
+`.game_loop/` to this repo's `.gitignore`, so nothing it installs reaches anybody who clones. The
+installer prints which of the two it did, either way — it is a choice, not a default you discover
+when a colleague pulls.
+
 Installing several repos on one machine? `install.sh --central` wires a repo to run the tool from one
 shared, machine-wide location instead of copying it in — see "Central install" in
 [docs/how-it-works.md](docs/how-it-works.md) for setup and tradeoffs.

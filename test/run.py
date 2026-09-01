@@ -15843,6 +15843,46 @@ def main():
           len(set(_lines)) == 3 and "COULD NOT TELL" in _lines[0]
           and "none seen" in _lines[1] and "200" in _lines[2])
 
+    # THE RULE WAS WRITTEN DOWN AND FAILED FOUR TIMES, so it moved to a tool. Assertion names in this
+    # repo quote the tool's own vocabulary, so a grep for a verdict word also matches every assertion
+    # written ABOUT that verdict — `grep -c "BELOW FLOOR"` on a HEALTHY log returns hits from
+    # assertions named "...a NOT MEASURED producer is never also reported as BELOW FLOOR". Twice in
+    # one afternoon I counted those as findings; once I ran the opposite mistake, a pattern matching
+    # nothing, and killed a sweep whose answer was in the file I had just called empty.
+    print("reading a sweep log by SHAPE, not by word:")
+    # Loaded the way this file already loads a script by path — there is no _load_module_from
+    # helper here, and assuming one existed is how a paste fails at the seam rather than in the body.
+    _svu = __import__("importlib.util", fromlist=["util"])
+    _sv_spec = _svu.spec_from_file_location(
+        "_sweep_verdicts", os.path.join(REPO, "test", "sweep-verdicts.py"))
+    _sv = _svu.module_from_spec(_sv_spec)
+    _sv_spec.loader.exec_module(_sv)
+    # A log carrying BOTH a real verdict and prose that quotes it — which is the only case that
+    # discriminates. A fixture with only one of the two would pass for a word-grep as well.
+    _log = "\n".join([
+        "producer_a -> does a thing",
+        "  killed: 7   [ok]   floor 4",
+        "  SURVIVED: ...and a NOT MEASURED producer is never also reported as BELOW FLOOR",
+        "producer_b -> does another",
+        "  killed: 2   [ok]   floor 5  ↓ BELOW FLOOR",
+        "producer_c -> a third",
+        "  !! producer_c: NOT FOUND in x.py — renamed, or gone. NOT MEASURED: nothing was mutated",
+    ])
+    _rep, _below, _unm = _sv.read(_log)
+    check("a real BELOW FLOOR is counted and prose quoting the words is not — the discriminator is "
+          "the column, because prose can imitate the vocabulary and cannot imitate the layout",
+          _below == ["producer_b"])
+    check("...and a real NOT MEASURED is counted from its `!!` line, not from an assertion name "
+          "that happens to contain the phrase",
+          _unm == ["producer_c"])
+    check("...and every producer that reported at all is counted, including the healthy one",
+          _rep == ["producer_a", "producer_b"])
+    # THE CONTROL THAT MAKES THIS FIXTURE HONEST: the naive grep must actually be wrong on it, or
+    # the test proves nothing about the tool — it would pass for a word-grep too.
+    check("...and a WORD grep over the same log is genuinely wrong — 2 hits for BELOW FLOOR where "
+          "there is one verdict, which is the failure this tool exists to stop being possible",
+          _log.count("BELOW FLOOR") == 2 and len(_below) == 1)
+
     check("every declared producer actually MUTATES its own file — anchor found and bytes changed "
           "— so no producer is scored on a tree identical to the baseline: " +
           (("no-op: " + ", ".join(_noops)) if _noops else "") +

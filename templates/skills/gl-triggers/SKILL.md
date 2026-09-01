@@ -352,6 +352,36 @@ And when you move such a check somewhere it does run, test that it is WIRED, not
 works. Four assertions passing a state straight into the report all stayed green while it was
 disconnected from the command that shows it.
 
+## A compound command's outcome is not the outcome of the part you cared about
+
+Three times in one day, in three different shapes, a command reported success while the thing I
+wanted had failed. None of them were exotic.
+
+**A pipe replaces the exit status.** `long_job 2>&1 | tail -30` exits with `tail`'s status, which is
+0 whatever the job did. The harness reported "completed, exit 0"; the output file held a traceback,
+and the job had died half an hour earlier while I waited on it.
+
+**A gate refuses the whole command, not the offending part.** `authorize ... && gh issue create ...`
+can never work when the refusal fires at PreToolUse: nothing in the command runs, so the hatch is
+never granted — and the here-doc earlier in the same call, writing the body file, never runs either.
+The retry then fails on a missing file, which looks like a second, unrelated problem.
+
+**A `;` between an edit and a record lets the record lie.** `python3 - <<'PY' ...edit... PY ;
+tool record --notes "edited X"` runs the record even when the edit raised. The edit's assertion
+failed; the note claiming it went into an append-only log.
+
+The general form: **the shell answers about the LAST thing, or about the whole thing, and you are
+usually asking about a middle thing.** Two habits cover all three:
+
+- **Separate the call you need an answer about.** Run the job unpiped and read its file; run the
+  authorize alone; run the edit alone.
+- **When you must chain, chain with `&&`** so a failure stops the sequence — and put the
+  state-changing command LAST, never before the thing whose success it describes.
+
+And the check that catches what both habits miss: **after a command that was supposed to change a
+file, read the file.** Not the exit code, not the success line — the file. Every one of the three
+above survived its own success message and died at the first look at the artifact.
+
 ## The harness, for the shape it fits
 
 This skill used to close by saying the tooling did not exist and this was the method. That stopped

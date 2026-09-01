@@ -1402,6 +1402,20 @@ def main():
               "the next unrelated outward write",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "gh issue comment 60 --body-file /tmp/b"}})))
+        # THE REFUSAL DID NOT SAY THE ONE THING THAT WOULD HAVE SAVED TWO ATTEMPTS. It points at
+        # `authorize` and the natural next move is to chain them — which can NEVER work, because
+        # this gate fires at PreToolUse, before any part of the command runs: the whole thing is
+        # refused, the hatch is never granted, and anything else in that call is discarded too,
+        # including the here-doc writing the body file. I did it twice before writing this down.
+        _ghmsg = guard(wgproj, {"tool_name": "Bash",
+                                "tool_input": {"command": "gh issue close 1"}}).stdout
+        check("the outward-gh refusal says the authorize call must be its OWN call — the message "
+              "points at a fix whose obvious spelling is refused by the same gate",
+              "ITS OWN CALL" in _ghmsg and "PreToolUse" in _ghmsg)
+        check("...and the refusal body executes NOTHING when it is built — it is assembled inside a "
+              "double-quoted shell string, where a backtick would run as command substitution, and "
+              "the first draft of this very hint did exactly that",
+              "command not found" not in _ghmsg and "$(" not in _ghmsg)
         check("still denies a real redirect to a QUOTED out-of-repo target",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo x > "$HOME/gl_outside.txt"'}})))

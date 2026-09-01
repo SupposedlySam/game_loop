@@ -1977,6 +1977,11 @@ If a HUMAN has explicitly authorized this, quote them and try again:
   game_loop authorize --path \"$gh_hit\" --reason \"<their exact words>\" [--uses N]
 One authorization per USE, logged permanently — the same hatch, and the same cost, as the MCP door.
 
+RUN THAT AS ITS OWN CALL, NOT CHAINED AHEAD OF THE VERB. This gate fires at PreToolUse — before any
+part of your command runs — so authorize-then-verb in ONE command is refused as a WHOLE and the hatch is never
+granted. Everything else in that command is discarded too, including a here-doc writing the body
+file you were about to pass. Authorize in one call; run the verb in the next.
+
 WRITING ABOUT THE VERB RATHER THAN RUNNING IT? You are not: this matches COMMAND POSITION only, so
 prose quoting the command is not affected, and neither is a --body-file whose CONTENTS mention it."
       fi

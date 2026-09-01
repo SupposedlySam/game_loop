@@ -491,7 +491,7 @@
     },
     {
       "seq": 51,
-      "sha": "PENDING",
+      "sha": "439ab39",
       "notice": true,
       "verb": "write guard (Write/Edit and Bash)",
       "change": "the script named by watchdog.waiting_probe is now refused, on both paths — tool write, redirect, append, sed -i, tee, cp. Resolved from the CONFIG VALUE rather than by a hard-coded name, so it follows the pointer. Other scripts in triggers.d are untouched.",

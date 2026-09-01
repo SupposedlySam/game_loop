@@ -1327,6 +1327,43 @@ def main():
               allowed(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "env | sed 's/=.*TOKEN.*/=<redacted>/'"}}))
 
+        # #120: THE WATCHDOG'S OFF SWITCH HAS TWO ENDS. config.local.json holds the pointer and was
+        # already refused; the SCRIPT it names was not, so `exit 0` bought silence from the other
+        # end. Resolved from the config VALUE, so it follows the pointer rather than assuming a
+        # path — and that is what makes gating the script sufficient rather than theatre: the
+        # pointer cannot be moved to a fresh script, because moving it is refused above.
+        print("write guard (the watchdog's own off switch, #120):")
+        _probe_cfg = os.path.join(wgproj, ".game_loop", "config.local.json")
+        _probe_sh = os.path.join(wgproj, ".game_loop", "triggers.d", "wait-probe.sh")
+        os.makedirs(os.path.dirname(_probe_sh), exist_ok=True)
+        with open(_probe_sh, "w") as _f:
+            _f.write("exit 1\n")
+        with open(_probe_cfg, "w") as _f:
+            json.dump({"watchdog": {"waiting_probe": 'bash "$GAME_LOOP_ROOT/triggers.d/wait-probe.sh"'}}, _f)
+        check("refuses a TOOL write to the script watchdog.waiting_probe names — a session that "
+              "can make its own probe say WAITING decides when its idle alarm stops",
+              denied(guard(wgproj, {"tool_name": "Write", "tool_input": {
+                  "file_path": _probe_sh, "content": "exit 0"}})))
+        for _c, _what in ((">> " + _probe_sh, "an append"),
+                          ("> " + _probe_sh, "a truncating redirect")):
+            check("...and refuses %s to it on the BASH path, where the pointer's own gate was "
+                  "registered on Write/Edit only for a year" % _what,
+                  denied(guard(wgproj, {"tool_name": "Bash",
+                                        "tool_input": {"command": "echo x " + _c}})))
+        check("...and `sed -i` on it too, which came free by extending the policy resolver rather "
+              "than adding a second list of verbs to keep in step",
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "sed -i '' s/a/b/ " + _probe_sh}})))
+        # THE CONTROL. Without it this section passes for a guard that refuses every trigger script,
+        # or every path under .game_loop, and says nothing about resolving the pointer.
+        _other_sh = os.path.join(wgproj, ".game_loop", "triggers.d", "not-the-probe.sh")
+        with open(_other_sh, "w") as _f:
+            _f.write("exit 1\n")
+        check("...but a DIFFERENT trigger script beside it is untouched — the gate is about the "
+              "path the config names, not about the directory it happens to live in",
+              allowed(wgproj, {"tool_name": "Write", "tool_input": {
+                  "file_path": _other_sh, "content": "exit 0"}}))
+
         # #118: TWO DOORS TO ONE OUTWARD ACT. The MCP guard refuses an issue comment and demands a
         # logged hatch; this door let the identical action through in silence, exit 0, nothing
         # recorded — and the deploy refusal above named `gh issue comment --body-file` as the way

@@ -611,6 +611,77 @@ same act as editing one.
 THE GUARD ONLY SEES THIS SESSION'S TOOL CALLS. A human editing the file, or a layer above writing it
 into this tree from its own process, does not pass through here and is unaffected."
     fi
+
+    # THE WAITING PROBE'S SCRIPT IS THE WATCHDOG'S OFF SWITCH (#120). config.local.json holds the
+    # POINTER and is already refused above, so a session cannot repoint the probe — but the script
+    # it names was not covered, and rewriting that to `exit 0` buys the same silence by the other
+    # end. Resolved FROM THE CONFIG VALUE rather than by a hard-coded name, so it follows the
+    # pointer instead of assuming today's path.
+    #
+    # THE ISSUE THAT ASKED FOR THIS WAS WRONG ABOUT THE SHAPE, and the correction is why this is
+    # eight lines instead of a policy-file expansion: it proposed locking config.local.json because
+    # idle_sec and ring_cap sit beside waiting_probe and silence the watchdog just as well. Driving
+    # the guard rather than reading its source showed that file was ALREADY refused, both by tool
+    # write and by shell redirect. Only the script was open.
+    #
+    # WHAT THIS DOES NOT CLOSE, said here because a gate that overstates its reach is the defect
+    # this one is about: idle_sec and settle_sec honour WATCHDOG_IDLE_SEC / WATCHDOG_SETTLE_SEC,
+    # and a hook's environment comes from .claude/settings.json, which this guard does not cover.
+    # ring_cap has no env override. The file doors are shut; the environment door is not.
+    probe_hit=$(GAMELOOP_DIR="$GAMELOOP_DIR" FP="$fp" python3 <<'PY' 2>/dev/null
+import json, os, shlex
+d = os.path.realpath(os.environ["GAMELOOP_DIR"])
+real = os.path.realpath(os.environ["FP"])
+for cand in ("config.local.json", "config.json"):
+    try:
+        with open(os.path.join(d, cand)) as f:
+            cmd = str(((json.load(f).get("watchdog") or {}).get("waiting_probe") or "")).strip()
+    except (OSError, ValueError):
+        continue
+    if not cmd:
+        continue
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        toks = cmd.split()
+    for t in toks:
+        t = t.replace("${GAME_LOOP_ROOT}", d).replace("$GAME_LOOP_ROOT", d)
+        if "/" not in t:
+            continue
+        if os.path.realpath(t) == real:
+            print(os.path.relpath(real, os.path.dirname(d)))
+            raise SystemExit(0)
+PY
+)
+    if [ -n "$probe_hit" ]; then
+      probe_real=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$fp" 2>/dev/null)
+      consumed_raw=$(consume_authorization "$probe_real")
+      if [ "$(printf '%s\n' "$consumed_raw" | sed -n '1p')" = "yes" ]; then
+        record_edit "$fp"
+        note "$(consumed_note "$probe_real" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
+      fi
+      deny "BLOCKED: $probe_hit is the WATCHDOG'S OFF SWITCH, and this session is what it watches.
+
+watchdog.waiting_probe names this script. When it exits 0 the watchdog treats the run as WAITING and
+holds off ringing — so a session that edits it decides for itself when its own idle alarm stops. The
+config that points here is already refused for the same reason; this is the other end of the pointer.
+
+MEASURED, NOT HYPOTHETICAL: this repo's own agent extended its probe mid-run to treat a long
+measurement as a wait. Objective, bounded, failing toward ringing, done carefully — and the care is
+not the point. A careless version would have been easier to see.
+
+IF THE PROBE IS GENUINELY WRONG, that is a question for the human, not an edit to make while the
+alarm it governs is pointed at you. Say what it misjudged and what you would change.
+
+If the human has authorized this specific edit, record their words and try again:
+  $GAMELOOP_DIR/bin/game_loop authorize --path $probe_real --reason \"<their exact words>\"
+
+WHAT THIS DOES NOT COVER, so you do not read it as more than it is: idle_sec and settle_sec also
+honour WATCHDOG_IDLE_SEC / WATCHDOG_SETTLE_SEC, and a hook's environment is set in
+.claude/settings.json, which this guard does not gate."
+    fi
     # Prints "yes" when the target is inside an allow root, else the resolved realpath — which is
     # what an authorization is matched against (authorize records real prefixes, not raw tool input).
     verdict=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" FP="$fp" python3 <<'PY'
@@ -2047,6 +2118,36 @@ def policy_name(raw, cwd):
             return n + "\t" + real
     if real == os.path.join(gl, "config" + ".local.json"):
         return "config" + ".local.json\t" + real
+    # THE WAITING PROBE'S SCRIPT, on this path too (#120). The pointer lives in config.local.json,
+    # already covered above, so it cannot be moved; without this the script it names could still be
+    # appended to with `>>` and the watchdog told to hold off forever. Resolved from the CONFIG
+    # VALUE so it follows the pointer rather than assuming a path. Returned under its own name so
+    # the refusal can say what this file actually is instead of borrowing the policy wording.
+    if real == probe_script_path(gl):
+        return "WATCHDOG-PROBE\t" + real
+    return None
+
+
+def probe_script_path(gl):
+    """Absolute path of the script watchdog.waiting_probe names, or None."""
+    for cand in ("config" + ".local.json", "config.json"):
+        try:
+            with open(os.path.join(gl, cand)) as f:
+                cmd = str(((json.load(f).get("watchdog") or {}).get("waiting_probe") or "")).strip()
+        except (OSError, ValueError):
+            continue
+        if not cmd:
+            continue
+        try:
+            toks = shlex.split(cmd)
+        except ValueError:
+            toks = cmd.split()
+        for t in toks:
+            t = t.replace("${GAME_LOOP_ROOT}", gl).replace("$GAME_LOOP_ROOT", gl)
+            if "/" in t:
+                rp = os.path.realpath(t)
+                if os.path.exists(rp):
+                    return rp
     return None
 
 
@@ -2344,6 +2445,23 @@ PY
         note "$(consumed_note "$pol_real" \
                   "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
                   "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
+      fi
+      if [ "$pol_name" = "WATCHDOG-PROBE" ]; then
+        deny "BLOCKED: the watchdog's waiting-probe SCRIPT — a shell write is still a write.
+
+watchdog.waiting_probe names this script. When it exits 0 the watchdog treats the run as WAITING and
+holds off ringing, so a session editing it decides when its own idle alarm stops. The config that
+points here is already refused; this is the other end of the pointer, and \`>>\` reaches it just as
+well as an editor does.
+
+MEASURED: this repo's own agent extended its probe mid-run to treat a long measurement as a wait.
+Careful, bounded, failing toward ringing — and the care is not the point.
+
+If the human has authorized this specific edit, record their words and try again:
+  $GAMELOOP_DIR/bin/game_loop authorize --path $pol_real --reason \"<their exact words>\"
+
+WHAT THIS DOES NOT COVER: idle_sec and settle_sec honour WATCHDOG_IDLE_SEC / WATCHDOG_SETTLE_SEC,
+and a hook's environment is set in .claude/settings.json, which this guard does not gate."
       fi
       deny "BLOCKED: .game_loop/$pol_name is the PROJECT'S POLICY, and a shell write is still a write.
 

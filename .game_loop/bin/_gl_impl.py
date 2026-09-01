@@ -6957,21 +6957,31 @@ def cmd_watchdog(s, a):
             "  the watchdog, and this verb cannot tell a session from the orchestrator above it.",
             "  THAT SENTENCE IS NARROWER THAN IT READS, and the difference is the whole of what "
             "this",
-            "  protects. No VERB sets it — and neither config.local.json nor the script it names "
-            "is a",
-            "  policy file, so a session can widen its own silence by editing either directly. It "
-            "is a",
-            "  missing convenience, not a locked door. Measured here: this repo's own agent "
-            "extended its",
-            "  probe mid-run to treat a long measurement as a wait — objective, bounded, "
-            "failing toward",
-            "  ringing, done carefully. THE CARE IS NOT THE POINT: a session deciding when its "
-            "own",
-            "  watchdog stops ringing is the defect regardless of how well it decides, and a "
-            "careless",
-            "  version would have been easier to see. If that matters to you, the",
-            "  enforcement to add is the guard refusing those two paths, not another sentence "
-            "here.",
+            "  protects. No VERB sets it, and config.local.json — which holds the pointer, and "
+            "idle_sec",
+            "  and ring_cap beside it — is a POLICY FILE the write guard refuses, by tool write "
+            "and by",
+            "  shell redirect alike. The SCRIPT it names is refused too, resolved from the config "
+            "value",
+            "  rather than by name, so repointing does not escape it.",
+            "",
+            "  WHAT IS STILL OPEN, because a guard that overstates itself is the failure this "
+            "whole",
+            "  message is about: idle_sec and settle_sec also honour WATCHDOG_IDLE_SEC / "
+            "WATCHDOG_SETTLE_SEC,",
+            "  and reaching a hook's environment means .claude/settings.json, which this guard "
+            "does not",
+            "  cover. ring_cap has no env override. So the file doors are shut and the "
+            "environment door",
+            "  is not.",
+            "",
+            "  Measured here: this repo's own agent extended its probe mid-run to treat a long "
+            "measurement",
+            "  as a wait — objective, bounded, failing toward ringing, done carefully. THE CARE "
+            "IS NOT THE",
+            "  POINT: a session deciding when its own watchdog stops ringing is the defect "
+            "regardless of",
+            "  how well it decides, and a careless version would have been easier to see.",
             "",
             "  PASTE THIS, adjusting the command — one file, once per install:",
             '    {"watchdog": {"waiting_probe": "<your command>"}}',

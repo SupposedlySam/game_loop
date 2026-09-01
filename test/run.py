@@ -16356,7 +16356,21 @@ def main():
     # session-start instruction (`game_loop status`) does not include. .claude/settings.json wires
     # every gate here: write guard, MCP guard, stop gate, watchdog. The write guard does not cover
     # that file. So the master switch was unguarded AND its detector was opt-in.
-    _pin_code = os.path.join(REPO, PIN_DIRNAME_FOR_TEST, ".game_loop")
+    # A REAL DIRECTORY THIS TEST OWNS, not this checkout's pin. Using REPO/.game_loop_self made
+    # these three assertions depend on whether the DEVELOPER happened to be pinned: they passed
+    # here and failed in a fresh clone, where that directory is gitignored and absent, so the report
+    # correctly took its "pinned checkout is not there" branch and the expected text never appeared.
+    # A fixture that reads the working tree is a fixture that measures the author's machine.
+    _pin_code = os.path.join(_tmpdir("glpin-"), ".game_loop")
+    os.makedirs(_pin_code, exist_ok=True)
+    # ...and the wiring compared against is the wiring GENERATED FOR THAT PATH, so byte-identity is
+    # a property of the comparison rather than of where this repo happens to be pinned.
+    _pin_cmds = [l.strip() for l in _sbmod.self_hooks_block(_pin_code)
+                 if l.strip().startswith('d="$CLAUDE_PROJECT_DIR/')]
+    _wired_state = dict(_wired_state, pinned=[("PreToolUse", c) for c in _pin_cmds])
+    _drift_state = dict(_wired_state,
+                        pinned=[("PreToolUse", _pin_cmds[0].replace("guard-", "guard-STALE-"))]
+                               + [("PreToolUse", c) for c in _pin_cmds[1:]])
     _hi_ok = "\n".join(_sbmod.hook_integrity_report(_wired_state, _pin_code))
     check("`status` — the report every session runs — now says whether the hook wiring still "
           "matches what the tool generates, instead of that living only in a verb nobody invokes",

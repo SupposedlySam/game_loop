@@ -432,6 +432,17 @@ def verdict(killed):
 # still catches the loss it exists to catch.
 
 MUTANTS = [
+    ("concurrent_suites -> the sweep cannot tell it was overlapped, and blames the mutants",
+     "test/mutation_sweep.py::concurrent_suites", "    return None\n",
+     ['machine to itself', 'own workers', 'none seen'],
+     "FLOOR 3 FROM A MEASUREMENT OF 5, and the two subtractions are the accumulated evidence rather "
+     "than caution. Scoped hand measurement says 5. One of those is `neuter REACHES every candidate "
+     "the finder produces`, which is about the mutator's reach and not about contention — the same "
+     "collateral that appeared in both producers measured this way earlier, so it comes out: 4. "
+     "Then the scoped method itself overstated the full-sweep number by one on BOTH of those "
+     "producers (recorded 5, swept 4; recorded 6, swept 5), so it comes down again: 3. "
+     "I am spending the correction I already paid for rather than making it a third time. The next "
+     "FULL sweep pays the real number, and it can only raise this.", 3),
     # THE TWO NEWEST PRODUCERS, and the only ones here whose floors were measured BY HAND. This
     # file has no per-producer selector, so a floor for a new entry otherwise costs a full ~1h run.
     # Method: this file's own neuter() + in_a_copy_of(), and a SET DIFFERENCE OF ASSERTION NAMES
@@ -1764,9 +1775,11 @@ NOT_SWEPT = {
     # So these two sit here with the number owed rather than guessed, and the next FULL sweep is
     # what pays it. A floor typed from a subset would be a tripwire calibrated by the same method
     # that was refuted an hour ago.
-    "test/mutation_sweep.py::concurrent_suites": "added with this commit; floor owed at the next "
-        "FULL sweep rather than typed from a scoped run, after that method overstated by one on "
-        "each of the two producers measured the same day",
+    # concurrent_suites LIVED HERE AND HAS MOVED TO MUTANTS. Its note said "floor owed at the next
+    # FULL sweep" — and being in this dict is precisely what EXCLUDES a producer from every sweep,
+    # so that sentence could never come true. A debt whose repayment plan is the one thing the
+    # declaration prevents is not a debt, it is a hole with a note on it. The 137-producer run it
+    # was waiting for came and went without touching it.
     # overlap_line is deliberately NOT here: it always returns a string, so it is not a
     # candidate at all, and naming it made a STALE entry the accounting gate caught.
     # ── THE EMPTY-STRING NOTHINGS, enumerated the day the detector started seeing them ──────────

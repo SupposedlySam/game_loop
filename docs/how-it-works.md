@@ -1422,11 +1422,22 @@ version bump. So `verify.yaml`, `config.json`, `INVARIANTS.md`, `state`, `sessio
 `verified.json` all stay in the repo's `.game_loop/`; `self --pin` deletes the project-owned files out
 of the copy so there is only ever one identity to read.
 
-**The hooks that point at the pin belong in `.claude/settings.local.json`** — gitignored,
-machine-local — **never in the tracked `.claude/settings.json`**, which ships to every install and
-must keep pointing at `$CLAUDE_PROJECT_DIR/.game_loop/bin/`. `.game_loop_self/` is gitignored for the
-same reason: which commit you pin is a local decision. `game_loop self` prints the block to paste;
-hooks are read at session start, so reload afterwards.
+**ONE set of hooks, in the tracked `.claude/settings.json`, using the fallback form `game_loop
+self` prints** — which prefers `.game_loop_self/` and falls back to `.game_loop/` in the same
+command. Pinned or not, it resolves correctly, and `.game_loop_self/` stays gitignored because which
+commit you pin is a local decision. Hooks are read at session start, so reload afterwards.
+
+**This paragraph used to say the opposite** — that pin-pointing hooks belong in
+`settings.local.json`, *never* in the tracked file — and that rule is unworkable, which is why this
+repo never followed it. The two settings files **MERGE rather than override**: put the pin hooks in
+the local one while the tracked one keeps its own, and every gate runs twice. `game_loop self` says
+so on sight — *"game_loop hooks appear in BOTH settings files … every gate is running twice. Delete
+the ones in settings.local.json"* — which is the verb instructing you to undo the doc. The rule was
+stated, never enforced, and never checked against the tool that had to live with it.
+
+Consumers are unaffected either way: `install.sh` merges `templates/settings.hooks.json`, whose
+commands are the plain `"$CLAUDE_PROJECT_DIR"/.game_loop/bin/…` form, and a consumer who has no
+pinned checkout has nothing to prefer.
 
 **What this does not catch (INV6).** It protects the session from code *you* are editing in this
 checkout. It does nothing about a pinned copy that is itself broken, a bad commit you deliberately

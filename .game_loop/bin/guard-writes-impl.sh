@@ -1057,7 +1057,7 @@ prompt surface is not knowable from inside a hook."
     # read by a verify started afterwards, and this repo routinely has twenty sessions committing
     # into one checkout. Two of them sharing a scope file would gate each other's commits.
     SCOPE_OUT="/tmp/.game_loop_scope.${SLUG:-default}.${SID:-nosid}"
-    rm -f "$SCOPE_OUT" "$SCOPE_OUT.inband"
+    rm -f "$SCOPE_OUT" "$SCOPE_OUT.inband" "$SCOPE_OUT.writes"
     commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" SCOPE_OUT="$SCOPE_OUT" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 payload = json.loads(sys.argv[1])
@@ -1072,7 +1072,9 @@ commit_args = None         # the argv of the FIRST repo-targeting commit, for re
 commit_count = 0           # more than one, and "what does the commit carry" has no single answer
 cwd_dynamic = False        # a `cd` into a variable — every later commit lands somewhere unnameable
 unresolved = ""            # the raw fragment that made a COMMIT's target unreadable, if any
+inband_seg = ""            # the FIRST such segment, so the note can name it
 index_touched = False      # an in-band segment that RESTAGES — see _INDEX_VERBS below
+writes_in_band = False    # an in-band segment not PROVABLY read-only — see reads_only
 
 # The git verbs that can change WHAT IS STAGED. Only these invalidate an index read; `git status &&
 # git commit` is left narrow, because over-gating a clean bundle is the cost #28 was written to
@@ -1080,6 +1082,32 @@ index_touched = False      # an in-band segment that RESTAGES — see _INDEX_VER
 # status of paths a human named, which an in-band add does not widen.
 _INDEX_VERBS = {"add", "rm", "mv", "reset", "restore", "checkout", "switch", "stash",
                 "apply", "am", "cherry-pick", "revert", "merge"}
+
+# THE OTHER HALF OF THE SAME MOMENT, AND WHY THIS ONE IS ONLY A NOTE. An in-band EDIT is worse
+# than an in-band add and LESS fixable: measured on a green tree, `printf 'two' >> b.txt &&
+# git commit -am x` was allowed and the commit that landed CARRIED b.txt with its checks unrun.
+# Widening the scope does not help — at PreToolUse that file is not dirty, so it owes nothing under
+# the tree scope either. A gate cannot examine a change that has not happened. What it can do is
+# refuse to report silence as an answer, which is what the note built from this flag does.
+#
+# AN ALLOW-LIST, NOT A LIST OF WRITERS. MUTATORS further down carries that lesson in its own
+# header: curl -o, wget -O, tar -C, unzip -d, rsync, install, patch -o, split and perl -i all wrote
+# past a verb list advertising "and the other obvious ones". Any program can write. The handful of
+# segments people actually chain read-only CAN be enumerated; everything else is assumed to write.
+_READ_ONLY = {"echo", "pwd", "ls", "true", "date", "which", "wc", "head", "tail", "cat", "grep",
+              "sort", "uniq", "printf"}       # printf and cat write the moment they are redirected
+_READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "branch", "remote", "describe",
+                  "ls-files", "config", "tag", "blame", "shortlog"}
+
+
+def reads_only(seg, argv, verb):
+    """True only for a segment this can PROVE does not write. Unrecognised is False, always."""
+    if ">" in seg or "<" in seg:
+        return False                 # a redirection turns any of these into a writer
+    if verb == "git":
+        rest = [a for a in argv[1:] if not a.startswith("-")]
+        return bool(rest) and rest[0] in _READ_ONLY_GIT
+    return verb in _READ_ONLY
 
 # A path we cannot resolve without EXECUTING it, which this guard must never do. $HOME is substituted
 # before this runs, so an ordinary ~ or $HOME path stays resolvable and is not caught here.
@@ -1278,6 +1306,12 @@ for seg in shell_segments(cmd):
                 target = tgt          # the tree whose record this commit is answerable to (#28)
                 commit_args = strip_redirections(args)
             continue
+    # THIS segment, not the flag: index_touched persists across segments, so testing it here
+    # would silently exempt every later git segment once any earlier one had staged.
+    if not reads_only(seg, argv, verb) and not (verb == "git" and not _INDEX_VERBS.isdisjoint(args)):
+        writes_in_band = True
+        if not inband_seg:
+            inband_seg = seg if len(seg) <= 70 else seg[:67] + "..."
     others.append(seg if len(seg) <= 70 else seg[:67] + "...")
 
 # WHAT THIS COMMIT CARRIES, read off the COMMAND — and the reason it is read here rather than in
@@ -1441,6 +1475,12 @@ if commit_args is not None and commit_count == 1 and answerable.startswith("root
             except OSError:
                 scope_mode = ""      # cannot write it -> cannot narrow -> the tree, as before
 
+if writes_in_band and commit_count:
+    try:
+        with open(os.environ["SCOPE_OUT"] + ".writes", "w") as _f:
+            _f.write(inband_seg + "\n")
+    except OSError:
+        pass                     # cannot mark it -> no note, which is the behaviour before this
 print("yes" if found else "")
 print(answerable)
 print(scope_mode)
@@ -2648,7 +2688,20 @@ is meant to land outside and a HUMAN authorized that, quote them against the RES
     # after every check that can deny. A denial means the command never ran, and a warning about a
     # commit that did not happen is noise. `note` exits, so the two are joined into one body — a
     # commit can be both widened past the work AND carrying paths nothing checks.
+    edit_note=""
+    if [ -f "$SCOPE_OUT.writes" ]; then
+      edit_note="THIS COMMAND WRITES BEFORE IT COMMITS, so the checks above ran against the tree as it is NOW:
+    $(head -1 "$SCOPE_OUT.writes")
+This gate is PreToolUse. A file that segment is about to change is not stale YET, owes nothing yet,
+and can land in this commit unchecked — the checks above did not look at it and cannot. Run the
+edit as its own call, then commit, and the gate sees the change it is meant to see."
+    fi
     commit_note="${blast_note:-}"
+    if [ -n "$edit_note" ]; then
+      [ -n "$commit_note" ] && commit_note="$commit_note
+"
+      commit_note="$commit_note$edit_note"
+    fi
     if [ -n "${cov_note:-}" ]; then
       [ -n "$commit_note" ] && commit_note="$commit_note
 "

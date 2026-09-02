@@ -4696,6 +4696,41 @@ def main():
             r = brbundle("git status && git commit -m x")
             check("a bundled command that CANNOT restage still reads the index and names the file",
                   "lib/swept_in.dart" in r.stdout and "could not read" not in r.stdout)
+            # THE OTHER HALF OF THE SAME MOMENT, and the one a wider scope cannot fix. An
+            # in-band EDIT ahead of the commit is not stale at PreToolUse — it is not even
+            # written — so it owes nothing under ANY scope, tree included, and the commit that
+            # lands carries it unchecked. Measured on a green tree before this note existed:
+            # `printf 'two' >> b.txt && git commit -am x` was allowed and the resulting HEAD carried
+            # b.txt. A gate cannot examine a change that has not happened; it can refuse to
+            # report silence as an answer.
+            brgit("reset", "-q")
+            r = brbundle("printf 'two' >> lib/swept_in.dart && git commit -am x")
+            check("a commit whose own call EDITS first says the checks ran against the tree as "
+                  "it is now, before that edit",
+                  "WRITES BEFORE IT COMMITS" in r.stdout and "PreToolUse" in r.stdout)
+            _after = r.stdout.split("WRITES BEFORE IT COMMITS")
+            check("...and NAMES the segment, so the reader does not have to re-read their own "
+                  "command to find which half the gate could not see",
+                  len(_after) > 1 and "printf" in _after[1])
+            check("...and still never blocks — this has always been a note",
+                  not denied(r) and r.returncode == 0)
+            r = brbundle("sed -i '' s/a/b/ lib/swept_in.dart && git commit -am x")
+            check("...and it is not keyed on a verb list: sed -i is caught by the same rule that "
+                  "catches printf, because anything not PROVABLY read-only is assumed to write",
+                  "WRITES BEFORE IT COMMITS" in r.stdout)
+            # THE CONTROLS. A note that fires on every chained command is one people learn to
+            # skip, and the two notes must not both claim the same command.
+            check("a bare commit says nothing of the kind", "WRITES BEFORE IT COMMITS"
+                  not in brbundle("git commit -m x").stdout)
+            check("a provably read-only chain says nothing either",
+                  "WRITES BEFORE IT COMMITS" not in brbundle("git status && git commit -m x").stdout
+                  and "WRITES BEFORE IT COMMITS" not in brbundle("echo hi && git commit -m x").stdout)
+            check("a bundled `git add` is the OTHER note's case and does not claim to write — an "
+                  "add changes no file's content",
+                  "WRITES BEFORE IT COMMITS" not in brbundle("git add -A && git commit -m x").stdout)
+            check("...but a REDIRECTED printf is not read-only, and the redirect is what decides",
+                  "WRITES BEFORE IT COMMITS" in brbundle(
+                      "printf x > lib/swept_in.dart && git commit -am x").stdout)
             brlog_f = os.path.join(br, ".game_loop", "log.jsonl")
             brlog = open(brlog_f).read() if os.path.exists(brlog_f) else ""
             check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)

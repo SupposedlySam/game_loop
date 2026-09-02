@@ -473,6 +473,17 @@ MUTANTS = [
      "after the entry landed reported BELOW FLOOR on it, which is the tripwire doing its job on the "
      "person who wrote it. 4 is the measured number; the reasoning that produced 5 was wrong and is "
      "left here rather than tidied away, because the wrong claim is the useful part.", 4),
+    ("only_filter -> a name that matches nothing silently sweeps the WHOLE list instead of refusing",
+     "test/mutation_sweep.py::only_filter", "    return idxs, None\n",
+     ['matched no producer', 'Nothing was swept', 'ONLY '],
+     "FLOOR OWED, RECORDED 0 — and it is measured in the very next commit with "
+     "GAME_LOOP_SWEEP_ONLY=only_filter, which is this entry's own subject. The neutered form is "
+     "the exact defect the function exists to refuse: `return idxs, None` drops the refusal, so a "
+     "typo in the flag falls back to sweeping everything and spends the hour the flag was added "
+     "to avoid — while looking identical to having asked for it. That is the shape this whole "
+     "file is about, arriving in the code written to make the file cheaper to use. The default-"
+     "deny gate caught it undecided within one suite run of it being written, which is the second "
+     "time today it caught the person adding the producer.", 0),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',
@@ -2856,6 +2867,11 @@ def _parse_argv(argv):
         print("  (default)                 sweep every producer in MUTANTS against the WHOLE suite.")
         print("                            Roughly an hour on 14 cores.")
         print("  GAME_LOOP_SWEEP_JOBS=N    producers in flight at once. Default: cores - 2, cap 12.")
+        print("  GAME_LOOP_SWEEP_ONLY=name sweep ONE producer (substring of its label or")
+        print("                            target). Baseline + one mutant, ~8 min instead of an")
+        print("                            hour. For paying a single floor, not for coverage.")
+        print("                            A name that matches nothing REFUSES rather than")
+        print("                            sweeping everything.")
         print("  GAME_LOOP_SWEEP_FAST=1    scope each producer to the sections that killed it in")
         print("                            the last FULL sweep, with its baseline taken over the")
         print("                            same subset so the arithmetic stays honest.")
@@ -2890,6 +2906,33 @@ def _parse_argv(argv):
     print("flag means you asked for something this script does not do. `--help` lists the modes",
           file=sys.stderr)
     raise SystemExit(2)
+
+
+def only_filter(idxs, mutants, only):
+    """(idxs, refusal) for GAME_LOOP_SWEEP_ONLY — one producer instead of the whole list.
+
+    THE CHEAP ANSWER THIS FILE DID NOT HAVE. A producer that owes a floor cost an HOUR to measure,
+    because the only mode was "sweep everything", and the alternative was hand-rolling a script
+    outside the repo -- which is what I did on 2026-09-02, after my human stopped an hour-long
+    sweep with the right question: the sweep validates no fix, its only job that day was replacing
+    two floors, and an hour of a shared machine is not what that is worth. A scoped answer being
+    unavailable IN THE TOOL is why the expensive one kept getting reached for.
+
+    Matched as a SUBSTRING against both the label and the target, so `newest_mark`,
+    `_gl_impl.py::newest_mark` and `newest` all select the same entry. A miss REFUSES rather than
+    silently sweeping everything: a typo that fell back to the full list would spend the hour this
+    exists to avoid, and would look identical to asking for it.
+    """
+    if not only:
+        return idxs, None
+    picked = [i for i in idxs if only in mutants[i][0] or only in mutants[i][1]]
+    if not picked:
+        return [], ("GAME_LOOP_SWEEP_ONLY=%r matched no producer in MUTANTS.\n"
+                    "  Nothing was swept. A miss refuses rather than falling back to the whole "
+                    "list, because\n"
+                    "  a typo that quietly swept everything would cost the hour this flag exists "
+                    "to avoid." % only)
+    return picked, None
 
 
 def main():
@@ -3209,6 +3252,11 @@ def main():
     # without measuring anything.
     shard, shards = _shard_of()
     idxs = [i for i in range(len(MUTANTS)) if i % shards == (shard - 1)]
+    idxs, _refusal = only_filter(idxs, MUTANTS, (os.environ.get("GAME_LOOP_SWEEP_ONLY") or "").strip())
+    if _refusal:
+        print(_refusal)
+        shutil.rmtree(base, ignore_errors=True)
+        return 1
     _swept = set(idxs)
     _where = f" [shard {shard}/{shards}]" if shards > 1 else ""
     print(f"running {len(idxs)} of {len(MUTANTS)} producers{_where}, {jobs} at a time "

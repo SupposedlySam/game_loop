@@ -10507,6 +10507,41 @@ def main():
         finally:
             _pgm._git = _real_git
 
+        # SWEEPING ONE PRODUCER, which the sweep had no way to do. A floor owed by one entry cost
+        # an HOUR, so the cheap answer got hand-rolled outside the repo instead — and a cheap
+        # answer that lives outside the tool is one the next person does not have. Driven at the
+        # selector rather than through a real sweep: what is being asserted is the SELECTION and
+        # its refusal, and an hour of suite runs would assert neither.
+        _msspec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_ms_only", os.path.join(REPO, "test", "mutation_sweep.py"))
+        _msm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_msspec)
+        _msspec.loader.exec_module(_msm)
+        _MUT = [("alpha -> a", "f.py::alpha", "", [], "", 1),
+                ("beta -> b", "f.py::beta", "", [], "", 2),
+                ("gamma -> c", "g.py::gamma", "", [], "", 3)]
+        _all = [0, 1, 2]
+        check("no ONLY leaves the producer list exactly as the shard chose it",
+              _msm.only_filter(_all, _MUT, "") == (_all, None))
+        _one, _ref = _msm.only_filter(_all, _MUT, "beta")
+        check("ONLY selects the single producer whose LABEL carries the name",
+              _one == [1] and _ref is None)
+        _one2, _ = _msm.only_filter(_all, _MUT, "g.py::gamma")
+        check("...and matches the TARGET too, so the name in a MUTANTS entry and the name in a "
+              "traceback both work without the reader knowing which one this wants",
+              _one2 == [2])
+        _none, _ref2 = _msm.only_filter(_all, _MUT, "no-such-producer")
+        check("a name matching NOTHING refuses and sweeps nothing — a typo that fell back to the "
+              "whole list would spend the hour this exists to avoid and look identical to asking "
+              "for it",
+              _none == [] and _ref2 and "matched no producer" in _ref2)
+        check("...and the refusal says it did not fall back, rather than only that it matched "
+              "nothing — the reader's next question is what just happened to their machine",
+              "Nothing was swept" in (_ref2 or ""))
+        _shardy, _ = _msm.only_filter([0, 2], _MUT, "beta")
+        check("ONLY narrows WITHIN the shard's slice and cannot reach outside it — beta belongs to "
+              "another shard, so this one sweeps nothing rather than stealing it",
+              _shardy == [])
+
         # A trigger that fires and FAILS every time is the third state, and the one most likely to
         # go unnoticed: it has fired, so the never-fired warning is silent about it.
         _tp_write({"harden": [{"name": "tp-broken", "command": "exit 4"}]})

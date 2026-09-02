@@ -6151,6 +6151,36 @@ def main():
                   "gated on the whole tree",
                   denied(r) and "b.txt" in r.stdout)
 
+            # STAGING BUNDLED INTO THE SAME CALL, which is the shape that made the index read a lie
+            # and let a stale commit through. The hook is PreToolUse: at gate time the `git add`
+            # has NOT run, `git diff --cached` is empty, and an index scope of nothing matches no
+            # rule and allows anything. Measured before the fix rather than reasoned about after
+            # it — `git add -- b.txt && git commit -m x` was ALLOWED against this same stale fixture.
+            #
+            # It cost another agent an evening: five bundled probes all reported its guard
+            # "allowing a stale commit", and every one was a consistent reading of the wrong
+            # moment. Repetition cannot tell that apart from confirmation, so the gate has to.
+            r = csrun("git add -- b.txt && git commit -m x")
+            check("in-band `git add` before the commit gives up the index scope and gates the "
+                  "WHOLE TREE — the add has not run yet, so the index is not what this carries",
+                  denied(r) and "b.txt" in r.stdout)
+            check("...and git really does leave b.txt out of the index at that moment, which is "
+                  "what makes the check above a control rather than a coincidence",
+                  "b.txt" not in csgit("diff", "--cached", "--name-only").stdout)
+            r = csrun("printf 'x\\n' >> b.txt && git add -- b.txt && git commit -m x")
+            check("...also when the edit itself is bundled ahead of the add",
+                  denied(r) and "b.txt" in r.stdout)
+            r = csrun("git add -A && git commit -m x")
+            check("...and for `git add -A`, whose pathspec names nothing this could read",
+                  denied(r) and "b.txt" in r.stdout)
+            # THE CONTROL THAT KEEPS THIS FROM BEING "GATE ON THE TREE AGAIN". Only the verbs that
+            # can RESTAGE give up the narrowing; a bundled read-only git command must not, or #28's
+            # whole point — that a commit answers for what it CARRIES — is quietly undone by a
+            # `git status` somebody chained for convenience.
+            check("a bundled git command that CANNOT restage keeps the narrow index scope",
+                  csok("git status && git commit -m x"))
+            check("...and so does a bundled non-git segment", csok("echo hi && git commit -m x"))
+
             # THE VALUE-TAKING OPTIONS, which is where a hand-rolled parser silently goes wrong: the
             # message must never be read as a pathspec, or the scope becomes a file that does not
             # exist and the gate matches nothing.

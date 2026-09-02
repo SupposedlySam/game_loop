@@ -1072,6 +1072,14 @@ commit_args = None         # the argv of the FIRST repo-targeting commit, for re
 commit_count = 0           # more than one, and "what does the commit carry" has no single answer
 cwd_dynamic = False        # a `cd` into a variable — every later commit lands somewhere unnameable
 unresolved = ""            # the raw fragment that made a COMMIT's target unreadable, if any
+index_touched = False      # an in-band segment that RESTAGES — see _INDEX_VERBS below
+
+# The git verbs that can change WHAT IS STAGED. Only these invalidate an index read; `git status &&
+# git commit` is left narrow, because over-gating a clean bundle is the cost #28 was written to
+# remove. `pathspec` mode is absent from the check below for the same reason -- it asks git for the
+# status of paths a human named, which an in-band add does not widen.
+_INDEX_VERBS = {"add", "rm", "mv", "reset", "restore", "checkout", "switch", "stash",
+                "apply", "am", "cherry-pick", "revert", "merge"}
 
 # A path we cannot resolve without EXECUTING it, which this guard must never do. $HOME is substituted
 # before this runs, so an ordinary ~ or $HOME path stays resolvable and is not caught here.
@@ -1224,6 +1232,19 @@ for seg in shell_segments(cmd):
         nxt = os.path.expanduser(args[0].replace("$HOME", home))
         cwd = nxt if os.path.isabs(nxt) else os.path.join(cwd, nxt)
         continue   # a bare cd is navigation, not lost work — track it, don't report it
+    if verb == "git" and not _INDEX_VERBS.isdisjoint(args):
+        # STAGING BUNDLED WITH THE COMMIT, which is the one thing that makes reading the index a
+        # lie. Measured, not reasoned: `git add -- note.txt && git commit -m x` in ONE call was
+        # ALLOWED against a tree whose checks were stale, because at PreToolUse the add had not run
+        # and `git diff --cached` was empty -- the gate narrowed the scope to nothing and passed
+        # anything. Two calls refused the same commit correctly. lamp-owner spent an evening
+        # concluding its guard was broken on exactly this shape, five consistent readings of the
+        # wrong moment; the reading was mine to fix.
+        #
+        # NOT a refusal, and deliberately: bundling is a normal way to work. This only DECLINES TO
+        # NARROW, so the gate falls back to the whole tree -- the same fallback every other
+        # unreadable command already takes, costing speed and never the gate.
+        index_touched = True
     if verb == "git" and "commit" in args and "--no-verify" not in args:
         # #40: FAIL CLOSED when the target cannot be READ, not merely when it is elsewhere.
         # A variable resolves to nothing this scan can match against the repo, so the commit used to
@@ -1403,6 +1424,8 @@ elif found:
 scope_mode = ""
 if commit_args is not None and commit_count == 1 and answerable.startswith("root:"):
     _mode, _paths = read_scope_mode(commit_args)
+    if index_touched and _mode in ("index", "all", "include"):
+        _mode = "tree"
     if _mode != "tree":
         _tree = os.path.dirname(answerable[len("root:"):])
         _files = resolve_scope(_mode, _paths, _tree)

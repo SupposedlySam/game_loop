@@ -431,6 +431,10 @@ def verdict(killed):
 # what is recorded here but never lower — a floor is a minimum, and one taken from a smaller suite
 # still catches the loss it exists to catch.
 
+FLOOR_METHOD = (
+    "MEASURED 2026-09-02 by a SCOPED run, and the method is stated because this file's history says a scoped floor overstates: neuter the one producer in a `git archive HEAD` copy, run the WHOLE suite once, and take every FAIL as a kill — the baseline is green, so no baseline run is needed and the semantics are the sweep's own set difference of assertion NAMES. The collateral subtraction came free from having TWO producers: newest_mark's kill set was a STRICT SUBSET of publish_gap's, 13 shared names about install.sh, --pin, shim dispatch and this file's own bookkeeping, none of them about releases. Those 13 are held out. What this still cannot see is collateral that fires for these two and nothing else, so if a full sweep later reads lower, the full sweep is right. "
+)
+
 MUTANTS = [
     ("concurrent_suites -> the sweep cannot tell it was overlapped, and blames the mutants",
      "test/mutation_sweep.py::concurrent_suites", "    return None\n",
@@ -481,11 +485,14 @@ MUTANTS = [
      "DELIBERATELY IN MUTANTS RATHER THAN NOT_SWEPT, which is where the previous two debts sat: "
      "being in NOT_SWEPT is precisely what EXCLUDES a producer from every sweep, so 'floor owed at "
      "the next full sweep' could never come true there — a debt whose repayment plan is the one "
-     "thing the declaration prevents. Here the sweep measures it and the number arrives on its "
-     "own. The producer exists because a mark is a LOCAL TAG and a `confidence` attachment is what "
-     "carries it outward: on 2026-09-02 a publish trigger was killed with its caller, the tags went "
-     "up, `status` said 'newest mark', and three hours later a consumer reported that the newest "
-     "thing they could install was one commit short of the fix.", 0),
+     "thing the declaration prevents. The producer exists because a mark is a LOCAL TAG and a "
+     "`confidence` attachment is what carries it outward: on 2026-09-02 a publish trigger was "
+     "killed with its caller, the tags went up, `status` said 'newest mark', and three hours later "
+     "a consumer reported that the newest thing they could install was one commit short of the "
+     "fix. "
+     + FLOOR_METHOD +
+     "RAW 19, RECORDED 6 — and the 6 are exactly the assertions written about its output, which is "
+     "the reassuring answer rather than the impressive one.", 6),
     ("newest_mark -> the release comparison has no mark to compare against, so the gap is silent",
      ".game_loop/bin/_gl_impl.py::newest_mark", "    return None, None\n",
      ['WAS MARKED WITHOUT', 'BEFORE this mark'],
@@ -494,7 +501,14 @@ MUTANTS = [
      "silences the whole check without touching it. Its neutered form is `None, None` rather than "
      "`None` because the caller unpacks two values — a mutant that raises TypeError everywhere "
      "would kill assertions by crashing the tool rather than by silencing a producer, which "
-     "measures the suite's tolerance for tracebacks instead of its coverage of a silence.", 0),
+     "measures the suite's tolerance for tracebacks instead of its coverage of a silence. "
+     + FLOOR_METHOD +
+     "FIRST MEASUREMENT WAS ZERO, AND THE ZERO WAS RIGHT: every check of publish_gap passes `mark=` "
+     "explicitly, so the half that goes and asks git was never driven — the comparison was tested "
+     "and the reader was not. Four assertions were added (ac2eda7) and it re-measured at RAW 15, "
+     "RECORDED 2. Only two, because the other two cover the NOTHING answer and survive BY "
+     "CONSTRUCTION: the mutant returns (None, None), which is exactly what they assert. That is "
+     "this file's own low-count caveat, observed on the entry that was written after reading it.", 2),
     ("hook_integrity_report -> `status` says nothing about the file that wires every gate",
      ".game_loop/bin/_gl_impl.py::hook_integrity_report", "    return []\n",
      ['hook wiring', 'DETECTION, NOT PREVENTION', 'NOT pinned', 'NOT THERE'],

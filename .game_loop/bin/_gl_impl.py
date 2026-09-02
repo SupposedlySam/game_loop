@@ -3163,6 +3163,95 @@ def release_distance():
     return best_n, best_sha, best_lvl
 
 
+def newest_mark():
+    """(tag, datetime) of the most recently created release mark, or (None, None).
+
+    Read from the tag's own creation date rather than from anything this tool wrote down: the
+    question below is whether an attachment ran AFTER the mark, and a remembered timestamp would
+    make the tool the witness to its own release.
+    """
+    out = _git("for-each-ref", "--sort=-creatordate",
+               "--format=%(refname:short)\t%(creatordate:iso-strict)",
+               "refs/tags/stable-*", "refs/tags/beta-*")
+    for line in (out or "").splitlines():
+        if "\t" not in line:
+            continue
+        tag, iso = line.split("\t", 1)
+        try:
+            dt = datetime.datetime.fromisoformat(iso.strip())
+        except ValueError:
+            continue
+        # Naive local, because that is what `now()` writes into the trigger records this is
+        # compared against. Mixing an aware datetime with a naive one raises rather than lies,
+        # which is the right failure — but it would raise inside a status line, so convert here.
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return tag, dt
+    return None, None
+
+
+def publish_gap(s=None, mark=None, seen=None, attachments=None):
+    """Marks made while a `confidence` attachment did NOT run — a release nobody can reach.
+
+    A mark is a local tag. The attachment is what carries it outward, and nothing here ever
+    compared the two: a mark whose publish was interrupted looked identical to one whose publish
+    worked, and `release_distance` counted both as released. Observed on 2026-09-02 — a mark was
+    made, the publish trigger was killed with the caller before it finished, the tags went to the
+    remote, and a consumer reported hours later that the newest thing they could install was one
+    commit short of the fix. `status` said "newest mark" and nothing else.
+
+    WHAT IT CANNOT SEE (INV6): whether the attachment actually published anything. It compares
+    two timestamps that already exist — when the mark was created, and when the attachment last
+    recorded a run. An attachment that ran and silently did nothing reads here as fine.
+    """
+    if mark is None:
+        mark = newest_mark()
+    tag, when = mark
+    if not tag or not when:
+        return []
+    if attachments is None:
+        attachments = [str(t.get("name") or "(unnamed)") for t in triggers_for("confidence")]
+    if not attachments:
+        return []                    # nothing attached: a mark IS the whole of the release here
+    if seen is None:
+        seen = ((s if isinstance(s, dict) else load()).get("triggers") or {})
+    behind = []
+    for name in attachments:
+        rec = seen.get(name) or {}
+        at = rec.get("at")
+        ran = None
+        if at:
+            try:
+                ran = datetime.datetime.fromisoformat(str(at))
+            except ValueError:
+                ran = None
+        if ran is None or ran < when:
+            behind.append((name, at, bool(rec.get("ok"))))
+    if not behind:
+        return []
+    L = [f"⚠ {tag} WAS MARKED WITHOUT {len(behind)} OF ITS ATTACHMENT(S) RUNNING:"]
+    for name, at, ok in behind:
+        if not at:
+            L.append(f"    {name} — no run recorded at all")
+        else:
+            L.append(f"    {name} — last ran {at}" + ("" if ok else " (and FAILED)")
+                     + ", BEFORE this mark")
+    L += [
+        "  The tag is local and pushable; the attachment is what carries the release OUTWARD.",
+        "  A mark whose publish did not finish is indistinguishable from one whose publish worked,",
+        "  and release_distance counts both as released — so `status` can say a fix is out while",
+        "  every consumer following the channel still gets the commit before it. That happened",
+        "  here: the trigger was killed along with the caller, three hours before a consumer said",
+        "  the newest thing they could install did not carry the fix.",
+        "",
+        f"    game_loop confidence --mark <level> --notes \"..\"   # and let it FINISH",
+        "",
+        "  A publish attachment can be slow — this one has a 900s budget. A caller that kills it",
+        "  early leaves the mark made and the release unmade, with nothing said either way.",
+    ]
+    return L
+
+
 def release_owed():
     """(n, sha, level) when finished work is unreleased and the handback must not pass — else None.
 
@@ -11039,6 +11128,7 @@ def cmd_status(s, a):
                 ".game_loop/log.jsonl")
     out(*denials_report(s))   # the referee firing, not the loop's own scoreboard
     out(*triggers_report())  # attached ≠ working: one that never fired looks just like one that does
+    out(*publish_gap(s))     # marked ≠ released: the tag is local, the attachment is the outward half
     # AND A GUARD DISABLED BY THE STATE IT READS (#90) — the same equivalence one process boundary
     # out. Registered, running, returning the code that means allowed, for sixteen hours.
     out(*guards_report())

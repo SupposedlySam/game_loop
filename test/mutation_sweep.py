@@ -469,6 +469,32 @@ MUTANTS = [
      "after the entry landed reported BELOW FLOOR on it, which is the tripwire doing its job on the "
      "person who wrote it. 4 is the measured number; the reasoning that produced 5 was wrong and is "
      "left here rather than tidied away, because the wrong claim is the useful part.", 4),
+    ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
+     ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
+     ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',
+      'no run recorded at all'],
+     "FLOOR OWED, RECORDED 0 — and 0 rather than a number I have not measured. Both of this "
+     "file's own scoped hand-measurements (wiring_drift at 5, hook_integrity_report at 6) were "
+     "OVERSTATED and came down on the first full sweep after they landed, so the method that "
+     "would produce a number here today is the one refuted an hour before those entries were "
+     "written. A floor of 0 claims nothing and cannot fire falsely; the next FULL sweep pays it. "
+     "DELIBERATELY IN MUTANTS RATHER THAN NOT_SWEPT, which is where the previous two debts sat: "
+     "being in NOT_SWEPT is precisely what EXCLUDES a producer from every sweep, so 'floor owed at "
+     "the next full sweep' could never come true there — a debt whose repayment plan is the one "
+     "thing the declaration prevents. Here the sweep measures it and the number arrives on its "
+     "own. The producer exists because a mark is a LOCAL TAG and a `confidence` attachment is what "
+     "carries it outward: on 2026-09-02 a publish trigger was killed with its caller, the tags went "
+     "up, `status` said 'newest mark', and three hours later a consumer reported that the newest "
+     "thing they could install was one commit short of the fix.", 0),
+    ("newest_mark -> the release comparison has no mark to compare against, so the gap is silent",
+     ".game_loop/bin/_gl_impl.py::newest_mark", "    return None, None\n",
+     ['WAS MARKED WITHOUT', 'BEFORE this mark'],
+     "FLOOR OWED, RECORDED 0, for the same reason as its neighbour above. This one is the input "
+     "half: publish_gap answers nothing when there is no mark, correctly, so neutering the reader "
+     "silences the whole check without touching it. Its neutered form is `None, None` rather than "
+     "`None` because the caller unpacks two values — a mutant that raises TypeError everywhere "
+     "would kill assertions by crashing the tool rather than by silencing a producer, which "
+     "measures the suite's tolerance for tracebacks instead of its coverage of a silence.", 0),
     ("hook_integrity_report -> `status` says nothing about the file that wires every gate",
      ".game_loop/bin/_gl_impl.py::hook_integrity_report", "    return []\n",
      ['hook wiring', 'DETECTION, NOT PREVENTION', 'NOT pinned', 'NOT THERE'],

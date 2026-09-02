@@ -10396,6 +10396,71 @@ def main():
               "warning above mean something",
               "tp-never" in _st2 and "CONFIGURED BUT NEVER FIRED" not in _st2)
 
+        # MARKED IS NOT RELEASED, and until 2026-09-02 nothing here compared the two. A mark is a
+        # local tag; a `confidence` attachment is what carries it outward. A mark made while that
+        # attachment was killed looked exactly like one whose publish worked, and
+        # release_distance() counted both as released — so `status` reported a fix as out while
+        # every consumer following the channel still got the commit before it. Observed: the
+        # publish trigger died with its caller at 11:12, and at 14:0x a consumer said the newest
+        # thing they could install did not carry the fix. Nothing had said a word.
+        #
+        # Driven at the FUNCTION with all three inputs injected: this is a comparison of two
+        # timestamps, and staging a real tag plus a real trigger record would test git and the
+        # trigger runner instead of the thing that was missing.
+        _pg_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_pubgap", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _pgm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_pg_spec)
+        _pg_spec.loader.exec_module(_pgm)
+        _MARKED = datetime.datetime(2026, 9, 2, 11, 12, 0)
+        _mk = ("beta-8ed5c6ca", _MARKED)
+        _gap = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"],
+                                seen={"lamp-publish": {"at": "2026-09-02T09:46:30", "ok": True}})
+        check("an attachment whose last run PREDATES the mark is named — the publish did not "
+              "happen for this release, whatever the tag says",
+              any("WAS MARKED WITHOUT" in l for l in _gap)
+              and any("lamp-publish" in l and "BEFORE this mark" in l for l in _gap))
+        check("...and it says the tag alone does not reach a consumer, which is the whole "
+              "difference between marked and released",
+              any("carries the release OUTWARD" in l for l in _gap))
+        _after = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"],
+                                  seen={"lamp-publish": {"at": "2026-09-02T11:19:00", "ok": True}})
+        check("...while an attachment that ran AFTER the mark is silent — the pair that makes the "
+              "warning above mean something rather than fire on every release",
+              _after == [])
+        _never = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"], seen={})
+        check("an attachment with NO run recorded at all is named too, and says so in those words "
+              "rather than borrowing the stale-timestamp sentence",
+              any("no run recorded at all" in l for l in _never))
+        _failed = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"],
+                                   seen={"lamp-publish": {"at": "2026-09-02T09:46:30",
+                                                          "ok": False}})
+        check("...and a stale run that also FAILED says both facts, not just the newer one",
+              any("FAILED" in l and "BEFORE this mark" in l for l in _failed))
+        check("NOTHING attached means a mark IS the whole release, and this says nothing at all",
+              _pgm.publish_gap(mark=_mk, attachments=[], seen={}) == [])
+        check("no mark at all is silent too — an unreleased project owes no comparison",
+              _pgm.publish_gap(mark=(None, None), attachments=["lamp-publish"], seen={}) == [])
+        _bad = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"],
+                                seen={"lamp-publish": {"at": "not a timestamp", "ok": True}})
+        check("an unparseable recorded time is treated as NOT having run since the mark — a "
+              "timestamp this cannot read must never be read as reassurance",
+              any("lamp-publish" in l for l in _bad))
+        # WHICH STORE THE RECORDS ARE IN, which the first draft got wrong and only driving it
+        # against the real repo revealed: trigger runs are written into the SESSION's state, and
+        # reading the repo-global one returned an empty "triggers" key — so every attachment read
+        # as "no run recorded at all" and a healthy mark would have been reported as a release gap
+        # every time. A check that cries wolf on the normal path is one that gets switched off
+        # (INV5), so this pins the state it reads rather than the answer it gave.
+        _handed = {"triggers": {"lamp-publish": {"at": "2026-09-02T11:19:00", "ok": True}}}
+        check("the gap reads the state it is HANDED, not a store it goes and finds — an attachment "
+              "recorded in the session's state counts as having run",
+              _pgm.publish_gap(_handed, mark=_mk, attachments=["lamp-publish"]) == [])
+        _handed_stale = {"triggers": {"lamp-publish": {"at": "2026-09-02T09:46:30", "ok": True}}}
+        check("...and the same state with a STALE run still reports the gap, so the check above is "
+              "reading that field rather than failing to find one",
+              any("BEFORE this mark" in l for l in
+                  _pgm.publish_gap(_handed_stale, mark=_mk, attachments=["lamp-publish"])))
+
         # A trigger that fires and FAILS every time is the third state, and the one most likely to
         # go unnoticed: it has fired, so the never-fired warning is silent about it.
         _tp_write({"harden": [{"name": "tp-broken", "command": "exit 4"}]})

@@ -10461,6 +10461,37 @@ def main():
               any("BEFORE this mark" in l for l in
                   _pgm.publish_gap(_handed_stale, mark=_mk, attachments=["lamp-publish"])))
 
+        # A DECISION THAT WAS WRITTEN DOWN AND NEVER READ BACK. `checkpoint --release-deferred`
+        # logs the reason WITH the HEAD it was about, and then the next checkpoint refused again
+        # unless the whole sentence was retyped — which turns a decision into a ritual, the exact
+        # failure the checkpoint's own ritual warning names three lines further down the same
+        # function. Driven at the function with the log lines injected: what is asserted is which
+        # records count and which do not.
+        _H = "1d4d82d"
+        _defer = lambda head, reason: json.dumps(
+            {"kind": "release_deferred", "reason": reason, "head": head})
+        check("a deferral logged for THIS head stands, so the reason does not have to be retyped "
+              "at every turn-end",
+              _pgm.deferral_standing(_H, [_defer(_H, "test-only")]) == "test-only")
+        check("...and a deferral logged for a DIFFERENT head does not — moving HEAD is new work, "
+              "and no judgement has been made about it",
+              _pgm.deferral_standing(_H, [_defer("deadbee", "test-only")]) is None)
+        check("...and the LAST record for this head wins, so a revised reason replaces rather than "
+              "sits behind the first one",
+              _pgm.deferral_standing(_H, [_defer(_H, "first"), _defer(_H, "second")]) == "second")
+        check("an empty log defers nothing — the gate refuses exactly as it did before this "
+              "existed",
+              _pgm.deferral_standing(_H, []) is None)
+        check("a torn line is SKIPPED rather than fatal, and a real record after it still counts — "
+              "an interrupted append is the ordinary state of a log being written to",
+              _pgm.deferral_standing(_H, ["{not json", _defer(_H, "after the tear")])
+              == "after the tear")
+        check("a record of ANOTHER kind carrying the same head is not a deferral",
+              _pgm.deferral_standing(_H, [json.dumps({"kind": "authorize", "head": _H})]) is None)
+        check("no readable HEAD defers nothing — a gate must not stand down on a question it "
+              "could not ask",
+              _pgm.deferral_standing("", [_defer(_H, "test-only")]) is None)
+
         # THE READER ITSELF, WHICH THE SIX CHECKS ABOVE NEVER DRIVE. Every one of them passes
         # `mark=` explicitly, so newest_mark() — the half that goes and asks git — is unexercised
         # by all of them. Measured rather than suspected: neutering newest_mark to (None, None)

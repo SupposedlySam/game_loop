@@ -3252,6 +3252,48 @@ def publish_gap(s=None, mark=None, seen=None, attachments=None):
     return L
 
 
+def deferral_standing(head=None, log_lines=None):
+    """The reason a release was deferred FOR THIS HEAD, or None — read from the log, not remembered.
+
+    THE DECISION WAS ALREADY MADE AND WRITTEN DOWN, AND NOTHING READ IT BACK. `checkpoint
+    --release-deferred` logs the reason with the HEAD it was about, and then the very next
+    checkpoint refused again unless the whole sentence was retyped. That converts a decision into a
+    ritual, which is the failure the checkpoint's own ritual warning is about, three lines further
+    down the same function.
+
+    KEYED ON HEAD, deliberately. A deferral is a judgement about a specific set of finished
+    commits: "these do not reach a consumer". Move HEAD and that judgement has not been made about
+    the new work, so the gate fires again — which is the whole point of it firing at all.
+
+    An unreadable log returns None, so the gate refuses as it always did. That is the safe
+    direction here: the cost is retyping a sentence, and the cost of the other one is a release
+    nobody gets.
+    """
+    if head is None:
+        head = _git("rev-parse", "--short", "HEAD") or ""
+    if not head:
+        return None
+    def _scan(lines):
+        found = None
+        for ln in lines:
+            if '"release_deferred"' not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            if r.get("kind") == "release_deferred" and r.get("head") == head:
+                found = r.get("reason") or ""     # the LAST one wins: a reason can be revised
+        return found
+    if log_lines is not None:
+        return _scan(log_lines)
+    try:
+        with open(LOG_F) as f:
+            return _scan(f)
+    except (OSError, ValueError):
+        return None
+
+
 def release_owed():
     """(n, sha, level) when finished work is unreleased and the handback must not pass — else None.
 
@@ -3456,7 +3498,8 @@ def cmd_checkpoint(s, a):
     # both times, and was read past; the human then had to ASK, twice, whether the work was marked
     # and published. It was not. Informing is a thing a reader can decline, which is what rung 5
     # means — so the mechanism moves up rather than the wording getting louder.
-    if not getattr(a, "release_deferred", None):
+    _standing = None if getattr(a, "release_deferred", None) else deferral_standing()
+    if not getattr(a, "release_deferred", None) and not _standing:
         _owed = release_owed()
         if _owed:
             _n, _sha, _lvl = _owed
@@ -3483,6 +3526,9 @@ def cmd_checkpoint(s, a):
     _rit = ritual_checkpoints()
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
+        *([f"  release deferred for this HEAD, standing from an earlier checkpoint: {_standing}",
+           "  It lapses the moment HEAD moves — a deferral is a judgement about THESE commits."]
+          if _standing else []),
         *([f"⚠ {_rit + 1} CHECKPOINTS SINCE ANY EVIDENCE WORK — no commit anywhere in this repo,",
            "  and no claim, harden, proof, phase or retro logged in between. That is not progress",
            "  reported N times; it is the",

@@ -497,7 +497,8 @@ MUTANTS = [
     ("deferral_standing -> a release deferral has to be retyped at every single turn-end",
      ".game_loop/bin/_gl_impl.py::deferral_standing", "    return None\n",
      ['standing from an earlier checkpoint', 'lapses the moment HEAD moves',
-      'does not have to be retyped'],
+      'does not have to be retyped', 'LAST record for this head', 'torn line is SKIPPED',
+      'deferral logged for THIS head'],
      "FLOOR OWED, RECORDED 0, and paid in the next commit with GAME_LOOP_SWEEP_ONLY. The neutered "
      "form is the behaviour this replaced: the decision was logged WITH the head it was about and "
      "nothing ever read it back, so the checkpoint refused again unless the whole sentence was "
@@ -505,7 +506,12 @@ MUTANTS = [
      "ritual warning names three lines further down the same function. Neutering it is silent by "
      "construction in the safe direction: the gate simply refuses as it always did, which is why "
      "the assertions that catch it are the ones about a deferral STANDING rather than the ones "
-     "about it lapsing.", 0),
+     "about it lapsing. "
+     "MEASURED 5 BY THE TOOL in 6.9 minutes (GAME_LOOP_SWEEP_ONLY=deferral_standing). Five and "
+     "not seven because four of the seven assertions here answer `is None`, which a mutant "
+     "returning None satisfies BY CONSTRUCTION -- this file's own low-count caveat, and the "
+     "second entry in a row to meet it. The same run reported this mark set naming only 1 of its "
+     "5 killers, so it was narrowed TOWARD them rather than away from breadth.", 5),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',

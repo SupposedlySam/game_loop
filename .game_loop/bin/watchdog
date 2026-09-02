@@ -194,7 +194,12 @@ def _merged_config(config_f):
 
 
 def _cfg():
-    wd = {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3}
+    # waiting_probe_timeout_sec: THE COMMAND WAS CONFIGURABLE AND ITS BUDGET WAS NOT (#124). A
+    # consumer armed the command this project's own note recommends, it grew to ~20s on an ordinary
+    # workload, and every tick hit a hardcoded 15s ceiling — so a legitimately SLOW probe was
+    # unrepresentable and read as broken. 34 of 236 recorded verdicts were "failing" for that
+    # reason, across six days. Arming a command you cannot budget for is half a setting.
+    wd = {"idle_sec": 30, "settle_sec": 5, "ring_cap": 3, "waiting_probe_timeout_sec": 15}
     wd.update(_merged_config(CONFIG_F).get("watchdog") or {})
     return wd
 
@@ -215,6 +220,9 @@ IDLE_SEC = int(os.environ.get("WATCHDOG_IDLE_SEC") or _WD["idle_sec"])
 SETTLE_SEC = int(os.environ.get("WATCHDOG_SETTLE_SEC") or _WD["settle_sec"])
 CHUNK_SEC = 10          # bounds supersede latency
 RING_CAP = int(_WD["ring_cap"])  # consecutive unproductive rings before standing down
+# The probe's budget, settable beside the probe. Env override for the same reason as the others.
+PROBE_TIMEOUT_SEC = int(os.environ.get("WATCHDOG_PROBE_TIMEOUT_SEC")
+                        or _WD["waiting_probe_timeout_sec"])
 EXHAUSTED_PCT = float(_LC["exhausted_pct"])   # at/over this, the session is treated as rate-limited
 # Grace after a window resets before ringing — the reset timestamp is Anthropic's clock, not ours.
 RESUME_BUFFER_SEC = int(os.environ.get("WATCHDOG_RESUME_BUFFER_SEC") or 30)
@@ -723,8 +731,8 @@ def waiting_verdict(tpath=None):
         # signal, so a probe never has to glob across the sessions sharing a checkout (#60).
         env = dict(os.environ, GAME_LOOP_ROOT=ROOT, GAME_LOOP_REPO=REPO_ROOT,
                    GAME_LOOP_TRANSCRIPT=tpath or "", **session_env())
-        r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15,
-                           cwd=REPO_ROOT, env=env)
+        r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True,
+                           timeout=PROBE_TIMEOUT_SEC, cwd=REPO_ROOT, env=env)
         # THE EXIT CONTRACT IS 0 OR 1 AND NOTHING ELSE.
         #
         # "Conservative toward not waiting" is right, and on its own it made a BROKEN probe
@@ -743,6 +751,14 @@ def waiting_verdict(tpath=None):
         detail = reason if waiting else (r.stderr or "").strip()[:160]
         if not answered:
             detail = (detail or f"exit {r.returncode} with nothing on stderr")[:160]
+    except subprocess.TimeoutExpired:
+        # A TIMEOUT IS NOT "DID NOT RUN", and saying so cost the reporter real diagnosis time (#124):
+        # they went looking for a missing binary and a cwd problem — both of which this runner is
+        # careful about — before thinking to time the command. The probe ran fine; it ran LONG.
+        waiting, answered, detail = False, False, (
+            "probe TIMED OUT after %ss — it ran, it did not finish. Raise "
+            "watchdog.waiting_probe_timeout_sec if this command is legitimately slow, or make the "
+            "probe cheaper; it runs on every tick." % PROBE_TIMEOUT_SEC)
     except Exception:  # noqa: BLE001 — unrunnable, hung, anything: NOT waiting, and say so
         waiting, answered, detail = False, False, "probe did not run at all"
     logline({"kind": "watchdog_waiting", "waiting": waiting, "answered": answered,

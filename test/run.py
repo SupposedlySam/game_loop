@@ -7183,6 +7183,44 @@ def main():
                   "is loud instead of indistinguishable from a busy queue",
                   "THE WAITING PROBE IS FAILING" in gl(wp, "status", sid="sess-wait").stdout)
 
+        # #124, FROM THE CONSUMER SEAT: THE COMMAND WAS CONFIGURABLE AND ITS BUDGET WAS NOT.
+        # They armed the command this project's own config note recommends; it grew to ~20s on an
+        # ordinary workload against a HARDCODED 15s ceiling, so every tick raised TimeoutExpired.
+        # 34 of 236 recorded verdicts read "failing" across six days, and in that window three of
+        # their runs died without committing. A legitimately slow probe was unrepresentable.
+        open(_wlog, "w").close()
+        _probe("sleep 60")
+        _at_cap()
+        _run()
+        _l_to = read_or_empty(_wlog)
+        check("#124: a probe that TIMES OUT says so — it ran and did not finish, which is a "
+              "different repair from a missing binary, and 'did not run at all' sent the reporter "
+              "hunting a cwd problem this runner does not have",
+              "TIMED OUT" in _l_to and "did not run at all" not in _l_to)
+        check("...and the message names the setting that fixes it, because a budget you cannot "
+              "find is the same as a budget you cannot set",
+              "waiting_probe_timeout_sec" in _l_to)
+        # AND THE BUDGET IS ACTUALLY HONOURED — the arm above proves the message, this proves the
+        # knob. A slow probe INSIDE its raised budget must answer normally rather than time out.
+        with open(_wcfg) as f:
+            _c124 = json.load(f)
+        _c124["watchdog"] = dict(_c124.get("watchdog") or {}, waiting_probe="sleep 2; exit 0",
+                                 waiting_probe_timeout_sec=20)
+        with open(_wcfg, "w") as f:
+            json.dump(_c124, f)
+        open(_wlog, "w").close()
+        _at_cap()
+        _run()
+        _l_ok = read_or_empty(_wlog)
+        check("#124: ...and a slow probe INSIDE a raised waiting_probe_timeout_sec answers instead "
+              "of timing out — the knob does something, which is the half a message cannot prove",
+              '"answered": true' in _l_ok and "TIMED OUT" not in _l_ok)
+        # restore, so the assertions after this see the fixture they expect
+        _c124["watchdog"] = {k: v for k, v in _c124["watchdog"].items()
+                             if k != "waiting_probe_timeout_sec"}
+        with open(_wcfg, "w") as f:
+            json.dump(_c124, f)
+
         # PAIRED: a probe that genuinely answers "there is work" must NOT be smeared as broken, or
         # the warning becomes noise and stops carrying information.
         open(_wlog, "w").close()

@@ -475,7 +475,12 @@ MUTANTS = [
      "left here rather than tidied away, because the wrong claim is the useful part.", 4),
     ("only_filter -> a name that matches nothing silently sweeps the WHOLE list instead of refusing",
      "test/mutation_sweep.py::only_filter", "    return idxs, None\n",
-     ['matched no producer', 'Nothing was swept', 'ONLY '],
+     # NARROWED after the first run reported this set TOO BROAD TO DISCRIMINATE: 'ONLY ' is a
+     # common word matched as a substring and answered yes for 141 assertion names, which is the
+     # whole table. A mark that wide stops telling a genuine kill from collateral without ever
+     # failing. These five name the subject instead.
+     ['matched no producer', 'Nothing was swept', 'ONLY selects', 'ONLY narrows',
+      'did not fall back'],
      "FLOOR OWED, RECORDED 0 — and it is measured in the very next commit with "
      "GAME_LOOP_SWEEP_ONLY=only_filter, which is this entry's own subject. The neutered form is "
      "the exact defect the function exists to refuse: `return idxs, None` drops the refusal, so a "
@@ -483,7 +488,12 @@ MUTANTS = [
      "to avoid — while looking identical to having asked for it. That is the shape this whole "
      "file is about, arriving in the code written to make the file cheaper to use. The default-"
      "deny gate caught it undecided within one suite run of it being written, which is the second "
-     "time today it caught the person adding the producer.", 0),
+     "time today it caught the person adding the producer. "
+     "MEASURED 7 BY THE TOOL, in 6.9 minutes, with GAME_LOOP_SWEEP_ONLY=only_filter — the flag "
+     "measuring its own selector, and the first number recorded here needing NO caveat about "
+     "method, because the runner did the excluding rather than me. That same run also reported "
+     "this mark set too broad and this floor STALE-LOW at 0; both are fixed in the commit that "
+     "records the 7.", 7),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',
@@ -3417,7 +3427,10 @@ def main():
         print("  ever failing. Narrow them to phrases that name the producer's subject — a common")
         print("  word matched as a substring is the usual cause. Not fatal: a broad mark has never")
         print("  broken a run, it has only ever made a report agree with you.")
-        print("  The names to narrow AGAINST are in test/sweep-killers.json, written by this run:"
+        _whose = ("written by this run" if _is_full_sweep() else
+                  "which THIS run did NOT write, being a trimmed one — those names are the last "
+                  "FULL sweep's")
+        print("  The names to narrow AGAINST are in test/sweep-killers.json, " + _whose + ":"
               "\n  every assertion that actually killed each producer, not the three shown above.")
         # WHAT THIS CANNOT TELL YOU (INV6), and it took trying to act on it to find out: breadth
         # alone does not separate a LOOSE MARK from a genuinely CENTRAL PRODUCER. `fix_warning`'s

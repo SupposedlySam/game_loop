@@ -11819,7 +11819,12 @@ def main():
           "KILL_NAMES.items()" in _msrc[_msrc.index("def _write_killers"):])
     check("...and the overbroad-marks advisory NAMES that file, so the instruction and the data it "
           "requires are not one screen apart",
-          "sweep-killers.json, written by this run" in _msrc)
+          "The names to narrow AGAINST are in test/sweep-killers.json" in _msrc)
+    check("...and it says WHOSE run wrote it, because a trimmed run (GAME_LOOP_SWEEP_ONLY, a "
+          "shard) does not — pointing at a stale file with a fresh claim on it is the failure this "
+          "whole advisory exists to avoid",
+          "written by this run" in _msrc and "_is_full_sweep()" in _msrc
+          and "did NOT write" in _msrc)
     # AND IT SAYS WHAT IT CANNOT TELL YOU. Breadth alone does not separate a LOOSE MARK from a
     # genuinely CENTRAL producer, and acting on the advisory is how that surfaced: fix_warning's
     # nine killers all name fixes and proofs, so a subject-naming set narrows it 103 -> 19 with

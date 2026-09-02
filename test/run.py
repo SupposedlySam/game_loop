@@ -7212,6 +7212,30 @@ def main():
         _at_cap()
         _run()
         _l_ok = read_or_empty(_wlog)
+        # #124 FOLLOW-UP: the third state now carries a STRUCTURED why, not only prose. Their
+        # reconcile keys on `answered: false`, which collapses three causes with different repairs —
+        # ran-long, could-not-run, answered-off-contract. The detail string always said which, in
+        # prose a consumer would have to parse. Additive: nothing reading `answered` changes.
+        for _why, _cmd in (("timeout", "sleep 60"),
+                           ("unrunnable", "/nonexistent/probe/xyz"),
+                           ("unexpected_exit", "exit 3")):
+            open(_wlog, "w").close()
+            _probe(_cmd)
+            _at_cap()
+            _run()
+            check("#124: a %s failure is logged as why=%s, so a consumer can switch on the cause "
+                  "instead of parsing prose" % (_why.replace("_", " "), _why),
+                  ('"why": "%s"' % _why) in read_or_empty(_wlog))
+        # AND THE CONTROL: a probe that ANSWERED must not carry a failure reason, or the field is
+        # decoration rather than a discriminator.
+        open(_wlog, "w").close()
+        _probe("exit 1")
+        _at_cap()
+        _run()
+        check("#124: ...and a probe that ANSWERED carries an empty why — a failure reason on a run "
+              "that did not fail would make the field noise",
+              '"why": ""' in read_or_empty(_wlog))
+
         check("#124: ...and a slow probe INSIDE a raised waiting_probe_timeout_sec answers instead "
               "of timing out — the knob does something, which is the half a message cannot prove",
               '"answered": true' in _l_ok and "TIMED OUT" not in _l_ok)

@@ -719,6 +719,7 @@ def waiting_verdict(tpath=None):
     cmd = str(_WD.get("waiting_probe") or "").strip()
     if not cmd:
         return False, ""
+    why = ""          # bound before the try: an arm that forgot it would be a NameError at the log
     try:
         # SAME ENVIRONMENT CONTRACT AS A TRIGGER. Both features run a command the PROJECT supplied,
         # and they were handing it different environments: triggers set GAME_LOOP_ROOT and
@@ -751,7 +752,14 @@ def waiting_verdict(tpath=None):
         detail = reason if waiting else (r.stderr or "").strip()[:160]
         if not answered:
             detail = (detail or f"exit {r.returncode} with nothing on stderr")[:160]
+            # 127 IS BASH'S "command not found", and it arrives as a COMPLETED run rather than an
+            # exception — so the exception arm below, which reads like the cannot-run case, almost
+            # never sees a missing probe. Measured: an assertion for why=unrunnable failed against
+            # `/nonexistent/probe/xyz` because bash exited 127 quite happily. A consumer diagnosing
+            # "my probe is missing" and one diagnosing "my probe answered 3" do different things.
+            why = "unrunnable" if r.returncode == 127 else "unexpected_exit"
     except subprocess.TimeoutExpired:
+        why = "timeout"
         # A TIMEOUT IS NOT "DID NOT RUN", and saying so cost the reporter real diagnosis time (#124):
         # they went looking for a missing binary and a cwd problem — both of which this runner is
         # careful about — before thinking to time the command. The probe ran fine; it ran LONG.
@@ -760,9 +768,18 @@ def waiting_verdict(tpath=None):
             "watchdog.waiting_probe_timeout_sec if this command is legitimately slow, or make the "
             "probe cheaper; it runs on every tick." % PROBE_TIMEOUT_SEC)
     except Exception:  # noqa: BLE001 — unrunnable, hung, anything: NOT waiting, and say so
-        waiting, answered, detail = False, False, "probe did not run at all"
+        # No process at all: bash itself missing, an OS error, anything before an exit code exists.
+        waiting, answered, detail, why = False, False, "probe did not run at all", "unrunnable"
+    # WHY, STRUCTURED, BESIDE THE PROSE (#124). `answered: false` collapses three causes with
+    # different repairs: a probe that ran long, one that could not run, and one that answered with a
+    # code outside the 0/1 contract. The detail string has always said which — in prose, which a
+    # consumer's reconcile would have to parse. A field it can switch on costs nothing and is
+    # additive: nothing that reads `answered` today changes behaviour.
+    #
+    # Empty string when the probe ANSWERED, so "why did it fail" is never a question about a run
+    # that did not fail. The three values are timeout · unrunnable · unexpected_exit.
     logline({"kind": "watchdog_waiting", "waiting": waiting, "answered": answered,
-             "detail": detail})
+             "detail": detail, "why": why})
     return waiting, detail
 
 

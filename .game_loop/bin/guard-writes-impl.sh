@@ -1057,7 +1057,7 @@ prompt surface is not knowable from inside a hook."
     # read by a verify started afterwards, and this repo routinely has twenty sessions committing
     # into one checkout. Two of them sharing a scope file would gate each other's commits.
     SCOPE_OUT="/tmp/.game_loop_scope.${SLUG:-default}.${SID:-nosid}"
-    rm -f "$SCOPE_OUT"
+    rm -f "$SCOPE_OUT" "$SCOPE_OUT.inband"
     commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" SCOPE_OUT="$SCOPE_OUT" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 payload = json.loads(sys.argv[1])
@@ -1426,6 +1426,10 @@ if commit_args is not None and commit_count == 1 and answerable.startswith("root
     _mode, _paths = read_scope_mode(commit_args)
     if index_touched and _mode in ("index", "all", "include"):
         _mode = "tree"
+        try:
+            open(os.environ["SCOPE_OUT"] + ".inband", "w").close()
+        except OSError:
+            pass                 # cannot mark it -> the blast-radius note stays silent, as before
     if _mode != "tree":
         _tree = os.path.dirname(answerable[len("root:"):])
         _files = resolve_scope(_mode, _paths, _tree)
@@ -1598,8 +1602,11 @@ Or commit with --no-verify to skip it on the record.$tree_hint$chained_hint"
       # Silent by design wherever it cannot reason: no recorded edits, no readable index, no git.
       # A commit's PROVENANCE is the third thing this needs to know and could not be told (issue
       # #29). See the attribution block inside the Python below.
+      INBAND_STAGING=""
+      [ -f "$SCOPE_OUT.inband" ] && INBAND_STAGING=1
       blast_note=$(REPO_REAL="$REPO_REAL" EDITED_F="$EDITED_F" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" \
                    GAMELOOP_DIR="$GAMELOOP_DIR" TARGET_TREE="$TARGET_TREE" SID="$SID" \
+                   INBAND_STAGING="$INBAND_STAGING" \
                    STATE_F="$STATE_F" python3 <<'PY'
 import datetime, io, json, os, subprocess, sys
 from fnmatch import fnmatch
@@ -1657,6 +1664,24 @@ staged = git("diff", "--cached", "--name-only")
 if top is None or staged is None:
     sys.exit(0)          # not an index this can read — degrade to silence, never to noise
 top = os.path.realpath(top.strip())
+
+# COULD NOT TELL, which must never share bytes with NOTHING TO REPORT. This note reads the index,
+# and the hook is PreToolUse: when the staging is bundled into the commit's own call the add has
+# not run, the index is empty, and the check that exists to name a sweeping commit accused nobody
+# in ZERO BYTES. Measured on `git add -A && git commit -m x` with an untouched file in the tree —
+# it named the file when the staging came in a prior call and said nothing when it did not.
+# Deliberately NOT a guess at what the add would stage: this says what it cannot see rather than
+# inventing a list, and the gate three blocks up already widened its own scope to the whole tree
+# for the same command, so the commit is not passing unexamined.
+if os.environ.get("INBAND_STAGING"):
+    sys.stdout.write(
+        "THIS COMMAND STAGES IN THE SAME CALL, so this check could not read what the commit "
+        "carries.\n"
+        "The hook runs at PreToolUse: your staging has not executed yet and the index is still "
+        "empty.\n"
+        "This is NOT 'nothing was swept in' — it is 'nobody looked'. Stage in a separate call and\n"
+        "this note can name the files this session never wrote.\n")
+    sys.exit(0)
 
 # CONSUME, here and not a line earlier: a declaration is spent by the next commit this check
 # actually EXAMINES. Above this point the check said nothing at all (no recorded edits, no readable

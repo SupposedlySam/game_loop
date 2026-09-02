@@ -4669,6 +4669,33 @@ def main():
                   and "lib/swept_in.dart" in r.stdout
                   and "vendor/dep/lib.js" not in r.stdout and "pubspec.lock" not in r.stdout
                   and "model.g.dart" not in r.stdout)
+            # COULD NOT TELL MUST NOT SHARE BYTES WITH NOTHING TO REPORT. This note reads the
+            # index, and the hook is PreToolUse: bundle the staging into the commit's own call and
+            # the add has not run, so the index is empty and the check that exists to name a
+            # sweeping commit accused nobody in ZERO BYTES. Measured before the fix — the same
+            # tree, the same untouched file, named when the staging came in a prior call and
+            # silent when it came in the same one.
+            def brbundle(cmd, sid="sess-blast"):
+                return guard(br, {"tool_name": "Bash", "session_id": sid, "cwd": br,
+                                  "tool_input": {"command": cmd}}, sid=sid)
+
+            brgit("reset", "-q")
+            r = brbundle("git add -A && git commit -m x")
+            check("a commit that stages IN THE SAME CALL says the index could not be read, "
+                  "instead of reporting nothing swept in",
+                  "could not read" in r.stdout and "nobody looked" in r.stdout)
+            check("...and it says WHY, so the reader can get the real answer rather than "
+                  "concluding the check is broken",
+                  "PreToolUse" in r.stdout and "separate call" in r.stdout)
+            check("...and it still does not block the commit — this note has never blocked one",
+                  not denied(r) and r.returncode == 0)
+            # THE CONTROL. A bundle that cannot restage leaves the index a fine answer, and a note
+            # that cried blindness on every chained `git status` would be noise that teaches
+            # readers to skip the times it is real.
+            brgit("add", "-A")
+            r = brbundle("git status && git commit -m x")
+            check("a bundled command that CANNOT restage still reads the index and names the file",
+                  "lib/swept_in.dart" in r.stdout and "could not read" not in r.stdout)
             brlog_f = os.path.join(br, ".game_loop", "log.jsonl")
             brlog = open(brlog_f).read() if os.path.exists(brlog_f) else ""
             check("a widened commit is permanent in the log", '"commit_unedited"' in brlog)

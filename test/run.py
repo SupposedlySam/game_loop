@@ -10461,6 +10461,52 @@ def main():
               any("BEFORE this mark" in l for l in
                   _pgm.publish_gap(_handed_stale, mark=_mk, attachments=["lamp-publish"])))
 
+        # THE READER ITSELF, WHICH THE SIX CHECKS ABOVE NEVER DRIVE. Every one of them passes
+        # `mark=` explicitly, so newest_mark() — the half that goes and asks git — is unexercised
+        # by all of them. Measured rather than suspected: neutering newest_mark to (None, None)
+        # killed 13 assertions and ALL 13 were also killed by neutering publish_gap, i.e. universal
+        # collateral about install.sh, --pin and the sweep's own bookkeeping. Its own genuine count
+        # was ZERO. A producer with a floor of nothing is a producer the suite is not about.
+        _nmdir = _tmpdir("glmark-")
+        subprocess.run(["git", "init", "-q", _nmdir], capture_output=True)
+        for _k, _v in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(["git", "-C", _nmdir, "config", _k, _v], capture_output=True)
+        with open(os.path.join(_nmdir, "f.txt"), "w") as f:
+            f.write("x\n")
+        subprocess.run(["git", "-C", _nmdir, "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", _nmdir, "commit", "-q", "-m", "one"], capture_output=True)
+        # Two marks, the OLDER one created second, so "newest" cannot be satisfied by tag order,
+        # by creation order in the ref listing, or by alphabetical luck — only by creatordate.
+        subprocess.run(["git", "-C", _nmdir, "tag", "-a", "beta-aaaaaaaa", "-m", "older",
+                        "--cleanup=verbatim"], capture_output=True,
+                       env=dict(os.environ, GIT_COMMITTER_DATE="2026-01-01T00:00:00"))
+        subprocess.run(["git", "-C", _nmdir, "tag", "-a", "stable-zzzzzzzz", "-m", "newer",
+                        "--cleanup=verbatim"], capture_output=True,
+                       env=dict(os.environ, GIT_COMMITTER_DATE="2026-06-01T00:00:00"))
+        _real_git = _pgm._git
+        _pgm._git = lambda *a: (subprocess.run(["git", "-C", _nmdir, *a], capture_output=True,
+                                               text=True).stdout.strip() or None)
+        try:
+            _tag, _when = _pgm.newest_mark()
+            check("newest_mark reads a real mark off git, and takes the NEWEST BY CREATION DATE "
+                  "rather than the newest by name — the older tag sorts last alphabetically and "
+                  "was created second, so a listing order would pick the wrong one",
+                  _tag == "stable-zzzzzzzz" and _when is not None)
+            check("...and the datetime it returns is NAIVE, because it is compared against the "
+                  "naive timestamps now() writes into the trigger records — an aware one would "
+                  "raise TypeError inside a status line rather than answering",
+                  _when is not None and _when.tzinfo is None)
+            _pgm._git = lambda *a: None
+            check("...and a tree with no marks at all answers (None, None) rather than raising — "
+                  "an unreleased project owes no comparison",
+                  _pgm.newest_mark() == (None, None))
+            _pgm._git = lambda *a: "not-a-tag\tnot-a-date"
+            check("...and an unparseable creatordate is SKIPPED rather than crashing the status "
+                  "line it is printed from",
+                  _pgm.newest_mark() == (None, None))
+        finally:
+            _pgm._git = _real_git
+
         # A trigger that fires and FAILS every time is the third state, and the one most likely to
         # go unnoticed: it has fired, so the never-fired warning is silent about it.
         _tp_write({"harden": [{"name": "tp-broken", "command": "exit 4"}]})

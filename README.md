@@ -505,6 +505,15 @@ the watchdog. The contract is three-valued:
 | `1` | Not waiting — there is work here. The watchdog rings. |
 | anything else, a timeout, or an unrunnable command | **Could not answer.** Still rings, *and* `status` reports the probe as FAILING. |
 
+**Say what your probe's budget is.** `watchdog.waiting_probe_timeout_sec` (default `15`, env
+override `WATCHDOG_PROBE_TIMEOUT_SEC`) bounds how long the probe may take; it runs on every tick, so
+the default is deliberately small. A probe that exceeds it is killed and lands in the third row —
+which means **a legitimately slow probe is unrepresentable until you raise this**, and reads exactly
+like a broken one. Reported from the consumer seat in #124: the recommended command grew to ~20s
+against a budget that was not written down anywhere, every tick timed out for six days, and three
+runs died unnoticed. A timeout now says it timed out and names this key, rather than reporting that
+the probe did not run — those send you to completely different repairs.
+
 That third state exists because a probe that crashed and a probe reporting work produced identical
 output, so a broken one stayed invisible for exactly as long as there was work to do. Write yours to
 resolve its own dependencies explicitly: a hook's `PATH` is not your shell's, and a tool found by

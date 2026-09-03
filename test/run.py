@@ -1681,6 +1681,18 @@ def main():
         # arm's thread ts, or the watchdog below finds nothing to poll (the real-world bug: reply never
         # forwarded). A Slack-paged arm survives as `spent`; a spent arm no longer re-opens the gate.
         print("a slack-paged arm survives the stop gate (so the reply can still come back):")
+        # THIS SECTION USED TO INHERIT ITS ARM FROM THE SECTION ABOVE, and that dependency was
+        # invisible to the pruner: it is state on DISK (a Slack-paged arm in sess-slk), not a Python
+        # name, and the closure follows names. So the section announced a fixture boundary it could
+        # not establish and failed 2 of 3 standing alone — one of the 3 unsound cuts out of 38
+        # measured for #126. Arming here makes the dependency a NAME the pruner can follow
+        # (FakeSlack, real), which is the mechanism that already works everywhere else; `arm`
+        # overwrites t3_armed rather than refusing, so doing it again in a full run is a no-op that
+        # re-pages a channel two sections later clear anyway.
+        FakeSlack.posts.clear()
+        gl(proj, "mandate", "--set", "notify work", sid="sess-slk")
+        gl(proj, "arm", "--question", "prod or staging?", "--read", real,
+           "--predict", "staging", sid="sess-slk")
         r = gl(proj, "stopgate",
                stdin=json.dumps({"last_assistant_message": "prod or staging — which one?"}),
                sid="sess-slk")

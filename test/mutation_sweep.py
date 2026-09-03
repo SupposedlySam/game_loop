@@ -516,25 +516,27 @@ MUTANTS = [
      ".game_loop/bin/_gl_impl.py::deferral_pin_note", '    return ""\n',
      ['the PIN has moved', 'NAMES both shas', 'SILENT when the pin has not moved',
       'before pins were recorded', 'LAST record for this head supplies the pin'],
-     "FLOOR OWED, RECORDED 0, and 0 rather than a number I have not measured -- this file's own "
-     "hand-measurements have been OVERSTATED twice and came down on the first full sweep after "
-     "they landed. A floor of 0 claims nothing and cannot fire falsely; a scoped run pays it. "
-     "IN MUTANTS RATHER THAN NOT_SWEPT deliberately: NOT_SWEPT is what EXCLUDES a producer from "
-     "every sweep, so a debt parked there is a debt nothing will ever collect. "
-     "EXPECT A LOW COUNT AND NOT BECAUSE COVERAGE IS THIN: neutered to \"\", this mutant satisfies "
-     "every assertion asserting SILENCE by construction -- and three of the six here assert "
-     "exactly that. Only the assertions reading the note's TEXT can kill it, which is this file's "
-     "standing nothing-direction caveat and the third entry to meet it.", 0),
+     "MEASURED 5 BY THE TOOL (GAME_LOOP_SWEEP_ONLY=pin_), paying the floor this entry was "
+     "recorded owing. The prediction written before the run held: neutered to \"\" this mutant "
+     "satisfies every SILENCE assertion by construction, so only the ones reading the note's TEXT "
+     "can kill it -- this file's standing nothing-direction caveat, and the third entry in a row "
+     "to meet it. IN MUTANTS RATHER THAN NOT_SWEPT deliberately: NOT_SWEPT is what EXCLUDES a "
+     "producer from every sweep, so a debt parked there is a debt nothing will ever collect, which "
+     "is how this one got collected within the hour. The run named 2 of the 5 killers from this "
+     "mark set, so the set is a LOWER BOUND rather than the whole story.", 5),
     ("current_pin_sha -> the pin recorded with a decision comes from something other than the stamp",
      ".game_loop/bin/_gl_impl.py::current_pin_sha", "    return None\n",
      ['READ from the pinned checkout', 'same source `self` reports from',
       'actually WRITES that field'],
-     "FLOOR OWED, RECORDED 0, same reasoning as its caller above. A one-line reader whose whole "
-     "job is to name WHERE the pin's value comes from: the pinned checkout's own stamp, which is "
-     "the same source `self` reports from. It exists because the value was being written from "
-     "memory into prose -- twice on 2026-09-03, the second time with the correct value sitting in "
-     "the same command's output. Neutered to None it is silent by construction in the direction "
-     "that matters, since a missing pin makes deferral_pin_note return \"\" rather than lie.", 0),
+     "MEASURED 1 BY THE TOOL and reported THIN, which is the honest number and not a coverage "
+     "hole to paper over. A one-line reader whose whole job is to name WHERE the pin's value "
+     "comes from: the pinned checkout's own stamp, the same source `self` reports from. Neutered "
+     "to None it is silent BY CONSTRUCTION in the direction that matters -- a missing pin makes "
+     "deferral_pin_note return \"\" rather than lie -- so only a positive read can kill it and "
+     "there is one to have. Adding nothing-direction assertions would raise this number by zero. "
+     "ONE THING HERE IS AN OPEN UNDER-REPORT, recorded rather than tidied: the run said 0 of this "
+     "mark set name the single killer, so the killer is an assertion other than the three written "
+     "for it, and the marks do not yet point at whatever that is.", 1),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',
@@ -656,12 +658,16 @@ MUTANTS = [
      "consumer their gates are running older code than the tree they guard",
      ".game_loop/bin/_gl_impl.py::_pin_marker_sha", "    return None\n",
      ["pin", "wiring", "marker"],
-     "3 kills, and the ceiling is STRUCTURAL — do not try to raise it. This "
-     "returns a sha or None, so the neutered body IS its nothing-answer, and the two assertions "
-     "covering the absent-marker and corrupt-marker paths survive by construction. They earn their "
-     "place (they would catch a raise, or a bare \"\" reported as agreement between pin and HEAD) "
-     "and they can never kill THIS mutant. Only the positive read can, and there is exactly one of "
-     "those to have. Adding more nothing-direction assertions raises nothing.", 3),
+     "4 kills. THE PREVIOUS NOTE HERE SAID THE CEILING WAS STRUCTURAL AT 3 AND TO NOT TRY TO "
+     "RAISE IT, and that claim stopped being true without anyone editing it — which is the same "
+     "defect as the deferral reason two entries down, in a note ABOUT this producer. Its reasoning "
+     "was sound: the body returns a sha or None, so the neutered form IS its nothing-answer, the "
+     "absent-marker and corrupt-marker assertions survive by construction, and only a POSITIVE "
+     "read can kill it. What changed is the premise 'there is exactly one of those to have'. "
+     "35c8321 added two more — `self` naming the sha when the pin AGREES with HEAD, and the line "
+     "dating that agreement — and both showed up as killers on the next run. Nothing-direction "
+     "assertions still raise this by zero; a do-not-raise instruction is a claim about the suite "
+     "on the day it was written.", 4),
     ("parse_events -> no per-event distribution is ever seen",
      ".game_loop/bin/_gl_impl.py::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),

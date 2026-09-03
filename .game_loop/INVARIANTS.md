@@ -23,6 +23,25 @@ Every claim about external reality — a dependency, a harness, another repo —
 that backs it: `game_loop claim --assert ".." --read <path>`. A research subagent's citation is not a
 source; it *finds* the file, it does not *read* it. Cite the file you read.
 
+**The same rule binds a CHECK, not only a sentence.** A gate that decides about X by measuring Y is
+reading a proxy, and a proxy that merely *correlates* eventually disagrees with the thing it stands
+for — quietly, because the check still passes. Four instances in one day, none of which announced
+itself:
+
+- **ancestry for content.** A floor gate diffed `merge-base(branch, main)..branch`. Squash-merge
+  rewrites the commit, so shipped work is never an ancestor of main and the gate replayed an entire
+  merged branch for fourteen days. The fix that works tests whether the bound is *present in main's
+  copy of the file* — content, not lineage.
+- **a phase's `since` for the day its prose was written**, so every "today" in a banner silently
+  re-pointed at whoever was reading it.
+- **"the run finished" for "the run measured anything".** A crashed suite printed
+  `1880 passing, 11 FAILING`, which reads healthy while roughly 400 assertions never executed.
+- **`.get("key")` for every config read.** A surface report called itself complete over a set that
+  excluded subscript access, and the one key it missed was the subject of an open issue.
+
+The question that separates a measurement from a proxy is: *what would this check have to observe to
+be wrong?* If the answer is "something it never looks at", it is a proxy. Observe that instead.
+
 ## INV3 — Everything outside this repo is READ-ONLY
 
 Read other projects, mine them, use their data as fixtures. Never write, never run their tooling,

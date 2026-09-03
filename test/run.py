@@ -9877,6 +9877,51 @@ def main():
               "pre-exempted: " + (", ".join(_stalev) or "none"),
               not _stalev)
 
+        # THE SAME COMPLETENESS ARGUMENT OVER CONFIG KEYS READ BY SUBSCRIPT, which nothing covered.
+        # This project's `undocumented-surface` trigger reports every config key documented, and its
+        # extractor matches `.get("key")` only — so a key read as `_WD["key"]` is outside its
+        # denominator entirely, and the report is true about what it found while silent about a
+        # whole access pattern. Measured 2026-09-03: five keys are read that way, and
+        # `waiting_probe_timeout_sec` was in no tracked document at all — which is the knob #124 was
+        # filed about, a consumer being unable to state their probe's budget. A trigger saying
+        # "every one of them is named" is exactly the shape INV8 warns about when the set it swept
+        # was never the whole set.
+        #
+        # THE STANDARD HERE IS FINDABLE, NOT README. docs/how-it-works.md is a legitimate home —
+        # CLAUDE.md names it as the source of truth for how the guardrails work, and four of these
+        # five live there quite properly. Demanding README or llms.txt for config keys would import
+        # the VERB rule above onto a surface this project has not decided that about, which is a
+        # policy change wearing a test's clothes.
+        _cfgdocs = ""
+        for _d in ["README.md", "llms.txt"] + sorted(
+                glob.glob(os.path.join(REPO, "docs", "*.md"))):
+            _dp = _d if os.path.isabs(_d) else os.path.join(REPO, _d)
+            if os.path.exists(_dp):
+                with open(_dp, encoding="utf-8") as _f:
+                    _cfgdocs += _f.read()
+        _subkeys = {}
+        for _bp in sorted(glob.glob(os.path.join(REPO, ".game_loop", "bin", "*"))):
+            if not os.path.isfile(_bp):
+                continue
+            try:
+                with open(_bp, encoding="utf-8") as _f:
+                    _bs = _f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for _h, _k in re.findall(r'\b(_[A-Z][A-Z_]{1,})\[\s*"([a-z_]{4,})"\s*\]', _bs):
+                _subkeys.setdefault(_k, set()).add(os.path.basename(_bp))
+        check("config keys read by SUBSCRIPT are found at all — the extractor that missed them "
+              "matches only .get(\"key\"), so a sweep here that finds nothing would repeat the "
+              f"original defect one level up: {len(_subkeys)} found",
+              len(_subkeys) >= 3)
+        _undock = sorted(k for k in _subkeys
+                         if not re.search(r"\b" + re.escape(k) + r"\b", _cfgdocs))
+        check("...and every one of them is NAMED in a tracked document — a knob a consumer can set "
+              "but cannot discover is not a knob, which is what #124 said about "
+              "waiting_probe_timeout_sec while it sat configurable and unwritten-down: "
+              + (", ".join(_undock) or "none"),
+              not _undock)
+
         # #97: THE KEYWORD-NAMED DESTS ARE DERIVED, because the failure mode is silent. argparse
         # cannot store `assert` or `with` under their own names, so both carry a trailing underscore
         # — and resolve_prose SKIPS any option whose dest it cannot find. A missing entry therefore

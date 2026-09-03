@@ -4068,6 +4068,41 @@ def main():
         check("...and when the marker is missing the pin-vs-HEAD warning is SILENT rather than "
               "guessing — 'I could not read the stamp' is not 'the pin is current'",
               "gates are running OLDER code" not in _same)
+        check("...but it does NOT stay silent about the stamp itself: an unreadable PINNED says so, "
+              "because 'I could not read it' and 'it matches' were the same output and only one of "
+              "them is a reason to stop checking",
+              "unreadable" in _same and "not the same answer" in _same)
+
+        # AGREEMENT WAS THE SILENT ARM, AND SILENCE IS WHAT COST A RELEASE (INV8). Divergence has
+        # always printed a ⚠ naming both shas; a pin that MATCHED printed nothing, so this report
+        # named no commit at all and a reader carrying a stale belief met nothing that contradicted
+        # it. On 2026-09-03 a release sat deferred for hours on a written claim that the pin was
+        # `4a4a114` while HEAD was `170f506` — the stamp had said `170f5064` since 08:00 — and
+        # running `self` was the move that was supposed to settle it. It could not.
+        _real_sha = _wmodl._git_sha
+        try:
+            _wmodl._git_sha = lambda *_a, **_k: "170f5064abcdef"
+            _agree = "\n".join(_wtext(
+                _mkpin({"sha": "170f5064abcdef", "ref": "170f5064",
+                        "at": "2026-09-03T08:00:11"}),
+                _wire(_mkwire(_hk(_PINCMD)))))
+        finally:
+            _wmodl._git_sha = _real_sha
+        check("a pin that MATCHES HEAD now says so and NAMES the commit — the report used to pass "
+              "in silence, which reads identically to a report that never looked",
+              "170f5064" in _agree and "so does HEAD" in _agree)
+        check("...and it carries WHEN the pin was stamped, which is the half that contradicts a "
+              "stale claim: 'the pin matches' and 'the pin has matched since this morning' answer "
+              "different questions, and only the second one dates the belief it is correcting",
+              "2026-09-03 08:00:11" in _agree)
+        check("...and agreement is still not reported as divergence — the ⚠ arm stays exclusive, "
+              "so the loud case cannot be triggered by the quiet one",
+              "gates are running OLDER code" not in _agree)
+        check("the PINNED stamp is readable as a whole record and not only as a sha, since `at` is "
+              "what the ✓ line dates itself with",
+              _wmodl._pin_marker(_mkpin({"sha": "x", "at": "2026-01-01T00:00:00"}))
+              .get("at") == "2026-01-01T00:00:00"
+              and _wmodl._pin_marker(_mkpin("{ not json")) == {})
 
         check("game_loop hooks in BOTH settings files are called out even though the state is "
               "wired: the two files MERGE rather than override, so that repo runs every gate "

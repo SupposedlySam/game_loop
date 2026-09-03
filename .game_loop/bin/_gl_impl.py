@@ -10778,6 +10778,13 @@ def pin_wiring_lines(code, w):
             L.append(f"  ✓ all {len(have)} are byte-identical to the wiring this verb prints, so "
                      "the tracked file")
             L.append("    and the instructions have not drifted apart.")
+        # AGREEMENT USED TO BE SILENT HERE, and that is the whole defect (INV8: a pass that is
+        # silence proves nothing). Divergence has always been loud; a pin that MATCHES printed
+        # nothing at all, so this report named no commit and a reader carrying a stale belief about
+        # the pin met nothing that contradicted it. Observed 2026-09-03: a release was held for
+        # hours on a written claim that the pin was `4a4a114` while HEAD was `170f506`, when the
+        # stamp had said `170f5064` since 08:00 that morning — and running this verb was the thing
+        # that was supposed to settle it. It could not: it printed the wiring and no sha.
         pin_sha = _pin_marker_sha(code)
         head = _git_sha(REPO_ROOT)
         if pin_sha and head and not (pin_sha.startswith(head) or head.startswith(pin_sha)):
@@ -10787,6 +10794,16 @@ def pin_wiring_lines(code, w):
                   "    this tree. Edits here are inert until `self --pin <sha>`, which is both the "
                   "protection",
                   "    and how a shipped fix sits unused. Re-pinning takes effect immediately."]
+        elif pin_sha and head:
+            _at = (_pin_marker(code).get("at") or "").replace("T", " ")
+            L += [f"  ✓ the pin names {pin_sha[:8]} and so does HEAD"
+                  + (f", stamped {_at}" if _at else ""),
+                  "    — the gates ARE this tree, so an edit to .game_loop/bin/ is live for them."]
+        elif not pin_sha:
+            L.append(f"  ⚠ the {PINNED_MARK} stamp is unreadable, so WHICH commit is pinned is "
+                     "unknown — which is not the same answer as \"it matches\".")
+        elif not head:
+            L.append("  ⚠ git could not name HEAD here, so the pin was not compared to anything.")
         L += ["",
               f"  (this invocation ran {CODE_ROOT}, because that is the path you typed. That fact "
               "is about",
@@ -10805,13 +10822,24 @@ def pin_wiring_lines(code, w):
     return L
 
 
-def _pin_marker_sha(code):
-    """The commit a pinned checkout was cut from, per its own PINNED marker, or None."""
+def _pin_marker(code):
+    """A pinned checkout's PINNED stamp as a dict, or {} — the pin's own record of what it is.
+
+    Split out of `_pin_marker_sha` because the stamp carries `at` as well as `sha`, and WHEN a pin
+    was cut is half of what a reader needs: "the pin matches HEAD" and "the pin has matched HEAD
+    since this morning" answer different questions, and only the second one contradicts a written
+    claim that it does not.
+    """
     try:
         with open(os.path.join(code, PINNED_MARK), encoding="utf-8") as fh:
-            return (json.load(fh) or {}).get("sha") or None
+            return json.load(fh) or {}
     except (OSError, ValueError, AttributeError):
-        return None
+        return {}
+
+
+def _pin_marker_sha(code):
+    """The commit a pinned checkout was cut from, per its own PINNED marker, or None."""
+    return _pin_marker(code).get("sha") or None
 
 
 def cmd_self(s, a):

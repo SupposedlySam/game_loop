@@ -1277,6 +1277,34 @@ def main():
                                 WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
         check("watchdog rings for its own session's idle mandate (A)",
               watchdog("sess-aaa").returncode == 2)
+
+        # AND THE DATE NOTE HAS TO REACH THE RING. The unit checks further down drive
+        # phase_written_note directly, and a correct function that nothing calls prints exactly
+        # what a missing one prints — INV8's lesson, applied to the wiring rather than the logic.
+        # So this drives the real binary and reads its stderr.
+        _sf = os.path.join(proj, ".game_loop", "sessions", "sess-aaa", "state.json")
+        gl(proj, "trans", "--tier", "T2", "--doing", "fixed it today", sid="sess-aaa")
+
+        def _stamp_phase(since):
+            with open(_sf) as f:
+                _st = json.load(f)
+            _st.setdefault("phase", {})["since"] = since
+            with open(_sf, "w") as f:
+                json.dump(_st, f)
+
+        _stamp_phase((datetime.datetime.now() - datetime.timedelta(days=2)).isoformat(
+            timespec="seconds"))
+        _stale = watchdog("sess-aaa")
+        check("the watchdog DATES a phase line written on an earlier day, so its \"today\" cannot "
+              "keep re-pointing at whatever day the reader is having",
+              _stale.returncode == 2 and "2 days ago" in _stale.stderr
+              and 'means THAT day' in _stale.stderr)
+        _stamp_phase(datetime.datetime.now().isoformat(timespec="seconds"))
+        _fresh = watchdog("sess-aaa")
+        check("...and says nothing about the date when the phase was written today — the ring is "
+              "already long, and a note on every one of them is a note nobody reads",
+              _fresh.returncode == 2 and "days ago" not in _fresh.stderr
+              and "day ago" not in _fresh.stderr)
         # QUIET IS WHAT A DEAD WATCHDOG PRODUCES TOO. This asserted exit 0 and nothing else, so a
         # `bin/watchdog` replaced by `sys.exit(0)` passed it — measured, along with the ring
         # assertion beside it correctly FAILING, because a wake-up cannot be produced by absence
@@ -10492,6 +10520,52 @@ def main():
               "could not ask",
               _pgm.deferral_standing("", [_defer(_H, "test-only")]) is None)
 
+        # A TIMESTAMP THAT WAS WRITTEN AND NEVER READ BACK — the same shape one file over from
+        # deferral_standing above. `trans` has always stamped phase["since"]; nothing printed it,
+        # so a phase written on Tuesday kept saying "today" on Wednesday. Observed twice in one
+        # run and hand-repaired both times, which lasts until the next date rollover.
+        _NOW = datetime.datetime(2026, 9, 3, 3, 46)
+        _pw = lambda since: _pgm.phase_written_note({"since": since}, when=_NOW)
+        check("a phase written on an EARLIER DAY is dated, and the note says which day its "
+              "\"today\" meant — the reader can resolve the prose instead of trusting it",
+              "2026-09-02" in _pw("2026-09-02T23:59:00")
+              and "1 day ago" in _pw("2026-09-02T23:59:00"))
+        check("...and one written EARLIER THE SAME DAY is silent, because its prose is still true "
+              "and a note on every banner is a note nobody reads",
+              _pw("2026-09-03T00:01:00") == "")
+        check("...and three days reads as days, not as a bare date anyone has to subtract",
+              "3 days ago" in _pw("2026-08-31T10:00:00"))
+        check("a phase stamped in the FUTURE is silent rather than accusing the clock — this is a "
+              "readability aid, and an aid that starts arguing about time is a different feature",
+              _pw("2026-09-04T10:00:00") == "")
+        check("an unparseable or absent stamp is silent, not fatal: the banner it decorates has to "
+              "print either way",
+              _pw("not-a-date") == "" and _pw(None) == ""
+              and _pgm.phase_written_note({}, when=_NOW) == ""
+              and _pgm.phase_written_note(None, when=_NOW) == "")
+        # THE TWIN HAS TO STAY ONE. bin/watchdog imports nothing from _gl_impl.py, so this function
+        # exists twice on purpose — and a fix applied to one copy works where you test it and not
+        # where it matters, which is the failure _config_merge's twin comment already names. Driven
+        # against the OTHER copy, not diffed as text: two spellings that agree are fine, two
+        # behaviours that disagree are the bug.
+        _wd_src = open(os.path.join(REPO, ".game_loop", "bin", "watchdog")).read()
+        _wd_fn = [n for n in ast.parse(_wd_src).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "phase_written_note"]
+        check("the watchdog carries its own copy of phase_written_note — the banner that was "
+              "actually read stale is the watchdog's",
+              len(_wd_fn) == 1)
+        if _wd_fn:
+            _wd_mod = ast.Module(body=_wd_fn, type_ignores=[])
+            ast.fix_missing_locations(_wd_mod)
+            _wd_ns = {"datetime": datetime}
+            exec(compile(_wd_mod, "watchdog", "exec"), _wd_ns)  # noqa: S102
+            _twin = _wd_ns["phase_written_note"]
+            check("...and the two copies AGREE on every case above, driven separately rather than "
+                  "compared as text",
+                  all(_twin({"since": v}, when=_NOW) == _pw(v)
+                      for v in ("2026-09-02T23:59:00", "2026-09-03T00:01:00", "2026-08-31T10:00:00",
+                                "2026-09-04T10:00:00", "not-a-date", None)))
+
         # THE READER ITSELF, WHICH THE SIX CHECKS ABOVE NEVER DRIVE. Every one of them passes
         # `mark=` explicitly, so newest_mark() — the half that goes and asks git — is unexercised
         # by all of them. Measured rather than suspected: neutering newest_mark to (None, None)
@@ -16531,6 +16605,62 @@ def main():
           "never calls it",
           "coverage_gate(" in inspect.getsource(sweep.main))
 
+    # A SUBSET BASELINE WAS NEVER REQUIRED TO BE GREEN, only to finish. The whole-suite baseline
+    # has counted and NAMED its failures for a while — "they cannot flip, so no producer can be
+    # credited or blamed for them" — and the subset path added later never got the same treatment.
+    # An assertion that fails in the baseline is absent from both sides of the set difference, so
+    # it cancels and the floor comes out lower with nothing said.
+    # EVERY FIXTURE HERE CARRIES ITS TRAILER, because the note now discriminates on it: a run
+    # without one did not finish, and a suite output invented without one is a crashed run, not a
+    # tidy sample. The first version of these fixtures had no trailer and they all read as crashes.
+    _green = "  ok   alpha\n  ok   beta\n\n2 passed, 0 failed\n"
+    _red = "  ok   alpha\n  FAIL beta\n  FAIL gamma\n\n1 passed, 2 failed\n"
+    check("a GREEN subset baseline says nothing — the note has to be a discrimination, not a "
+          "banner every producer wears",
+          sweep.subset_baseline_note(_green, ["s1"]) == "")
+    _n = sweep.subset_baseline_note(_red, ["watchdog (per-session)"])
+    check("a RED subset baseline is reported, COUNTED and NAMED, and says the floor beneath it is "
+          "understated rather than leaving a low number to read as thin coverage",
+          "2 of this producer's 3" in _n and "beta" in _n and "gamma" in _n
+          and "UNDERSTATED" in _n and "watchdog (per-session)" in _n)
+    check("...and it says the failures are NOT a finding about the mutant, which is the reading a "
+          "bare low number invites",
+          "Not a finding about the mutant" in _n)
+    check("a long list of baseline failures is capped and SAYS how many it did not show — a note "
+          "that scrolls the report off the screen is a note nobody reads",
+          "(+2 more)" in sweep.subset_baseline_note(
+              "  FAIL a\n  FAIL b\n  FAIL c\n  FAIL d\n  FAIL e\n  FAIL f\n"
+              "\n0 passed, 6 failed\n", ["s"], cap=4))
+    check("a baseline that produced NOTHING is not reported as green — that case is already "
+          "refused above as a timeout, and this must not quietly re-answer it as 'no failures'",
+          sweep.subset_baseline_note(None, ["s"]) == ""
+          and sweep.subset_baseline_note("", ["s"]) == "")
+    # `sweep_one` is NESTED in main(), so main()'s source is where its call site lives — and
+    # reaching for `sweep.sweep_one` raised AttributeError, which took the whole run down rather
+    # than failing one check. The module-level `def subset_baseline_note` is not inside main(), so
+    # a match here can only be the call.
+    check("...and the sweep's per-producer report actually calls it, rather than defining the note "
+          "beside a report that never carries it",
+          "subset_baseline_note(" in inspect.getsource(sweep.main))
+    # A CRASHED SUBSET BASELINE IS THE OTHER WAY TO MEASURE NOTHING, and it reads healthy: the
+    # hand script that measured these floors printed "1880 passing, 11 FAILING" over a suite that
+    # had aborted partway through. main() refuses an unfinished baseline; that refusal is IN main(),
+    # so the subset path and every other caller of run() never had it.
+    _crashed = "  ok   alpha\n  FAIL beta\nTraceback (most recent call last):\nAttributeError: x\n"
+    _cn = sweep.subset_baseline_note(_crashed, ["s1"])
+    check("a subset baseline with NO TRAILER is reported as unfinished rather than as one failure "
+          "— assertions that never ran are outside the denominator, not thin coverage",
+          "DID NOT FINISH" in _cn and "SHORTER suite" in _cn)
+    check("...and that case is reported INSTEAD of the failure count, because a crashed baseline's "
+          "count of failures is meaningless rather than merely incomplete",
+          "RED SUBSET BASELINE" not in _cn)
+    check("...while a baseline that FINISHED with failures still gets the red-baseline note, so "
+          "the new case is a discrimination rather than a swallow",
+          "RED SUBSET BASELINE" in sweep.subset_baseline_note(_red, ["s1"]))
+    check("failing() reads the suite's FAIL rows the way passing() reads its ok rows — the two "
+          "halves of one summary, and only one of them existed",
+          sweep.failing(_red) == ["beta", "gamma"] and sweep.failing(_green) == [])
+
     # An exclusion with no reason is a name on a list: unreadable, uncheckable, and exactly what
     # somebody clearing the run to get a green would leave behind.
     check("every exclusion carries a reason — and the same check catches a blank one, so its "
@@ -19687,14 +19817,33 @@ def main():
     # THE FIXTURE BOUNDARY. The shared-fixture block was extended to its START for any selection
     # touching it — sound, and it made 6089 lines indivisible: every subset reaching one section
     # there paid all 809 assertions before it, and `prun`'s whole wall was that one slab. The cut is
-    # allowed where no kept section READS a name an earlier one DEFINES, which is what makes it
-    # sound about the filesystem too: nothing in this block reaches the shared sandbox except
-    # through a name.
+    # allowed where no kept section READS a name an earlier one DEFINES.
+    #
+    # THAT WAS CLAIMED TO BE SOUND ABOUT THE FILESYSTEM TOO — "nothing in this block reaches the
+    # shared sandbox except through a name" — AND IT IS NOT, because reaching the sandbox through a
+    # name is not the same as reaching it through a name the SKIPPED section defined. `proj` is
+    # defined once in the block prologue and read by every section in it, so a section that only
+    # WRITES through `proj` defines nothing, and cutting it looks free.
+    #
+    # MEASURED against a clean `git archive HEAD` tree, so it is not an artefact of a working copy:
+    # `--section "watchdog (per-session)"` is announced as a sound boundary and then FAILS 2 of its
+    # 4 assertions, because the mandate they ring on is bound by `per-session state (isolation):`
+    # one section earlier — through `proj`, which that section did not define. Found while
+    # measuring a sweep floor through that subset and getting a number that was too low; the sweep
+    # now SAYS when its subset baseline is red (mutation_sweep.py::subset_baseline_note), which
+    # makes this visible at the moment it costs something rather than only here.
+    #
+    # So the announcement below states what it actually checked and what it cannot. Detecting a
+    # write through a borrowed name is the real fix and is not this.
     _cut = _sel("--section", "coverage --staged").stdout
     check("a section that builds its own fixture no longer drags the shared block's prefix — the "
           "cut is announced, so a reader can see WHICH sections were judged irrelevant rather "
           "than trusting that some were",
-          "fixture boundary:" in _cut and "earlier section(s) build nothing it reads" in _cut)
+          "fixture boundary:" in _cut and "earlier section(s) define no NAME it reads" in _cut)
+    check("...and the announcement states the residual risk rather than a soundness it cannot "
+          "establish — a cut that claims more than it checked is how a subset stops gating "
+          "quietly",
+          "claim about names" in _cut and "did not define" in _cut)
     check("...and it still RUNS and passes standing alone, which is the only thing that makes the "
           "cut a speedup rather than a subset that quietly stopped gating",
           re.search(r"^\d+ passed, 0 failed", _cut, re.M))
@@ -20051,7 +20200,14 @@ def _run_cli(argv):
         keep.update(here[k] for k in range(start, hi_k + 1))
         if start:
             print(f"  fixture boundary: this block starts at \"{segs[here[start]]['name'][:60]}\" "
-                  f"— {start} earlier section(s) build nothing it reads.")
+                  f"— {start} earlier section(s) define no NAME it reads.")
+            print("    That is a claim about names, and the cut is only as sound as that: an "
+                  "earlier section can still")
+            print("    have WRITTEN state this one reads through a name it did not define. "
+                  "MEASURED, not hypothetical —")
+            print("    see the comment on this check in test/run.py. If a selected section fails "
+                  "here and passes in a full")
+            print("    run, that is this hole and not a regression.")
 
     for body in _bodies(mainfn):
         drop = set()

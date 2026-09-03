@@ -689,6 +689,52 @@ def _box(lines):
     return "\n".join([top] + body + [bot])
 
 
+def phase_written_note(ph, when=None):
+    """How old the phase line is, but ONLY once it is old enough to lie — "" on the same day.
+
+    THE TWIN of the function of the same name in bin/watchdog, and it has to stay one, for the
+    reason _config_merge's twin states there: the watchdog is standalone and imports nothing
+    from here, so a fix applied to one copy and not the other works where you test it and not
+    where it matters. `status` is the higher-traffic caller — CLAUDE.md tells every session to
+    run it first — and the watchdog is where the staleness was actually read.
+
+    `trans` has always stamped `phase["since"]`, and nothing has ever read it back. So a phase
+    written on one day keeps being re-printed on the next, and every relative date inside it —
+    "today", "this morning", "earlier" — silently re-points at whatever day the reader is having.
+    OBSERVED TWICE in one run: a banner saying "FOUR fixes today" about the previous day, and then
+    a banner saying "#125 ARRIVED TODAY" that went on saying it across a date rollover. Both were
+    repaired by hand, which is rung 0 and lasts until the next rollover.
+
+    This is behaviour 56's shape exactly, one file over: the decision was written to the record
+    WITH the thing that scopes it, and the reader ignored the scope. There the scope was a HEAD;
+    here it is a date.
+
+    SAME-DAY IS SILENT, deliberately. A note on every banner is a note nobody reads by the third
+    one, and on the day it was written the prose is simply true — there is nothing to correct.
+    Negative ages (a clock that moved backwards, a phase stamped in the future) are treated as
+    same-day rather than reported: this is a readability aid, and an aid that starts making
+    accusations about the clock has become a different feature.
+
+    WHAT IT DOES NOT DO: it does not read the prose. A phase with no relative dates in it gets the
+    note too, and a phase written twenty minutes before midnight gets it eight hours later. Both
+    are over-reports of a fact that is true — this text is from an earlier day — and the honest
+    alternative, guessing which words are time-relative, fails in the direction that matters by
+    staying quiet about a stale "today" it did not recognise.
+    """
+    since = (ph or {}).get("since")
+    if not since:
+        return ""
+    try:
+        wrote = datetime.datetime.fromisoformat(since)
+    except (TypeError, ValueError):
+        return ""
+    days = ((when or datetime.datetime.now()).date() - wrote.date()).days
+    if days < 1:
+        return ""
+    return (f"written {wrote.date().isoformat()} · {days} day{'s' if days != 1 else ''} ago — "
+            f'any "today" in it means THAT day')
+
+
 def render_banner(s, frm=None):
     ph = s.get("phase", {})
     name = config().get("project_name", "project").upper()
@@ -709,7 +755,7 @@ def render_banner(s, frm=None):
         head,
         f"{TIER_NAMES.get(tier, tier).split(' (')[0]} · claims {s.get('claim_count', 0)} · "
         f"hardened {s.get('hardened_count', 0)}",
-    ])
+    ] + ([note] if (note := phase_written_note(ph)) else []))
 
 
 def retro_overdue(s):

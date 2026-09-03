@@ -816,11 +816,19 @@ def ring(state, rings):
 
     save_state(st)
 
+    # Error-swallowed for the same reason flair is: a note about a date must never be the thing
+    # that stops the watchdog ringing.
+    try:
+        _phase_note = phase_written_note(ph)
+    except Exception:  # noqa: BLE001
+        _phase_note = ""
+
     print(
         f"WATCHDOG: {IDLE_SEC}s idle, and your game_loop state contradicts your harness state.\n\n"
         f"  game_loop says: mandate bound — {m.get('text')}\n"
         f"  game_loop says: {ph.get('milestone')} · {ph.get('doing')}\n"
-        f"  game_loop says: nobody is waiting on you (no T3 armed)\n"
+        + (f"  game_loop says: ...and that phase line is {_phase_note}\n" if _phase_note else "")
+        + f"  game_loop says: nobody is waiting on you (no T3 armed)\n"
         f"  harness says  : the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
         "Both cannot be true. You are under an autonomy mandate with work outstanding and you are\n"
         "doing nothing. The Stop gate can stop you SAYING the wrong thing, but it cannot press go for\n"
@@ -832,6 +840,46 @@ def ring(state, rings):
         + tail,
         file=sys.stderr)
     sys.exit(2)
+
+
+def phase_written_note(ph, when=None):
+    """How old the phase line is, but ONLY once it is old enough to lie — "" on the same day.
+
+    `trans` has always stamped `phase["since"]`, and nothing has ever read it back. So a phase
+    written on one day keeps being re-printed on the next, and every relative date inside it —
+    "today", "this morning", "earlier" — silently re-points at whatever day the reader is having.
+    OBSERVED TWICE in one run: a banner saying "FOUR fixes today" about the previous day, and then
+    a banner saying "#125 ARRIVED TODAY" that went on saying it across a date rollover. Both were
+    repaired by hand, which is rung 0 and lasts until the next rollover.
+
+    This is behaviour 56's shape exactly, one file over: the decision was written to the record
+    WITH the thing that scopes it, and the reader ignored the scope. There the scope was a HEAD;
+    here it is a date.
+
+    SAME-DAY IS SILENT, deliberately. A note on every banner is a note nobody reads by the third
+    one, and on the day it was written the prose is simply true — there is nothing to correct.
+    Negative ages (a clock that moved backwards, a phase stamped in the future) are treated as
+    same-day rather than reported: this is a readability aid, and an aid that starts making
+    accusations about the clock has become a different feature.
+
+    WHAT IT DOES NOT DO: it does not read the prose. A phase with no relative dates in it gets the
+    note too, and a phase written twenty minutes before midnight gets it eight hours later. Both
+    are over-reports of a fact that is true — this text is from an earlier day — and the honest
+    alternative, guessing which words are time-relative, fails in the direction that matters by
+    staying quiet about a stale "today" it did not recognise.
+    """
+    since = (ph or {}).get("since")
+    if not since:
+        return ""
+    try:
+        wrote = datetime.datetime.fromisoformat(since)
+    except (TypeError, ValueError):
+        return ""
+    days = ((when or datetime.datetime.now()).date() - wrote.date()).days
+    if days < 1:
+        return ""
+    return (f"written {wrote.date().isoformat()} · {days} day{'s' if days != 1 else ''} ago — "
+            f'any "today" in it means THAT day')
 
 
 def main():

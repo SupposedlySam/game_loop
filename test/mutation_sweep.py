@@ -1843,6 +1843,67 @@ MUTANTS += [
 ]
 
 
+# THREE PRODUCERS ADDED 2026-09-03, floors measured BY HAND against the FULL suite. Both reasons
+# for "full" are failures this same measurement walked into, in order:
+#
+#   1. A SECTION SUBSET measured the watchdog twin at 1. The full suite says 4. The two assertions
+#      that drive it live in a section that loses half of itself when run alone, so they were
+#      failing in the SUBSET BASELINE, absent from both sides, and cancelled. That is the third
+#      entry below, and it is why it exists.
+#   2. THE FIRST FULL RUN CRASHED. A wiring assertion reached for a function nested inside main(),
+#      the AttributeError took the suite down partway, and the baseline printed "1880 passing, 11
+#      FAILING" — which reads healthy. 395 assertions never ran. main() refuses exactly this; the
+#      refusal is IN main(), so a script calling run() directly does not get it.
+#
+# Honest baseline after both: 2288 assertions, 2275 passing / 13 failing, TRAILER CHECKED, ~400s a
+# run, in the tree shape the real sweep uses (a tracked-files extract, no .git). The 13 are
+# git-dependent arms, identical on both sides.
+#
+# EVERY FLOOR HERE IS RAW MINUS TWO. `neuter REACHES every candidate the finder produces` and
+# `every declared producer actually MUTATES its own file` are the sweep's own bookkeeping and
+# redden for ANY neutered producer at all, so each entry scored two kills it did not earn. The
+# second of those was invisible in the crashed run — it lives past the crash point — which is why
+# the raw numbers moved and the genuine ones did not.
+MUTANTS += [
+    ("phase_written_note -> a banner written yesterday goes on saying \"today\"",
+     ".game_loop/bin/_gl_impl.py::phase_written_note", '    return ""\n',
+     ['EARLIER DAY', 'reads as days', 'two copies AGREE'],
+     "raw 5, floor 3. `trans` has always stamped phase[\"since\"] and nothing read it back, so "
+     "`status` re-printed a phase across a date rollover with every relative date in it silently "
+     "re-pointing — behaviour 56's shape one file over, where the scope written to the record was "
+     "a HEAD and here it is a date. THE SILENCE HALF CANNOT BE MEASURED THIS WAY and that is not a "
+     "gap in the assertions: a producer neutered to \"\" satisfies every same-day-says-nothing "
+     "check BY CONSTRUCTION, so this number is one half of a two-direction contract. The "
+     "watchdog's e2e pair does not appear here either, correctly — it exercises the twin, which is "
+     "what makes the twin a twin rather than a wrapper.", 3),
+    ("phase_written_note (the watchdog twin) -> the ring stops dating a stale phase line",
+     ".game_loop/bin/watchdog::phase_written_note", '    return ""\n',
+     ['two copies AGREE', 'DATES a phase line'],
+     "raw 4, floor 2. THE TWIN EXISTS BECAUSE bin/watchdog IMPORTS NOTHING FROM _gl_impl.py, which "
+     "is the same reason _config_merge is duplicated there, and the same hazard: a fix applied to "
+     "one copy works where you test it and not where it matters. One of its two genuine kills is "
+     "the agreement check, driven against the other copy rather than diffed as text — two "
+     "spellings that agree are fine, two behaviours that disagree are the bug. MEASURED AT 1 "
+     "FIRST, through a section subset, and that number was wrong; the entry below is what came of "
+     "finding out why.", 2),
+    ("subset_baseline_note -> a floor measured through a broken subset baseline reports nothing",
+     "test/mutation_sweep.py::subset_baseline_note", '    return ""\n',
+     ['finding about the mutant', 'RED subset baseline', 'baseline failures is capped',
+      'NO TRAILER'],
+     "raw 7, floor 5. THE WHOLE-SUITE BASELINE ALREADY DOES ALL OF THIS and the subset path never "
+     "got it: failures counted, named, and explained as outside the denominator because they "
+     "cannot flip. The subset baseline's only health check was `_b is None` — did the run FINISH. "
+     "Finishing is not measuring, and as it turned out neither was the finishing check being "
+     "asked at all. TWO CASES, reported separately because a crashed baseline's failure COUNT is "
+     "meaningless rather than merely incomplete. I PREDICTED 5 OF MY FIRST 7 ASSERTIONS WOULD KILL "
+     "THIS AND GOT 3: two of them assert \"\" and a producer neutered to \"\" satisfies them by "
+     "construction — the nothing-direction caveat this file states about itself, which I had "
+     "quoted about a different producer earlier the same day and then did not apply to my own "
+     "prediction. Third entry in a row to meet that caveat. The three assertions added afterwards "
+     "for the crash case kill 2 of 3, which is the same ratio and the same reason.", 5),
+]
+
+
 NOT_SWEPT = {
     # ── DECLARED DEBT, NOT A WAIVER: two producers added the same day, floors OWED ─────────────
     # These are swept-worthy and I am not pretending otherwise. What I will not do is invent their
@@ -2869,6 +2930,81 @@ def passing(out):
     return [m.group(1) for m in re.finditer(r"^  ok   (.*)$", out, re.M)]
 
 
+def failing(out):
+    return [m.group(1) for m in re.finditer(r"^  FAIL (.*)$", out, re.M)]
+
+
+def subset_baseline_note(out, secs, cap=4):
+    """What a RED subset baseline costs the measurement below it — "" when the baseline is green.
+
+    THIS TREATMENT ALREADY EXISTED ONE LEVEL UP AND THE SUBSET PATH NEVER GOT IT. The whole-suite
+    baseline counts its failures, NAMES them, and says why a failing assertion is outside the
+    denominator — "they cannot flip, so no producer can be credited or blamed for them. Not a
+    silent cap: printed every run." Every word of that is true of a subset baseline too. What the
+    subset path had instead was one check, `_b is None`, which asks whether the run FINISHED.
+    Finishing is not measuring.
+
+    So the failure is not a missing idea; it is an idea applied to the code path that was there
+    when it was written and not to the one added later. A subset baseline is a different
+    experiment from the whole-suite one, and nobody re-asked it the question the whole-suite one
+    is already required to answer.
+
+    OBSERVED (INV4), measuring a producer of my own: the scoped floor for the watchdog's copy of
+    phase_written_note came back 1. The two end-to-end assertions that drive it live in section
+    "watchdog (per-session)", and that section loses 2 of its 4 assertions when run alone —
+    verified against a clean `git archive HEAD` tree, so it predates the producer being measured.
+    Both sides lost them, both sides agreed, and the number was wrong in the safe direction, which
+    is the direction nobody investigates.
+
+    IT REPORTS, IT DOES NOT REFUSE. Understating a floor is the safe error and the run still
+    carries real information; turning it into NOT MEASURED would throw away a usable-if-low number
+    for two producers today. What was missing is not a verdict, it is the sentence telling the
+    reader that this number was measured through a hole.
+
+    TWO WAYS A SUBSET BASELINE MEASURES NOTHING, and they read differently: assertions that RAN
+    and failed, and assertions that never ran because the suite died. The second is reported first
+    and separately, because a crashed baseline's failure count is meaningless rather than merely
+    incomplete.
+
+    WHAT IT DOES NOT DO: it cannot say WHICH of the lost assertions would have been killed, so it
+    does not guess a corrected floor. It also does not explain WHY the section is red — the subset
+    runner already prints that it follows names and cannot see state a skipped section wrote into
+    the shared sandbox, and this note points at that rather than re-deriving it.
+    """
+    if not out:
+        return ""
+    # A CRASH IS NOT A LOW SCORE EITHER, and I walked into this one myself twenty minutes after
+    # writing the paragraph above. The hand script measuring these very floors called `run()`
+    # directly, and its baseline printed "1880 passing, 11 FAILING" — which reads healthy. The
+    # suite had aborted on an AttributeError partway through, so ~390 assertions never ran and were
+    # outside the denominator entirely. main() refuses exactly this, loudly ("a floor measured
+    # against an unfinished suite is not a floor"), and the refusal lives in main() rather than in
+    # `run()`, so EVERY OTHER CALLER is without it: the subset path here, and any script that
+    # measures through this file's own functions.
+    #
+    # Both sides truncate at the same point, so this understates rather than inventing kills — but
+    # a number silently measured over half a suite is the short-denominator bug this file's own
+    # oldest lesson is about, and it must not read as a coverage finding.
+    if not re.search(r"^\d+ passed, \d+ failed", out, re.M):
+        return ("  SUBSET BASELINE DID NOT FINISH — no trailer, so the suite crashed or was killed "
+                "partway through\n"
+                "    and every assertion after that point is outside this producer's denominator. "
+                "The floor below is\n"
+                "    a floor against a SHORTER suite, not a coverage reading. Fix the crash before "
+                "believing the number.")
+    bad = failing(out)
+    if not bad:
+        return ""
+    shown = " · ".join(b[:70] for b in bad[:cap])
+    more = f" (+{len(bad) - cap} more)" if len(bad) > cap else ""
+    return (f"  RED SUBSET BASELINE — {len(bad)} of this producer's {len(bad) + len(passing(out))} "
+            f"selected assertions FAIL before any mutation, in: "
+            f"{' · '.join(secs)[:120]}\n"
+            f"    {shown}{more}\n"
+            f"    They are absent from BOTH sides, so they cancel and the floor below is\n"
+            f"    UNDERSTATED by up to that many. Not a finding about the mutant.")
+
+
 def _parse_argv(argv):
     """Refuse what this script does not understand, INSTEAD OF running for an hour anyway.
 
@@ -3139,12 +3275,14 @@ def main():
             # whole-suite baseline would be a set of 1719 minus a set of 40, i.e. every assertion
             # that simply did not run, reported as a kill.
             _secs = SECTION_MAP.get(key) if FAST else None
+            _redbase = ""
             if _secs:
                 _b = run(base, sections=_secs)
                 if _b is None:
                     return ((key, None, NOT_MEASURED, floor),
                             f"{label}\n  NOT MEASURED — the SUBSET baseline timed out.\n")
                 local_base = set(passing(_b))
+                _redbase = subset_baseline_note(_b, _secs)
             else:
                 local_base = baseline
             out, _rc, _err = run_detail(t, sections=_secs)
@@ -3185,6 +3323,8 @@ def main():
         drift = "  ↓ BELOW FLOOR" if killed < floor else ""
         lines = [f"{label}", f"  suite: {tail}",
                  f"  killed: {killed}   [{v}]   floor {floor}{drift}"]
+        if _redbase:
+            lines.append(_redbase)
         if live_why:
             lines.append(f"  probe : {live_why}")
         # THE NOTE WAS MISLABELLED, NOT STALE — and I nearly deleted ten of them finding that out.

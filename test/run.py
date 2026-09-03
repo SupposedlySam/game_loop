@@ -10673,10 +10673,34 @@ def main():
               "resolved — one decision, read the same way in both halves",
               "cccc3333" in _pgm.deferral_pin_note(
                   _H, [_defpin(_H, "aaaa1111"), _defpin(_H, "cccc3333")], pin_now="bbbb2222"))
+        # THIS CHECK USED TO BE VACUOUS AND THE SWEEP SAID SO, in a way I nearly misread. It
+        # compared current_pin_sha() against _pin_marker_sha() on the LIVE pinned checkout — and
+        # .game_loop_self/ is gitignored, so in a clone and in the sweep's own tree under test both
+        # sides are None and the check passes by construction. Measured: the scoped sweep scored
+        # current_pin_sha at 1 kill and reported that 0 of its marks named the killer, which reads
+        # like a labelling problem and was actually this: the assertion written for the producer
+        # does not kill it anywhere the producer is measured. A check that passes for the wrong
+        # reason in every environment except the author's own working copy.
+        #
+        # So drive the RELATIONSHIP instead of the value: hand it a recorder and assert both that
+        # the answer comes back AND that it was asked for the pinned checkout's path. Non-vacuous
+        # in a clone, and a neutered body fails it rather than agreeing with a second None.
+        _asked, _real_pms = [], _pgm._pin_marker_sha
+        try:
+            _pgm._pin_marker_sha = lambda code: (_asked.append(code), "feedface1234")[1]
+            _got_pin = _pgm.current_pin_sha()
+        finally:
+            _pgm._pin_marker_sha = _real_pms
         check("the pin the checkpoint records is READ from the pinned checkout's own stamp rather "
-              "than from anything remembered — the same source `self` reports from",
-              _pgm.current_pin_sha() == _pgm._pin_marker_sha(
-                  os.path.join(_pgm.REPO_ROOT, _pgm.PINNED_DIRNAME, ".game_loop")))
+              "than from anything remembered — the same source `self` reports from, asked for by "
+              "path, and the answer returned rather than recomputed",
+              _got_pin == "feedface1234"
+              and _asked == [os.path.join(_pgm.REPO_ROOT, _pgm.PINNED_DIRNAME, ".game_loop")])
+        check("...and that check is NOT satisfied by two absent values agreeing — a clone has no "
+              "gitignored .game_loop_self, so comparing the live stamp against itself was None == "
+              "None everywhere the producer is actually measured",
+              _pgm._pin_marker_sha(os.path.join(_tmpdir("glnopin-"), "nope")) is None
+              and _got_pin is not None)
         check("...and `checkpoint --release-deferred` actually WRITES that field, since a note that "
               "reads a key nothing sets is a check that can only ever be silent",
               '"pin": current_pin_sha()' in inspect.getsource(_pgm.cmd_checkpoint))

@@ -667,7 +667,14 @@ MUTANTS = [
      "35c8321 added two more — `self` naming the sha when the pin AGREES with HEAD, and the line "
      "dating that agreement — and both showed up as killers on the next run. Nothing-direction "
      "assertions still raise this by zero; a do-not-raise instruction is a claim about the suite "
-     "on the day it was written.", 4),
+     "on the day it was written. "
+     "THE FLOOR STAYS AT 3 AND THE 4 IS NOT RECORDED HERE. I raised it to 4 and the coverage gate "
+     "refused: floors are compared against what the last FULL sweep recorded, and a scoped run is "
+     "not that. The gate is right — a floor above its own measurement can only ever fire falsely, "
+     "and the instrument that would vindicate it is an hour long. So the correction above stands "
+     "(the ceiling is not structural) and the NUMBER waits for a full sweep. Reading a scoped "
+     "number as a full-sweep number is the same substitution this whole file warns about: a "
+     "measurement taken over one denominator, spent on a claim about another.", 3),
     ("parse_events -> no per-event distribution is ever seen",
      ".game_loop/bin/_gl_impl.py::parse_events", "    return []\n",
      ["events", "dominance"], None, 21),

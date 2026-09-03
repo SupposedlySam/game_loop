@@ -161,6 +161,18 @@
 # the suite owes the WHOLE of itself; the manifest's own rule names a section, further down.
 "test/run.py":
   - "python3 test/prun.py"
+# THE TRIPWIRE'S OWN CALIBRATION (#119). test/suite-floor.json sets the number the coverage gate
+# compares against, and it matched no rule here — so the one file where "nothing looked at it"
+# matters most could be edited owing nothing. Observed five times in a single day (156399d, 0932cee,
+# 1051688, and the coverage reports on 8c630ef and 35c8321), every one printing NOT CHECKED.
+# WHAT THIS BUYS, STATED HONESTLY BECAUSE IT IS HALF: a floor written too HIGH now goes red, because
+# prun refuses a floor above the run. A floor written too LOW still passes green and silent, and low
+# is the direction someone editing this file is tempted to move it. That half is not fixable by
+# naming a command here — it needs the floor compared against the file's own recorded measurements,
+# which is a check nobody has an observed failure for yet (INV4). This closes "owes nothing"; it
+# does not close "wrong in the quiet direction", and the difference is worth knowing.
+"test/suite-floor.json":
+  - "python3 test/prun.py"
 # The sweep decides whether the suite's silence-shaped assertions are worth anything (#42), and it
 # now FAILS a run rather than only printing. Its verdict line and its list of producers are checked
 # by the suite — cheaply, without running the sweep, which is one full pass per producer.

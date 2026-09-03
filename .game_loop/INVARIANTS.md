@@ -105,6 +105,30 @@ a summary and are worth opposite amounts: recovering a crashed producer buys you
 safety, and reporting it as a closed hole overstates the work. Fix the crash to learn how strongly
 the thing was already defended — then say which of the two you found.
 
+**"The suite produced no trailer" has three causes, and only one of them is about the mutant.** A
+run that ends without `N passed, M failed` proves nothing by itself, and the three reasons it can
+happen want opposite responses:
+
+- **It crashed under the mutant.** The producer *is* defended; the measurement is what was lost. Fix
+  the crash to learn how strongly, and do not report the recovered number as a closed hole.
+- **The mutant never parsed.** The declaration is broken, so nothing ran and nothing was defended.
+  This one can look like strong coverage: unrun assertions never print `ok`, so a set difference
+  counts every one of them as a kill. Eleven producers here were declared with a literal backslash-n
+  instead of a newline and sat unmeasured across two full sweeps.
+- **Something killed the process.** A negative return code means it did not choose to exit — memory
+  pressure, a competing run, a stray signal. Twelve *contiguous* producers once reported within two
+  seconds of each other with empty output, which is one batch of workers dying together, not twelve
+  independent findings. Nothing in that tree is evidence about the producer in either direction.
+
+The rule that separates them is not cleverness, it is **keeping the evidence**: capture the exit
+status and stderr, not just stdout. Two causes with opposite remedies arriving as the same bytes is
+the failure this invariant exists to name, and a report that defaults to blaming the mutant sends
+every reader to the expensive investigation first.
+
+**Changed is a weaker property than still means something.** The check that missed the unparsed
+mutants asked whether the edit *landed* — anchor found, bytes changed — and both were true of a file
+that was no longer a program. That generalises past mutants to every verification of the same shape.
+
 The crash itself has a shape worth naming, because fixing it once does not fix it. **A crash exposes
 only the FIRST site of its kind.** Every identically-shaped site behind it was never reached, so it
 never earned a guard — which means patching the site that crashed leaves its neighbours in exactly

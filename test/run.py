@@ -10634,6 +10634,53 @@ def main():
               "could not ask",
               _pgm.deferral_standing("", [_defer(_H, "test-only")]) is None)
 
+        # AND THE PIN THE DECISION WAS MADE UNDER, because the reason is PROSE and prose goes stale
+        # with nothing touching it. A deferral is keyed on HEAD so it lapses when the commits
+        # change; nothing lapsed it when the PIN changed, and the pin is what most of these reasons
+        # are actually about ("these commits are not dogfooded").
+        #
+        # Observed twice on 2026-09-03. A reason claimed the pin was four commits behind when the
+        # stamp had matched HEAD for eight hours, and a release sat unmade for it. Then — after the
+        # verb that REPORTS the pin was fixed to print it in both directions — a reason recorded a
+        # sha copied from the previous turn's message while the correct value sat in that same
+        # command's output. The reader had been fixed and the WRITER still had nothing checking it.
+        # And the pin moves without this session acting: another session re-pinned this checkout
+        # mid-flight the same afternoon, one log record and no other activity.
+        _defpin = lambda head, pin: json.dumps(
+            {"kind": "release_deferred", "reason": "r", "head": head, "pin": pin})
+        check("a deferral records the PIN it was made under, so a reason ABOUT the pin is not the "
+              "only thing that knows what the pin was",
+              "the PIN has moved" in _pgm.deferral_pin_note(
+                  _H, [_defpin(_H, "aaaaaaaa1111")], pin_now="bbbbbbbb2222"))
+        check("...and the note NAMES both shas, since 'something changed' sends a reader to the "
+              "same file they would have had to open anyway",
+              "aaaaaaaa" in _pgm.deferral_pin_note(_H, [_defpin(_H, "aaaaaaaa1111")],
+                                                   pin_now="bbbbbbbb2222")
+              and "bbbbbbbb" in _pgm.deferral_pin_note(_H, [_defpin(_H, "aaaaaaaa1111")],
+                                                       pin_now="bbbbbbbb2222"))
+        check("...and it is SILENT when the pin has not moved — a line printed on every checkpoint "
+              "is a line nobody reads by the third one, and this reports a CHANGE",
+              _pgm.deferral_pin_note(_H, [_defpin(_H, "aaaaaaaa1111")],
+                                     pin_now="aaaaaaaa1111") == "")
+        check("...and silent for a deferral written before pins were recorded — an absent field is "
+              "'nobody looked', which must not be reported as 'the pin moved'",
+              _pgm.deferral_pin_note(_H, [_defer(_H, "test-only")], pin_now="bbbbbbbb2222") == "")
+        check("...and a deferral for ANOTHER head contributes no pin, so the note is scoped to the "
+              "same decision the reason is",
+              _pgm.deferral_pin_note(_H, [_defpin("deadbee", "aaaaaaaa1111")],
+                                     pin_now="bbbbbbbb2222") == "")
+        check("...and the LAST record for this head supplies the pin, matching how its reason is "
+              "resolved — one decision, read the same way in both halves",
+              "cccc3333" in _pgm.deferral_pin_note(
+                  _H, [_defpin(_H, "aaaa1111"), _defpin(_H, "cccc3333")], pin_now="bbbb2222"))
+        check("the pin the checkpoint records is READ from the pinned checkout's own stamp rather "
+              "than from anything remembered — the same source `self` reports from",
+              _pgm.current_pin_sha() == _pgm._pin_marker_sha(
+                  os.path.join(_pgm.REPO_ROOT, _pgm.PINNED_DIRNAME, ".game_loop")))
+        check("...and `checkpoint --release-deferred` actually WRITES that field, since a note that "
+              "reads a key nothing sets is a check that can only ever be silent",
+              '"pin": current_pin_sha()' in inspect.getsource(_pgm.cmd_checkpoint))
+
         # A TIMESTAMP THAT WAS WRITTEN AND NEVER READ BACK — the same shape one file over from
         # deferral_standing above. `trans` has always stamped phase["since"]; nothing printed it,
         # so a phase written on Tuesday kept saying "today" on Wednesday. Observed twice in one

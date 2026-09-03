@@ -3340,6 +3340,66 @@ def deferral_standing(head=None, log_lines=None):
         return None
 
 
+def current_pin_sha():
+    """The sha this repo's own pinned checkout was cut from, or None — read, never remembered."""
+    return _pin_marker_sha(os.path.join(REPO_ROOT, PINNED_DIRNAME, ".game_loop"))
+
+
+def deferral_pin_note(head=None, log_lines=None, pin_now=None):
+    """"...and the pin has MOVED since that decision", or "" — because the prose cannot know.
+
+    A DEFERRAL'S REASON IS PROSE, AND PROSE GOES STALE WITHOUT ANYTHING TOUCHING IT. The reason is
+    keyed on HEAD, so it lapses when the commits change; nothing lapsed it when the PIN changed, and
+    the pin is what most of these reasons are actually about ("these commits are not dogfooded").
+
+    Observed twice on 2026-09-03. First a reason claimed the pin was four commits behind when the
+    stamp had matched HEAD for eight hours, and a release sat unmade. Then — after the verb that
+    reports the pin was fixed to print it in both directions — a reason recorded a pin sha copied
+    from the previous turn's message while the correct value sat in that same command's output. The
+    second one matters more: the reader was corrected and the WRITER still had nothing checking it.
+
+    AND THE PIN CAN MOVE WITH THIS SESSION DOING NOTHING. Session 2378d4b0 re-pinned this checkout
+    at 13:48:20 while another session was mid-flight — one log record, no other activity. So a
+    remembered pin value is not merely stale-able by its author; it is stale-able by somebody else.
+
+    Silent when the record carries no pin (every deferral written before this existed), when there
+    is no pin, and when they agree — this reports a CHANGE, and a note printed on every checkpoint
+    is a note nobody reads by the third one.
+    """
+    if head is None:
+        head = _git("rev-parse", "--short", "HEAD") or ""
+    if not head:
+        return ""
+    if pin_now is None:
+        pin_now = current_pin_sha()
+
+    def _scan(lines):
+        found = None
+        for ln in lines:
+            if '"release_deferred"' not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            if r.get("kind") == "release_deferred" and r.get("head") == head:
+                found = r.get("pin")               # the LAST one wins, as with the reason
+        return found
+
+    if log_lines is not None:
+        was = _scan(log_lines)
+    else:
+        try:
+            with open(LOG_F) as f:
+                was = _scan(f)
+        except (OSError, ValueError):
+            return ""
+    if not was or not pin_now or was == pin_now:
+        return ""
+    return (f"the PIN has moved since that reason was written: {was[:8]} → {pin_now[:8]}. "
+            "If the reason is about dogfooding, re-read it before trusting it.")
+
+
 def release_owed():
     """(n, sha, level) when finished work is unreleased and the handback must not pass — else None.
 
@@ -3545,6 +3605,11 @@ def cmd_checkpoint(s, a):
     # and published. It was not. Informing is a thing a reader can decline, which is what rung 5
     # means — so the mechanism moves up rather than the wording getting louder.
     _standing = None if getattr(a, "release_deferred", None) else deferral_standing()
+    # Error-swallowed: a note about a pin must never be the thing that stops a checkpoint.
+    try:
+        _pinmoved = deferral_pin_note() if _standing else ""
+    except Exception:  # noqa: BLE001
+        _pinmoved = ""
     if not getattr(a, "release_deferred", None) and not _standing:
         _owed = release_owed()
         if _owed:
@@ -3567,14 +3632,17 @@ def cmd_checkpoint(s, a):
     if notify:
         notify.send("checkpoint", f"📍 checkpoint — {a.notes}")  # default-off event; opt in to page
     if getattr(a, "release_deferred", None):
+        # THE PIN GOES IN THE RECORD, not only in the prose. A reason that talks about the pin
+        # is the common case, and prose is exactly what stops being true without anyone editing it.
         logline({"kind": "release_deferred", "reason": a.release_deferred,
-                 "head": _git("rev-parse", "--short", "HEAD")})
+                 "head": _git("rev-parse", "--short", "HEAD"), "pin": current_pin_sha()})
     _rit = ritual_checkpoints()
     out("✓ CHECKPOINT — one turn-end allowed (reporting, not asking).",
         f"  {a.notes}",
         *([f"  release deferred for this HEAD, standing from an earlier checkpoint: {_standing}",
            "  It lapses the moment HEAD moves — a deferral is a judgement about THESE commits."]
           if _standing else []),
+        *([f"  ⚠ {_pinmoved}"] if _standing and _pinmoved else []),
         *([f"⚠ {_rit + 1} CHECKPOINTS SINCE ANY EVIDENCE WORK — no commit anywhere in this repo,",
            "  and no claim, harden, proof, phase or retro logged in between. That is not progress",
            "  reported N times; it is the",

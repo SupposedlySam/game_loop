@@ -512,6 +512,29 @@ MUTANTS = [
      "returning None satisfies BY CONSTRUCTION -- this file's own low-count caveat, and the "
      "second entry in a row to meet it. The same run reported this mark set naming only 1 of its "
      "5 killers, so it was narrowed TOWARD them rather than away from breadth.", 5),
+    ("deferral_pin_note -> a deferral's reason can talk about a pin that has since moved, silently",
+     ".game_loop/bin/_gl_impl.py::deferral_pin_note", '    return ""\n',
+     ['the PIN has moved', 'NAMES both shas', 'SILENT when the pin has not moved',
+      'before pins were recorded', 'LAST record for this head supplies the pin'],
+     "FLOOR OWED, RECORDED 0, and 0 rather than a number I have not measured -- this file's own "
+     "hand-measurements have been OVERSTATED twice and came down on the first full sweep after "
+     "they landed. A floor of 0 claims nothing and cannot fire falsely; a scoped run pays it. "
+     "IN MUTANTS RATHER THAN NOT_SWEPT deliberately: NOT_SWEPT is what EXCLUDES a producer from "
+     "every sweep, so a debt parked there is a debt nothing will ever collect. "
+     "EXPECT A LOW COUNT AND NOT BECAUSE COVERAGE IS THIN: neutered to \"\", this mutant satisfies "
+     "every assertion asserting SILENCE by construction -- and three of the six here assert "
+     "exactly that. Only the assertions reading the note's TEXT can kill it, which is this file's "
+     "standing nothing-direction caveat and the third entry to meet it.", 0),
+    ("current_pin_sha -> the pin recorded with a decision comes from something other than the stamp",
+     ".game_loop/bin/_gl_impl.py::current_pin_sha", "    return None\n",
+     ['READ from the pinned checkout', 'same source `self` reports from',
+      'actually WRITES that field'],
+     "FLOOR OWED, RECORDED 0, same reasoning as its caller above. A one-line reader whose whole "
+     "job is to name WHERE the pin's value comes from: the pinned checkout's own stamp, which is "
+     "the same source `self` reports from. It exists because the value was being written from "
+     "memory into prose -- twice on 2026-09-03, the second time with the correct value sitting in "
+     "the same command's output. Neutered to None it is silent by construction in the direction "
+     "that matters, since a missing pin makes deferral_pin_note return \"\" rather than lie.", 0),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',

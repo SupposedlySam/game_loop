@@ -1264,6 +1264,19 @@ def main():
         check("A's authorization spends in session A", not denied(guard(proj, pb)))
 
         print("watchdog (per-session):")
+        # THE MANDATE THIS SECTION RINGS ON IS BOUND HERE, not inherited from four sections back.
+        # It was relying on `per-session state (isolation):` having bound one in sess-aaa AND on the
+        # clear not having happened yet — an ordering window, not merely a prior write, and
+        # invisible to a cut analysis that follows names. MEASURED (#126): 2 of this section's 4
+        # assertions fail when it runs alone, while the runner announces the cut as sound.
+        #
+        # SAFE IN A FULL RUN, and that is read from the source rather than assumed: `cmd_mandate`
+        # refuses a --set only when a live mandate's text DIFFERS from the new one
+        # (_gl_impl.py, "REFUSED — a mandate is already bound here"), and it deliberately does not
+        # restamp `since` when the words match. So the same words are a no-op here and a real bind
+        # when this section stands alone. Different words would be a refusal, which is why they are
+        # copied exactly rather than paraphrased.
+        gl(proj, "mandate", "--set", "session A work", sid="sess-aaa")
         tpath = os.path.join(proj, "transcript.jsonl")
         with open(tpath, "w") as f:
             f.write("x\n")

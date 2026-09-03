@@ -4228,6 +4228,21 @@ def merge_files(tree, ref):
     The set is `git diff --name-only $(git merge-base HEAD <ref>)..<ref>` — the files that ref brings
     that HEAD does not already have. Paths come back REPO-relative, the one space edited.txt and the
     blast-radius check both speak, so a worktree's paths carry the worktree's prefix.
+
+    WHAT THIS MISSES, and it is an over-report in the widening direction: "HEAD does not already
+    have" is answered from ANCESTRY, and a squash-merge rewrites the commit — so a ref whose work is
+    already in HEAD is never an ancestor of it, and this replays the ENTIRE branch forever. The set
+    is therefore too big, not too small, and it feeds `attribute`, which uses it to widen what the
+    blast-radius check accepts. So the error excuses files rather than nagging about them.
+
+    Three things bound that, none of them this function: an own-edited file is matched as an own
+    edit BEFORE the attributed set is consulted, so nothing this session touched can be laundered
+    through a stale ref; the declaration is spent by one commit; and it carries a required reason
+    into log.jsonl permanently. What is left is files this session did not edit, that something else
+    wrote, that also fall inside an over-broad ref diff — inside one commit, with a reason on the
+    record. Observed as a BLOCKING failure in another harness (#125), where the same ancestry test
+    demanded review of code that had already shipped; not observed here, so it is written down
+    rather than gated (INV4).
     """
     if not _git_out(tree, "rev-parse", "--git-dir"):
         return None, "%s is not a git tree, so there is no ref to recompute anything from" % tree

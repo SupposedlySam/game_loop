@@ -1558,12 +1558,21 @@ def main():
                 json.dump({"mandate": {"active": mandate_active, "text": "x"}}, f)
             os.utime(sf, (_time.time() - old, _time.time() - old))
             os.utime(d, (_time.time() - old, _time.time() - old))
+        # THE FRESH SESSION IS MADE HERE, not borrowed from four sections earlier. This asserted on
+        # `sess-aaa`, which exists only because `per-session state (isolation):` bound a mandate in
+        # it — a dependency through the shared sandbox that the section-cut analysis cannot see,
+        # because it follows names and `proj` is defined in the block prologue. MEASURED (#126):
+        # running this section alone loses exactly this one assertion of its four, while the runner
+        # announces the cut as sound. One of 38 announced cuts, 3 of which break; this is the
+        # mildest and the easiest to fix, because a GC test that needs somebody else's session to
+        # exist was never testing what it says.
+        gl(proj, "status", sid="sess-gc-fresh")
         gl(proj, "status", sid="sess-gc")
         check("prunes an old session with no active mandate",
               not os.path.exists(os.path.join(sess_root, "sess-old-idle")))
         check("never prunes an old session holding an ACTIVE mandate",
               os.path.exists(os.path.join(sess_root, "sess-old-live")))
-        check("keeps fresh sessions", os.path.exists(os.path.join(sess_root, "sess-aaa")))
+        check("keeps fresh sessions", os.path.exists(os.path.join(sess_root, "sess-gc-fresh")))
         with open(os.path.join(proj, ".game_loop", "log.jsonl")) as f:
             check("logs the prune", '"sessions_pruned"' in f.read())
 

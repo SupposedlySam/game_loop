@@ -13925,6 +13925,74 @@ def main():
           "is one that must be idempotent in what it writes to files they own",
           read_or_empty(os.path.join(_local_d, ".gitignore")).count("\n.game_loop/") == 1)
 
+    # THE REVERT, WHICH DID NOT EXIST — reported by showrunner, who was about to copy this flag into
+    # their own installer and asked whether it was reversible. It was not, and in two ways rather
+    # than the one they named. Re-running WITHOUT --local re-pointed the hooks at settings.json and
+    # left BOTH --local artifacts in place: the ignore stayed, so you got a SHARED install whose
+    # payload was still gitignored — it reported success and shipped nothing to the team, and no
+    # verb caught that. (The hook half at least surfaces later: `self` says hooks are in both files
+    # and every gate runs twice.)
+    _revert_out = subprocess.run(
+        ["bash", os.path.join(REPO, "install.sh"), _local_d],
+        capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
+    _revert_gi = read_or_empty(os.path.join(_local_d, ".gitignore"))
+    check("re-installing WITHOUT --local removes the ignore this installer wrote — otherwise the "
+          "SHARED install it just performed ships nothing to the team while reporting success",
+          ".game_loop/" not in _revert_gi and "removed" in _revert_out)
+    check("...and it SAYS the hooks are still doubled rather than silently deleting a settings file "
+          "the user owns — the two files merge, so every gate runs twice until they clean it",
+          "settings.local.json" in _revert_out and "TWICE" in _revert_out)
+
+    # ONLY OUR OWN MARKED BLOCK. An untagged `.game_loop/` a person put there themselves is THEIR
+    # line; an installer that edits a tracked file gets exactly one liberty — undoing its own writes.
+    _own_d = os.path.join(_li_root, "own")
+    os.makedirs(_own_d)
+    subprocess.run(["git", "init", "-q", "."], cwd=_own_d, capture_output=True)
+    with open(os.path.join(_own_d, ".gitignore"), "w") as f:
+        f.write("node_modules/\n.game_loop/\n")
+    _own_out = subprocess.run(["bash", os.path.join(REPO, "install.sh"), _own_d],
+                              capture_output=True, text=True, env=_env(),
+                              stdin=subprocess.DEVNULL).stdout
+    check("a `.game_loop/` line this installer did not write SURVIVES a shared install and is "
+          "reported instead — deleting it would be the installer editing a tracked file on a guess",
+          ".game_loop/" in read_or_empty(os.path.join(_own_d, ".gitignore"))
+          and "left alone" in _own_out)
+
+    # ASK GIT, NOT ONE FILE. The check was `grep -qxF` against .gitignore, so a repo ignoring
+    # .game_loop/ through .git/info/exclude or core.excludesFile read as un-ignored and the line was
+    # appended again on EVERY re-install — undoing a decision that repo deliberately made, since
+    # info/exclude is the git-provided place for "ignore my tooling without telling my teammates".
+    # showrunner refuses to write info/exclude for a good reason of their own (it is not
+    # per-worktree); a repo that CHOSE it must still be respected. llm_chat's installer had already
+    # hit this and fixed it the same way.
+    _ex_d = os.path.join(_li_root, "excl")
+    os.makedirs(_ex_d)
+    subprocess.run(["git", "init", "-q", "."], cwd=_ex_d, capture_output=True)
+    with open(os.path.join(_ex_d, ".gitignore"), "w") as f:
+        f.write("node_modules/\n")
+    with open(os.path.join(_ex_d, ".git", "info", "exclude"), "a") as f:
+        f.write("\n.game_loop/\n")
+    _ex_out = subprocess.run(["bash", os.path.join(REPO, "install.sh"), "--local", _ex_d],
+                             capture_output=True, text=True, env=_env(),
+                             stdin=subprocess.DEVNULL).stdout
+    check("a repo that ignores .game_loop/ via .git/info/exclude is left alone — the check asks "
+          "`git check-ignore`, which resolves the same three sources git does, instead of grepping "
+          "one file and re-appending on every upgrade",
+          ".game_loop/" not in read_or_empty(os.path.join(_ex_d, ".gitignore"))
+          and "already ignored" in _ex_out)
+
+    # THREE OUTCOMES, NOT TWO: check-ignore exits 128 when it cannot answer at all. Folding that
+    # into "not ignored" would write to a tree this could not read.
+    _nogit_d = os.path.join(_li_root, "nogit")
+    os.makedirs(_nogit_d)
+    _nogit_out = subprocess.run(["bash", os.path.join(REPO, "install.sh"), "--local", _nogit_d],
+                                capture_output=True, text=True, env=_env(),
+                                stdin=subprocess.DEVNULL).stdout
+    check("a target that is not a git repository writes NO .gitignore and says it could not ask — "
+          "'could not answer' folded into 'not ignored' is a check failing into a real answer",
+          not os.path.exists(os.path.join(_nogit_d, ".gitignore"))
+          and "could not ask git" in _nogit_out)
+
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")
     ibug = tempfile.mkdtemp(prefix="gameloop-install-")

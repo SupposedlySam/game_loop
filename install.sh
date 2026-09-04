@@ -193,7 +193,9 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--local] [--sk
                         added to this repo's .gitignore. Nothing this installs then reaches anybody
                         who clones the repo. WITHOUT this flag the install is SHARED, which is the
                         design: the payload and the gates are committed, and everyone who clones
-                        gets both.
+                        gets both. Omit on a later re-install to revert: the ignore this wrote is
+                        removed, and any leftover hooks in settings.local.json are NAMED rather
+                        than deleted, because that file is yours.
   --central             don't copy the tool's code into this repo at all — write 5 tiny dispatcher
                         shims that run it from a shared, machine-wide install instead (set up once
                         with `game_loop self --pin <ref> --dest ~/.claude/game_loop-central`, or
@@ -1331,15 +1333,80 @@ PY
 # anyway would be the disclosure problem again wearing a flag. Appended to the repo's own .gitignore,
 # idempotently, and only when asked: the SHARED install deliberately tracks .game_loop/ and must not
 # have it ignored out from under it.
+GI_ROOT="$TARGET/.gitignore"
+GI_MARK="# game_loop, installed with --local: for this machine only, not the team."
 if [ "$LOCAL_INSTALL" = "1" ]; then
-  GI_ROOT="$TARGET/.gitignore"
-  if ! grep -qxF ".game_loop/" "$GI_ROOT" 2>/dev/null; then
-    { [ -s "$GI_ROOT" ] && [ -n "$(tail -c 1 "$GI_ROOT")" ] && echo ""; } >> "$GI_ROOT" 2>/dev/null || true
-    printf '%s\n' "" "# game_loop, installed with --local: for this machine only, not the team." \
-      ".game_loop/" >> "$GI_ROOT"
-    echo "  wrote   .gitignore (+ .game_loop/ — --local keeps the payload out of the repo)"
-  else
-    echo "  ok      .gitignore already ignores .game_loop/"
+  # ASK GIT, NOT ONE FILE. This used to `grep -qxF` the target's .gitignore, so a repo that ignores
+  # .game_loop/ through .git/info/exclude or core.excludesFile read as un-ignored and the line was
+  # appended again on EVERY re-install — undoing a decision that repo had deliberately made, since
+  # info/exclude is the git-provided place for "ignore my tooling without telling my teammates".
+  # Reported by showrunner, who was about to copy this flag; llm_chat's installer had already hit
+  # the same thing and fixed it the same way. `git check-ignore` consults all three sources, which
+  # is the resolution git itself uses and therefore the question actually being asked.
+  #
+  # THREE OUTCOMES, NOT TWO: 0 ignored, 1 not ignored, 128 could not answer (no git, or not a
+  # repository). Folding 128 into "not ignored" would append to a file in a tree we could not read,
+  # so it is its own branch and writes nothing.
+  # `|| GI_RC=$?` and not a bare call: this script runs under `set -e`, and exit 1 here is the
+  # EXPECTED answer ("not ignored"), so a plain statement would abort the installer at the moment
+  # it had work to do. Caught by running it against a throwaway repo — `bash -n` passes either way,
+  # which is the same blind spot that shipped this block inside a python heredoc the first time.
+  GI_RC=0
+  ( cd "$TARGET" 2>/dev/null && git check-ignore -q .game_loop/ 2>/dev/null ) || GI_RC=$?
+  case $GI_RC in
+    0) echo "  ok      .game_loop/ is already ignored here (.gitignore, info/exclude or core.excludesFile)" ;;
+    1) { [ -s "$GI_ROOT" ] && [ -n "$(tail -c 1 "$GI_ROOT")" ] && echo ""; } >> "$GI_ROOT" 2>/dev/null || true
+       printf '%s\n' "" "$GI_MARK" ".game_loop/" >> "$GI_ROOT"
+       echo "  wrote   .gitignore (+ .game_loop/ — --local keeps the payload out of the repo)" ;;
+    *) echo "  ⚠ could not ask git whether .game_loop/ is ignored (no git, or not a repository)."
+       echo "    Wrote nothing. A --local install leaves the payload committable until you add"
+       echo "    .game_loop/ to .gitignore or .git/info/exclude yourself." ;;
+  esac
+else
+  # THE REVERT, which did not exist and made --local a one-way door (showrunner, #122 follow-up).
+  # Re-running WITHOUT the flag re-pointed the hooks at settings.json and left both --local
+  # artifacts in place, so you got a SHARED install whose payload was still gitignored: it reported
+  # success and shipped nothing to the team, and no verb caught it. The hook half at least surfaces
+  # later — `game_loop self` prints that hooks appear in BOTH settings files and every gate is
+  # running twice — but nothing ever mentioned the ignore.
+  #
+  # ONLY OUR OWN MARKED BLOCK IS REMOVED. The marker line is one we wrote; an untagged `.game_loop/`
+  # a person added themselves is THEIR line, and this warns about it rather than deleting it. An
+  # installer that edits a tracked file gets exactly one liberty: undoing its own writes.
+  if [ -f "$GI_ROOT" ] && grep -qxF "$GI_MARK" "$GI_ROOT" 2>/dev/null; then
+    python3 - "$GI_ROOT" "$GI_MARK" <<'PYGI'
+import sys
+p, mark = sys.argv[1], sys.argv[2]
+with open(p) as f:
+    lines = f.read().split("\n")
+out, i = [], 0
+while i < len(lines):
+    if lines[i] == mark:
+        i += 1
+        if i < len(lines) and lines[i].strip() == ".game_loop/":
+            i += 1
+        while out and out[-1].strip() == "":
+            out.pop()
+        continue
+    out.append(lines[i])
+    i += 1
+with open(p, "w") as f:
+    f.write("\n".join(out).rstrip("\n") + "\n")
+PYGI
+    echo "  removed .gitignore's --local block — this is a SHARED install and the payload must be"
+    echo "          committable, or your teammates clone a repo with no harness in it."
+  elif [ -f "$GI_ROOT" ] && grep -qxF ".game_loop/" "$GI_ROOT" 2>/dev/null; then
+    echo "  ⚠ .gitignore ignores .game_loop/ but not through a block this installer wrote, so it is"
+    echo "    left alone. A SHARED install needs the payload committed — remove that line yourself,"
+    echo "    or your teammates get the hooks and nothing for them to run."
+  fi
+  # The hooks half of the same revert. Not deleted: a settings file is the user's, and `self`
+  # already names this exact state at runtime. Said here so it is not first heard from a colleague.
+  if [ -f "$TARGET/.claude/settings.local.json" ] \
+     && grep -q "game_loop" "$TARGET/.claude/settings.local.json" 2>/dev/null; then
+    echo "  ⚠ .claude/settings.local.json still has game_loop hooks from a --local install. The two"
+    echo "    settings files MERGE rather than override, so every gate now runs TWICE. Delete the"
+    echo "    game_loop entries there; `game_loop self` will keep saying so until you do."
   fi
 fi
 

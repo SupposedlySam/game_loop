@@ -1351,6 +1351,26 @@ if [ "$LOCAL_INSTALL" = "1" ]; then
   # EXPECTED answer ("not ignored"), so a plain statement would abort the installer at the moment
   # it had work to do. Caught by running it against a throwaway repo — `bash -n` passes either way,
   # which is the same blind spot that shipped this block inside a python heredoc the first time.
+  # THE OTHER DIRECTION OF THE SAME DOOR, and the one that was still silent after the first fix.
+  # The revert below cleans up --local's artifacts; nothing looked the other way. Install SHARED and
+  # then re-install with --local and the merge writes settings.local.json while the tracked
+  # settings.json keeps its copy — the two files MERGE rather than override, so every gate is
+  # registered twice, including the Stop gate, where a doubled answer is not merely noisy.
+  #
+  # Reported by showrunner with the two-line reproduction, and REPRODUCED here before believing it:
+  # `install.sh <repo> && install.sh --local <repo>` left 15 game_loop entries in each file.
+  # NOT REPAIRED, deliberately: settings.json is source-controlled and its entries may be a team's
+  # deliberate registration. Deleting them because one developer passed a private flag would be this
+  # installer editing shared source control on somebody's personal decision — which is the whole
+  # thing --local exists to avoid. So it is named here, and `self` keeps naming it afterwards.
+  if [ -f "$TARGET/.claude/settings.json" ] \
+     && grep -q "game_loop" "$TARGET/.claude/settings.json" 2>/dev/null; then
+    echo "  ⚠ .claude/settings.json ALSO has game_loop hooks, from an earlier shared install. The"
+    echo "    two settings files MERGE rather than override, so every gate is now registered TWICE"
+    echo "    and fires twice — the Stop gate included. Left alone because that file is source-"
+    echo "    controlled and those entries may be your team's: remove them there if this repo is"
+    echo "    meant to be yours alone. \`game_loop self\` will keep saying so until one side is gone."
+  fi
   GI_RC=0
   ( cd "$TARGET" 2>/dev/null && git check-ignore -q .game_loop/ 2>/dev/null ) || GI_RC=$?
   case $GI_RC in

@@ -13943,6 +13943,34 @@ def main():
           "the user owns — the two files merge, so every gate runs twice until they clean it",
           "settings.local.json" in _revert_out and "TWICE" in _revert_out)
 
+    # THE OTHER DIRECTION OF THE SAME DOOR, reported by showrunner AFTER the revert above shipped —
+    # they measured the composition in their own tool, then handed over a two-line reproduction for
+    # ours rather than guessing at our behaviour. It was live: `install.sh <repo>` then
+    # `install.sh --local <repo>` left 15 game_loop entries in EACH settings file. The two merge
+    # rather than override, so every gate fires twice, and the Stop gate is one of them.
+    #
+    # NOT REPAIRED, deliberately: settings.json is source-controlled and those entries may be a
+    # team's. Deleting them because one developer passed a private flag would be the installer
+    # editing shared source control on a personal decision, which is what --local exists to avoid.
+    _dbl_d = os.path.join(_li_root, "dbl")
+    os.makedirs(_dbl_d)
+    subprocess.run(["git", "init", "-q", "."], cwd=_dbl_d, capture_output=True)
+    subprocess.run(["bash", os.path.join(REPO, "install.sh"), _dbl_d],
+                   capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL)
+    _dbl_out = subprocess.run(
+        ["bash", os.path.join(REPO, "install.sh"), "--local", _dbl_d],
+        capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
+    check("a SHARED install followed by --local is told that every gate is now registered twice — "
+          "the two settings files merge, and nothing said so until a consumer measured it",
+          "TWICE" in _dbl_out and "settings.json" in _dbl_out)
+    check("...and it is NAMED, not repaired: the tracked settings.json keeps its entries, because "
+          "deleting a team's registration over one developer's private flag is the thing --local "
+          "exists to avoid",
+          "game_loop" in read_or_empty(os.path.join(_dbl_d, ".claude", "settings.json")))
+    check("...and a --local install with NO prior shared install stays silent, so the warning is a "
+          "discrimination rather than a line printed on every local install",
+          "TWICE" not in _local_out)
+
     # ONLY OUR OWN MARKED BLOCK. An untagged `.game_loop/` a person put there themselves is THEIR
     # line; an installer that edits a tracked file gets exactly one liberty — undoing its own writes.
     _own_d = os.path.join(_li_root, "own")

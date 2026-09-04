@@ -516,7 +516,8 @@ SOURCE-CONTROLLED one. Both it and `.game_loop/` are tracked, so once committed,
 gets the payload and the gates. That is deliberate: the guardrail is the team's.
 
 For a machine-local install that reaches nobody else, use `--local`, which writes the hooks to
-`.claude/settings.local.json` and gitignores `.game_loop/`:
+`.claude/settings.local.json` and excludes both it and `.game_loop/` through `.git/info/exclude` —
+per-clone, so `git status` stays clean and no tracked file changes (#127):
 
 ```
 ./install.sh --local /path/to/this/project

@@ -13913,17 +13913,43 @@ def main():
           "anybody who clones",
           os.path.isfile(os.path.join(_local_d, ".claude", "settings.local.json"))
           and not os.path.isfile(os.path.join(_local_d, ".claude", "settings.json")))
-    check("...and gitignores .game_loop/ too — hooks that reach nobody while the payload is still "
-          "committed would be the same disclosure problem wearing a flag",
-          ".game_loop/" in read_or_empty(os.path.join(_local_d, ".gitignore")))
+    # THE PROPERTY MOVED WITH THE MECHANISM (#127). This used to assert `.game_loop/` was in the
+    # target's .gitignore — which is TRACKED, so the flag whose whole promise is "this reaches
+    # nobody" ended by writing a file that arrives as a diff on everybody's next pull. Raised by
+    # showrunner, argued better by a consumer of theirs, then measured here: `git status --porcelain`
+    # after --local was exactly " M .gitignore".
+    #
+    # The assertion is now showrunner's, and it is better than the one it replaces because it is
+    # indifferent to mechanism: after a --local install the tree is COMPLETELY CLEAN. A file-contents
+    # check passed the old behaviour; this one is the thing the user actually experiences.
+    check("#127: after --local the working tree is COMPLETELY CLEAN — no tracked file changed, "
+          "because a private decision arriving as a diff on everyone's next pull is the one thing "
+          "this flag promises not to do",
+          subprocess.run(["git", "status", "--porcelain"], cwd=_local_d, capture_output=True,
+                         text=True).stdout.strip() == "")
+    check("...and the ignore is real rather than merely absent from .gitignore: git resolves "
+          ".game_loop/ to .git/info/exclude, which is per-clone",
+          "info/exclude" in subprocess.run(
+              ["git", "check-ignore", "-v", ".game_loop/"], cwd=_local_d, capture_output=True,
+              text=True).stdout)
+    check("...and .claude/settings.local.json is excluded TOO. MEASURED, not assumed: on this "
+          "machine it was ignored only by the user's GLOBAL core.excludesFile — not by Claude Code, "
+          "not by the repo, not by anything shipped here — so on a machine without that line the "
+          "next `git add -A` commits one developer's private hooks under their own name",
+          "info/exclude" in subprocess.run(
+              ["git", "check-ignore", "-v", ".claude/settings.local.json"], cwd=_local_d,
+              capture_output=True, text=True).stdout)
+    check("...and the tracked .gitignore is NOT touched at all",
+          ".game_loop/" not in read_or_empty(os.path.join(_local_d, ".gitignore")))
     check("...and says it reaches nobody, rather than reusing the shared wording",
           "reaches anybody" in _local_out and "SOURCE-CONTROLLED" not in _local_out)
     _, _again_out = None, subprocess.run(
         ["bash", os.path.join(REPO, "install.sh"), "--local", _local_d],
         capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
-    check("...and a second --local run does not append the ignore twice — an installer people re-run "
-          "is one that must be idempotent in what it writes to files they own",
-          read_or_empty(os.path.join(_local_d, ".gitignore")).count("\n.game_loop/") == 1)
+    check("...and a second --local run does not append the exclude twice — an installer people "
+          "re-run is one that must be idempotent in what it writes to files they own",
+          read_or_empty(os.path.join(_local_d, ".git", "info", "exclude")).count(
+              "\n.game_loop/") == 1)
 
     # THE REVERT, WHICH DID NOT EXIST — reported by showrunner, who was about to copy this flag into
     # their own installer and asked whether it was reversible. It was not, and in two ways rather
@@ -13935,10 +13961,10 @@ def main():
     _revert_out = subprocess.run(
         ["bash", os.path.join(REPO, "install.sh"), _local_d],
         capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
-    _revert_gi = read_or_empty(os.path.join(_local_d, ".gitignore"))
-    check("re-installing WITHOUT --local removes the ignore this installer wrote — otherwise the "
+    check("re-installing WITHOUT --local removes the exclude this installer wrote — otherwise the "
           "SHARED install it just performed ships nothing to the team while reporting success",
-          ".game_loop/" not in _revert_gi and "removed" in _revert_out)
+          subprocess.run(["git", "check-ignore", "-q", ".game_loop/"], cwd=_local_d).returncode != 0
+          and "removed" in _revert_out)
     check("...and it SAYS the hooks are still doubled rather than silently deleting a settings file "
           "the user owns — the two files merge, so every gate runs twice until they clean it",
           "settings.local.json" in _revert_out and "TWICE" in _revert_out)
@@ -14020,6 +14046,36 @@ def main():
           "'could not answer' folded into 'not ignored' is a check failing into a real answer",
           not os.path.exists(os.path.join(_nogit_d, ".gitignore"))
           and "could not ask git" in _nogit_out)
+    check("...and it writes no STRAY exclude file either. `cd \"$(cmd)\"` where cmd FAILED becomes "
+          "`cd \"\"`, which bash treats as staying put — so a non-repository silently resolved to "
+          "the target itself and this wrote $TARGET/info/exclude, a file git never reads, while "
+          "printing that it had written .git/info/exclude. A false success, found by driving it",
+          not os.path.exists(os.path.join(_nogit_d, "info", "exclude")))
+
+    # MIGRATION off the tracked file. An earlier --local wrote its marked block into .gitignore;
+    # leaving it there means the repo carries the private decision in source control forever. The
+    # move is a real tracked change — that is the point, since it REMOVES the leak — so it is the
+    # one .gitignore write this still makes, and it is a deletion.
+    _mig_d = os.path.join(_li_root, "mig")
+    os.makedirs(_mig_d)
+    subprocess.run(["git", "init", "-q", "."], cwd=_mig_d, capture_output=True)
+    with open(os.path.join(_mig_d, ".gitignore"), "w") as f:
+        f.write("node_modules/\n\n# game_loop, installed with --local: for this machine only, "
+                "not the team.\n.game_loop/\n")
+    _mig_out = subprocess.run(["bash", os.path.join(REPO, "install.sh"), "--local", _mig_d],
+                              capture_output=True, text=True, env=_env(),
+                              stdin=subprocess.DEVNULL).stdout
+    _mig_gi = read_or_empty(os.path.join(_mig_d, ".gitignore"))
+    check("an EXISTING --local install is migrated off the tracked .gitignore — the old marked "
+          "block is removed and the exclude moves to .git/info/exclude, so a repo that already "
+          "carries the private decision in source control stops carrying it",
+          ".game_loop/" not in _mig_gi and "moved" in _mig_out
+          and "info/exclude" in subprocess.run(
+              ["git", "check-ignore", "-v", ".game_loop/"], cwd=_mig_d,
+              capture_output=True, text=True).stdout)
+    check("...and the migration leaves the rest of their .gitignore alone",
+          "node_modules/" in _mig_gi)
+
 
     print("install.sh: the piped one-liner upgrades, not only installs fresh:")
     inst = os.path.join(REPO, "install.sh")

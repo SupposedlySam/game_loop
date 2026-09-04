@@ -129,10 +129,15 @@ If you want it for yourself and not for your colleagues, install with `--local`:
 ./install.sh --local .
 ```
 
-That writes the hooks to `.claude/settings.local.json` (machine-local, gitignored) and adds
-`.game_loop/` to this repo's `.gitignore`, so nothing it installs reaches anybody who clones. The
-installer prints which of the two it did, either way — it is a choice, not a default you discover
-when a colleague pulls.
+That writes the hooks to `.claude/settings.local.json` and adds `.game_loop/` — plus
+`.claude/settings.local.json` itself — to **`.git/info/exclude`**, which is per-clone and tells your
+teammates nothing. Nothing it installs reaches anybody who clones, and `git status` stays completely
+clean: the flag writes no tracked file, because a private decision arriving as a diff on everyone's
+next pull is the one thing it promises not to do (#127). The installer prints which of the two modes
+it did, either way — it is a choice, not a default you discover when a colleague pulls.
+
+Omit `--local` on a later re-install to revert: the exclude block this wrote is removed, and leftover
+hooks in `settings.local.json` are **named** rather than deleted, because that file is yours.
 
 Installing several repos on one machine? `install.sh --central` wires a repo to run the tool from one
 shared, machine-wide location instead of copying it in — see "Central install" in

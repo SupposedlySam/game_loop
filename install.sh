@@ -188,9 +188,11 @@ usage: ./install.sh [--same-as <checkout>] [--fresh] [--central] [--local] [--sk
                         A target whose config already decides this is never asked and never
                         rewritten.
   --local               install for YOU, not for the team. Hooks go into
-                        .claude/settings.local.json (machine-local, gitignored by Claude Code)
-                        instead of the source-controlled .claude/settings.json, and .game_loop/ is
-                        added to this repo's .gitignore. Nothing this installs then reaches anybody
+                        .claude/settings.local.json instead of the source-controlled
+                        .claude/settings.json, and .game_loop/ — plus settings.local.json itself —
+                        is added to .git/info/exclude, which is PER-CLONE, so no tracked file
+                        changes and `git status` stays clean. Nothing this installs then reaches
+                        anybody
                         who clones the repo. WITHOUT this flag the install is SHARED, which is the
                         design: the payload and the gates are committed, and everyone who clones
                         gets both. Omit on a later re-install to revert: the ignore this wrote is
@@ -207,7 +209,7 @@ USAGE
 }
 
 TARGET=""
-LOCAL_INSTALL=0        # --local: hooks to settings.local.json, and gitignore .game_loop/
+LOCAL_INSTALL=0        # --local: hooks to settings.local.json, exclude via .git/info/exclude
 OVER_VENDORED=0
 OVER_BLESSED=0
 SAME_AS=""
@@ -1300,7 +1302,7 @@ else:
     print("            commit, everyone who clones this repo gets the payload and the gates. That is")
     print("            the design (a guardrail the team shares), not an accident.")
     print("            Want it for yourself only? Re-run with --local, which writes the hooks to")
-    print("            .claude/settings.local.json and gitignores .game_loop/ instead.")
+    print("            .claude/settings.local.json and excludes .game_loop/ per-clone instead.")
 
 # The statusline is the ONLY place Claude Code exposes subscription rate limits, so it is the tap
 # that feeds the limitgate and the watchdog's limit-park. Set it only when the project has none —
@@ -1335,64 +1337,51 @@ PY
 # have it ignored out from under it.
 GI_ROOT="$TARGET/.gitignore"
 GI_MARK="# game_loop, installed with --local: for this machine only, not the team."
+
+# WHERE --local's IGNORE GOES, and this moved (#127). It used to append to the target's tracked
+# .gitignore, which is the one thing the flag promises not to do: a private decision arriving as a
+# diff on everybody's next pull. Raised by showrunner, argued better by a consumer of theirs, and
+# then MEASURED here — `git status --porcelain` after a --local install was exactly " M .gitignore",
+# the tracked file and nothing else. .git/info/exclude is git's own place for "ignore my tooling in
+# my clone without telling my teammates", it takes the same syntax including # comments, and the
+# marked-block convention the revert depends on transfers verbatim.
+#
+# RESOLVED INSIDE THE TARGET, because `rev-parse --git-common-dir` answers RELATIVE to the repo you
+# asked about — joining it to the installer's own cwd writes the WRONG repo's exclude file, and a
+# hand-check then passes by reading the file it just wrongly wrote. showrunner hit exactly that and
+# handed it over as the trap on the way here.
+# THE ANSWER MUST BE NON-EMPTY, and that is not pedantry. `cd "$(cmd)"` where cmd FAILED becomes
+# `cd ""`, which bash treats as staying put rather than erroring — so a non-repository target
+# silently resolved to the target itself and this wrote $TARGET/info/exclude, a file git never
+# reads, while printing "wrote .git/info/exclude". A false success: told the payload was ignored
+# when it was not. Found by driving the non-repo case, not by reading the diff — the third time in
+# this file's history that only a real run caught it.
+GL_EXCLUDE=""
+GL_IS_WORKTREE=0
+GL_COMMON_REL=$( cd "$TARGET" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null ) || GL_COMMON_REL=""
+if [ -n "$GL_COMMON_REL" ]; then
+  COMMON=$( cd "$TARGET" 2>/dev/null && cd "$GL_COMMON_REL" 2>/dev/null && pwd ) || COMMON=""
+  GL_GITDIR_REL=$( cd "$TARGET" 2>/dev/null && git rev-parse --git-dir 2>/dev/null ) || GL_GITDIR_REL=""
+  GITDIR=$( cd "$TARGET" 2>/dev/null && cd "$GL_GITDIR_REL" 2>/dev/null && pwd ) || GITDIR=""
+  if [ -n "$COMMON" ]; then
+    [ -n "$GITDIR" ] && [ "$COMMON" != "$GITDIR" ] && GL_IS_WORKTREE=1
+    GL_EXCLUDE="$COMMON/info/exclude"
+  fi
+fi
+
 if [ "$LOCAL_INSTALL" = "1" ]; then
   # ASK GIT, NOT ONE FILE. This used to `grep -qxF` the target's .gitignore, so a repo that ignores
   # .game_loop/ through .git/info/exclude or core.excludesFile read as un-ignored and the line was
-  # appended again on EVERY re-install — undoing a decision that repo had deliberately made, since
-  # info/exclude is the git-provided place for "ignore my tooling without telling my teammates".
-  # Reported by showrunner, who was about to copy this flag; llm_chat's installer had already hit
-  # the same thing and fixed it the same way. `git check-ignore` consults all three sources, which
-  # is the resolution git itself uses and therefore the question actually being asked.
+  # appended again on EVERY re-install — undoing a decision that repo had deliberately made.
+  # `git check-ignore` consults all three sources, which is the resolution git itself uses.
+  # THREE OUTCOMES, NOT TWO: 0 ignored, 1 not ignored, 128 could not answer.
   #
-  # THREE OUTCOMES, NOT TWO: 0 ignored, 1 not ignored, 128 could not answer (no git, or not a
-  # repository). Folding 128 into "not ignored" would append to a file in a tree we could not read,
-  # so it is its own branch and writes nothing.
-  # `|| GI_RC=$?` and not a bare call: this script runs under `set -e`, and exit 1 here is the
-  # EXPECTED answer ("not ignored"), so a plain statement would abort the installer at the moment
-  # it had work to do. Caught by running it against a throwaway repo — `bash -n` passes either way,
-  # which is the same blind spot that shipped this block inside a python heredoc the first time.
-  # THE OTHER DIRECTION OF THE SAME DOOR, and the one that was still silent after the first fix.
-  # The revert below cleans up --local's artifacts; nothing looked the other way. Install SHARED and
-  # then re-install with --local and the merge writes settings.local.json while the tracked
-  # settings.json keeps its copy — the two files MERGE rather than override, so every gate is
-  # registered twice, including the Stop gate, where a doubled answer is not merely noisy.
-  #
-  # Reported by showrunner with the two-line reproduction, and REPRODUCED here before believing it:
-  # `install.sh <repo> && install.sh --local <repo>` left 15 game_loop entries in each file.
-  # NOT REPAIRED, deliberately: settings.json is source-controlled and its entries may be a team's
-  # deliberate registration. Deleting them because one developer passed a private flag would be this
-  # installer editing shared source control on somebody's personal decision — which is the whole
-  # thing --local exists to avoid. So it is named here, and `self` keeps naming it afterwards.
-  if [ -f "$TARGET/.claude/settings.json" ] \
-     && grep -q "game_loop" "$TARGET/.claude/settings.json" 2>/dev/null; then
-    echo "  ⚠ .claude/settings.json ALSO has game_loop hooks, from an earlier shared install. The"
-    echo "    two settings files MERGE rather than override, so every gate is now registered TWICE"
-    echo "    and fires twice — the Stop gate included. Left alone because that file is source-"
-    echo "    controlled and those entries may be your team's: remove them there if this repo is"
-    echo "    meant to be yours alone. \`game_loop self\` will keep saying so until one side is gone."
-  fi
+  # `|| GI_RC=$?` and not a bare call: this runs under `set -e`, and exit 1 is the EXPECTED answer.
   GI_RC=0
   ( cd "$TARGET" 2>/dev/null && git check-ignore -q .game_loop/ 2>/dev/null ) || GI_RC=$?
-  case $GI_RC in
-    0) echo "  ok      .game_loop/ is already ignored here (.gitignore, info/exclude or core.excludesFile)" ;;
-    1) { [ -s "$GI_ROOT" ] && [ -n "$(tail -c 1 "$GI_ROOT")" ] && echo ""; } >> "$GI_ROOT" 2>/dev/null || true
-       printf '%s\n' "" "$GI_MARK" ".game_loop/" >> "$GI_ROOT"
-       echo "  wrote   .gitignore (+ .game_loop/ — --local keeps the payload out of the repo)" ;;
-    *) echo "  ⚠ could not ask git whether .game_loop/ is ignored (no git, or not a repository)."
-       echo "    Wrote nothing. A --local install leaves the payload committable until you add"
-       echo "    .game_loop/ to .gitignore or .git/info/exclude yourself." ;;
-  esac
-else
-  # THE REVERT, which did not exist and made --local a one-way door (showrunner, #122 follow-up).
-  # Re-running WITHOUT the flag re-pointed the hooks at settings.json and left both --local
-  # artifacts in place, so you got a SHARED install whose payload was still gitignored: it reported
-  # success and shipped nothing to the team, and no verb caught it. The hook half at least surfaces
-  # later — `game_loop self` prints that hooks appear in BOTH settings files and every gate is
-  # running twice — but nothing ever mentioned the ignore.
-  #
-  # ONLY OUR OWN MARKED BLOCK IS REMOVED. The marker line is one we wrote; an untagged `.game_loop/`
-  # a person added themselves is THEIR line, and this warns about it rather than deleting it. An
-  # installer that edits a tracked file gets exactly one liberty: undoing its own writes.
+
+  # MIGRATION off the tracked file. An earlier --local wrote its marked block into .gitignore; leave
+  # it there and this repo keeps carrying the private decision in source control forever.
   if [ -f "$GI_ROOT" ] && grep -qxF "$GI_MARK" "$GI_ROOT" 2>/dev/null; then
     python3 - "$GI_ROOT" "$GI_MARK" <<'PYGI'
 import sys
@@ -1413,20 +1402,89 @@ while i < len(lines):
 with open(p, "w") as f:
     f.write("\n".join(out).rstrip("\n") + "\n")
 PYGI
-    echo "  removed .gitignore's --local block — this is a SHARED install and the payload must be"
-    echo "          committable, or your teammates clone a repo with no harness in it."
-  elif [ -f "$GI_ROOT" ] && grep -qxF ".game_loop/" "$GI_ROOT" 2>/dev/null; then
+    echo "  moved   .gitignore's --local block out of source control (#127) — it is going to"
+    echo "          .git/info/exclude, which is per-clone and tells your teammates nothing."
+    GI_RC=1
+  fi
+
+  if [ "$GL_IS_WORKTREE" = "1" ]; then
+    # showrunner's refusal, and it is right: info/exclude lives in the COMMON dir, so writing it
+    # from a linked worktree changes the MAIN checkout's ignores for every tree sharing it. That is
+    # a decision about somebody else's working copy, made from inside this one.
+    echo "  ⚠ this target is a LINKED WORKTREE, and .git/info/exclude is shared with the main"
+    echo "    checkout — writing it here would change what every other tree ignores. Wrote nothing."
+    echo "    Install into the main checkout, or add .game_loop/ to your own ignores by hand."
+  elif [ -z "$GL_EXCLUDE" ]; then
+    echo "  ⚠ could not ask git where this repo keeps its exclude file (no git, or not a"
+    echo "    repository). Wrote nothing — a --local install leaves the payload committable until"
+    echo "    you ignore .game_loop/ yourself."
+  elif [ "$GI_RC" = "0" ]; then
+    echo "  ok      .game_loop/ is already ignored here (.gitignore, info/exclude or core.excludesFile)"
+  else
+    mkdir -p "$(dirname "$GL_EXCLUDE")"
+    { [ -s "$GL_EXCLUDE" ] && [ -n "$(tail -c 1 "$GL_EXCLUDE")" ] && echo ""; } >> "$GL_EXCLUDE" 2>/dev/null || true
+    # settings.local.json TOO, and not because Claude Code might forget. MEASURED: on this machine
+    # it is ignored by the USER'S GLOBAL core.excludesFile — not by Claude Code, not by the repo,
+    # not by anything shipped here. On a machine without that line it is untracked and visible, and
+    # the next `git add -A` commits one developer's private hooks under their own name.
+    printf '%s\n' "" "$GI_MARK" ".game_loop/" ".claude/settings.local.json" >> "$GL_EXCLUDE"
+    echo "  wrote   .git/info/exclude (+ .game_loop/, .claude/settings.local.json) — per-clone, so"
+    echo "          this decision reaches nobody and leaves your tree clean"
+  fi
+
+  # THE OTHER DIRECTION OF THE SAME DOOR. Install SHARED then re-install --local and the merge
+  # writes settings.local.json while the tracked settings.json keeps its copy — the two files MERGE
+  # rather than override, so every gate is registered twice, Stop gate included. Reported by
+  # showrunner with a two-line reproduction; reproduced here before believing it.
+  # NOT REPAIRED: settings.json is source-controlled and those entries may be a team's.
+  if [ -f "$TARGET/.claude/settings.json" ] \
+     && grep -q "game_loop" "$TARGET/.claude/settings.json" 2>/dev/null; then
+    echo "  ⚠ .claude/settings.json ALSO has game_loop hooks, from an earlier shared install. The"
+    echo "    two settings files MERGE rather than override, so every gate is now registered TWICE"
+    echo "    and fires twice — the Stop gate included. Left alone because that file is source-"
+    echo "    controlled and those entries may be your team's: remove them there if this repo is"
+    echo "    meant to be yours alone. \`game_loop self\` will keep saying so until one side is gone."
+  fi
+else
+  # THE REVERT. Re-running WITHOUT the flag used to leave every --local artifact in place, so you
+  # got a SHARED install whose payload was still ignored: it reported success and shipped nothing.
+  # ONLY OUR OWN MARKED BLOCK IS REMOVED, from either file — an untagged `.game_loop/` somebody
+  # added themselves is THEIR line. An installer that edits files it does not own gets exactly one
+  # liberty: undoing its own writes.
+  for _f in "$GI_ROOT" "$GL_EXCLUDE"; do
+    [ -n "$_f" ] && [ -f "$_f" ] && grep -qxF "$GI_MARK" "$_f" 2>/dev/null || continue
+    python3 - "$_f" "$GI_MARK" <<'PYGI2'
+import sys
+p, mark = sys.argv[1], sys.argv[2]
+with open(p) as f:
+    lines = f.read().split("\n")
+out, i = [], 0
+while i < len(lines):
+    if lines[i] == mark:
+        i += 1
+        while i < len(lines) and lines[i].strip() in (".game_loop/", ".claude/settings.local.json"):
+            i += 1
+        while out and out[-1].strip() == "":
+            out.pop()
+        continue
+    out.append(lines[i])
+    i += 1
+with open(p, "w") as f:
+    f.write("\n".join(out).rstrip("\n") + "\n")
+PYGI2
+    echo "  removed $(basename "$_f")'s --local block — this is a SHARED install and the payload"
+    echo "          must be committable, or your teammates clone a repo with no harness in it."
+  done
+  if [ -f "$GI_ROOT" ] && grep -qxF ".game_loop/" "$GI_ROOT" 2>/dev/null; then
     echo "  ⚠ .gitignore ignores .game_loop/ but not through a block this installer wrote, so it is"
     echo "    left alone. A SHARED install needs the payload committed — remove that line yourself,"
     echo "    or your teammates get the hooks and nothing for them to run."
   fi
-  # The hooks half of the same revert. Not deleted: a settings file is the user's, and `self`
-  # already names this exact state at runtime. Said here so it is not first heard from a colleague.
   if [ -f "$TARGET/.claude/settings.local.json" ] \
      && grep -q "game_loop" "$TARGET/.claude/settings.local.json" 2>/dev/null; then
     echo "  ⚠ .claude/settings.local.json still has game_loop hooks from a --local install. The two"
     echo "    settings files MERGE rather than override, so every gate now runs TWICE. Delete the"
-    echo "    game_loop entries there; `game_loop self` will keep saying so until you do."
+    echo "    game_loop entries there; \`game_loop self\` will keep saying so until you do."
   fi
 fi
 

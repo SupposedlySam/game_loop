@@ -242,6 +242,13 @@
 # it. Seconds, and it is the only rule here that gates a file GitHub runs rather than one we do.
 ".github/workflows/*.yml":
   - "python3 test/run.py --section 'nightly sweep workflow' --section 'house voice'"
+# THE CLASSIFIER THE NIGHTLY REPORT DECIDES WITH (#128). It is the thing that says whether a run
+# REGRESSED, was INCOMPLETE, or merely hit infrastructure — and it arrived NOT CHECKED, matching no
+# rule, which is #119's shape in a file added the same hour #119's lesson was being applied. A
+# report that names the wrong cause is what cost eight unread days; the logic deciding that name
+# owes a check.
+".github/sweep_report.py":
+  - "python3 test/run.py --section 'house voice' --section 'the nightly sweep reports what it MEASURED'"
 "install.sh":
   - "python3 test/prun.py"
 # The behaviour record is DATA the update notice reads, and a malformed one degrades to silence --

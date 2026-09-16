@@ -537,6 +537,26 @@ MUTANTS = [
      "ONE THING HERE IS AN OPEN UNDER-REPORT, recorded rather than tidied: the run said 0 of this "
      "mark set name the single killer, so the killer is an assertion other than the three written "
      "for it, and the marks do not yet point at whatever that is.", 1),
+    ("sweep_report.classify -> every failed run reads as the same accusation",
+     ".github/sweep_report.py::classify", '    return "REGRESSED", [], {}, 0\n',
+     ['reported as INFRA, not as a coverage regression', 'INCOMPLETE rather than clean',
+      'still reads REGRESSED', 'INCOMPLETE beats INFRA', 'files nothing'],
+     "FLOOR OWED, RECORDED 0 — 0 rather than a number I have not measured, which is this file's "
+     "standing precedent after two hand-measurements here came down on the next full sweep. "
+     "NEUTERED TO THE OLD BEHAVIOUR ON PURPOSE: returning REGRESSED unconditionally IS what the "
+     "workflow did before #128 — it read the job's exit and accused coverage. So this mutant is "
+     "the defect, not a scramble, and the assertions that kill it are the ones separating INFRA "
+     "and INCOMPLETE from a real verdict. Expect it to be killed by several: the GREEN case alone "
+     "catches it, since a clean run would file an issue.", 0),
+    ("sweep_report.render -> the issue says the same thing whatever was found",
+     ".github/sweep_report.py::render", '    return "mutation sweep", ""\n',
+     ['NAMES the shortfall in its title', 'how many logs it actually judged'],
+     "FLOOR OWED, RECORDED 0, same reasoning as its caller above. This is the half a reader "
+     "actually sees: a nightly issue is read for its TITLE, so a render that cannot vary the title "
+     "returns the report to the state #128 was filed about — one accusation for three causes. "
+     "EXPECT A LOW COUNT AND NOT BECAUSE COVERAGE IS THIN: neutered to a constant it satisfies "
+     "nothing-direction assertions by construction, and only the two reading the rendered text "
+     "can kill it — this file's standing caveat, met again.", 0),
     ("publish_gap -> a mark whose publish never ran reads exactly like one whose publish worked",
      ".game_loop/bin/_gl_impl.py::publish_gap", "    return []\n",
      ['WAS MARKED WITHOUT', 'carries the release OUTWARD', 'BEFORE this mark',

@@ -88,7 +88,7 @@ jobs:
         # A nightly that opens an issue every night is a nightly nobody reads. One open issue at a
         # time: while it stands, later failures are visible in this workflow's own run history, and
         # closing it is what re-arms the report.
-        if: needs.sweep.result != 'success'
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -108,29 +108,23 @@ jobs:
             exit 0
           fi
 
-          # The verdict lines are what a reader needs; the full logs are attached to the run.
-          {
-            echo "The nightly producer mutation sweep did not come back clean."
-            echo
-            echo "Run: $RUN_URL"
-            echo
-            echo "A sweep fails when a producer is UNPROTECTED (neutering it killed no assertion),"
-            echo "INERT (nothing calls it where an assertion can see), NOT MEASURED (the mutant"
-            echo "never applied, or its suite crashed or hung), or has DRIFTED below a recorded"
-            echo "floor. Only the last of those is a regression in coverage; the others are gaps."
-            echo
-            echo "What each shard reported:"
-            echo
-            echo '```'
-            grep -hE '^(UNPROTECTED|INERT|NOT MEASURED|DRIFT|THIN|KNOWN GAPS|no producer)' \
-                 logs/*/sweep-*.log 2>/dev/null | sort -u || echo "(no verdict lines — see the run)"
-            echo '```'
-            echo
-            echo "This issue was opened by \`.github/workflows/mutation-sweep.yml\`. While it stays"
-            echo "open no further issues are filed, so close it once the sweep is clean again."
-          } > body.md
+          # WHAT HAPPENED IS DECIDED FROM THE SHARD LOGS, NOT FROM THE JOB'S EXIT (#128). This
+          # step used to fire on `needs.sweep.result != 'success'` and then assert a fact about
+          # COVERAGE. Measured on run 34227453406: eleven shards green, the twelfth ran a
+          # completely clean sweep and then died uploading its artifact with a 403 — and the issue
+          # it filed was titled "a producer is unprotected or has drifted". Nothing had drifted. It
+          # sat unread for eight days, which is what a report crying the wrong wolf buys you.
+          #
+          # The classifier separates three causes the way INV8 separates them one layer in:
+          # REGRESSED (a real verdict), INCOMPLETE (a shard log missing, so the set judged is
+          # SHORTER than the set that ran), INFRA (every log present and clean, job failed anyway).
+          # It writes body.md and prints the title; a non-zero exit means there is nothing to file.
+          title=$(python3 .github/sweep_report.py logs 12 "${{ needs.sweep.result }}" "$RUN_URL") || {
+            echo "nothing to file: every expected shard log is present and clean, and the job passed."
+            exit 0
+          }
 
           gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "mutation sweep: a producer is unprotected or has drifted" \
+            --title "$title" \
             --label mutation-sweep \
             --body-file body.md

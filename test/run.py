@@ -16851,6 +16851,60 @@ def main():
           "that could push to this repo from a scheduled job",
           re.search(r"permissions:\s*\n\s*contents:\s*read\s*\n\s*issues:\s*write", _wf))
 
+    print("the nightly sweep reports what it MEASURED, not what the job exited (#128):")
+    # THE REPORT READ THE JOB'S EXIT AND CLAIMED A FACT ABOUT COVERAGE. It fired on
+    # `needs.sweep.result != 'success'` and filed an issue titled "a producer is unprotected or has
+    # drifted" — a claim about the SWEEP, derived from the JOB. MEASURED on run 34227453406: eleven
+    # of twelve shards green, the twelfth ran a completely clean sweep and then died uploading its
+    # artifact with a 403. Eleven logs reached the report, all clean, and it announced a coverage
+    # regression that had not happened. It sat unread for eight days.
+    #
+    # Two defects in one: a proxy standing in for the thing (INV2), and a verdict pronounced over a
+    # denominator that was missing exactly the shard that failed.
+    # Loaded by path the way the sweep-verdicts section above does it — this file has no
+    # _load_module helper, and assuming one exists is how a paste fails at the seam.
+    _sru = __import__("importlib.util", fromlist=["util"])
+    _sr_spec = _sru.spec_from_file_location(
+        "_gl_sweep_report", os.path.join(REPO, ".github", "sweep_report.py"))
+    _sr = _sru.module_from_spec(_sr_spec)
+    _sr_spec.loader.exec_module(_sr)
+    _CLEAN = "no producer is unprotected, and none is below its recorded floor."
+
+    def _logs(n, extra=""):
+        d = _tmpdir("glsr-")
+        for i in range(1, n + 1):
+            os.makedirs(os.path.join(d, "sweep-%d" % i))
+            with open(os.path.join(d, "sweep-%d" % i, "sweep-%d.log" % i), "w") as f:
+                f.write("THIN — reported, not fatal: x (2)\n%s\n%s\n" % (_CLEAN, extra))
+        return d
+
+    _kind = lambda d, n, r: _sr.classify(d, n, r == "success")[0]
+    check("#128: every expected shard log present and clean with a GREEN job files nothing — the "
+          "report exists to name a problem, and inventing one is how a nightly stops being read",
+          _kind(_logs(12), 12, "success") == "GREEN")
+    check("#128: ...and the same logs with a FAILED job are reported as INFRA, not as a coverage "
+          "regression. Nothing drifted; whatever broke is in the run, and sending a reader to hunt "
+          "producers is the eight-day mistake this is named after",
+          _kind(_logs(12), 12, "failure") == "INFRA")
+    check("#128: ...and a MISSING shard log is INCOMPLETE rather than clean — this is the real "
+          "shape of run 34227453406, where the shard that failed is exactly the one whose verdict "
+          "never arrived. 'The logs I have are clean' is not 'the sweep was clean'",
+          _kind(_logs(11), 12, "failure") == "INCOMPLETE")
+    check("#128: ...and a real verdict line still reads REGRESSED, so narrowing the other three "
+          "cases did not cost the one the report was built for",
+          _kind(_logs(12, extra="DRIFT below floor: foo::bar"), 12, "failure") == "REGRESSED")
+    check("#128: ...and INCOMPLETE beats INFRA when both could apply — a job that failed AND lost a "
+          "log is unmeasured, and calling that infrastructure would report a denominator hole as a "
+          "clean bill",
+          _kind(_logs(11), 12, "failure") == "INCOMPLETE")
+    _t_inc, _b_inc = _sr.render("INCOMPLETE", [], {"a": ""}, 1, 12, "http://run")
+    check("#128: ...and the INCOMPLETE issue NAMES the shortfall in its title, because a title is "
+          "all a nightly issue gets read for: " + _t_inc,
+          "missing" in _t_inc and "NOT measured" in _t_inc and "11 of 12" not in _t_inc)
+    check("...and its body says how many logs it actually judged, so the denominator is on the page "
+          "rather than assumed",
+          "1 of 12 shard logs are present" in _b_inc or "Shard logs seen: 1 of 12" in _b_inc)
+
     print("mutation sweep coverage (default-deny over the producers it can find):")
     synth = ("def decides(x):\n"
              "    if x:\n"

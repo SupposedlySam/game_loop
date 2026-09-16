@@ -42,6 +42,21 @@ itself:
 The question that separates a measurement from a proxy is: *what would this check have to observe to
 be wrong?* If the answer is "something it never looks at", it is a proxy. Observe that instead.
 
+**A measurement licenses the sentence that reports it, and no sentence after that.** "I shipped it"
+is not "you have it." A fix reaches a consumer on UPGRADE, not on release, and whether it arrived is
+a fact about THEIR checkout — which is not the thing you measured.
+
+Four agents converged on this separately in one week, which is why it is here rather than in a
+comment. The instance that earned it: a consumer reported a defect in this repo's manifest reader, it
+was fixed and released, and they were told "your guard is redundant now." They checked before
+dropping it — their installed `VERSION` was four weeks behind and their parser byte-identical to the
+unfixed one, so taking that sentence would have removed their only cover while they still carried the
+defect. The fixed half was measured. The sentence about their tree was not, and it was false.
+
+The repair is not caution, it is a CONDITION they can test: not a date, not an assurance, but
+*"I will drop it when my own copy refuses."* State what shipped and in which commit; let the other
+side check arrival, because only they can.
+
 ## INV3 — Everything outside this repo is READ-ONLY
 
 Read other projects, mine them, use their data as fixtures. Never write, never run their tooling,

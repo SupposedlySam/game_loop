@@ -7786,6 +7786,46 @@ def main():
     # Both of its protections are failure modes somebody paid for: scanning the WHOLE message flags
     # a mid-prose mention the ending contradicts, and a guard that fires on an agent QUOTING a
     # marker phrase while writing the postmortem is a guard that gets switched off.
+    print("the stop gate reads CONTRACTIONS and inserted words, not exact strings:")
+    # THE GATE MISSED ONE, and the human caught it in the turn after the gate had fired on a
+    # DIFFERENT sentence and I had complied. The miss, verbatim:
+    #
+    #     "I'll pick it up next unless you'd rather I leave it session-scoped."
+    #
+    # It evaded BOTH lists at once. `_ASK_MARKERS` had "would you rather" and the sentence said
+    # "you'd rather" — a contraction and a different word order — with no question mark, so the
+    # tail test could not see it either. `_CONTINUE_MARKERS` had "i'll pick up" and the sentence
+    # said "i'll pick IT up" — one word inserted between verb and particle.
+    #
+    # The fix is not the two strings that would have patched that sentence: contractions are
+    # expanded before matching, so "i'll"/"i will" is ONE rule, and the verb-particle forms are
+    # patterns that tolerate an object between the halves. That is the same lesson _CONTINUE_MARKERS
+    # already carries from a consumer — a concept-level rule is checked against INTENT and the
+    # intent always feels fine; the WRITING is where the defect lives.
+    _agm = {"re": re}
+    exec(compile(_gsrc[_gsrc.index("_ASK_MARKERS = ["):
+                       _gsrc.index("_TRANSCRIPT_TAIL =")], "gate-slice", "exec"), _agm)
+    _ask, _cont = _agm["_asked_the_user"], _agm["_promised_to_continue"]
+    _MISS = "I'll pick it up next unless you'd rather I leave it session-scoped."
+    check("the exact sentence that got past this gate is now caught as a handback — no question "
+          "mark anywhere in it, so the tail test never had a chance and the marker list is what "
+          "had to see it",
+          _ask(_MISS) and "?" not in _MISS)
+    check("...and it is ALSO caught as a promise to continue, because a word between the verb and "
+          "its particle (\"pick IT up\") is invisible to substring matching",
+          _cont(_MISS))
+    check("a contraction and its expansion are ONE rule, not two entries — the list is written "
+          "expanded and the text is normalised before matching",
+          _ask("Would you rather I stopped?") and _ask("Tell me if you would rather I stopped")
+          and _cont("I'll take it from here") and _cont("I will take it from here"))
+    check("...and the verb-particle pattern does not fire on an ordinary report, so this stayed a "
+          "discrimination rather than becoming a ban on the letter I",
+          not _cont("Released as stable-129c99bb; verify green, 3088 passed, 0 failed.")
+          and not _ask("The gate blocked it and I rewrote the ending as a statement."))
+    check("...and a sentence that BOTH hands back and claims to be working trips both checks — "
+          "they are different failures and the report should say both",
+          _ask("Say the word and I will take it.") and _cont("Say the word and I will take it."))
+
     print("the closing a stop gate reads is the TAIL, unquoted and present-tense:")
     _gsrc = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
     _cm = {"re": re}

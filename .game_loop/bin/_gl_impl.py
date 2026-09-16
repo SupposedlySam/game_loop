@@ -5829,16 +5829,49 @@ _ASK_MARKERS = [
     "want me to", "should i ", "shall i ", "would you like", "do you want",
     "let me know", "your call", "which would you", "would you rather",
     "prefer that i", "happy to either", "or should we", "thoughts?",
+    # ADDED AFTER THE GATE MISSED ONE, reported by the human in the turn after it fired on a
+    # DIFFERENT sentence and I complied. The miss: "I'll pick it up next unless you'd rather I
+    # leave it session-scoped." No question mark, so the tail test could not see it, and
+    # "you'd rather" is not "would you rather" — a contraction and a different word order.
+    "you would rather", "unless you", "if you would prefer", "if you prefer",
+    "say the word", "up to you", "your preference", "or i can ", "or i could ",
 ]
+
+# CONTRACTIONS ARE WHY THE LIST MISSED IT, and expanding them is worth more than the two strings
+# it would have taken to patch that one sentence. Every marker here is written expanded, so
+# "you'd"/"you would" and "i'll"/"i will" are one entry rather than two, and the next contraction
+# nobody thought of is already covered.
+_CONTRACTIONS = (
+    ("won't", "will not"), ("can't", "cannot"), ("n't", " not"),
+    ("i'll", "i will"), ("we'll", "we will"), ("you'll", "you will"),
+    ("i'd", "i would"), ("you'd", "you would"), ("we'd", "we would"),
+    ("let's", "let us"), ("i'm", "i am"), ("you're", "you are"),
+)
+
+# A WORD INSERTED BETWEEN VERB AND PARTICLE also slipped past: the list had "i'll pick up" and the
+# sentence said "I'll pick it up". Substring matching cannot see that, so the verb-particle forms
+# are patterns rather than strings. Narrow on purpose — a first-person future verb about WORK.
+_CONTINUE_PATTERNS = (
+    r"\bi will (?:pick|take|carry|move|push|pull) (?:it|this|that|them|those|these) (?:up|on|over|forward|through)\b",
+    r"\bi will (?:get|set) (?:it|this|that) (?:done|going|started)\b",
+)
+
+
+def _normalise(text):
+    """Lowercased, contractions expanded, whitespace collapsed — so one marker covers both spellings."""
+    t = (text or "").lower()
+    for a, b in _CONTRACTIONS:
+        t = t.replace(a, b)
+    return re.sub(r"\s+", " ", t)
 
 
 def _asked_the_user(text):
     if not text:
         return False
-    t = text.lower()
-    if any(mk in t for mk in _ASK_MARKERS):
+    t = _normalise(text)
+    if any(_normalise(mk) in t for mk in _ASK_MARKERS):
         return True
-    tail = [ln.strip() for ln in t.strip().splitlines() if ln.strip()][-3:]
+    tail = [ln.strip() for ln in (text or "").lower().strip().splitlines() if ln.strip()][-3:]
     return any(ln.endswith("?") for ln in tail)
 
 
@@ -5896,7 +5929,12 @@ def _closing(text, lines=4):
 
 
 def _promised_to_continue(text):
-    return any(mk in _closing(text) for mk in _CONTINUE_MARKERS)
+    # Normalised for the same reason the ask-check is: "i'll" and "i will" are one rule, and the
+    # verb-particle patterns catch a word inserted between the two halves ("pick IT up").
+    tail = _normalise(_closing(text))
+    if any(_normalise(mk) in tail for mk in _CONTINUE_MARKERS):
+        return True
+    return any(re.search(pat, tail) for pat in _CONTINUE_PATTERNS)
 
 
 _TRANSCRIPT_TAIL = 250              # records kept from the end — a tail in LINES, never in bytes

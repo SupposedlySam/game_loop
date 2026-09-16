@@ -15915,6 +15915,34 @@ def main():
     check("no duplicate key means NO tail at all — the notice is the exception, not a banner on "
           "every run",
           _vmod["duplicate_key_tail"]() == "")
+    # A BACKSLASH IN A RULE IS REFUSED, NOT DECODED — reported by wcs, who ran the three legs
+    # against their own copy instead of reading them. This parser strips surrounding quotes and
+    # decodes NOTHING, so `bash -n \"$f\"` reaches the shell with the backslashes still attached
+    # and it looks for a file named "$f", quotes included.
+    #
+    # WCS'S POINT IS WHY THIS REFUSES RATHER THAN WARNS, and it is better than the one I had. The
+    # instance that was found failed CLOSED — the mangled filename errored, `|| exit 1` fired,
+    # verify went red, somebody looked. The same escape in a rule shaped to fail OPEN (anything
+    # ending `|| true`, a grep whose pattern merely stops matching, a test guarding an echo) prints
+    # GREEN while the check never runs. The visible failure is the lucky member of a family whose
+    # other members are silent, so a reader that handles most escapes and mis-executes the rest is
+    # worse than one that refuses the lot. There is also no yaml module to lean on here.
+    _vmod["ESCAPED_LINES"][:] = []
+    check("a manifest with no backslash produces NO refusal — this is the exception, not a banner",
+          _vmod["escaped_tail"]() == "")
+    _vmod["ESCAPED_LINES"].append((17, '- "for f in x; do bash -n \\"$f\\" || exit 1; done"'))
+    _et = _vmod["escaped_tail"]()
+    check("...and a rule carrying one is REFUSED, naming the line, because the command that runs "
+          "is not the command the file appears to say",
+          "REFUSED" in _et and "line 17" in _et)
+    check("...and it says NOTHING WAS CHECKED rather than reporting the other rules as fine — a "
+          "reader that mis-handles one escape has no claim on the rest of the file",
+          "NOTHING WAS CHECKED" in _et)
+    check("...and it states the silent half, which is the reason it refuses instead of warning: "
+          "the same escape in a rule ending `|| true` prints GREEN while the check never ran",
+          "GREEN" in _et and "never" in _et)
+    _vmod["ESCAPED_LINES"][:] = []
+
     _vmod["DUPLICATE_KEYS"][".game_loop/bin/guard-writes-impl.sh"] = 2
     _dt = _vmod["duplicate_key_tail"]()
     check("a key declared twice is REPORTED, so a merge nobody was told about cannot happen twice",

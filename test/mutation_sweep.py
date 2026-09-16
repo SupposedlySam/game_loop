@@ -537,6 +537,19 @@ MUTANTS = [
      "ONE THING HERE IS AN OPEN UNDER-REPORT, recorded rather than tidied: the run said 0 of this "
      "mark set name the single killer, so the killer is an assertion other than the three written "
      "for it, and the marks do not yet point at whatever that is.", 1),
+    ("escaped_tail -> a rule this reader cannot execute faithfully runs anyway",
+     ".game_loop/bin/verify::escaped_tail", '    return ""\n',
+     ['no backslash produces NO refusal', 'is REFUSED, naming the line',
+      'NOTHING WAS CHECKED', 'states the silent half'],
+     "FLOOR OWED, RECORDED 0 — this file's standing precedent over a hand-measured number. "
+     "REPORTED BY A CONSUMER (wcs) who ran the legs against their own copy rather than reading "
+     "them: the manifest reader strips quotes and decodes NOTHING, so a YAML escape reaches the "
+     "shell as literal bytes and the command that runs is not the command the file says. "
+     "NEUTERED TO \"\" IS THE OLD BEHAVIOUR EXACTLY — before this, a backslashed rule was parsed "
+     "and run — so the mutant is the defect rather than a scramble. Their argument is why it "
+     "refuses instead of warning, and it is the better one: the instance found failed CLOSED and "
+     "went red, while the same escape in a rule ending `|| true` prints green with the check never "
+     "run. The visible failure is the lucky member of a silent family.", 0),
     ("sweep_report.classify -> every failed run reads as the same accusation",
      ".github/sweep_report.py::classify", '    return "REGRESSED", [], {}, 0\n',
      ['reported as INFRA, not as a coverage regression', 'INCOMPLETE rather than clean',

@@ -247,6 +247,16 @@
 # rule, which is #119's shape in a file added the same hour #119's lesson was being applied. A
 # report that names the wrong cause is what cost eight unread days; the logic deciding that name
 # owes a check.
+# THE HARNESS THAT EXERCISES EVERY SHIPPED TRIGGER EXAMPLE, and it had been DEAD. Found 2026-09-17
+# while adding a third example: it exited 2 before running a single case. Two regressions from one
+# old refactor — splitting the CLI into a stub plus _gl_impl dropped the `__main__` guard, so
+# importing `bin/game_loop` ran argparse and exited, and `log_kinds` moved out from under the
+# loader. Neither was noticed because this file matched no rule and is run by neither the suite nor
+# CI, which is the third instance of #119's shape. The examples it guards are what consumers copy.
+"test/trigger_fixtures.py":
+  - "python3 test/trigger_fixtures.py"
+"templates/triggers.d-examples/*.sh":
+  - "python3 test/trigger_fixtures.py"
 ".github/sweep_report.py":
   - "python3 test/run.py --section 'house voice' --section 'the nightly sweep reports what it MEASURED'"
 "install.sh":

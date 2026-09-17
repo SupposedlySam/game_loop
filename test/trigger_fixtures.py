@@ -216,8 +216,12 @@ def load_log_kinds():
                              "sessions", "log.jsonl", "state.json", "upstream.json",
                              "config.local.json", "triggers.json", "triggers.d",
                              "UPSTREAM_LEDGER.md", ".game_loop_self"))
+        # `_gl_impl.py`, NOT the `bin/game_loop` stub. `log_kinds` moved into the implementation
+        # when the CLI was split into a thin door plus _gl_impl, and this loader was never
+        # repointed — the second half of the same regression as the missing __main__ guard, and
+        # invisible for the same reason: nothing runs this file. It is in verify.yaml now.
         loader = importlib.machinery.SourceFileLoader(
-            "gl_fixtures_kinds", os.path.join(dst, "bin", "game_loop"))
+            "gl_fixtures_kinds", os.path.join(dst, "bin", "_gl_impl.py"))
         os.environ["GAME_LOOP_HOME"] = dst
         mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("gl_fixtures_kinds", loader))
         loader.exec_module(mod)
@@ -307,6 +311,59 @@ def main():
     check("quiet — the stubbed tool itself fails (room unreachable): fails open, not closed",
           code == 0)
     record("example-answer-owed", fired=False)
+
+    # ── example-open-issues.sh — the work queue, which SHIPS because three projects rebuilt it ──
+    # Audited 2026-09-17: llm_chat, showrunner and this repo had each built this attachment
+    # independently, every one of them from a broadcast rather than a file, and they had drifted —
+    # one 70 lines to another's 50, one having lost the acknowledgement mechanism entirely so a
+    # reply its author had settled re-reported forever. A copy taken from a message never receives
+    # the original's later fixes; a copy taken from templates/ upgrades with the payload.
+    #
+    # It REPORTS and never blocks, so "firing" here means "named work", not "exit non-zero".
+    OPEN_SH = os.path.join(REPO, "templates", "triggers.d-examples", "example-open-issues.sh")
+    GH_TWO = ('case "$*" in\n'
+              '  *"repo view"*) echo "acme/widget" ;;\n'
+              '  *"issue list"*) echo \'[{"number":7,"title":"a real one","labels":[]},'
+              '{"number":9,"title":"awaiting a call","labels":[{"name":"needs-input"}]}]\' ;;\n'
+              'esac')
+    code, out_, _ = run_stubbed_trigger("bash %s" % OPEN_SH, "gh", GH_TWO)
+    check("FIRING — actionable work is listed, and the issue WAITING ON A HUMAN is counted "
+          "separately rather than listed beside it: a report that mixes them trains the reader to "
+          "skim, which is how a standing queue stops being read",
+          code == 0 and "#7" in out_ and "1 issue(s) actionable, 1 waiting" in out_
+          and "do not guess these" in out_)
+    record("example-open-issues.sh", fired=True)
+
+    GH_NONE = ('case "$*" in\n'
+               '  *"repo view"*) echo "acme/widget" ;;\n'
+               '  *"issue list"*) echo "[]" ;;\n'
+               'esac')
+    code, out_, _ = run_stubbed_trigger("bash %s" % OPEN_SH, "gh", GH_NONE)
+    check("quiet — an empty queue says it is GENUINELY empty, which is a different sentence from "
+          "the could-not-look case below",
+          code == 0 and "genuinely empty" in out_)
+    record("example-open-issues.sh", fired=False)
+
+    # THE ONE THAT MATTERS MOST (INV8): a tracker that refuses must NOT read as an empty queue.
+    # Those two are the same bytes to a careless reader and they mean opposite things.
+    GH_DOWN = ('case "$*" in\n'
+               '  *"repo view"*) echo "acme/widget" ;;\n'
+               '  *"issue list"*) echo "HTTP 403: rate limited"; exit 1 ;;\n'
+               'esac')
+    code, out_, err = run_stubbed_trigger("bash %s" % OPEN_SH, "gh", GH_DOWN)
+    check("could-not-look is NOT an empty queue — the tracker refusing exits non-zero and names "
+          "the refusal, where reporting zero issues would be a silent false all-clear",
+          code != 0 and "could not reach" in err and "genuinely empty" not in out_)
+
+    # AND THE REPO IS ASKED FOR, NOT HARDCODED — the single change that makes the file copyable.
+    # Every instance found in the audit named its own repo in a string, so it could not move
+    # between projects without an edit somebody had to remember to make.
+    GH_NOREPO = 'case "$*" in\n  *"repo view"*) exit 1 ;;\n  *) echo "[]" ;;\nesac'
+    code, _, err = run_stubbed_trigger("bash %s" % OPEN_SH, "gh", GH_NOREPO)
+    check("...and with no resolvable repo it refuses and says so, rather than reporting the queue "
+          "of whatever repo happened to be nearby",
+          code != 0 and "not a GitHub checkout" in err)
+
 
     print()
     print("fixture shape 4 (repo + origin/main + feature branch) — self-test, infrastructure only:")

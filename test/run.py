@@ -558,6 +558,51 @@ def main():
               gl(proj, "claim", "--assert", "x", "--read", real).returncode == 0
               and _logk("claim") == _c_before + 1)
 
+        print("the stop gate survives a CLEAR for three turn-ends (the clear-then-stall):")
+        # THE HOLE THE HUMAN NAMED, ACROSS SEVERAL AGENTS AND NOT ONE. Clearing a mandate switches
+        # this gate off, and the turn-end most likely to be a stall is the very next one: clear,
+        # say "I'll start on that now", stop. The announce-then-stop detector for that exact
+        # sentence sat eighty lines below the inert return and was UNREACHABLE, because the clear
+        # had already returned.
+        #
+        # Measured here afterwards rather than taken on the anecdote: 4 of this repo's 7 clears are
+        # followed within ONE MINUTE by the watchdog going quiet, which is the log's shape for
+        # "cleared it and stopped".
+        #
+        # BOUNDED TO THREE TURN-ENDS ON PURPOSE. `_stop_verdict`'s own docstring says blocking every
+        # turn-end equally prices a progress report like an interruption and decays into a nag that
+        # gets ignored. This is not "always on" — it is the one detector about a FALSE STATEMENT
+        # rather than about asking, kept alive across the moment it exists for.
+        _CLEARED = {"mandate": {"active": False, "cleared_at": "2026-09-17T09:00:00"},
+                    "stops_since_clear": 0}
+        _NEVER = {"mandate": {}, "stops_since_clear": 0}
+        _SPENT = {"mandate": {"active": False, "cleared_at": "2026-09-17T09:00:00"},
+                  "stops_since_clear": 3}
+        # Loaded by path here: `_pgm` is not bound until far later in this file, and reaching for
+        # a name that does not exist yet is how a paste fails at the seam rather than in the body.
+        _cs_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_clearstall", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _csm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_cs_spec)
+        _cs_spec.loader.exec_module(_csm)
+        _sv = lambda st, txt: _csm._stop_verdict(
+            {"mandate": dict(st["mandate"]), "stops_since_clear": st["stops_since_clear"]},
+            {"last_assistant_message": txt})
+        check("a mandate cleared and then a claim to be carrying on is REFUSED — clearing says the "
+              "work is done and announcing says it is not, and stopping says neither",
+              _sv(_CLEARED, "Cleared it. I'll start on that now.")[0] is False)
+        check("...and the refusal NAMES the clear it is about, so the reader is not left guessing "
+              "which of the two statements the gate disbelieved",
+              "cleared the mandate" in (_sv(_CLEARED, "I'll start on that now.")[2] or ""))
+        check("...while an honest report after the same clear passes — the gate is about the "
+              "contradiction, not about having cleared",
+              _sv(_CLEARED, "Cleared it. 2937 passed, 0 failed.")[0] is True)
+        check("...and a session that NEVER had a mandate is untouched by it, which is what keeps "
+              "this from sitting between the human and an ordinary conversation",
+              _sv(_NEVER, "I'll start on that now.")[0] is True)
+        check("...and the window is SPENT after three turn-ends rather than arming forever — a "
+              "gate that never stands down is the nag its own docstring warns about",
+              _sv(_SPENT, "I'll start on that now.")[0] is True)
+
         print("stop gate (no mandate = inert):")
         r = gl(proj, "stopgate", stdin='{"last_assistant_message":"want me to continue?"}')
         # NOT STRENGTHENED, AND THAT IS THE HONEST ANSWER. With no mandate the gate is inert and

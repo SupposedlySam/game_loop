@@ -2702,6 +2702,7 @@ def cmd_mandate(s, a):
         m["active"] = False
         m["cleared_at"] = now()
         s["stop_blocks"] = 0
+        s["stops_since_clear"] = 0     # each clear gets its own window; see cmd_stopgate
         save(s)
         logline({"kind": "mandate_clear", "text": m.get("text"), "notes": a.notes,
                  "was_parked": was_parked})
@@ -6190,8 +6191,38 @@ def _stop_verdict(s, payload):
     """
     m = s.get("mandate") or {}
     if not m.get("active"):
-        # With no mandate bound, this gate is INERT. It must never sit between the human and a normal
-        # conversation, or it earns its own removal.
+        # WITH ONE EXCEPTION, ADDED BECAUSE THE INERTNESS HAD A HOLE EXACTLY WHERE IT HURT. Clearing
+        # a mandate switches this gate off, and the turn-end most likely to be a stall is the one
+        # right after that: clear, say "I'll start on that now", and stop. The announce-then-stop
+        # detector for that exact sentence lives 80 lines below and was unreachable, because the
+        # clear had already returned here.
+        #
+        # Reported by the human across SEVERAL agents, not one. Measured here afterwards: 4 of this
+        # repo's 7 clears are followed within ONE MINUTE by the watchdog going quiet, which is the
+        # log's shape for "cleared it and stopped".
+        #
+        # ARMED FOR THREE TURN-ENDS, NOT FOREVER. The docstring above is right that blocking every
+        # turn-end equally decays into a nag that gets ignored — so this is not "the gate is always
+        # on". It is the one detector that is about a FALSE STATEMENT rather than about asking, kept
+        # alive across the moment it was written for. After three turn-ends it goes quiet again.
+        # READ ONLY HERE. This function's docstring promises a pure decision so a suite can drive
+        # every branch, and the first version of this counted the turn-end and saved state inside
+        # it — which would have made the branch untestable without a real state file, in the
+        # function whose whole design note is that it is testable.
+        if m.get("cleared_at") and s.get("stops_since_clear", 0) < 3:
+            _t, _ = _last_assistant_text(payload)
+            if _promised_to_continue(_t):
+                return False, "cleared-then-announced", (
+                    "STOP GATE — you cleared the mandate and then said you were carrying on.\n\n"
+                    "  cleared: %s\n\n"
+                    "Those two cannot both be true at a turn-end. Clearing says the work is done;\n"
+                    "announcing says it is not, and stopping says neither. This is the stall the\n"
+                    "gate stays armed for — three turn-ends after a clear and no longer.\n\n"
+                    "Either DO the thing you just named, or end with what is actually true:\n"
+                    "the work is finished and you are waiting for them."
+                    % (m.get("cleared_at") or "?"))
+        # With no mandate bound, this gate is otherwise INERT. It must never sit between the human
+        # and a normal conversation, or it earns its own removal.
         return True, "no mandate bound — gate inert", None
 
     if payload.get("stop_hook_active"):
@@ -6555,6 +6586,12 @@ def cmd_stopgate(s, a, payload):
         s["_tpath"] = payload["transcript_path"]
 
     allow, reason, rec = _stop_verdict(s, payload)
+    # The post-clear window is counted HERE, not in the verdict: that function is documented as a
+    # pure decision so the suite can drive it, and a counter that writes state would end that.
+    _mand = s.get("mandate") or {}
+    if not _mand.get("active") and _mand.get("cleared_at"):
+        s["stops_since_clear"] = s.get("stops_since_clear", 0) + 1
+        save(s)
     if rec:
         logline(rec)
     if allow:

@@ -306,11 +306,23 @@
   - ".gitignore"
   # .claude/settings.json is NOT here -- it has its own rule above. The rest of .claude/ is local
   # session wiring nobody else runs.
-  - ".claude/agents/**"
-  - ".claude/skills/**"
+  #
+  # `.claude/agents/**`, `.claude/skills/**` AND `.game_loop/notify.json` WERE HERE AND ARE GONE
+  # (#99). None of the three matched a tracked file, and `verify --coverage` names that state in
+  # its own words: "when a file finally lands under one of these, it arrives EXEMPT and this report
+  # says clean without ever looking. Delete the entry and let the gate ask you then."
+  #
+  # The first two mattered most, because agents and skills are concepts this repo DOCUMENTS — files
+  # will land there, and they would have arrived pre-exempted by a line written before they
+  # existed, silently, since an exemption says nothing when it works. notify.json is gitignored so
+  # it could never appear as a changed tracked file; it went because a harmless entry sitting
+  # beside two live gaps reads like the same decision, and the next reader cannot tell them apart.
+  #
+  # `.saggar/**` STAYS, and the difference is the point: it is another tool's manifest that nothing
+  # here reads, so the answer when a file lands is still "excluded on purpose". A stated decision
+  # about a surface we do not own is not the same object as a gap nobody noticed.
   - ".game_loop/*.md"
   - ".game_loop/config.json"
-  - ".game_loop/notify.json"
   # saggar's own project manifest, written by `saggar init` and by the app. It is that tool's file,
   # not this repo's: nothing here reads it, and no command exists that fails when its contents are
   # wrong. `successor` detects saggar from SAGGAR_SESSION in the environment and never opens this,

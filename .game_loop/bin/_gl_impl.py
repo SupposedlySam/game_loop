@@ -3190,24 +3190,56 @@ def release_distance():
     than against a branch: `stable`/`beta` are what this project tells consumers to install, and the
     gap that matters is between what exists and what they can get.
     """
-    tags = _git("tag", "-l", "stable-*", "beta-*") or ""
-    marked = [t for t in tags.split("\n") if t.strip()]
-    if not marked:
-        return 0, None, None          # never released: no distance is owed, and none is implied
-    best_n, best_sha, best_lvl = None, None, None
-    for t in marked:
-        sha = _git("rev-list", "-n", "1", t)
-        if not sha:
+    # TWO GIT PROCESSES PER TAG IS WHY A TURN-END TOOK SIXTEEN MINUTES. This loop ran
+    # `rev-list -n 1 <tag>` and `rev-list --count sha..HEAD` for EVERY marked tag: at 254 tags that
+    # is 508 subprocess spawns, measured at 263s inside one `checkpoint`, and a sample of the
+    # running process was almost entirely Python import/exec — the cost of starting processes, not
+    # of walking history.
+    #
+    # THE SHAPE WAS THE WORST AVAILABLE: the gate that guards RELEASING got slower every time you
+    # released, so the project punished exactly the thing it was built to encourage. Ten tags
+    # landed here in one day and each one made every future turn-end dearer.
+    #
+    # Three calls now, whatever the tag count. `for-each-ref` resolves every tag to its commit in
+    # one pass; walking `rev-list HEAD` once finds the NEAREST marked ancestor, which is by
+    # definition the smallest distance; and the exact count is then asked for that one tag only, so
+    # the number this returns is the same number the loop returned.
+    # `%(*objectname)` FIRST, AND THAT IS NOT A DETAIL. `confidence` writes ANNOTATED tags, so
+    # `%(objectname)` is the sha of the TAG OBJECT, not of the commit — it never appears in
+    # `rev-list HEAD`, so a lookup keyed on it matches nothing and this returns "nothing owed" for
+    # every input. That is a gate which can never fire, and the first version of this fix had it.
+    #
+    # It survived the equivalence check because the old and new code agreed on six sampled heads —
+    # both answering 0, for opposite reasons. Caught only by asking for a commit with no tag on it
+    # and finding the list was wrong. The deref field is empty for a lightweight tag, so taking it
+    # when present and falling back covers both kinds.
+    want = {}
+    for line in (_git("for-each-ref", "--format=%(*objectname) %(objectname) %(refname:short)",
+                      "refs/tags/stable-*", "refs/tags/beta-*") or "").split("\n"):
+        parts = line.split(None, 2)
+        if len(parts) == 3:
+            deref, direct, name = parts
+            want.setdefault(deref or direct, name)
+        elif len(parts) == 2:                       # lightweight: the deref field came back empty
+            want.setdefault(parts[0], parts[1])
+    if not want:
+        return 0, None, None
+    for sha in (_git("rev-list", "HEAD") or "").split("\n"):
+        sha = sha.strip()
+        if sha not in want:
             continue
         n = _git("rev-list", "--count", f"{sha}..HEAD")
         if n is None or not str(n).strip().isdigit():
-            continue
+            return 0, None, None
         n = int(n)
-        if best_n is None or n < best_n:
-            best_n, best_sha, best_lvl = n, sha, t.split("-")[0]
-    if not best_sha or not best_n:
-        return 0, None, None
-    return best_n, best_sha, best_lvl
+        if not n:
+            return 0, None, None       # HEAD is itself marked: nothing owed
+        return n, sha, want[sha].split("-")[0]
+    # NO MARKED TAG IS AN ANCESTOR OF HEAD — a branch nobody has released from. The old loop would
+    # have measured against a tag off to one side, which is a distance to a commit this history
+    # does not contain. Saying nothing is owed is the honest answer and the safe direction: this
+    # gate refuses handbacks, and refusing on an unanswerable question is how a gate gets removed.
+    return 0, None, None
 
 
 def newest_mark():

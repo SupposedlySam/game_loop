@@ -558,6 +558,68 @@ def main():
               gl(proj, "claim", "--assert", "x", "--read", real).returncode == 0
               and _logk("claim") == _c_before + 1)
 
+        print("release_distance asks git ONCE, and resolves an annotated tag to its commit:")
+        # A TURN-END TOOK SIXTEEN MINUTES AND THIS WAS ALL OF IT. The old loop ran two git
+        # processes PER MARKED TAG — at 254 tags, 508 spawns — measured at 263s inside a single
+        # `checkpoint`, with a sample of the running process showing almost nothing but Python
+        # import/exec: the cost of starting processes, not of walking history.
+        #
+        # The shape was the worst available: the gate guarding RELEASING got slower every time you
+        # released. Ten tags landed in one day and each made every later turn-end dearer.
+        #
+        # DRIVEN AT THE LOGIC WITH GIT STUBBED, because the two things that broke are both parsing
+        # decisions, and a fixture repo would test git instead of them.
+        _rd_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_reldist", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _rdm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_rd_spec)
+        _rd_spec.loader.exec_module(_rdm)
+        _calls = []
+
+        def _fake_git(*a):
+            _calls.append(a)
+            if a[0] == "for-each-ref":
+                # An ANNOTATED tag yields the TAG OBJECT in %(objectname) and the commit only in
+                # %(*objectname). `confidence` writes annotated tags, so keying on the first field
+                # matches nothing that ever appears in rev-list — a gate that can never fire.
+                return ("cccc1111 tagobj9999 stable-cccc1111\n"
+                        " dddd2222 beta-dddd2222")          # lightweight: deref field empty
+            if a[0] == "rev-list" and a[1] == "HEAD":
+                return "aaaa0000\nbbbb0001\ncccc1111\ndddd2222"
+            if a[0] == "rev-list" and a[1] == "--count":
+                return "2"
+            return ""
+
+        _real_git = _rdm._git
+        try:
+            _rdm._git = _fake_git
+            _got = _rdm.release_distance()
+        finally:
+            _rdm._git = _real_git
+        check("an ANNOTATED tag is resolved to its COMMIT — %(objectname) is the tag object and "
+              "never appears in rev-list, so keying on it makes this return 'nothing owed' for "
+              "every input, which is a gate that cannot fire",
+              _got == (2, "cccc1111", "stable"))
+        check("...and it asks git a FIXED number of times rather than twice per tag: the old loop "
+              "spawned 508 processes at this repo's tag count and got slower with every release",
+              len(_calls) <= 4)
+        check("...and it walks HEAD's own history, so the mark it reports is an ANCESTOR. The old "
+              "minimum was taken over every tag including DESCENDANTS, where count(desc..HEAD) is "
+              "0 and zero always wins a minimum — so a head behind any tag read as nothing owed",
+              any(c[0] == "rev-list" and c[1] == "HEAD" for c in _calls))
+
+        _calls.clear()
+
+        def _no_tags(*a):
+            _calls.append(a)
+            return "" if a[0] == "for-each-ref" else "aaaa0000"
+        try:
+            _rdm._git = _no_tags
+            _none = _rdm.release_distance()
+        finally:
+            _rdm._git = _real_git
+        check("...and a project with no marks at all owes no distance, without walking anything",
+              _none == (0, None, None))
+
         print("the stop gate survives a CLEAR for three turn-ends (the clear-then-stall):")
         # THE HOLE THE HUMAN NAMED, ACROSS SEVERAL AGENTS AND NOT ONE. Clearing a mandate switches
         # this gate off, and the turn-end most likely to be a stall is the very next one: clear,

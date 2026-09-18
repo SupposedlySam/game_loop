@@ -550,6 +550,18 @@ MUTANTS = [
      "refuses instead of warning, and it is the better one: the instance found failed CLOSED and "
      "went red, while the same escape in a rule ending `|| true` prints green with the check never "
      "run. The visible failure is the lucky member of a silent family.", 0),
+    ("release_distance -> nothing is ever owed, so the release gate can never fire",
+     ".game_loop/bin/_gl_impl.py::release_distance", "    return 0, None, None\n",
+     ['ANNOTATED tag is resolved to its COMMIT', 'asks git a FIXED number of times',
+      "walks HEAD's own history", 'no marks at all owes no distance'],
+     "FLOOR OWED, RECORDED 0 — this file's standing precedent over a hand-measured number. "
+     "NEUTERED TO THE OLD BUG EXACTLY: before the annotated-tag fix this returned (0, None, None) "
+     "for every input, because %(objectname) on an annotated tag is the TAG OBJECT and never "
+     "appears in rev-list, so the lookup matched nothing. A gate that cannot fire. It also carried "
+     "a second fault the mutant reproduces — the minimum was taken over every tag INCLUDING "
+     "descendants, and count(descendant..HEAD) is 0, which always wins a minimum, so any head "
+     "behind a tag read as nothing owed. The mutant is therefore the defect rather than a "
+     "scramble, and the assertions that kill it are the ones reading the returned tuple.", 0),
     ("sweep_report.classify -> every failed run reads as the same accusation",
      ".github/sweep_report.py::classify", '    return "REGRESSED", [], {}, 0\n',
      ['reported as INFRA, not as a coverage regression', 'INCOMPLETE rather than clean',
@@ -1974,6 +1986,16 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    # A TEST STUB IS NOT A PRODUCER. `_fake_git` exists inside test/run.py to feed
+    # `release_distance` canned git output, so the two parsing decisions that broke there can be
+    # driven without a fixture repo testing git instead of them. Neutering it would mutate the
+    # FIXTURE, and an assertion about a stub that no longer answers is a test of the test.
+    #
+    # Declared rather than renamed around: the default-deny gate is right to notice a new def, and
+    # the honest answer to "is this swept?" is a written no with a reason.
+    "test/run.py::_fake_git":
+        "a fixture stub feeding canned git output to release_distance — mutating it tests the "
+        "fixture, not the code under it",
     # ── DECLARED DEBT, NOT A WAIVER: two producers added the same day, floors OWED ─────────────
     # These are swept-worthy and I am not pretending otherwise. What I will not do is invent their
     # floors, because I just watched hand measurement OVERSTATE: `wiring_drift` and

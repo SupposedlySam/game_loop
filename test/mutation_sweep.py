@@ -566,6 +566,30 @@ MUTANTS = [
      "reading the warning's TEXT can kill it — this file's standing nothing-direction caveat. The "
      "neutered form is exactly the behaviour being repaired: the entry was dropped and nobody was "
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
+    ("parse_expires -> every --expires value is accepted as 'never'",
+     ".game_loop/bin/_gl_impl.py::parse_expires", "    return None\n",
+     ['bare number, a month, and a word are all REFUSED', 'duration and a date are both accepted'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO None IS THE PRE-FIX WORLD EXACTLY — before this every "
+     "grant was unbounded in time — so the mutant is the defect rather than a scramble. It is also "
+     "the SILENT direction: a grant that never lapses refuses nothing and looks identical to one "
+     "whose date has not arrived, which is why the killers are the assertions about REFUSING a "
+     "value rather than any about a grant staying live.", 0),
+    ("grant_expired -> a lapsed grant is honoured by every rail, forever",
+     ".game_loop/bin/_gl_impl.py::grant_expired", "    return False\n",
+     ['expired, spent and neither are three distinct states', 'grant_live is ONE definition',
+      'counts LAPSED apart from spent'],
+     "FLOOR OWED, RECORDED 0. This is the one function the three guards and the report all reduce "
+     "to, so neutering it re-opens every lapsed hatch at once while `status` still prints the "
+     "expiry date beside them — the record saying closed over a hatch that is open, which is this "
+     "repo's recurring defect in the place nobody re-reads.", 0),
+    ("grant_age_note -> a six-week-old grant looks exactly like one granted this morning",
+     ".game_loop/bin/_gl_impl.py::grant_age_note", '    return ""\n',
+     ['live grant\'s AGE is printed beside its balance', 'SILENT under a day'],
+     "FLOOR OWED, RECORDED 0, AND EXPECT THE NOTHING-DIRECTION CAVEAT: neutered to \"\" this "
+     "satisfies the silent-under-a-day assertion BY CONSTRUCTION, so only the one requiring the "
+     "note to APPEAR can kill it. wcs is the measured instance this exists for — they read past "
+     "\"5 live, 6 spent\" on every run of a long session and then reported that status did not "
+     "surface grants at all.", 0),
     ("unbound_mandate_notice -> the notice never has anything to say",
      ".game_loop/bin/_gl_impl.py::unbound_mandate_notice", '    return ""\n',
      ['FIRES on the case it exists for', 'never REFUSES', 'says so in BOTH directions'],

@@ -1066,6 +1066,29 @@ def wake_landed_lines(s):
     return L
 
 
+def grant_age_note(a, now_iso=None):
+    """" · granted N days ago" for a grant old enough that its age is the interesting fact, else "".
+
+    SILENT UNDER A DAY, because on the day it was granted the age says nothing anybody does not
+    already know, and a note that prints on every grant is a note that stops being read — the same
+    failure the bare live/spent count already demonstrated on a real reader.
+    """
+    at = str((a or {}).get("at") or "")[:19]
+    if len(at) < 19:
+        return ""
+    try:
+        then = datetime.datetime.fromisoformat(at)
+        cur = datetime.datetime.fromisoformat(str(now_iso or now())[:19])
+    except ValueError:
+        return ""
+    days = (cur - then).days
+    if days < 1:
+        return ""
+    exp = (a or {}).get("expires_at")
+    return " · granted %d day%s ago%s" % (days, "" if days == 1 else "s",
+                                          "" if exp else ", NO EXPIRY")
+
+
 def authorizations_report(s):
     """The `authorize` grants this session holds, and what is LEFT of each.
 
@@ -1086,7 +1109,11 @@ def authorizations_report(s):
     auth = [a for a in (s.get("authorized") or []) if isinstance(a, dict)]
     if not auth:
         return []
-    live = [a for a in auth if int(a.get("uses_left") or 0) > 0]
+    _n = now()
+    live = [a for a in auth if grant_live(a, _n)]
+    # AN EXPIRED GRANT IS NOT A SPENT ONE EITHER, and it is not revoked: nobody withdrew it and
+    # nobody used it, the clock closed it. Three ways to stop being live, three counts.
+    expired = [a for a in auth if grant_expired(a, _n) and int(a.get("uses_left") or 0) > 0]
     # A REVOKED GRANT IS NOT A SPENT ONE. Folding them together would say a hatch was opened and
     # used when it was withdrawn unused — the same conflation the `--revoke` refusal exists to
     # prevent, one surface over. The extra clause appears only once something has been revoked, so
@@ -1094,10 +1121,16 @@ def authorizations_report(s):
     dead = [a for a in auth if int(a.get("uses_left") or 0) <= 0]
     revoked = [a for a in dead if a.get("revoked_at")]
     spent = len(dead) - len(revoked)
-    L = ["", "authorize grants: %d live, %d spent%s"
-         % (len(live), spent, (", %d revoked" % len(revoked)) if revoked else "")]
+    L = ["", "authorize grants: %d live, %d spent%s%s"
+         % (len(live), spent, (", %d revoked" % len(revoked)) if revoked else "",
+            (", %d lapsed" % len(expired)) if expired else "")]
     for a in live[:6]:
-        L.append(f"  {int(a.get('uses_left') or 0):>3} left · {a.get('path')}")
+        # THE AGE, BESIDE THE BALANCE. wcs read past "5 live, 6 spent" on every run of a long
+        # session and then reported that status did not surface grants at all — so the count alone
+        # is demonstrably not enough to make a stale grant look stale. An age is the one number
+        # that says which of these was a decision made for the work in front of you.
+        L.append("  %3d left · %s%s" % (int(a.get("uses_left") or 0), a.get("path"),
+                                        grant_age_note(a, _n)))
     if len(live) > 6:
         L.append(f"  ... and {len(live) - 6} more live")
     L.append("  A GRANT IS A CONSUMABLE, and running a guard SPENDS one — a probe decides and")
@@ -4523,6 +4556,92 @@ def recurrence_lines(reason, real, raw_path):
     return lines
 
 
+# ── a grant that lapses ──────────────────────────────────────────────────────────────────────────
+#
+# "A GRANT THAT LAPSES IS NOT A REMINDER; IT IS THE GUARD CLOSING ITSELF." — wcs, who argued me out
+# of the cheaper version of this and was right.
+#
+# THE HATCH IS "LOUD, NARROW, SINGLE-USE". Narrow has always meant narrow in PATH and narrow in
+# COUNT, and unbounded in TIME — and time is the only one of the three that acts while nobody is
+# looking, which is exactly the condition under which a stale grant is dangerous. wcs measured five
+# live grants and thirteen unspent uses in their tree, one dated six weeks earlier with eight uses
+# left, covering a repo root, an app container data dir, ~/.config/showrunner and an MCP verb.
+#
+# I PROPOSED THE CHEAPER RUNG AND IT WAS ALREADY REFUTED. My argument was that a lapse only helps
+# where somebody remembers to set one, so status should name a grant's AGE instead. wcs's answer
+# was to point at themselves: `status` printed "authorize grants: 5 live, 6 spent" on every run of
+# a long session, they read past it every time, and then told the human it did not surface grants
+# at all. Asking that same line to argue harder is asking a channel to succeed where it has just
+# demonstrably failed, on the same reader. Both are built; neither is traded for the other.
+
+_DUR_PAT = re.compile(r"^\s*(\d+)\s*([mhdw])\s*$", re.I)
+_ISO_DATE_PAT = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})\s*$")
+_ISO_FULL_PAT = re.compile(r"^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)\s*$")
+_DUR_SECONDS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def parse_expires(spec, base_epoch=None):
+    """An --expires value as an ISO instant, or None for "never". Raises ValueError on nonsense.
+
+    ACCEPTS A DURATION OR A DATE, and refuses a bare number in either direction. "2" is the one
+    input where a wrong guess is invisible: read as minutes it lapses during the call that set it,
+    read as days it covers a week of unattended runs, and nothing downstream can tell which the
+    human meant. `m` is MINUTES, deliberately, and months are not a unit here — a grant measured in
+    months is the thing this exists to prevent.
+
+    A DATE-ONLY VALUE MEANS THE END OF THAT DAY. Comparison downstream is lexicographic against
+    now()'s "%Y-%m-%dT%H:%M:%S", so a bare "2026-09-20" would otherwise mean one second past
+    midnight — a grant that lapses before the morning of the day the human named it for.
+    """
+    if spec is None:
+        return None
+    raw = str(spec).strip()
+    if not raw or raw.lower() in ("never", "none", "off"):
+        return None
+    m = _DUR_PAT.match(raw)
+    if m:
+        n = int(m.group(1))
+        if n <= 0:
+            raise ValueError("a duration of %r lapses before the grant is written down" % raw)
+        base = time.time() if base_epoch is None else base_epoch
+        return datetime.datetime.fromtimestamp(
+            base + n * _DUR_SECONDS[m.group(2).lower()]).isoformat(timespec="seconds")
+    m = _ISO_DATE_PAT.match(raw)
+    if m:
+        return m.group(1) + "T23:59:59"
+    m = _ISO_FULL_PAT.match(raw)
+    if m:
+        v = m.group(1).replace(" ", "T")
+        return v if len(v) > 16 else v + ":00"
+    raise ValueError(
+        "--expires %r is neither a duration nor a date.\n"
+        "  duration : 30m  2h  7d  1w   (m is MINUTES; months are not a unit here)\n"
+        "  date     : 2026-09-30   or   2026-09-30T17:00\n"
+        "  never    : --expires never\n"
+        "A bare number is refused on purpose: read as minutes it lapses during this call, read as\n"
+        "days it covers a week of unattended runs, and nothing downstream can tell which you meant."
+        % raw)
+
+
+def grant_expired(a, now_iso=None):
+    """Has this grant lapsed? False when it carries no expiry, which is the default and the old
+    behaviour exactly. Lexicographic on purpose: both sides are written by now()'s format."""
+    exp = (a or {}).get("expires_at")
+    if not exp:
+        return False
+    return str(now_iso or now()) >= str(exp)
+
+
+def grant_live(a, now_iso=None):
+    """The one definition of live, so status and the three guards cannot drift apart.
+
+    THEY ALREADY COULD. Before this the gate was `uses_left > 0` written out by hand in four places
+    — status, the write guard, the gh guard and the MCP guard — and adding a second condition to
+    three of four is how a grant comes to be refused by one rail and honoured by another.
+    """
+    return int((a or {}).get("uses_left") or 0) > 0 and not grant_expired(a, now_iso)
+
+
 def grant_matches(a, target):
     """Does grant `a` name `target`? Asked three ways, because `authorize` does not store what was
     typed: it realpaths `--path`, so a verb grant lands as `<cwd>/gh issue close` and the gh guard
@@ -4657,6 +4776,10 @@ def cmd_authorize(s, a):
             "  * if you are dispatched and no human is reachable, the orchestrator that briefed you\n"
             "    is the one that must ask. Report the refusal upward; do not spend the hatch for it.\n\n"
             "The guard you hit will still be there. That is the point of it.")
+    try:
+        expires_at = parse_expires(getattr(a, "expires", None))
+    except ValueError as e:
+        die("REFUSED — %s" % e)
     real = os.path.realpath(os.path.expanduser(a.path))
     # BEFORE the append and the logline below, or this grant counts itself as its own precedent.
     recur = recurrence_lines(a.reason, real, a.path)
@@ -4666,6 +4789,7 @@ def cmd_authorize(s, a):
     # "a human was asked here" and "nobody was" stops being invisible in the record.
     _armed = s.get("t3_armed") or {}
     auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1),
+            "expires_at": expires_at,
             "asked_via_arm": bool(_armed.get("question")),
             # A SPENT question is recorded SEPARATELY from a live one rather than folded into the
             # same flag. "This exact question is open" and "some question was put to the human
@@ -4682,6 +4806,14 @@ def cmd_authorize(s, a):
         f"  path  : {real}",
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
+        # SAID EITHER WAY. "no expiry" printed beside a grant is the one line that makes an
+        # unbounded one a decision somebody saw rather than a default they inherited — which is
+        # how a grant comes to sit armed for six weeks with nobody having chosen that.
+        ("  lapses: %s — after this the guard refuses it, spending nothing" % expires_at
+         if expires_at else
+         "  lapses: NEVER — this stays armed until it is spent or `authorize --revoke`d.\n"
+         "          `--expires 2h` / `7d` / `2026-09-30` bounds it. Time is the one dimension\n"
+         "          of this hatch that acts while nobody is looking."),
         # NAME THE LIVE QUESTION TOO. The spent branch below was fixed to print WHICH question,
         # because "some question was asked earlier" would let an unrelated hatch inherit its
         # diligence — and this branch still had exactly that defect, one step over. Observed while
@@ -12764,6 +12896,8 @@ def main():
     az.add_argument("--path", help="path prefix the human authorized")
     az.add_argument("--reason", help="the human's own words")
     az.add_argument("--uses", help="how many mutations (default 1)")
+    az.add_argument("--expires", metavar="WHEN",
+                    help="when this grant lapses: 30m / 2h / 7d / 1w / 2026-09-30 / never")
     az.add_argument("--revoke", metavar="PATH",
                     help="withdraw live grants on PATH: uses_left to 0, kept in the record")
 

@@ -8045,6 +8045,98 @@ def main():
           "line moves until they use the verb",
           any("0 live, 1 spent" in ln and "revoked" not in ln for ln in _rep2))
 
+
+    print("a grant can LAPSE, and lapsed is not spent and not revoked:")
+    # "A GRANT THAT LAPSES IS NOT A REMINDER; IT IS THE GUARD CLOSING ITSELF." — wcs, who argued me
+    # out of the cheaper version of this. THE HATCH IS "LOUD, NARROW, SINGLE-USE": narrow has always
+    # meant narrow in PATH and narrow in COUNT and unbounded in TIME, and time is the only one of
+    # the three that acts while nobody is looking, which is the exact condition under which a stale
+    # grant is dangerous. They measured five live grants and thirteen unspent uses in their tree,
+    # one six weeks old with eight uses left, over a repo root and an MCP verb.
+    #
+    # I PROPOSED THE CHEAPER RUNG AND IT WAS REFUTED BY MEASUREMENT, THEIRS: status should just name
+    # a grant's AGE. Their answer was to point at themselves — `status` printed "5 live, 6 spent" on
+    # every run of a long session, they read past it every time, and then told the human it did not
+    # surface grants at all. Asking that line to argue harder is asking a channel to succeed where
+    # it had just demonstrably failed on the same reader. Both are built; neither replaces the other.
+    _base = 1789000000.0
+    check("a duration and a date are both accepted, and a date means the END of that day — "
+          "comparison downstream is lexicographic against now(), so a bare date would otherwise "
+          "mean one second past midnight and lapse before the morning it was named for",
+          _um.parse_expires("2h", _base) == __import__("datetime").datetime.fromtimestamp(
+              _base + 7200).isoformat(timespec="seconds")
+          and _um.parse_expires("7d", _base) == __import__("datetime").datetime.fromtimestamp(
+              _base + 7 * 86400).isoformat(timespec="seconds")
+          and _um.parse_expires("2026-09-30", _base) == "2026-09-30T23:59:59"
+          and _um.parse_expires("2026-09-30T17:00", _base) == "2026-09-30T17:00:00")
+    check("...and 'never' is a real answer rather than an error, because an unbounded grant stays "
+          "the default and this must not turn every existing caller into a refusal",
+          _um.parse_expires("never") is None and _um.parse_expires(None) is None
+          and _um.parse_expires("") is None)
+    # A BARE NUMBER IS THE ONE INPUT WHERE A WRONG GUESS IS INVISIBLE: read as minutes it lapses
+    # during the call that set it, read as days it covers a week of unattended runs, and nothing
+    # downstream can tell which was meant. Refusing costs one retype; guessing costs a silent hole.
+    _bad = []
+    for _v in ("2", "7 months", "soon", "0d", "-3d", "tomorrow"):
+        try:
+            _um.parse_expires(_v, _base)
+        except ValueError:
+            _bad.append(_v)
+    check("a bare number, a month, and a word are all REFUSED — a bare number is the input where "
+          "guessing wrong is invisible in both directions, and 'm' is minutes because a grant "
+          "measured in months is the thing this exists to prevent",
+          _bad == ["2", "7 months", "soon", "0d", "-3d", "tomorrow"])
+
+    _N = "2026-09-19T12:00:00"
+    check("expired, spent and neither are three distinct states — and an expiry exactly NOW has "
+          "lapsed, because a boundary that favours the grant is a grant that outlives its own date",
+          _um.grant_expired({"uses_left": 2, "expires_at": "2026-09-19T11:59:59"}, _N)
+          and _um.grant_expired({"uses_left": 2, "expires_at": _N}, _N)
+          and not _um.grant_expired({"uses_left": 2, "expires_at": "2026-09-20T00:00:00"}, _N)
+          and not _um.grant_expired({"uses_left": 0}, _N))
+    check("...and a grant with NO expiry is untouched, which is the default and must be the old "
+          "behaviour byte for byte — every existing grant in every consumer's tree has no expiry",
+          not _um.grant_expired({"uses_left": 2}, _N)
+          and _um.grant_live({"uses_left": 2}, _N))
+    check("grant_live is ONE definition, so status and the three guards cannot drift — the gate was "
+          "`uses_left > 0` written out by hand in four places, and adding a second condition to "
+          "three of four is how a grant comes to be refused by one rail and honoured by another",
+          _um.grant_live({"uses_left": 1}, _N)
+          and not _um.grant_live({"uses_left": 1, "expires_at": "2020-01-01T00:00:00"}, _N)
+          and not _um.grant_live({"uses_left": 0}, _N))
+
+    # AND THE GUARDS THEMSELVES CARRY IT, not just the report. A grant that `status` calls dead
+    # while a guard still honours it is worse than having no expiry at all: the record says closed
+    # and the hatch is open, which is this repo's recurring defect in the place nobody re-reads.
+    for _gf in (".game_loop/bin/guard-writes-impl.sh", ".game_loop/bin/guard-mcp-impl.sh"):
+        _gsrc_g = open(os.path.join(REPO, _gf)).read()
+        check("%s honours the lapse too — all three consumers carry it, because a report that "
+              "calls a grant dead while a guard still spends it is worse than no expiry at all"
+              % os.path.basename(_gf),
+              _gsrc_g.count('_exp = a.get("expires_at")')
+              == _gsrc_g.count('if a.get("uses_left", 0) <= 0:'))
+
+    _rep3 = _um.authorizations_report({"authorized": [
+        {"path": "/a", "uses_left": 2, "at": _um.now()},
+        {"path": "/b", "uses_left": 0},
+        {"path": "/c", "uses_left": 0, "revoked_at": "2026-09-19T10:00:00"},
+        {"path": "/d", "uses_left": 3, "at": "2026-08-01T00:00:00",
+         "expires_at": "2026-08-02T00:00:00"}]})
+    check("status counts LAPSED apart from spent and revoked — three different ways to stop being "
+          "live, and nobody withdrew the lapsed one or used it: the clock closed it",
+          any("1 live, 1 spent, 1 revoked, 1 lapsed" in ln for ln in _rep3))
+    _old = _um.grant_age_note({"at": "2026-08-01T00:00:00"}, _N)
+    check("...and a live grant's AGE is printed beside its balance once it is more than a day old, "
+          "flagging the absence of an expiry — the bare count is demonstrably not enough to make a "
+          "stale grant look stale to a reader who has been seeing it all session",
+          "49 days ago" in _old and "NO EXPIRY" in _old
+          and _um.grant_age_note({"at": "2026-08-01T00:00:00",
+                                  "expires_at": "2026-12-01T00:00:00"}, _N).endswith("days ago"))
+    check("...and it is SILENT under a day, because on the day it was granted the age says nothing "
+          "the reader does not know, and a note that prints on every grant stops being read — "
+          "which is the exact failure the live/spent count already demonstrated",
+          _um.grant_age_note({"at": "2026-09-19T09:00:00"}, _N) == "")
+
     print("an unbound mandate is said at the MOMENT, not only at session start:")
     # THE BUG REPORT IS THE HUMAN'S OWN SENTENCE, relayed by showrunner: "I have to tell them
     # manually, none of them know." Agents start long unattended runs with no mandate bound, the
@@ -10211,6 +10303,9 @@ def main():
             "--revoke",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
+            # a duration or a date, and parse_expires REFUSES anything else by name — a mangled
+            # value fails loudly here, which is the defining property of the not-prose half.
+            "--expires",
             "--wake-every",
             "--exclude", "--exit-code", "--filed", "--instrument", "--mark", "--metric",
             "--milestone", "--null", "--outcome", "--pin", "--positive", "--prove", "--ref",

@@ -7893,6 +7893,52 @@ def main():
     # Both of its protections are failure modes somebody paid for: scanning the WHOLE message flags
     # a mid-prose mention the ending contradicts, and a guard that fires on an agent QUOTING a
     # marker phrase while writing the postmortem is a guard that gets switched off.
+    print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
+    # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.
+    # Their turn ended with "Next I'm rebuilding the artifact on the county's 51 parcels" and
+    # the human had to send a message to restart the run.
+    #
+    # THE NARROW BUG: `next\s+i\s` wants whitespace after the "i", so the branch that looks
+    # like it covers "next i ..." only covers a bare pronoun — "Next I'm" walks past it on the
+    # apostrophe. Reproduced verbatim here: 4 of their 7 shapes escaped `_NEXT_ACTION_PAT` and
+    # 5 of 7 escaped `_promised_to_continue`, which is a SECOND detector with the same hole.
+    #
+    # THE REAL ONE, AND THEIR ARGUMENT NOT MINE: every alternative in that pattern names a
+    # META-VERB of starting — start, begin, do, tackle, pick up, moving on. "rebuilding" is a
+    # WORK verb, and pulling, wiring, drafting and running are too. That set is OPEN, so an
+    # alternation over it loses by construction: the announcement picks a verb nobody listed.
+    # Match the shape, leave the verb free.
+    _fw_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+        "_gl_future", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+    _fwm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_fw_spec)
+    _fw_spec.loader.exec_module(_fwm)
+    _STALLS = ["Next I'm rebuilding the artifact on the county's 51 parcels",
+               "Next I'm pulling the remaining parcels.",
+               "I'm rebuilding the artifact now.",
+               "I'm going to rebuild the comp set."]
+    check("a signpost with a WORK verb behind it is caught in a checkpoint's notes — all four "
+          "shapes the consumer measured escaping, which no list of starting-verbs could have "
+          "covered: " + "; ".join(x[:28] for x in _STALLS[:2]),
+          all(_fwm.deferral_in_checkpoint(x) for x in _STALLS))
+    check("...and in the CLOSING MESSAGE too, which is a different detector that had the same "
+          "hole and escaped one shape more",
+          all(_fwm._promised_to_continue(x) for x in _STALLS))
+    check("...and the two handbacks the marker list deliberately protects stay SILENT — a ban "
+          "that swallows 'I'll report back if it changes' trades a visible stall for an "
+          "invisible one, which is the caveat the reporter asked to carry with the rule",
+          not _fwm._promised_to_continue("I'll report back if it changes.")
+          and not _fwm._promised_to_continue("I'll leave that to you."))
+    check("...and a PRESENT-TENSE REPORT is not a promise: the last shape is anchored to "
+          "end-of-line, so 'I'm reading the record now, and it says X' is reporting rather "
+          "than announcing, and an unanchored version would eat it",
+          not _fwm._promised_to_continue(
+              "I'm reading the record now, and it says the pin matches HEAD."))
+    check("...while 'Next up: the artifact rebuild.' stays silent in the CLOSING check on "
+          "purpose — that file's own rule is that 'next up is X' in a report is a plan and "
+          "'continuing to X now' is a claim to be doing it — and the NOTES check still sees it",
+          not _fwm._promised_to_continue("Next up: the artifact rebuild.")
+          and _fwm.deferral_in_checkpoint("Next up: the artifact rebuild."))
+
     print("the stop gate reads CONTRACTIONS and inserted words, not exact strings:")
     # THE GATE MISSED ONE, and the human caught it in the turn after the gate had fired on a
     # DIFFERENT sentence and I had complied. The miss, verbatim:
@@ -20270,18 +20316,24 @@ def main():
     # THE EXEMPTIONS ARE THE HALF THAT IS NOT CLEAN, and the comment above says why that is worse: a
     # rule matching nothing merely fails to run, while an exemption matching nothing is a STANDING
     # AUTHORISATION for a surface that does not exist — the day a file lands there it arrives
-    # already exempt. A consumer found four in this repo; #99 carries them and is the human's to
-    # answer. So this PINS the four rather than asserting none, which keeps the fact measured and
-    # makes a FIFTH one fail here instead of arriving quietly while #99 sits open.
+    # already exempt.
+    #
+    # #99 IS CLOSED AND THIS NUMBER MOVED WITH IT: four became one. `.claude/agents/**`,
+    # `.claude/skills/**` and `.game_loop/notify.json` are gone, because the first two name concepts
+    # this repo DOCUMENTS — files will land there — and the third read like the same decision while
+    # being harmless. `.saggar/**` stays and is the reason this still pins a value rather than
+    # asserting zero: it is another tool's manifest nothing here reads, so "excluded on purpose" is
+    # a STATED decision rather than a gap nobody noticed, and the two must not collapse into one
+    # number. A SECOND one arriving fails here rather than quietly.
     _vr_full = dict(_vr_rules)
     _vr_full.update({_e: [] for _e in _vr_excl})
     _dead_all, _vr_why2 = _gvr.vacuous_rules(REPO, _vr_full)
     _dead_ex = sorted(set(_dead_all) - set(_dead_rules))
-    check("...and this repo's vacuous EXEMPTIONS are exactly the four standing today, which #99 "
-          "holds open for the human — a fifth arriving fails HERE rather than while nobody is "
-          "counting: " + ", ".join(_dead_ex),
-          not _vr_why2 and _dead_ex == [".claude/agents/**", ".claude/skills/**",
-                                        ".game_loop/notify.json", ".saggar/**"])
+    check("...and this repo's vacuous EXEMPTION is exactly the ONE left after #99 — the other "
+          "three named surfaces that do not exist and would have exempted the first file to land "
+          "there; this one is a stated decision about a tool we do not own, and a SECOND arriving "
+          "fails HERE rather than while nobody is counting: " + ", ".join(_dead_ex),
+          not _vr_why2 and _dead_ex == [".saggar/**"])
     check("...and the exemption arm really is finding MORE than the rule arm, so the line above is "
           "a measurement of a different field rather than the same answer twice",
           len(_dead_ex) > len(_dead_rules))

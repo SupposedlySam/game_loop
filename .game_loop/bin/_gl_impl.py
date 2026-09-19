@@ -5890,6 +5890,26 @@ _CONTINUE_PATTERNS = (
 )
 
 
+# EVERY ALTERNATIVE BELOW NAMES A META-VERB OF STARTING — start, begin, do, tackle, pick up, moving
+# on — and that is the flaw wcs measured rather than argued. "Next I'm REBUILDING the artifact" uses
+# a WORK verb, and the set of work verbs is open: pulling, wiring, drafting, checking, running. An
+# alternation over them loses by construction, because the announcement just picks one nobody listed.
+#
+# They also found the narrow bug inside the broad one: `next\s+i\s` wants whitespace after the "i",
+# so the branch that looks like it covers "next i ..." only covers a bare pronoun and "Next I'm"
+# walks past it on the apostrophe. Reproduced here verbatim — 4 of their 7 shapes escaped this
+# pattern, and 5 of 7 escaped `_promised_to_continue`, which is a second detector with the same hole.
+#
+# So match the SHAPE and leave the verb free: a signpost to future work with a first person behind
+# it. Their patterns, kept as they wrote them, including the end-of-line anchor on the last — which
+# is what keeps "I'm reading the record now, and it says X" a REPORT rather than a promise.
+_FUTURE_WORK_PAT = re.compile(
+    r"^(?:and |so |then )?next\b[^.!?\n]{0,40}\b(?:i'?m|i'?ll|i am|i will)\b|"
+    r"\bnext,?\s+(?:i'?m|i'?ll|i am|i will)\b|"
+    r"\bi'?m (?:going|about) to \w+|"
+    r"\bi'?m \w+ing\b[^.!?\n]{0,60}\b(?:now|next)\b\s*[.!]?$", re.I | re.M)
+
+
 def _normalise(text):
     """Lowercased, contractions expanded, whitespace collapsed — so one marker covers both spellings."""
     t = (text or "").lower()
@@ -5967,7 +5987,16 @@ def _promised_to_continue(text):
     tail = _normalise(_closing(text))
     if any(_normalise(mk) in tail for mk in _CONTINUE_MARKERS):
         return True
-    return any(re.search(pat, tail) for pat in _CONTINUE_PATTERNS)
+    if any(re.search(pat, tail) for pat in _CONTINUE_PATTERNS):
+        return True
+    # THE SHAPE PATTERN RUNS ON THE RAW TAIL, NOT THE NORMALISED ONE, and that is not a detail:
+    # `_normalise` expands "i'm" to "i am" for the marker list, and the shape pattern's `i'?m`
+    # cannot match "i am" — so normalising first silently disarmed two of the four shapes. Caught by
+    # the two-direction fixture, which is the only reason it is not shipped.
+    #
+    # Quotation immunity is preserved because `_closing` has already blanked quoted spans, which is
+    # what lets a postmortem name these markers without tripping the guard it is about.
+    return bool(_FUTURE_WORK_PAT.search(_closing(text)))
 
 
 _TRANSCRIPT_TAIL = 250              # records kept from the end — a tail in LINES, never in bytes
@@ -6160,14 +6189,17 @@ def deferral_in_checkpoint(notes):
         return None
     if _BLOCKED_PAT.search(notes):
         return None
-    m = _NEXT_ACTION_PAT.search(notes)
+    m = _NEXT_ACTION_PAT.search(notes) or _FUTURE_WORK_PAT.search(notes)
     if not m:
         m = _DEFERS_WORK_PAT.search(notes)
         if not m:
             return None
         tail = notes[m.start():m.start() + 140].strip()
         return tail.split("\n")[0]
-    start = m.start(1)
+    # `_FUTURE_WORK_PAT` has no capturing group — it matches a SHAPE, not a named opener — so
+    # group 1 exists only for the older alternation. Asking for it unconditionally raised
+    # IndexError on every shape match, which the two-direction fixture caught immediately.
+    start = m.start(1) if m.lastindex else m.start()
     tail = notes[start:start + 140].strip()
     return tail.split("\n")[0]
 

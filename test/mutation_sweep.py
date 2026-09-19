@@ -566,6 +566,16 @@ MUTANTS = [
      "reading the warning's TEXT can kill it — this file's standing nothing-direction caveat. The "
      "neutered form is exactly the behaviour being repaired: the entry was dropped and nobody was "
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
+    ("finish_line_facts -> a mandate records nothing about its own finish line",
+     ".game_loop/bin/_gl_impl.py::finish_line_facts",
+     '    return {"markers": [], "enumerated_items": 0, "text_len": 0}\n',
+     ['marker is recorded WITH THE WORDS EITHER SIDE', 'ENUMERATED mandate with no marker reports',
+      'every marker occurrence is kept'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO THE EMPTY READING IS THE PRE-FIX WORLD — mandate_set "
+     "carried the text and nothing else — so the mutant is the defect rather than a scramble. Note "
+     "the neutered form keeps the KEYS: a mutant that changed the shape would be killed by the "
+     "structural assertion for the wrong reason, and this file's whole argument is that a kill "
+     "count only means something when the mutant is a behaviour somebody could plausibly ship.", 0),
     ("parse_expires -> every --expires value is accepted as 'never'",
      ".game_loop/bin/_gl_impl.py::parse_expires", "    return None\n",
      ['bare number, a month, and a word are all REFUSED', 'duration and a date are both accepted'],

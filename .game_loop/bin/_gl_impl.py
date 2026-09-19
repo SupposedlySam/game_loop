@@ -2886,6 +2886,79 @@ def cmd_claim(s, a):
     flair_out(s, "claim")
 
 
+# ── what a mandate SAID about its own finish line: facts, not a verdict ──────────────────────────
+#
+# THE SEQUENCING IS wcs's AND SO IS THE SHAPE, and it is the second time in one exchange their
+# measurement killed a design of mine that I was about to build.
+#
+# WHAT I WAS GOING TO BUILD: `mandate --set` nudges when the text carries no finish line, and
+# records `has_finish_line: false` so a later clear-side gate could be answerable. Both halves were
+# wrong, and they ran it against 42 real mandate_set records before I wrote a line of it:
+#
+#   IT FIRES ON 88%.  37 of 42 have no explicit marker. A nudge that speaks on seven of every eight
+#   mandates is not rare, it is the banner an agent learns to scroll past — the exact failure
+#   showrunner named as the one this class of feature dies of, and the one #4 already died of once.
+#
+#   THE FALSE NEGATIVES ARE THE BEST-SPECIFIED MANDATES IN THE LOG. Ten of theirs ENUMERATE their
+#   work — "(1) skip-trace API seam ... (2) ... (3) ..." — and carry no marker. Those have a finish
+#   line; it is the list. Nudging them teaches agents that enumerating the work is not good enough
+#   and that a magic phrase is, which is backwards.
+#
+#   AND THE FALSE POSITIVE READS GREEN, which is the direction that matters. Their live mandate
+#   matched on `until` — inside item (2), "re-run the neutral reviewer until READY". A condition on
+#   ONE ITEM, not a finish line for the mandate. Mention versus use, in the third place this
+#   exchange has found it, and recorded as `has_finish_line: true` it would be quietly wrong for
+#   exactly the mandates nobody re-checks.
+#
+# SO: RECORD THE FACTS, NOT THE CONCLUSION. Three things that cannot be wrong because they are not
+# judgements, plus the EVIDENCE for each — which is the half that answers wcs's false positive. A
+# bare `true` gives a later reader nothing to judge; `until` with the words either side of it lets
+# them see it sits inside item (2) and decide in a second. Storing the conclusion destroys the
+# information that would show the conclusion was wrong.
+#
+# AND NO NUDGE SHIPS YET, deliberately. Their 42 records and this repo's 7 are different
+# populations from the same tool and the same author — their shortest mandate is 198 characters and
+# this repo's log contains the literal string "ship it". A threshold tuned on either misfires on
+# the other, so the number is per-repo and there is no cross-repo measurement to set it from. The
+# facts are what make that measurement possible later; guessing the threshold now is what makes it
+# impossible to check.
+
+_FINISH_MARKERS = ("done when", "definition of done", "finished when", "complete when",
+                   "acceptance", "success criteria", "exit criteria")
+_ENUM_ITEM_PAT = re.compile(r"(?:^|\s)(?:\(\d+\)|\d+[.)]|[-*•])\s+\S", re.M)
+
+
+def finish_line_facts(text, window=36):
+    """What a mandate's text SAYS about its own finish line, as facts with their evidence.
+
+    Returns {"markers": [{"marker","at","context"}], "enumerated_items": int, "text_len": int}.
+
+    EVERY FIELD IS AN OBSERVATION, NOT A CLASSIFICATION. Nothing here says whether the mandate HAS
+    a finish line, because that judgement is what was measured and found wrong in both directions —
+    and because a reader in a month can ask questions of these three that a boolean has already
+    thrown away, including the one that caught it: was the marker inside an enumerated item?
+
+    The context window is the point of the marker entry, not a nicety. `until` alone is unjudgeable;
+    `until` with the words either side of it is judgeable at a glance, which is the cheapest
+    possible guard against the mention-versus-use failure that produced it.
+    """
+    t = str(text or "")
+    low = t.lower()
+    markers = []
+    for mk in _FINISH_MARKERS:
+        start = 0
+        while True:
+            i = low.find(mk, start)
+            if i < 0:
+                break
+            markers.append({"marker": mk, "at": i,
+                            "context": " ".join(t[max(0, i - window):i + len(mk) + window].split())})
+            start = i + len(mk)
+    return {"markers": markers,
+            "enumerated_items": len(_ENUM_ITEM_PAT.findall(t)),
+            "text_len": len(t)}
+
+
 def cmd_mandate(s, a):
     """Bind, park, resume, or release an autonomy mandate. While bound, the Stop gate is live.
 
@@ -3118,7 +3191,10 @@ def cmd_mandate(s, a):
     # mandate with a permanently disarmed engine is the exact stall `handed_off` exists to avoid.
     s.pop("handed_off", None)
     save(s)
-    logline({"kind": "mandate_set", "text": a.set})
+    # THE FACTS ABOUT THE FINISH LINE RIDE THE SET RECORD, because the clear side cannot be made
+    # answerable for a promise the set side never wrote down — which is what every clear-side gate
+    # proposed in this exchange foundered on, mine included.
+    logline(dict({"kind": "mandate_set", "text": a.set}, **finish_line_facts(a.set)))
     out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
         f"  {a.set}",
         "→ ending your turn now requires one of:",

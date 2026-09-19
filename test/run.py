@@ -8046,6 +8046,54 @@ def main():
           any("0 live, 1 spent" in ln and "revoked" not in ln for ln in _rep2))
 
 
+
+    print("what a mandate said about its own finish line is recorded as FACTS, not a verdict:")
+    # TWICE IN ONE EXCHANGE wcs's MEASUREMENT KILLED A DESIGN BEFORE IT WAS BUILT, and this is the
+    # second. What I was going to build: --set nudges when the text carries no finish line, and
+    # records `has_finish_line: false` so a clear-side gate could later be answerable. They ran it
+    # against 42 real mandate_set records first.
+    #
+    #   IT FIRES ON 88% (37/42 have no explicit marker) — not rare, a banner to scroll past.
+    #   THE FALSE NEGATIVES ARE THE BEST MANDATES: 10 of theirs ENUMERATE their work and carry no
+    #     marker. The finish line IS the list; nudging them teaches that a magic phrase beats
+    #     enumerating the work.
+    #   THE FALSE POSITIVE READS GREEN: their live mandate matched on a word inside item (2).
+    #     Recorded as `has_finish_line: true` it is quietly wrong for the mandates nobody re-checks.
+    _fl = _um.finish_line_facts
+    _enum = _fl("Self-drive the backlog, priority order: (1) skip-trace seam (2) rewrite (3) ship")
+    check("an ENUMERATED mandate with no marker reports 0 markers and 3 items — and nothing calls "
+          "that 'no finish line', because ten of the best-specified mandates in a consumer's log "
+          "have exactly this shape and the finish line is the list",
+          _enum["markers"] == [] and _enum["enumerated_items"] == 3)
+    _dw = _fl("Do the thing. DONE WHEN: all four tests pass and it is pushed.")
+    check("...and a real marker is recorded WITH THE WORDS EITHER SIDE OF IT, which is the half "
+          "that answers the false positive: a bare `true` gives a later reader nothing to judge, "
+          "while the marker in context is judgeable at a glance",
+          len(_dw["markers"]) == 1 and _dw["markers"][0]["marker"] == "done when"
+          and "all four tests pass" in _dw["markers"][0]["context"])
+    check("...and every marker occurrence is kept, not just the first — 'was the marker inside an "
+          "enumerated item' is a question the facts can answer and a boolean has already discarded",
+          len(_fl("acceptance here. and acceptance there.")["markers"]) == 2)
+    check("NOTHING HERE RETURNS A VERDICT. The three fields are observations, so none of them can "
+          "be wrong the way `has_finish_line` was wrong — storing the conclusion destroys the "
+          "evidence that would show the conclusion was wrong",
+          set(_fl("x")) == {"markers", "enumerated_items", "text_len"}
+          and not any("has_" in k for k in _fl("x")))
+    check("...and 'ship it' — the literal text of two clears in this repo's own log — records as "
+          "0 markers, 0 items, 7 characters, which is a fact rather than an accusation",
+          _fl("ship it") == {"markers": [], "enumerated_items": 0, "text_len": 7})
+    check("the facts ride the mandate_set record, because a clear cannot be made answerable for a "
+          "promise the SET side never wrote down — which is what every clear-side gate proposed in "
+          "this exchange foundered on, D and mine alike",
+          "finish_line_facts(a.set)" in inspect.getsource(_um.cmd_mandate))
+    # NO NUDGE SHIPS. Their 42 records and this repo's 7 are different populations from the same
+    # tool and the same author: their SHORTEST mandate is 198 characters, and this repo's log
+    # contains the literal string "ship it". A threshold tuned on either misfires on the other.
+    check("and NO nudge ships with it — the facts are what make a cross-repo measurement possible "
+          "later, and guessing the threshold now is what would make it impossible to check",
+          not any(w in inspect.getsource(_um.finish_line_facts)
+                  for w in ("out(", "die(", "warn")))
+
     print("a grant can LAPSE, and lapsed is not spent and not revoked:")
     # "A GRANT THAT LAPSES IS NOT A REMINDER; IT IS THE GUARD CLOSING ITSELF." — wcs, who argued me
     # out of the cheaper version of this. THE HATCH IS "LOUD, NARROW, SINGLE-USE": narrow has always

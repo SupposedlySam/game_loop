@@ -7893,6 +7893,47 @@ def main():
     # Both of its protections are failure modes somebody paid for: scanning the WHOLE message flags
     # a mid-prose mention the ending contradicts, and a guard that fires on an agent QUOTING a
     # marker phrase while writing the postmortem is a guard that gets switched off.
+    print("upstream_repos takes a SLUG, and says so about anything else (#129):")
+    # THE FILTER WAS `"/" in r`, WHICH EVERY ABSOLUTE PATH SATISFIES. A config holding
+    # `~/dev/game_loop` sailed through to `gh search --repo`, and GitHub answered with its generic
+    # "the listed users and repositories cannot be searched either because the resources do not
+    # exist or you do not have permission to view them" — four watched repos, every checkpoint.
+    #
+    # That sentence is about the VALUE and reads as a token problem: the reporter went to
+    # `gh auth status`, scopes, repo visibility and the search rate limit before looking at what was
+    # being passed. So the value is rejected at config load and NAMED, and the fetch echoes the repo
+    # it asked about beside the error, which was already in scope and never printed.
+    _u_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+        "_gl_upstream", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+    _um = __import__("importlib.util", fromlist=["util"]).module_from_spec(_u_spec)
+    _u_spec.loader.exec_module(_um)
+    check("a slug is accepted and a PATH is not — the old filter asked whether a '/' appeared "
+          "anywhere, which is true of every absolute path there has ever been",
+          _um.is_repo_slug("SupposedlySam/game_loop") and _um.is_repo_slug("owner/name")
+          and not _um.is_repo_slug("~/dev/game_loop")
+          and not _um.is_repo_slug("/Users/x/dev/game_loop")
+          and not _um.is_repo_slug("./rel/path"))
+    check("...and the near-misses go too: more than one slash, no slash, a space, or an empty half "
+          "— each of which reaches GitHub as a query it answers with the same misdirecting error",
+          not any(_um.is_repo_slug(x) for x in
+                  ("a/b/c", "noslash", "own er/name", "/leading", "trailing/", "")))
+    check("...and the rejected values are RECOVERABLE rather than silently dropped, because the "
+          "whole repair is naming which entry was wrong",
+          _um.upstream_rejected_repos.__doc__ is not None)
+
+    _warn_src = inspect.getsource(_um.upstream_config_warning)
+    check("the warning NAMES the offending values and points at the file to fix, rather than "
+          "reporting a count — a count sends the reader back to the same guessing",
+          "%s" in _warn_src and "config.json" in _warn_src)
+    _rep_src = inspect.getsource(_um.upstream_check)
+    check("...and it survives the EMPTY path: a config of nothing but paths yields no usable repos, "
+          "and reporting that as 'off' would say the watcher is switched off when it is "
+          "misconfigured — two states that look identical and mean opposite things",
+          "misconfigured" in _rep_src)
+    check("...and the fetch echoes WHICH repo it asked about beside GitHub's error, which was "
+          "already in scope and cost a session of auth debugging by being left out",
+          "asked for repo" in inspect.getsource(_um._upstream_fetch))
+
     print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
     # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.
     # Their turn ended with "Next I'm rebuilding the artifact on the county's 51 parcels" and

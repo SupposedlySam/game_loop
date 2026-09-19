@@ -2925,10 +2925,57 @@ _UP_OUTAGE_CAVEAT = (
 UPSTREAM_F = os.path.join(ROOT, "upstream.json")
 
 
+def is_repo_slug(r):
+    """`owner/name`, and nothing that is merely path-shaped (#129).
+
+    The old filter was `"/" in r`, which EVERY absolute path satisfies — so a config holding
+    `~/dev/game_loop` sailed through and reached `gh search --repo`, which answered with GitHub's
+    generic "the listed users and repositories cannot be searched either because the resources do
+    not exist or you do not have permission to view them". Four watched repos, every checkpoint,
+    and that sentence sends a reader to `gh auth status`, token scopes, repo visibility and the
+    search rate limit before it sends them to the value they typed.
+    """
+    if not isinstance(r, str):
+        return False
+    r = r.strip()
+    return (r.count("/") == 1 and not r.startswith(("~", "/", "."))
+            and " " not in r and all(part for part in r.split("/")))
+
+
 def upstream_repos():
-    """Repos to watch. EMPTY BY DEFAULT, so this is inert until somebody opts in."""
+    """Repos to watch. EMPTY BY DEFAULT, so this is inert until somebody opts in.
+
+    A value that is not a slug is DROPPED AND NAMED rather than silently passed to `gh` — see
+    `upstream_config_warning`, which is what makes the drop visible at the top of `status`.
+    """
     v = config().get("upstream_repos", [])
-    return [r for r in v if isinstance(r, str) and "/" in r] if isinstance(v, list) else []
+    return [r.strip() for r in v if is_repo_slug(r)] if isinstance(v, list) else []
+
+
+def upstream_rejected_repos():
+    """The entries `upstream_repos()` refused, so a caller can say WHICH value was wrong."""
+    v = config().get("upstream_repos", [])
+    if not isinstance(v, list):
+        return []
+    return [r for r in v if isinstance(r, str) and r.strip() and not is_repo_slug(r)]
+
+
+def upstream_config_warning():
+    """A loud, one-line complaint naming the offending value — or "" when the config is clean.
+
+    LOUD AND AT THE TOP, because the failure it replaces was a recurring runtime mystery: the check
+    reported four repos unreachable every checkpoint and the cause was one character class in a
+    filter. Naming the value turns a session of auth debugging into one read.
+    """
+    bad = upstream_rejected_repos()
+    if not bad:
+        return ""
+    return "\n".join(
+        ["⚠ upstream_repos HAS %d ENTRY(IES) THAT ARE NOT `owner/name` AND ARE BEING IGNORED:" % len(bad)]
+        + ["    %s" % b for b in bad]
+        + ["  `gh search --repo` takes a SLUG, not a path. A filesystem path reaches GitHub and comes",
+           "  back as \"the listed users and repositories cannot be searched ... or you do not have",
+           "  permission\", which is about the value, not your token. Fix them in .game_loop/config.json."])
 
 
 def _upstream_baseline():
@@ -2954,7 +3001,11 @@ def _upstream_fetch(repo, timeout=25):
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, None, f"search did not return ({type(exc).__name__})"
     if r.returncode != 0:
-        return None, None, (r.stderr or "").strip().split("\n")[-1][:120] or "search failed"
+        # NAME THE REPO BESIDE THE ERROR (#129). GitHub's message is generic and misdirects — "you
+        # do not have permission" reads as an auth problem when the real fault is the value being
+        # passed. The string is already in scope; not printing it cost a session of auth debugging.
+        why = (r.stderr or "").strip().split("\n")[-1][:120] or "search failed"
+        return None, None, "%s (asked for repo %r)" % (why, repo)
     try:
         items = json.loads(r.stdout or "[]")
     except ValueError:
@@ -2981,8 +3032,15 @@ def upstream_check(write=True):
     a checkpoint is a watcher that gets removed before it ever reports anything.
     """
     repos = upstream_repos()
+    # THE COMPLAINT COMES FIRST AND SURVIVES THE "off" PATH (#129). A config holding only paths
+    # yields NO usable repos, so returning "off" here would report the watcher as switched off
+    # when it is in fact misconfigured — the two look identical from outside and mean opposite
+    # things. Naming the values is the whole fix: the old failure was four repos "unreachable"
+    # every checkpoint with GitHub's permission error, which is about the value, not the token.
+    warn = upstream_config_warning()
+    pre = warn.split("\n") if warn else []
     if not repos:
-        return [], "off"
+        return (pre, "misconfigured") if pre else ([], "off")
     base = _upstream_baseline()
     first_run = not base.get("repos")
     stored = dict(base.get("repos") or {})
@@ -3024,7 +3082,7 @@ def upstream_check(write=True):
             pass
     n_iss = sum(len((stored.get(r) or {}).get("issues") or {}) for r in checked)
     if first_run and checked:
-        return ([f"upstream: baseline recorded — {n_iss} issue(s) involving you across "
+        return (pre + [f"upstream: baseline recorded — {n_iss} issue(s) involving you across "
                  f"{len(checked)} repo(s).",
                  "  Nothing is reported on a first run. Everything after this point is a CHANGE",
                  "  against this snapshot; if this gate had spoken now it would have handed you",
@@ -3034,11 +3092,12 @@ def upstream_check(write=True):
                     "baseline", "  and will record theirs on a later run."] if failed else []),
                 "first")
     if not checked:
-        return ([f"upstream: COULD NOT CHECK — {len(failed)} of {len(repos)} repo(s) failed.",
+        return (pre + [f"upstream: COULD NOT CHECK — {len(failed)} of {len(repos)} repo(s) failed.",
                  *[f"    {r}: {w}" for r, w in failed],
                  "  " + _UP_OUTAGE_CAVEAT], "outage")
     lines = []
     if moved:
+        lines = pre + lines
         lines.append(f"upstream: {len(moved)} item(s) moved since the last check —")
         for repo, num, what, title in moved[:12]:
             where = f"{repo}#{num}" if num else repo
@@ -3046,6 +3105,7 @@ def upstream_check(write=True):
         if len(moved) > 12:
             lines.append(f"    ... and {len(moved) - 12} more (all recorded; only 12 shown)")
     else:
+        lines = pre + lines
         lines.append("upstream: no movement in the index across "
                      f"{len(checked)} repo(s), {n_iss} issue(s).")
     if failed:

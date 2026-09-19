@@ -550,6 +550,28 @@ MUTANTS = [
      "refuses instead of warning, and it is the better one: the instance found failed CLOSED and "
      "went red, while the same escape in a rule ending `|| true` prints green with the check never "
      "run. The visible failure is the lucky member of a silent family.", 0),
+    ("is_repo_slug -> a filesystem path is accepted as a repo again (#129)",
+     ".game_loop/bin/_gl_impl.py::is_repo_slug", "    return True\n",
+     ['slug is accepted and a PATH is not', 'near-misses go too'],
+     "FLOOR OWED, RECORDED 0 — this file's standing precedent over a hand-measured number. "
+     "NEUTERED TO `return True` IS THE OLD FILTER: `\"/\" in r` accepted every absolute path, so "
+     "`~/dev/game_loop` reached `gh search --repo` and came back as GitHub's generic \"you do not "
+     "have permission\" on four repos every checkpoint. The mutant is the defect rather than a "
+     "scramble, and the assertions that kill it are the ones naming a path and a near-miss.", 0),
+    ("upstream_config_warning -> a bad entry is dropped in silence, as it was before",
+     ".game_loop/bin/_gl_impl.py::upstream_config_warning", '    return ""\n',
+     ['warning NAMES the offending values', 'survives the EMPTY path'],
+     "FLOOR OWED, RECORDED 0. EXPECT A LOW COUNT AND NOT BECAUSE COVERAGE IS THIN: neutered to "
+     "\"\" this satisfies every assertion about staying quiet BY CONSTRUCTION, so only the ones "
+     "reading the warning's TEXT can kill it — this file's standing nothing-direction caveat. The "
+     "neutered form is exactly the behaviour being repaired: the entry was dropped and nobody was "
+     "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
+    ("upstream_rejected_repos -> nothing can say WHICH entry was wrong",
+     ".game_loop/bin/_gl_impl.py::upstream_rejected_repos", "    return []\n",
+     ['rejected values are RECOVERABLE'],
+     "FLOOR OWED, RECORDED 0. The whole repair for #129 is naming the offending value, and this is "
+     "the function that can name it; neutered to [] the warning above has nothing to report and "
+     "degrades to the silence it replaced.", 0),
     ("release_distance -> nothing is ever owed, so the release gate can never fire",
      ".game_loop/bin/_gl_impl.py::release_distance", "    return 0, None, None\n",
      ['ANNOTATED tag is resolved to its COMMIT', 'asks git a FIXED number of times',

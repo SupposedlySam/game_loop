@@ -566,6 +566,23 @@ MUTANTS = [
      "reading the warning's TEXT can kill it — this file's standing nothing-direction caveat. The "
      "neutered form is exactly the behaviour being repaired: the entry was dropped and nobody was "
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
+    ("authorize_revoke -> a revoke that matched NOTHING reports success",
+     ".game_loop/bin/_gl_impl.py::authorize_revoke", "    return None\n",
+     ['REVOKE THAT MATCHED NOTHING REFUSES', 'refusal LISTS the live grants',
+      'refused revoke must not half-apply'],
+     "FLOOR OWED, RECORDED 0 — this file's standing precedent over a hand-measured number. "
+     "NEUTERED TO `return None` IS THE FAILURE THE VERB EXISTS TO AVOID, not a scramble: the "
+     "command exits 0, prints nothing, and the human reads it as done while the grant is still "
+     "armed. Every other mutation of this function is cosmetic beside that one, because a revoke "
+     "is used precisely ONCE per stale grant and nobody re-checks it afterwards.", 0),
+    ("grant_matches -> every grant matches every name, so one revoke sweeps them all",
+     ".game_loop/bin/_gl_impl.py::grant_matches", "    return True\n",
+     ['NOT matched by basename', 'matched by the realpath'],
+     "FLOOR OWED, RECORDED 0. The two directions are asymmetric and both are real: neutered to "
+     "True, `--revoke game_loop` disarms a grant on /Users/x/dev/game_loop AND every other live "
+     "grant in the state, which is discovered later by a write that stopped working and never "
+     "traced back to the revoke. The basename arm exists only because `authorize` realpaths a "
+     "`gh ` verb into <cwd>/gh issue close, so the stored form is one no human would type.", 0),
     ("upstream_rejected_repos -> nothing can say WHICH entry was wrong",
      ".game_loop/bin/_gl_impl.py::upstream_rejected_repos", "    return []\n",
      ['rejected values are RECOVERABLE'],

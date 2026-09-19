@@ -7934,6 +7934,117 @@ def main():
           "already in scope and cost a session of auth debugging by being left out",
           "asked for repo" in inspect.getsource(_um._upstream_fetch))
 
+    print("a grant can be WITHDRAWN, and a revoke that matched nothing refuses:")
+    # REPORTED BY wcs, WHO HAND-EDITED state.json BECAUSE NO VERB EXISTED — which is exactly the
+    # working-around this repo asks consumers to report rather than absorb. What they found when
+    # they looked properly: FIVE live grants and THIRTEEN unspent uses across two state files, one
+    # dated six weeks earlier with eight uses left. A grant is armed until something spends it, and
+    # nothing spends the ones nobody needed. `status` already printed the count, so the gap was
+    # never visibility — it was that seeing a stale grant left you with no way to put it out.
+    #
+    # DISARM, NOT DELETE, and the shape is theirs: uses_left to 0 PLUS revoked_at, revoked_reason
+    # and uses_revoked. Deleting the record takes with it the evidence that the hatch was ever
+    # opened, and "logged forever" is the whole value of the hatch; zeroing ALONE would read later
+    # as a grant somebody actually spent, which is the opposite of what happened.
+    class _RvArgs(object):
+        def __init__(self, **kw):
+            self.path = self.reason = self.uses = self.revoke = None
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    def _revoke(state, **kw):
+        """Run authorize_revoke against an in-memory state, capturing output and refusals.
+
+        `save` and `logline` are stubbed because the module resolved its home to THIS repo's
+        .game_loop when the test imported it — an unstubbed call would write the real state.json
+        and append to the real log.jsonl, which is the probe-spends-a-real-grant failure that
+        `authorizations_report` exists to warn about, one layer down.
+        """
+        said, logged, saved = [], [], []
+        _o, _s, _l, _d = _um.out, _um.save, _um.logline, _um.die
+
+        def _die(msg, code=3):
+            said.append(msg)
+            raise SystemExit(code)
+        _um.out = lambda *a: said.extend(a)
+        _um.save = lambda st: saved.append(st)
+        _um.logline = lambda rec: logged.append(rec)
+        _um.die = _die
+        try:
+            _um.authorize_revoke(state, _RvArgs(**kw))
+            refused = False
+        except SystemExit:
+            refused = True
+        finally:
+            _um.out, _um.save, _um.logline, _um.die = _o, _s, _l, _d
+        return refused, "\n".join(said), logged, saved
+
+    _g_path = {"path": "/Users/x/dev/game_loop", "reason": "Jonah: go ahead", "uses_left": 3,
+               "at": "2026-08-03T09:00:00"}
+    _g_verb = {"path": "/Users/x/dev/repo/gh issue close", "reason": "Jonah: you own it",
+               "uses_left": 1, "at": "2026-09-01T09:00:00"}
+
+    check("a grant is matched by the realpath `authorize` actually STORED, which is not what the "
+          "human typed — --path is expanded and realpathed before it is written down",
+          _um.grant_matches(_g_path, "/Users/x/dev/game_loop"))
+    check("...and a `gh ` verb by its BASENAME, because authorize realpaths that too and parks it "
+          "as <cwd>/gh issue close — the gh guard reads it back by basename and a revoke that "
+          "compared only the stored form would miss every verb grant a human names by hand",
+          _um.grant_matches(_g_verb, "gh issue close"))
+    check("...but a REAL PATH grant is NOT matched by basename: `--revoke game_loop` must not "
+          "disarm a grant on /Users/x/dev/game_loop, which is a different act than the one asked "
+          "for and would be discovered only by the write that stopped working",
+          not _um.grant_matches(_g_path, "game_loop"))
+
+    _st = {"authorized": [dict(_g_path)]}
+    _refused, _said, _log, _saved = _revoke(_st, revoke="/Users/x/dev/nothing-here")
+    check("A REVOKE THAT MATCHED NOTHING REFUSES. This is the load-bearing assertion: a success "
+          "line over an empty match set is this repo's recurring defect in the worst place it "
+          "could sit — the human reads 'revoked', the grant is still armed, and the write that "
+          "goes through it later is the one nobody is watching for",
+          _refused and "NOTHING WAS REVOKED" in _said)
+    check("...and the refusal LISTS the live grants in the form they must be named in, because "
+          "'no match' with nothing else on screen sends the reader to guess at the spelling",
+          "/Users/x/dev/game_loop" in _said)
+    check("...and it changed nothing: a refused revoke must not half-apply",
+          _st["authorized"][0]["uses_left"] == 3 and not _saved and not _log)
+
+    _st = {"authorized": [dict(_g_path), dict(_g_verb)]}
+    _refused, _said, _log, _saved = _revoke(_st, revoke="/Users/x/dev/game_loop",
+                                            reason="finished with it")
+    _rec = _st["authorized"][0]
+    check("a matched revoke zeroes the balance AND marks HOW MANY uses were withdrawn — zeroing "
+          "alone is indistinguishable afterwards from a grant that was spent, which would put a "
+          "bypass in the record that never happened",
+          not _refused and _rec["uses_left"] == 0 and _rec["uses_revoked"] == 3
+          and _rec.get("revoked_at") and _rec["revoked_reason"] == "finished with it")
+    check("...and the grant is DISARMED, NOT DELETED — the record that a hatch was opened outlives "
+          "the hatch, and deleting it takes the evidence with it",
+          len(_st["authorized"]) == 2 and _rec["reason"] == "Jonah: go ahead")
+    check("...and the other grant is untouched: a revoke names ONE path and must not sweep",
+          _st["authorized"][1]["uses_left"] == 1)
+    check("...and log.jsonl carries the withdrawal WITH the human's original words, so the log "
+          "still answers 'what was this hatch for' after the hatch is shut",
+          len(_log) == 1 and _log[0]["kind"] == "authorize_revoke"
+          and _log[0]["granted_reason"] == "Jonah: go ahead" and _log[0]["uses_revoked"] == 3)
+
+    _refused, _said, _log2, _saved2 = _revoke(_st, revoke="/Users/x/dev/game_loop")
+    check("revoking twice is idempotent and says so — a second 'REVOKED, 3 uses withdrawn' would "
+          "double-count a withdrawal that already happened",
+          not _refused and "ALREADY DISARMED" in _said and not _log2 and not _saved2)
+
+    _rep = _um.authorizations_report({"authorized": [
+        {"path": "/a", "uses_left": 2}, {"path": "/b", "uses_left": 0},
+        {"path": "/c", "uses_left": 0, "revoked_at": "2026-09-19T10:00:00"}]})
+    check("status counts REVOKED apart from SPENT: folding them together would report a hatch as "
+          "opened and used when it was withdrawn unused — the same conflation the refusal above "
+          "exists to prevent, one surface over",
+          any("1 live, 1 spent, 1 revoked" in ln for ln in _rep))
+    _rep2 = _um.authorizations_report({"authorized": [{"path": "/a", "uses_left": 0}]})
+    check("...and the clause appears ONLY once something has been revoked, so no consumer's status "
+          "line moves until they use the verb",
+          any("0 live, 1 spent" in ln and "revoked" not in ln for ln in _rep2))
+
     print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
     # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.
     # Their turn ended with "Next I'm rebuilding the artifact on the county's 51 parcels" and
@@ -9971,6 +10082,9 @@ def main():
             # EXISTENCE, which a mangled value fails loudly rather than silently.
             "--fixture", "--script", "--handoff",
             "--observed", "--path", "--produces", "--read",
+            # --revoke names a grant, matched against what `authorize` STORED. Like --path beside
+            # it, a mangled value cannot pass quietly: it matches no grant and the verb refuses.
+            "--revoke",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
             "--wake-every",

@@ -1087,8 +1087,15 @@ def authorizations_report(s):
     if not auth:
         return []
     live = [a for a in auth if int(a.get("uses_left") or 0) > 0]
-    spent = len(auth) - len(live)
-    L = ["", f"authorize grants: {len(live)} live, {spent} spent"]
+    # A REVOKED GRANT IS NOT A SPENT ONE. Folding them together would say a hatch was opened and
+    # used when it was withdrawn unused — the same conflation the `--revoke` refusal exists to
+    # prevent, one surface over. The extra clause appears only once something has been revoked, so
+    # no consumer's status line moves until they use the verb.
+    dead = [a for a in auth if int(a.get("uses_left") or 0) <= 0]
+    revoked = [a for a in dead if a.get("revoked_at")]
+    spent = len(dead) - len(revoked)
+    L = ["", "authorize grants: %d live, %d spent%s"
+         % (len(live), spent, (", %d revoked" % len(revoked)) if revoked else "")]
     for a in live[:6]:
         L.append(f"  {int(a.get('uses_left') or 0):>3} left · {a.get('path')}")
     if len(live) > 6:
@@ -4282,6 +4289,95 @@ def recurrence_lines(reason, real, raw_path):
     return lines
 
 
+def grant_matches(a, target):
+    """Does grant `a` name `target`? Asked three ways, because `authorize` does not store what was
+    typed: it realpaths `--path`, so a verb grant lands as `<cwd>/gh issue close` and the gh guard
+    reads it back by BASENAME. A revoke that compared only the stored form would silently miss
+    exactly the grants a human is most likely to name by hand.
+
+    The basename form is accepted ONLY for a `gh ` verb. Matching any grant by basename would let
+    `--revoke game_loop` disarm a grant on `/Users/x/dev/game_loop`, which is a different act than
+    the one asked for.
+    """
+    stored = (a.get("path") or "").strip()
+    t = (target or "").strip()
+    if not stored or not t:
+        return False
+    if stored == t:
+        return True
+    base = os.path.basename(stored)
+    if base.startswith("gh ") and base == t:
+        return True
+    return stored == os.path.realpath(os.path.expanduser(t))
+
+
+def authorize_revoke(s, a):
+    """Withdraw a live grant. DISARMED, NOT DELETED — and loud when it matched nothing.
+
+    Reported by wcs, who had no verb for this and hand-edited state.json, which is the working-
+    around this repo asks consumers to report instead of absorb. What they found when they looked
+    properly: five live grants and thirteen unspent uses across two state files, one dated six
+    weeks earlier with eight uses left. A grant is armed until something spends it, and nothing
+    spends the ones nobody needed.
+
+    Two decisions here are theirs, and both are right. DISARM rather than delete, because deleting
+    takes with it the evidence that the hatch was ever opened, and "logged forever" is the entire
+    value of the hatch. And record WHY and HOW MANY uses were withdrawn, because a grant zeroed
+    with no other mark is indistinguishable afterwards from one somebody actually spent — the
+    record would read as a bypass that happened.
+
+    REFUSES WHEN NOTHING MATCHED. That is the load-bearing half. A revoke that prints success over
+    an empty match set is this repo's recurring defect sitting in the worst available place: the
+    human reads "revoked", the grant is still armed, and the next write through it is the one
+    nobody is watching for. Silence here would be worse than having no verb at all.
+    """
+    target = a.revoke
+    auth = [x for x in (s.get("authorized") or []) if isinstance(x, dict)]
+    matched = [x for x in auth if grant_matches(x, target)]
+    live_all = [x for x in auth if int(x.get("uses_left") or 0) > 0]
+    if not matched:
+        if live_all:
+            have = ["  live grants, named as you must name them:"]
+            have += ["    %3d left · %s" % (int(x.get("uses_left") or 0), x.get("path"))
+                     for x in live_all[:8]]
+            if len(live_all) > 8:
+                have.append("    ... and %d more live" % (len(live_all) - 8))
+        else:
+            have = ["  This checkout holds no live grants at all."]
+        die("REFUSED — no grant here names %r, so NOTHING WAS REVOKED.\n%s\n\n"
+            "Said this loudly on purpose: a revoke that reported success over an empty match set\n"
+            "would leave the hatch armed while the record said it was closed, and the write that\n"
+            "went through it later would be the one nobody was watching for."
+            % (target, "\n".join(have)))
+    live = [x for x in matched if int(x.get("uses_left") or 0) > 0]
+    if not live:
+        out("✓ ALREADY DISARMED — %d grant(s) name that path and none has a use left."
+            % len(matched),
+            "  Nothing changed, and nothing needed to. A spent grant and a revoked one are both",
+            "  harmless; the record keeps them either way so the hatch stays readable later.")
+        return
+    reason = a.reason or "revoked; no reason given"
+    for x in live:
+        n = int(x.get("uses_left") or 0)
+        x["uses_left"] = 0
+        x["revoked_at"] = now()
+        x["revoked_reason"] = reason
+        x["uses_revoked"] = n
+    save(s)
+    for x in live:
+        logline({"kind": "authorize_revoke", "path": x.get("path"), "reason": reason,
+                 "granted_reason": x.get("reason"), "granted_at": x.get("at"),
+                 "uses_revoked": x.get("uses_revoked")})
+    withdrawn = sum(int(x.get("uses_revoked") or 0) for x in live)
+    out("✓ REVOKED — %d grant(s), %d unspent use(s) withdrawn." % (len(live), withdrawn),
+        *["  %s (granted %s, %d use(s) left)"
+          % (x.get("path"), (x.get("at") or "?")[:16], int(x.get("uses_revoked") or 0))
+          for x in live],
+        "  reason: %s" % reason,
+        "→ disarmed, not deleted. The grant stays in state.json and in log.jsonl carrying the",
+        "  human's original words, because the record that a hatch was opened outlives the hatch.")
+
+
 def cmd_authorize(s, a):
     """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
 
@@ -4294,6 +4390,8 @@ def cmd_authorize(s, a):
     typing. It does not make a bypass impossible; it makes a bypass LOUD, NARROW, SINGLE-USE and
     permanently attributable. That is the most a guard on this side of the keyboard can do.
     """
+    if getattr(a, "revoke", None):
+        return authorize_revoke(s, a)
     if not a.path or not a.reason:
         die("authorize needs --path <prefix> and --reason \"<the human's own words>\".\n"
             "This is a HUMAN escape hatch, not a convenience. Quote them, don't paraphrase.")
@@ -12432,6 +12530,8 @@ def main():
     az.add_argument("--path", help="path prefix the human authorized")
     az.add_argument("--reason", help="the human's own words")
     az.add_argument("--uses", help="how many mutations (default 1)")
+    az.add_argument("--revoke", metavar="PATH",
+                    help="withdraw live grants on PATH: uses_left to 0, kept in the record")
 
     at = sub.add_parser("attribute")  # a commit's merges, named by REF and recomputed here (#29)
     at.add_argument("--merge", action="append",

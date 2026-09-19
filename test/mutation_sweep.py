@@ -566,6 +566,51 @@ MUTANTS = [
      "reading the warning's TEXT can kill it — this file's standing nothing-direction caveat. The "
      "neutered form is exactly the behaviour being repaired: the entry was dropped and nobody was "
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
+    ("unbound_mandate_notice -> the notice never has anything to say",
+     ".game_loop/bin/_gl_impl.py::unbound_mandate_notice", '    return ""\n',
+     ['FIRES on the case it exists for', 'never REFUSES', 'says so in BOTH directions'],
+     "FLOOR OWED, RECORDED 0, AND THE NOTHING-DIRECTION CAVEAT IS THE WHOLE STORY HERE: neutered "
+     "to \"\" this passes every assertion about the four silences BY CONSTRUCTION, because staying "
+     "quiet is what it now does in all cases. Only the assertions requiring it to SPEAK can kill "
+     "it, which is exactly why they were written — a notice that never fires and a notice that "
+     "cannot fire are indistinguishable from inside the session it was meant to reach, and that "
+     "is the shape of #4, a detector sitting below a return at the turn-end most likely to be a "
+     "stall.", 0),
+    ("mandate_binding -> 'could not tell' reports ARMED, and the notice goes quiet",
+     ".game_loop/bin/_gl_impl.py::mandate_binding", '    return "armed"\n',
+     ['COULD NOT TELL', 'active\' mandate with no TEXT', 'bound mandate is ARMED'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO \"armed\" IS THE DEFECT showrunner NAMED, not a "
+     "scramble: a check that folds unknown into armed goes silent exactly when it has lost the "
+     "ability to speak, and from the inside that is indistinguishable from a run properly under "
+     "orders. This repo already paid for the same conflation one layer down, in load(), where an "
+     "UNREADABLE state.json read as a brand new session and status printed the sentence it prints "
+     "for a session that never had a mandate.", 0),
+    ("long_work_hit -> nothing ever looks like the start of a long run",
+     ".game_loop/bin/_gl_impl.py::long_work_hit", "    return None\n",
+     ['shapes that start a long run are caught', 'path-invoked form is among them',
+      'FIRES on the case it exists for'],
+     "FLOOR OWED, RECORDED 0. EXPECT THE SILENCE-DIRECTION CAVEAT TO APPLY IN FULL: neutered to "
+     "None this satisfies EVERY assertion about the notice staying quiet by construction, so only "
+     "the ones that require it to FIRE can kill it. That asymmetry is the reason those assertions "
+     "exist at all — a notice that never fires and a notice that cannot fire are the same thing "
+     "from inside the session it was supposed to reach.", 0),
+    ("_verb_at_command_position -> a verb QUOTED in an argument counts as running it",
+     ".game_loop/bin/_gl_impl.py::_verb_at_command_position",
+     "    return _spawn_verb_hit(cmd, verbs)\n",
+     ['QUOTED inside an argument is not an invocation', 'ordinary work is silent'],
+     "FLOOR OWED, RECORDED 0. THE NEUTERED FORM IS THE OLD BEHAVIOUR EXACTLY — `_spawn_verb_hit` "
+     "is what this rail called before, and its boundary class includes quotes deliberately for the "
+     "DENY rails it was built for. So the mutant is a real prior implementation rather than a "
+     "scramble, and it reintroduces the mention-versus-use failure two consumers hit the same day. "
+     "It matters more here than on a deny rail, not less: this notice speaks ONCE PER SESSION, so "
+     "a false positive spends the only notice and leaves the real unattended run silent.", 0),
+    ("_blank_quoted -> quoted spans are left intact for the matcher to read",
+     ".game_loop/bin/_gl_impl.py::_blank_quoted", "    return cmd\n",
+     ['QUOTED inside an argument is not an invocation', 'quote-blanking preserves LENGTH'],
+     "FLOOR OWED, RECORDED 0. showrunner's fix, taken rather than reinvented, after wcs hit the "
+     "class twice in one day in two alphabets — prose quoting `git worktree add` tripping the "
+     "advice about it, and `Kansas` matching \"Kansas City\". A word boundary is not a semantic "
+     "boundary, and returning the command unblanked is precisely the pre-fix state.", 0),
     ("authorize_revoke -> a revoke that matched NOTHING reports success",
      ".game_loop/bin/_gl_impl.py::authorize_revoke", "    return None\n",
      ['REVOKE THAT MATCHED NOTHING REFUSES', 'refusal LISTS the live grants',

@@ -2027,11 +2027,245 @@ def _limitgate_verdict(s, payload, now_epoch):
         + tail)
 
 
+# ── the unbound mandate, said at the moment it matters ──────────────────────────────────────────
+#
+# THE BUG REPORT IS THE HUMAN'S OWN SENTENCE: "I have to tell them manually, none of them know."
+# Agents across this machine start long unattended runs with no mandate bound. The Stop gate is then
+# inert by construction, `doorbell` correctly answers that there is nothing to wake the run FOR, and
+# a wake that lands mid-run drops the agent into a prompt with a hole where the goal goes.
+#
+# THE INFORMATION WAS NEVER MISSING, which is the whole diagnosis and it is showrunner's, reported
+# after they built the workaround in their own layer and saw the debt: `game_loop status` prints
+# `MANDATE: none (Stop gate inert)`, `doorbell` explains the remedy in full to anyone who runs it,
+# and their own SessionStart banner repeats the mandate line. THREE SURFACES, ALL CORRECT, ALL
+# IGNORED. So this is a DELIVERY defect, and more documentation is the one fix guaranteed not to
+# work — session-start text is read once, before the agent knows whether the work ahead is long, and
+# by the time it is long the banner is thousands of tokens upstream. The human succeeds where all
+# three documents fail for one reason: he speaks AT THE MOMENT, and the moment is the start of the
+# long thing rather than the start of the session.
+#
+# WHY IT LIVES HERE RATHER THAN IN showrunner, whose version works today: the mandate and the
+# doorbell are this tool's, so their gate re-derives a conclusion this one is better placed to
+# state; and it reaches only repos that install showrunner, while balooga, llm_chat, wcs and every
+# other consumer has the identical gap. Nine installs, one covered. They offered to delete theirs
+# and were asked to keep it until this one has fired somewhere real, because a notice that has never
+# fired and a notice that CANNOT fire look identical from the inside.
+#
+# IT RIDES THE HOOK THAT IS ALREADY REGISTERED. `game_loop limitgate` is a PreToolUse hook on
+# Write|Edit|NotebookEdit|Bash in every install. A new hook would need nine settings.json files
+# updated by hand before the fix reached anybody, which is the same delivery failure one layer out.
+
+
+def mandate_binding(s):
+    """Whether a goal is bound here: "armed", "unarmed" or "unknown" — never a bare boolean.
+
+    "COULD NOT TELL" MUST NEVER READ AS ARMED. showrunner's constraint, and it is the load-bearing
+    half of their report: a check that folds unknown into armed goes quiet exactly when it has lost
+    the ability to speak, and from the inside that is indistinguishable from a run properly under
+    orders. Their `armed()` returns four answers for this reason.
+
+    This repo already made the same distinction one level down and paid for it there. `load()` used
+    to return pristine defaults for a state.json that EXISTED and would not parse, so a corrupt file
+    read as a brand new session: the mandate vanished and status printed "MANDATE: none" — the exact
+    sentence it prints for a session that never had one. Same rule, one layer up.
+
+    A PARKED mandate counts as armed. The human called that break, so somebody is by definition
+    there to notice; nudging them to bind a goal they have already bound and paused is the nag that
+    turns a true signal into scenery.
+    """
+    if STATE_UNREADABLE:
+        return "unknown"
+    m = s.get("mandate")
+    if m is None:
+        return "unarmed"                 # a genuinely fresh session, and that is fine
+    if not isinstance(m, dict):
+        return "unknown"                 # something is there and it is not what this reads
+    if m.get("active") and str(m.get("text") or "").strip():
+        return "armed"
+    if m.get("active"):
+        return "unknown"                 # active with no text: bound to what?
+    return "unarmed"
+
+
+# NOT A GUESS THIS TOOL INVENTED. Two of these three are the lists the deploy rail and the fan-out
+# brake already read, so a consumer who has tuned those gets this for free and has ONE place to
+# argue with rather than a second copy drifting from the first. The third is a built-in list of
+# suite and build runners, overridable at config.long_work_verbs, because "what starts a long run"
+# is genuinely per-project and a hard-coded list is how six repos end up with six forks of it.
+#
+# HONEST ABOUT WHAT IT IS (INV6): a command-shape guess, exactly like showrunner's. game_loop knows
+# a mandate is unbound and knows when the last checkpoint landed, but the moment work BECOMES long
+# is not something it observes either — it sees tool calls through the same hooks. The improvement
+# over their version is not accuracy, it is that this is one guess in one place.
+LONG_WORK_VERBS = [
+    "pytest", "npm test", "npm run build", "yarn build", "flutter test", "flutter build",
+    "cargo test", "cargo build", "go test", "make", "gradle", "./gradlew", "tox", "nox",
+    "bazel build", "bazel test", "docker build", "terraform apply", "claude -p",
+]
+
+
+def long_work_verbs():
+    """The configured long-work verbs, or the built-in list. A consumer's list REPLACES."""
+    v = config().get("long_work_verbs")
+    if isinstance(v, list) and v:
+        return [str(x) for x in v if str(x).strip()]
+    return list(LONG_WORK_VERBS)
+
+
+_QUOTED = re.compile(r"""'[^']*'|"[^"]*\"""", re.S)
+_CMD_SPLIT = re.compile(r"\|\||&&|[;|\n]")
+_LEADING_ENV = re.compile(r"^(?:[A-Za-z_][A-Za-z_0-9]*=\S*\s+)+")
+
+
+def _blank_quoted(cmd):
+    """Quoted CONTENTS replaced by spaces, quotes and length kept.
+
+    REPORTED TWICE IN ONE DAY, in two repos, in two alphabets. wcs hit it writing a knowledge-base
+    entry whose BODY quoted `git worktree add` as the example of the thing not to do, and the advice
+    fired on their prose about the advice; their own matcher had the identical bug with `Kansas`
+    matching "Kansas City" and pinning a Missouri buyer to Kansas. showrunner fixed the same class
+    in their own guard and this is their fix, not a reinvention of it.
+
+    A word boundary is not a semantic boundary. `dart run tool/kb.dart --body "... git worktree add
+    ..."` is not a git invocation and nothing in the text says otherwise except the substring.
+    """
+    return _QUOTED.sub(lambda mm: mm.group(0)[0] + " " * (len(mm.group(0)) - 2) + mm.group(0)[-1],
+                       cmd)
+
+
+def _verb_at_command_position(cmd, verbs):
+    """The verb this command line RUNS — at a command boundary, outside quotes — or None.
+
+    STRICTER THAN `_spawn_verb_hit`, DELIBERATELY, AND NOT A CORRECTION OF IT. That matcher's
+    boundary class includes quotes on purpose, so a verb nested in an interpreter argument still
+    trips the DENY rails; for an irreversible deploy, over-refusing is the cheap direction and its
+    docstring says so.
+
+    THIS RAIL'S ARITHMETIC IS THE OPPOSITE, and for a reason particular to it: the notice speaks
+    ONCE PER SESSION. So a false positive does not cost one spurious line — it SPENDS THE ONLY
+    NOTICE, and the real unattended run an hour later gets silence. The expensive direction here is
+    the false positive, which is the same conclusion showrunner reached for a channel whose only
+    value is being worth reading, by a different route.
+
+    THE COST, asserted rather than left to be discovered: `bash -c "pytest"` is now a miss. That
+    trade is taken knowingly. Every ordinary invocation still hits — bare, after `&&`, after `;`,
+    after a pipe, behind a path, behind leading environment assignments.
+    """
+    text = _blank_quoted(cmd)
+    for seg in _CMD_SPLIT.split(text):
+        seg = _LEADING_ENV.sub("", seg.strip())
+        if not seg:
+            continue
+        for v in verbs:
+            words = [w for w in str(v).split() if w]
+            if not words:
+                continue
+            # `(?:\S*/)?` on the FIRST word only: `./.showrunner/bin/showrunner spawn` is the form
+            # every install of that harness actually uses, and a rule anchored to a bare word would
+            # match nothing at all while looking completely correct — the #51 lesson, kept.
+            pat = (r"^(?:\S*/)?" + r"\s+".join(re.escape(w) for w in words) + r"(?:$|[\s;&|])")
+            if re.search(pat, seg):
+                return v
+    return None
+
+
+def long_work_hit(payload):
+    """What about this call says a long run is starting, or None. Bash only.
+
+    Backgrounding is checked separately from the verb list because it is the one shape that carries
+    no verb at all: `&` at the end says "this outlives the turn" whatever is in front of it. `&&` is
+    not backgrounding and the distinction is one character, so it is matched rather than searched —
+    and it is checked against the QUOTE-BLANKED text, or `echo "a & b"` reads as backgrounding.
+    """
+    if (payload or {}).get("tool_name") != "Bash":
+        return None
+    cmd = str(((payload or {}).get("tool_input") or {}).get("command") or "")
+    if not cmd.strip():
+        return None
+    if re.search(r"(?<!&)&\s*$", _blank_quoted(cmd).strip()):
+        return "a backgrounded command"
+    c = config()
+    for label, verbs in (("a fan-out verb", spawn_cfg_verbs()),
+                         ("a deploy verb", [str(x) for x in (c.get("deploy_verbs") or [])]),
+                         ("a long-running command", long_work_verbs())):
+        v = _verb_at_command_position(cmd, verbs)
+        if v:
+            return "%s (%s)" % (label, v)
+    return None
+
+
+def spawn_cfg_verbs():
+    """The fan-out brake's verb list, read WITHOUT its enabled flag.
+
+    The brake is off by default and this notice is not the brake: `showrunner spawn` starts a long
+    unattended run whether or not anybody configured a token threshold to refuse it at. Reading the
+    flag here would make the notice silent in exactly the installs that never configured limits,
+    which is most of them.
+    """
+    try:
+        return list((context_cfg() or {}).get("spawn_verbs") or [])
+    except Exception:
+        return ["showrunner spawn"]
+
+
+def unbound_mandate_notice(s, payload):
+    """The text to put in front of the agent, or "" — pure, and silent in four distinct cases.
+
+    SILENCE MUST BE CHEAP AND THE NOTICE MUST BE RARE. showrunner's other constraint, and they named
+    the failure mode this feature is most likely to die of: a nag on every long command is how a
+    true signal becomes scenery. Silent when a mandate is bound, silent when this call starts
+    nothing long, silent when it has already spoken once in this session, and silent on every tool
+    that is not Bash. It never refuses — the agent may have a perfectly good reason, and a gate that
+    blocks work it cannot judge is a gate that gets routed around.
+    """
+    if s.get("mandate_notice_said"):
+        return ""
+    state = mandate_binding(s)
+    if state == "armed":
+        return ""
+    hit = long_work_hit(payload)
+    if not hit:
+        return ""
+    if state == "unknown":
+        where = STATE_UNREADABLE or "(the mandate record is present but not in the shape this reads)"
+        return (
+            "COULD NOT TELL WHETHER A GOAL IS BOUND, and you are starting %s.\n\n"
+            "  state: UNREADABLE — set aside at %s\n\n"
+            "This is NOT 'no mandate' and it is NOT 'you are fine'. The record that says what this\n"
+            "run is for cannot be read, so the Stop gate's inertness here means nothing either way.\n"
+            "Check `game_loop status` before this goes unattended; if the mandate is genuinely gone,\n"
+            "the set-aside file above is where its text still is." % (hit, where))
+    return (
+        "NO MANDATE IS BOUND, and you are starting %s.\n\n"
+        "Nothing is wrong yet. But the Stop gate is INERT while no goal is bound — so if this run\n"
+        "goes quiet, ends early, or gets woken mid-way, there is nothing recorded for it to be\n"
+        "woken FOR, and no gate will notice the stop. That is the shape behind a human having to\n"
+        "restart runs by hand, which is the report this notice exists for.\n\n"
+        "  game_loop mandate --set \"<what this run is for>\" --wake-every <sec>\n\n"
+        "If this is short, attended, or not the kind of work a mandate covers, ignore this — it\n"
+        "does not refuse anything and it will not ask again this session." % hit)
+
+
 def cmd_limitgate(s, a, payload):
     """PreToolUse entrypoint for the limit gate. Same output protocol as guard-writes.sh: a deny is
     JSON on stdout with permissionDecision=deny, always exit 0."""
     allow, reason = _limitgate_verdict(s, payload, time.time())
     if allow:
+        # THE NOTICE RIDES THE ALLOW PATH ONLY. A call that is being refused already has the
+        # agent's attention and a reason on screen; adding a second, unrelated paragraph to it is
+        # how the one that matters gets skimmed.
+        notice = unbound_mandate_notice(s, payload)
+        if notice:
+            # THE ONCE-PER-SESSION FLAG IS WRITTEN HERE, IN THE I/O LAYER, and not inside
+            # unbound_mandate_notice, which is documented pure. Same split `_stop_verdict` has and
+            # for the same reason it was moved there: a verdict function that writes state cannot
+            # be called twice by a test to check its answer is stable.
+            _binding, _hit = mandate_binding(s), long_work_hit(payload)
+            s["mandate_notice_said"] = now()
+            save(s)
+            logline({"kind": "mandate_notice", "binding": _binding, "trigger": _hit})
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "additionalContext": notice}}))
         sys.exit(0)
     # WHICH trigger, in the log — three of them now. A block count that cannot separate "the
     # account ran dry" from "the cap is set too low" from "a fan-out was refused" cannot tell an

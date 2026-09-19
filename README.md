@@ -462,6 +462,7 @@ Everything lives in `.game_loop/config.json`. It ships with sane defaults and co
 | `session_start` | `false` disables the status block injected at session start and after compaction. |
 | `work_nudge_every`, `trans_nudge_every` | How much evidence work goes by before `status` nudges for a retro / a phase transition. |
 | `hooks_probe_slack_sec` | How stale a hook probe may be before `status` calls the wiring into question. |
+| `long_work_verbs` | What counts as **starting a long run**, for the one-per-session notice that fires when no mandate is bound. Your list REPLACES the built-in one (suites, builds, `terraform apply`, `claude -p`); `limits.context.spawn_verbs` and `deploy_verbs` are read alongside it, so a verb you have already listed for those rails counts here for free. Matched at a **command boundary, outside quotes** — so a commit message mentioning `pytest` is not an invocation of it. |
 | `project_name`, `flair` | Display name, and the fun lines (`flair.enabled: false` to opt out). |
 
 **Standing MCP writes.** Ask-every-time is the wrong shape when a workflow's *work product* lands

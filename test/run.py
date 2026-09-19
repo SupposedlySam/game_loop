@@ -8007,7 +8007,7 @@ def main():
           "'no match' with nothing else on screen sends the reader to guess at the spelling",
           "/Users/x/dev/game_loop" in _said)
     check("...and it changed nothing: a refused revoke must not half-apply",
-          _st["authorized"][0]["uses_left"] == 3 and not _saved and not _log)
+          _st["authorized"][0].get("uses_left") == 3 and not _saved and not _log)
 
     _st = {"authorized": [dict(_g_path), dict(_g_verb)]}
     _refused, _said, _log, _saved = _revoke(_st, revoke="/Users/x/dev/game_loop",
@@ -8016,13 +8016,13 @@ def main():
     check("a matched revoke zeroes the balance AND marks HOW MANY uses were withdrawn — zeroing "
           "alone is indistinguishable afterwards from a grant that was spent, which would put a "
           "bypass in the record that never happened",
-          not _refused and _rec["uses_left"] == 0 and _rec["uses_revoked"] == 3
-          and _rec.get("revoked_at") and _rec["revoked_reason"] == "finished with it")
+          not _refused and _rec.get("uses_left") == 0 and _rec.get("uses_revoked") == 3
+          and _rec.get("revoked_at") and _rec.get("revoked_reason") == "finished with it")
     check("...and the grant is DISARMED, NOT DELETED — the record that a hatch was opened outlives "
           "the hatch, and deleting it takes the evidence with it",
-          len(_st["authorized"]) == 2 and _rec["reason"] == "Jonah: go ahead")
+          len(_st["authorized"]) == 2 and _rec.get("reason") == "Jonah: go ahead")
     check("...and the other grant is untouched: a revoke names ONE path and must not sweep",
-          _st["authorized"][1]["uses_left"] == 1)
+          _st["authorized"][1].get("uses_left") == 1)
     check("...and log.jsonl carries the withdrawal WITH the human's original words, so the log "
           "still answers 'what was this hatch for' after the hatch is shut",
           len(_log) == 1 and _log[0]["kind"] == "authorize_revoke"
@@ -8044,6 +8044,130 @@ def main():
     check("...and the clause appears ONLY once something has been revoked, so no consumer's status "
           "line moves until they use the verb",
           any("0 live, 1 spent" in ln and "revoked" not in ln for ln in _rep2))
+
+    print("an unbound mandate is said at the MOMENT, not only at session start:")
+    # THE BUG REPORT IS THE HUMAN'S OWN SENTENCE, relayed by showrunner: "I have to tell them
+    # manually, none of them know." Agents start long unattended runs with no mandate bound, the
+    # Stop gate is inert by construction, and a wake landing mid-run has no goal to return to.
+    #
+    # THE INFORMATION WAS NEVER MISSING — status says `MANDATE: none (Stop gate inert)`, doorbell
+    # explains the remedy in full, showrunner's own banner repeats it. Three surfaces, all correct,
+    # all ignored. It is a DELIVERY defect, so more documentation is the one fix guaranteed not to
+    # work: session-start text is read before the agent knows the work ahead is long.
+    #
+    # BUILT HERE RATHER THAN IN showrunner, who built it first and reported it as being in the wrong
+    # layer: the mandate is this tool's, and their version reaches only repos that install
+    # showrunner while nine consumers have the identical gap.
+    _mb = {"mandate": {"active": True, "text": "keep working open issues"}}
+    check("a bound mandate is ARMED and a cleared one is UNARMED — the ordinary two answers",
+          _um.mandate_binding(_mb) == "armed"
+          and _um.mandate_binding({"mandate": {"active": False, "text": "old"}}) == "unarmed"
+          and _um.mandate_binding({}) == "unarmed")
+    check("...and a PARKED mandate reads ARMED: the human called that break, so somebody is by "
+          "definition there to notice, and nudging them to bind a goal they have already bound and "
+          "paused is the nag that turns a true signal into scenery",
+          _um.mandate_binding({"mandate": dict(_mb["mandate"], parked={"by": "human"})}) == "armed")
+    _sv = _um.STATE_UNREADABLE
+    try:
+        _um.STATE_UNREADABLE = "/tmp/state.json.unreadable"
+        _unk = _um.mandate_binding(_mb)
+        _unk_txt = _um.unbound_mandate_notice(
+            _mb, {"tool_name": "Bash", "tool_input": {"command": "pytest -q"}})
+    finally:
+        _um.STATE_UNREADABLE = _sv
+    check("'COULD NOT TELL' IS ITS OWN ANSWER and must never read as armed — showrunner's "
+          "constraint, and the load-bearing half: a check that folds unknown into armed goes quiet "
+          "exactly when it has lost the ability to speak, which from the inside is indistinguishable "
+          "from a run properly under orders",
+          _unk == "unknown")
+    check("...and the notice it produces says so in BOTH directions — not 'no mandate' either, "
+          "because the record is unreadable rather than empty, and it names the set-aside file so "
+          "the mandate's text is recoverable rather than a thing to reconstruct from memory",
+          "COULD NOT TELL" in _unk_txt and "NOT 'no mandate'" in _unk_txt
+          and "/tmp/state.json.unreadable" in _unk_txt)
+    check("...and an 'active' mandate with no TEXT is unknown rather than armed — bound to what? "
+          "Treating it as armed would go silent on a record that says nothing",
+          _um.mandate_binding({"mandate": {"active": True, "text": "   "}}) == "unknown"
+          and _um.mandate_binding({"mandate": "a string"}) == "unknown")
+
+    def _bash(c):
+        return {"tool_name": "Bash", "tool_input": {"command": c}}
+
+    check("the shapes that start a long run are caught — a suite, a build, a fan-out verb, and a "
+          "backgrounded command, which is the one shape carrying no verb at all",
+          all(_um.long_work_hit(_bash(c)) for c in
+              ("pytest -q", "npm test", "make -j8", "terraform apply",
+               "showrunner spawn --n 4", "./.showrunner/bin/showrunner spawn",
+               "cd /tmp && npm test", "GL=1 pytest -q", "python3 test/run.py &")))
+    check("...and the path-invoked form is among them, which is the #51 lesson kept rather than "
+          "relearned: `./.showrunner/bin/showrunner spawn` is the form every install actually uses, "
+          "and a rule anchored to a bare word matches nothing while looking entirely correct",
+          _um.long_work_hit(_bash("./.showrunner/bin/showrunner spawn")) is not None)
+    check("ordinary work is silent — a status, a log read, a pipe whose long-looking word is an "
+          "ARGUMENT rather than the command",
+          not any(_um.long_work_hit(_bash(c)) for c in
+                  ("git status", "echo hi", "ls | grep pytest", "git log --oneline | head",
+                   "python3 x.py && echo done")))
+    # MENTION VERSUS USE, REPORTED TWICE IN ONE DAY IN TWO REPOS. wcs hit it writing a knowledge-base
+    # entry whose BODY quoted `git worktree add` as the example of the thing not to do — the advice
+    # fired on their prose about the advice — and their own matcher had it with `Kansas` matching
+    # "Kansas City". showrunner fixed the class in their guard; this is their fix.
+    #
+    # AND THE ARITHMETIC HERE IS WHY IT MATTERS MORE, NOT LESS: this notice speaks ONCE PER SESSION.
+    # A false positive does not cost one spurious line, it SPENDS THE ONLY NOTICE — and the real
+    # unattended run an hour later gets silence. The expensive direction is the false positive.
+    check("a verb QUOTED inside an argument is not an invocation of it — the mention-versus-use "
+          "failure two consumers hit the same day, and here it would spend the session's one notice "
+          "on a commit message and leave the real long run silent",
+          not any(_um.long_work_hit(_bash(c)) for c in
+                  ("git commit -m 'run pytest later'",
+                   'gh issue comment 1 --body "we should make the build faster"',
+                   'echo "run pytest" && ls', 'echo "a & b"')))
+    check("...and the quote-blanking preserves LENGTH, so a span is emptied rather than deleted and "
+          "nothing on either side of it is glued into a word that was never typed",
+          len(_um._blank_quoted("a 'bcd' e")) == len("a 'bcd' e")
+          and _um._blank_quoted("a 'bcd' e") == "a '   ' e")
+    # THE COST, ASSERTED RATHER THAN LEFT TO BE DISCOVERED — the same discipline showrunner used
+    # when they took this trade: a fix whose cost is not pinned is indistinguishable from the rule
+    # being switched off, and the next reader cannot tell a deliberate miss from a regression.
+    check("THE COST OF COMMAND-POSITION MATCHING, PINNED: `bash -c \"pytest\"` is a miss. Taken "
+          "knowingly, because for a once-per-session notice a false positive is the expensive "
+          "direction — and every ordinary invocation still fires",
+          _um.long_work_hit(_bash("bash -c 'pytest'")) is None)
+
+    check("the notice is SILENT in four distinct cases — mandate bound, nothing long starting, "
+          "already spoken this session, and any tool that is not Bash. 'Silence must be cheap and "
+          "the notice rare' is showrunner's constraint and they named the failure mode it exists to "
+          "avoid: a nag on every long command is how a true signal becomes scenery",
+          not _um.unbound_mandate_notice(_mb, _bash("pytest"))
+          and not _um.unbound_mandate_notice({}, _bash("git status"))
+          and not _um.unbound_mandate_notice({"mandate_notice_said": "2026-09-19T18:00:00"},
+                                             _bash("pytest"))
+          and not _um.unbound_mandate_notice({}, {"tool_name": "Write",
+                                                  "tool_input": {"file_path": "/x/pytest"}}))
+    _fire = _um.unbound_mandate_notice({}, _bash("pytest -q"))
+    check("...and it FIRES on the case it exists for, naming WHAT it noticed and the exact command "
+          "to fix it — so the four silences above are a verdict rather than a check that cannot "
+          "speak at all",
+          "NO MANDATE IS BOUND" in _fire and "pytest" in _fire
+          and "mandate --set" in _fire)
+    check("...and it never REFUSES: the text says so, because a gate that blocks work it cannot "
+          "judge is a gate that gets routed around rather than respected",
+          "does not refuse anything" in _fire)
+    _lg = inspect.getsource(_um.cmd_limitgate)
+    check("the once-per-session flag is written in the I/O layer and NOT inside the pure verdict — "
+          "the same split `_stop_verdict` was given after it broke, because a verdict function that "
+          "writes state cannot be called twice by a test to check its answer is stable",
+          "mandate_notice_said" in _lg and "save(s)" in _lg
+          # It READS the flag, which is what makes it once-per-session; what it must not do is
+          # WRITE. Asserted as "calls neither save nor logline" rather than "never mentions the
+          # key", because the crude version failed on the read and would have been silenced by
+          # deleting the very line that makes the function pure to begin with.
+          and not any(w in inspect.getsource(_um.unbound_mandate_notice)
+                      for w in ("save(", "logline(", 's["mandate_notice_said"] =')))
+    check("...and it rides the hook that is ALREADY REGISTERED rather than asking nine consumers to "
+          "edit settings.json — a new hook would be the same delivery failure one layer out",
+          "unbound_mandate_notice" in _lg and "hookEventName" in _lg)
 
     print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
     # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.

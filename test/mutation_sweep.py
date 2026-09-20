@@ -568,9 +568,9 @@ MUTANTS = [
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
     ("finish_line_facts -> a mandate records nothing about its own finish line",
      ".game_loop/bin/_gl_impl.py::finish_line_facts",
-     '    return {"markers": [], "enumerated_items": 0, "text_len": 0}\n',
-     ['marker is recorded WITH THE WORDS EITHER SIDE', 'ENUMERATED mandate with no marker reports',
-      'every marker occurrence is kept'],
+     '    return {"markers_checked": [], "labelled_markers": [], "enumerated_items": 0, "text_len": 0}\n',
+     ['marker is recorded WITH THE WORDS EITHER SIDE', 'record carries THE INSTRUMENT',
+      'TYPED AS A CONVENTION', 'every marker occurrence is kept'],
      "FLOOR OWED, RECORDED 0. NEUTERED TO THE EMPTY READING IS THE PRE-FIX WORLD — mandate_set "
      "carried the text and nothing else — so the mutant is the defect rather than a scramble. Note "
      "the neutered form keeps the KEYS: a mutant that changed the shape would be killed by the "
@@ -609,7 +609,7 @@ MUTANTS = [
      "it, which is exactly why they were written — a notice that never fires and a notice that "
      "cannot fire are indistinguishable from inside the session it was meant to reach, and that "
      "is the shape of #4, a detector sitting below a return at the turn-end most likely to be a "
-     "stall.", 0),
+     "stall. MEASURED 5 on 2026-09-19, in a SWEEP_ONLY run — the whole suite against this one producer — on a CLONE at b859295 rather than in the working tree, because two earlier attempts were invalidated by edits landing under a sweep that was still running. This replaces the FLOOR OWED placeholder with a reading; it is not a target.", 5),
     ("mandate_binding -> 'could not tell' reports ARMED, and the notice goes quiet",
      ".game_loop/bin/_gl_impl.py::mandate_binding", '    return "armed"\n',
      ['COULD NOT TELL', 'active\' mandate with no TEXT', 'bound mandate is ARMED'],

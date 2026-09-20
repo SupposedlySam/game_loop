@@ -2924,23 +2924,59 @@ def cmd_claim(s, a):
 # impossible to check.
 
 _FINISH_MARKERS = ("done when", "definition of done", "finished when", "complete when",
-                   "acceptance", "success criteria", "exit criteria")
+                   "acceptance criteria", "success criteria", "exit criteria")
 _ENUM_ITEM_PAT = re.compile(r"(?:^|\s)(?:\(\d+\)|\d+[.)]|[-*•])\s+\S", re.M)
+
+
+def _typographic_at(text, i, marker):
+    """Was this marker TYPED AS A CONVENTION — upper case and followed by a colon?
+
+    wcs's rule, and it is the one that separates the two populations they measured: "prefer markers
+    that are TYPOGRAPHIC (caps, colon, line-initial) over markers that are lexical. A word can be
+    used in a sentence; a convention has to be typed on purpose."
+
+    They measured the difference rather than arguing it. Over 42 records their proposed marker set
+    hit 5 times at 40% precision, and every miss was a LEXICAL match — `until` three times, once
+    cautioning against trusting a source, once forbidding a re-run, once as a condition on item (2)
+    of four. Both true positives were `DONE WHEN:` — capitalised, colon, at a clause boundary.
+
+    So the flag rather than a shorter list: dropping the lexical forms would throw away the record
+    that they appeared, and this field is supposed to let a later reader judge rather than inherit
+    somebody's threshold. A marker with typographic False is not a false positive, it is a match
+    whose precision is known to be poor.
+    """
+    seg = text[i:i + len(marker)]
+    after = text[i + len(marker):i + len(marker) + 2]
+    return seg.isupper() and after.lstrip()[:1] == ":"
 
 
 def finish_line_facts(text, window=36):
     """What a mandate's text SAYS about its own finish line, as facts with their evidence.
 
-    Returns {"markers": [{"marker","at","context"}], "enumerated_items": int, "text_len": int}.
+    Returns markers_checked / labelled_markers / enumerated_items / text_len.
 
     EVERY FIELD IS AN OBSERVATION, NOT A CLASSIFICATION. Nothing here says whether the mandate HAS
-    a finish line, because that judgement is what was measured and found wrong in both directions —
-    and because a reader in a month can ask questions of these three that a boolean has already
-    thrown away, including the one that caught it: was the marker inside an enumerated item?
+    a finish line, because that judgement was measured and found wrong in both directions — and
+    because a reader in a month can ask questions of these that a boolean has already thrown away,
+    including the one that caught it: was the marker inside an enumerated item?
 
-    The context window is the point of the marker entry, not a nicety. `until` alone is unjudgeable;
-    `until` with the words either side of it is judgeable at a glance, which is the cheapest
-    possible guard against the mention-versus-use failure that produced it.
+    THE FIELD IS `labelled_markers` AND THE LIST IS RECORDED BESIDE IT, and that is showrunner's
+    finding rather than tidiness. They ran this over 29 of their own records and got 0 hits, and
+    were about to report "showrunner never writes a finish condition" — then read the records
+    instead of the count. Sixteen of the twenty-nine state a terminal state INLINE and label none
+    of it: "work issue #75 through to pushed and closed", "spawn a real Crawler ... and integrate
+    or reap the result". So `0 of 29` was a fact about the MARKER LIST, not about the mandates —
+    the instrument, not the measurement.
+
+    An empty list here therefore licenses exactly one sentence: no marker from `markers_checked`
+    was found. It does NOT say the mandate has no finish line, and the field is named for the
+    labelling rather than the finish so that a later gate cannot quietly read it as the second
+    thing. Carrying the list makes the record self-describing — the instrument travels with the
+    reading, which is the only thing that would have caught showrunner's near-miss from outside.
+
+    The context window is the point of each entry, not a nicety. `done when` alone is unjudgeable;
+    `done when` with the words either side of it is judgeable at a glance, which is the cheapest
+    guard against the mention-versus-use failure that produced all of this.
     """
     t = str(text or "")
     low = t.lower()
@@ -2952,9 +2988,11 @@ def finish_line_facts(text, window=36):
             if i < 0:
                 break
             markers.append({"marker": mk, "at": i,
+                            "typographic": _typographic_at(t, i, mk),
                             "context": " ".join(t[max(0, i - window):i + len(mk) + window].split())})
             start = i + len(mk)
-    return {"markers": markers,
+    return {"markers_checked": list(_FINISH_MARKERS),
+            "labelled_markers": markers,
             "enumerated_items": len(_ENUM_ITEM_PAT.findall(t)),
             "text_len": len(t)}
 

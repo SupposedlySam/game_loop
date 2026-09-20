@@ -8064,24 +8064,59 @@ def main():
     check("an ENUMERATED mandate with no marker reports 0 markers and 3 items — and nothing calls "
           "that 'no finish line', because ten of the best-specified mandates in a consumer's log "
           "have exactly this shape and the finish line is the list",
-          _enum["markers"] == [] and _enum["enumerated_items"] == 3)
+          _enum["labelled_markers"] == [] and _enum["enumerated_items"] == 3)
     _dw = _fl("Do the thing. DONE WHEN: all four tests pass and it is pushed.")
     check("...and a real marker is recorded WITH THE WORDS EITHER SIDE OF IT, which is the half "
           "that answers the false positive: a bare `true` gives a later reader nothing to judge, "
           "while the marker in context is judgeable at a glance",
-          len(_dw["markers"]) == 1 and _dw["markers"][0]["marker"] == "done when"
-          and "all four tests pass" in _dw["markers"][0]["context"])
+          len(_dw["labelled_markers"]) == 1
+          and _dw["labelled_markers"][0]["marker"] == "done when"
+          and "all four tests pass" in _dw["labelled_markers"][0]["context"])
     check("...and every marker occurrence is kept, not just the first — 'was the marker inside an "
           "enumerated item' is a question the facts can answer and a boolean has already discarded",
-          len(_fl("acceptance here. and acceptance there.")["markers"]) == 2)
+          len(_fl("acceptance criteria here. and acceptance criteria there.")
+                  ["labelled_markers"]) == 2)
     check("NOTHING HERE RETURNS A VERDICT. The three fields are observations, so none of them can "
           "be wrong the way `has_finish_line` was wrong — storing the conclusion destroys the "
           "evidence that would show the conclusion was wrong",
-          set(_fl("x")) == {"markers", "enumerated_items", "text_len"}
+          set(_fl("x")) == {"markers_checked", "labelled_markers", "enumerated_items", "text_len"}
           and not any("has_" in k for k in _fl("x")))
     check("...and 'ship it' — the literal text of two clears in this repo's own log — records as "
           "0 markers, 0 items, 7 characters, which is a fact rather than an accusation",
-          _fl("ship it") == {"markers": [], "enumerated_items": 0, "text_len": 7})
+          _fl("ship it")["labelled_markers"] == []
+          and _fl("ship it")["enumerated_items"] == 0 and _fl("ship it")["text_len"] == 7)
+    # SHOWRUNNER RAN THIS OVER 29 OF THEIR OWN RECORDS AND GOT 0 HITS, and was about to report
+    # "showrunner never writes a finish condition" — then read the records instead of the count.
+    # SIXTEEN of the 29 state a terminal state INLINE and label none of it: "work issue #75 through
+    # to pushed and closed". So `0 of 29` was a fact about the MARKER LIST, not the mandates.
+    _inline = _fl("work issue #75 through to pushed and closed")
+    check("an INLINE finish condition records 0 LABELLED markers — and the field is named for the "
+          "LABELLING rather than the finish, because an empty list licenses exactly one sentence: "
+          "no marker from the list was found. It does not say the mandate has no finish line, and "
+          "16 of one consumer's 29 are precisely that case",
+          _inline["labelled_markers"] == []
+          and "labelled" in "".join(_inline) and "markers_checked" in _inline)
+    check("...and the record carries THE INSTRUMENT beside the reading, so a later reader can tell "
+          "'this list found nothing' from 'this mandate said nothing' — which is the only thing "
+          "that would have caught that near-miss from outside the repo that made it",
+          _inline["markers_checked"] == list(_um._FINISH_MARKERS)
+          and "done when" in _inline["markers_checked"])
+    # wcs MEASURED THE MARKER'S PRECISION over 42 records: 5 hits, 40% right. Every miss was a
+    # LEXICAL match (`until`, three times — cautioning against a source, forbidding a re-run, and
+    # as a condition on item (2) of four); both true positives were `DONE WHEN:`, capitalised and
+    # colon-terminated. Their rule: prefer TYPOGRAPHIC markers over lexical ones, because a word
+    # can be used in a sentence and a convention has to be typed on purpose.
+    check("a marker TYPED AS A CONVENTION — upper case, colon — is marked typographic, and the "
+          "same words in ordinary prose are not: one consumer measured 40% precision on a lexical "
+          "set and 100% on the typographic form, over 42 real records",
+          _fl("fold open_lead into routes. DONE WHEN: Result/Failure")
+              ["labelled_markers"][0]["typographic"] is True
+          and _fl("I think it is done when the tests pass")
+              ["labelled_markers"][0]["typographic"] is False)
+    check("...and the lexical match is still RECORDED rather than dropped — a marker with "
+          "typographic False is not a false positive, it is a match whose precision is known to "
+          "be poor, and shortening the list would throw away the record that it appeared at all",
+          len(_fl("I think it is done when the tests pass")["labelled_markers"]) == 1)
     check("the facts ride the mandate_set record, because a clear cannot be made answerable for a "
           "promise the SET side never wrote down — which is what every clear-side gate proposed in "
           "this exchange foundered on, D and mine alike",

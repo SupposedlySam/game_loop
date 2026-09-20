@@ -2268,13 +2268,25 @@ def unbound_mandate_notice(s, payload):
             "run is for cannot be read, so the Stop gate's inertness here means nothing either way.\n"
             "Check `game_loop status` before this goes unattended; if the mandate is genuinely gone,\n"
             "the set-aside file above is where its text still is." % (hit, where))
+    # WHO THE SENTENCE IS ADDRESSED TO — balooga-owner's finding, relayed by showrunner, and the
+    # only result in that whole exchange that survived every refutation because it is not a rule
+    # about text. Across 35 measured mandates the finish condition is in the AGENT's half and
+    # never the human's: showrunner's 29 have no human half at all — the human said "work the
+    # issues" and what reached mandate_set was the agent's own summary of what it decided that
+    # meant. So a notice worded as though the goal were something the human should have supplied
+    # misattributes the gap every time, and the agent's natural response is to go ask for a better
+    # brief instead of writing down the boundary it had already chosen. The placeholder said
+    # "<what this run is for>", which reads as "what you were told", and that was the defect.
     return (
         "NO MANDATE IS BOUND, and you are starting %s.\n\n"
         "Nothing is wrong yet. But the Stop gate is INERT while no goal is bound — so if this run\n"
         "goes quiet, ends early, or gets woken mid-way, there is nothing recorded for it to be\n"
         "woken FOR, and no gate will notice the stop. That is the shape behind a human having to\n"
         "restart runs by hand, which is the report this notice exists for.\n\n"
-        "  game_loop mandate --set \"<what this run is for>\" --wake-every <sec>\n\n"
+        "  game_loop mandate --set \"<the goal, and what finishing looks like>\" --wake-every <sec>\n\n"
+        "THIS IS YOURS TO WRITE, not something to go and ask for. Measured across 35 mandates in\n"
+        "five repos: the finish condition is in the AGENT's words every time it is there at all.\n"
+        "You already decided what this run is for when you started it — write that down.\n\n"
         "If this is short, attended, or not the kind of work a mandate covers, ignore this — it\n"
         "does not refuse anything and it will not ask again this session." % hit)
 
@@ -2991,9 +3003,22 @@ def finish_line_facts(text, window=36):
                             "typographic": _typographic_at(t, i, mk),
                             "context": " ".join(t[max(0, i - window):i + len(mk) + window].split())})
             start = i + len(mk)
+    # HOW MUCH OF THIS IS A QUOTED INSTRUCTION — balooga-owner's correction, and it invalidated a
+    # cross-repo comparison that five of us had already started making. Five of their six mandates
+    # embed TWO documents: a verbatim quote of the human, then the agent's plan. Raw median 722,
+    # agent's half alone 479. Nobody had asked whether the field was one document or two, so the
+    # length rows were silently comparing different objects. showrunner checked their own at the
+    # same instruction and found 0.7% quoted, all of it error strings — one-part, like-for-like.
+    #
+    # A LOWER BOUND AND IT SAYS SO: this counts characters inside '' and "" spans, so a human
+    # instruction pasted with no quotation marks at all measures zero. That is why the number is
+    # reported rather than a two-part/one-part verdict — the fact is countable, the conclusion is
+    # not, which is the same rule as every other field here.
+    _blanked = _blank_quoted(t)
     return {"markers_checked": list(_FINISH_MARKERS),
             "labelled_markers": markers,
             "enumerated_items": len(_ENUM_ITEM_PAT.findall(t)),
+            "quoted_chars": sum(1 for a, b in zip(t, _blanked) if a != b),
             "text_len": len(t)}
 
 

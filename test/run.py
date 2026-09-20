@@ -8126,7 +8126,8 @@ def main():
     check("NOTHING HERE RETURNS A VERDICT. The three fields are observations, so none of them can "
           "be wrong the way `has_finish_line` was wrong — storing the conclusion destroys the "
           "evidence that would show the conclusion was wrong",
-          set(_fl("x")) == {"markers_checked", "labelled_markers", "enumerated_items", "text_len"}
+          set(_fl("x")) == {"markers_checked", "labelled_markers", "enumerated_items",
+                            "quoted_chars", "text_len"}
           and not any("has_" in k for k in _fl("x")))
     check("...and 'ship it' — the literal text of two clears in this repo's own log — records as "
           "0 markers, 0 items, 7 characters, which is a fact rather than an accusation",
@@ -8164,6 +8165,24 @@ def main():
           "typographic False is not a false positive, it is a match whose precision is known to "
           "be poor, and shortening the list would throw away the record that it appeared at all",
           len(_fl("I think it is done when the tests pass")["labelled_markers"]) == 1)
+    # BALOOGA-OWNER'S CORRECTION, relayed by showrunner, and it invalidated a cross-repo comparison
+    # five of us had already started making. Five of their six mandates embed TWO documents — a
+    # verbatim quote of the human, then the agent's plan. Raw median 722, agent's half alone 479.
+    # Nobody had asked whether the field was one document or two, so the length rows were silently
+    # comparing different objects. showrunner checked their own and found 0.7% quoted, all of it
+    # error strings, so their 178 is one-part and like-for-like.
+    _two = 'Jonah said: "work the issues until the queue is clear". Plan: (1) triage (2) fix'
+    _one = 'Work the issues, priority order: (1) triage (2) fix'
+    check("a mandate embedding a QUOTED instruction is countable, so a length row is comparable "
+          "only once you know whether the field holds one document or two — the correction that "
+          "invalidated a five-repo comparison already under way",
+          _fl(_two)["quoted_chars"] > 0 and _fl(_one)["quoted_chars"] == 0
+          and _fl(_two)["text_len"] > _fl(_two)["quoted_chars"])
+    check("...and it is a LOWER BOUND that says so rather than a two-part verdict: a human "
+          "instruction pasted with no quotation marks measures zero, so the fact is countable "
+          "while the conclusion is not — the same rule as every other field here",
+          _fl("Jonah said work the issues. Plan: fix them")["quoted_chars"] == 0)
+
     check("the facts ride the mandate_set record, because a clear cannot be made answerable for a "
           "promise the SET side never wrote down — which is what every clear-side gate proposed in "
           "this exchange foundered on, D and mine alike",
@@ -8373,6 +8392,24 @@ def main():
           "speak at all",
           "NO MANDATE IS BOUND" in _fire and "pytest" in _fire
           and "mandate --set" in _fire)
+    # WHO THE SENTENCE IS ADDRESSED TO — balooga-owner's finding, and the only result in that
+    # exchange that survived every refutation, because it is not a rule about text. Across 35
+    # measured mandates in five repos the finish condition is in the AGENT's half and never the
+    # human's; showrunner's 29 have no human half at all. So a notice worded as though the goal
+    # were something the human should have supplied misattributes the gap every time, and the
+    # agent's natural response is to go ask for a better brief instead of writing down the
+    # boundary it had already chosen.
+    check("the notice says the goal is the AGENT'S TO WRITE and not something to go and ask for — "
+          "the placeholder said '<what this run is for>', which reads as 'what you were told', and "
+          "sending an agent to ask for a better brief is the one response that costs a human turn "
+          "and produces nothing this notice wanted",
+          "YOURS TO WRITE" in _fire and "not something to go and ask for" in _fire
+          and "<what this run is for>" not in _fire)
+    check("...and it cites the measurement rather than asserting it, because the claim that the "
+          "finish condition is always the agent's own words is exactly the kind a reader should be "
+          "able to check rather than inherit",
+          "35 mandates" in _fire and "AGENT's words" in _fire)
+
     check("...and it never REFUSES: the text says so, because a gate that blocks work it cannot "
           "judge is a gate that gets routed around rather than respected",
           "does not refuse anything" in _fire)

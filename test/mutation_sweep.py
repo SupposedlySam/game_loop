@@ -568,7 +568,7 @@ MUTANTS = [
      "told which one, which is what made the failure a recurring mystery rather than one read.", 0),
     ("finish_line_facts -> a mandate records nothing about its own finish line",
      ".game_loop/bin/_gl_impl.py::finish_line_facts",
-     '    return {"markers_checked": [], "labelled_markers": [], "enumerated_items": 0, "text_len": 0}\n',
+     '    return {"markers_checked": [], "labelled_markers": [], "enumerated_items": 0, "quoted_chars": 0, "text_len": 0}\n',
      ['marker is recorded WITH THE WORDS EITHER SIDE', 'record carries THE INSTRUMENT',
       'TYPED AS A CONVENTION', 'every marker occurrence is kept'],
      "FLOOR OWED, RECORDED 0. NEUTERED TO THE EMPTY READING IS THE PRE-FIX WORLD — mandate_set "

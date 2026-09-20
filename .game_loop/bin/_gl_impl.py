@@ -7252,6 +7252,43 @@ def stop_trigger_block(s, payload, notices):
     return "\n".join(lines)
 
 
+def record_session_activity(s, now_iso=None):
+    """One monotonic counter per session, written whether or not a mandate is bound.
+
+    REPORTED BY wcs, AND IT IS THE SAME STRUCTURAL GAP AS THE MANDATE SUBSTRATE, one level up.
+    They went to sample the population the unbound-mandate notice exists FOR — sessions that ran
+    without binding anything — and found that game_loop's own state cannot describe it. Every
+    unbound session in their tree recorded exactly one thing, that it oriented, and the nine were
+    byte-identical at 666 bytes. No claims, no pins, no checkpoints, no stop-gate blocks, because
+    with no mandate the gate is inert, so there is nothing to block and nothing to record.
+
+    MEASURED HERE TOO, at larger scale: 161 of 163 sessions in this repo never bound a mandate,
+    and 158 of them hold `oriented`, `version` and `transcript_path` and nothing else. So a SHORT
+    session that rightly needed no mandate and a LONG unattended run that should have bound one
+    are the same 650 bytes. "90% never bound one" is a true rate that supports no conclusion at
+    all about whether any of them warranted one.
+
+    THE TRANSCRIPT IS NOT THE WAY OUT, which I checked before accepting the argument rather than
+    after: 159 of those 161 transcripts are gone from disk here. Asking how many unbound sessions
+    exceeded a megabyte returns 0 over a denominator of TWO — the short-denominator failure this
+    repo keeps finding, and it would have read as "the gap is small".
+
+    NOTHING READS THIS. It is the substrate, recorded so that "unbound AND long" becomes an
+    answerable question next month, exactly as `finish_line_facts` was recorded so a clear-side
+    gate could become answerable later. The sessions most worth seeing are currently the ones the
+    tool writes least about, and that is backwards for a structural reason: the recording hangs
+    off the mandate, and these are the sessions with no mandate.
+
+    Three facts and no verdict. `turns` is monotonic; the two stamps give DURATION, which is the
+    other half of "long" and is not derivable from a count.
+    """
+    n = now_iso or now()
+    s["turns"] = int(s.get("turns") or 0) + 1
+    s.setdefault("first_turn_at", n)
+    s["last_turn_at"] = n
+    return s
+
+
 def cmd_stopgate(s, a, payload):
     """Stop-hook entrypoint. exit 0 = may stop · exit 2 = blocked, stderr goes back to the model.
 
@@ -7288,12 +7325,16 @@ def cmd_stopgate(s, a, payload):
         s["_tpath"] = payload["transcript_path"]
 
     allow, reason, rec = _stop_verdict(s, payload)
+    # BEFORE the mandate branch below and outside it, which is the entire point: this counter must
+    # be written for the sessions that never bind anything, because those are the ones nothing else
+    # here describes. Placing it under any mandate condition would reproduce the gap it closes.
+    record_session_activity(s)
     # The post-clear window is counted HERE, not in the verdict: that function is documented as a
     # pure decision so the suite can drive it, and a counter that writes state would end that.
     _mand = s.get("mandate") or {}
     if not _mand.get("active") and _mand.get("cleared_at"):
         s["stops_since_clear"] = s.get("stops_since_clear", 0) + 1
-        save(s)
+    save(s)
     if rec:
         logline(rec)
     if allow:

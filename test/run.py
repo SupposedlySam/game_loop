@@ -8047,6 +8047,53 @@ def main():
 
 
 
+
+    print("every session records that it ran, bound or not — the population the notice is FOR:")
+    # REPORTED BY wcs, and it is the mandate-substrate gap one level up. They went to sample the
+    # population the unbound-mandate notice exists FOR — sessions that ran without binding anything
+    # — and found game_loop's own state cannot describe it. All nine unbound sessions in their tree
+    # were BYTE-IDENTICAL at 666 bytes, recording exactly one thing: that they oriented. With no
+    # mandate the gate is inert, so there is nothing to block and nothing to record.
+    #
+    # MEASURED HERE AT LARGER SCALE BEFORE ACCEPTING IT: 161 of 163 sessions in this repo never
+    # bound one, and 158 hold `oriented` / `version` / `transcript_path` and nothing else. A SHORT
+    # session that rightly needed no mandate and a LONG unattended run that should have bound one
+    # are the same 650 bytes.
+    #
+    # AND THE TRANSCRIPT IS NOT THE WAY OUT — checked before accepting the argument, not after.
+    # 159 of those 161 transcripts are gone from disk, so "how many unbound sessions exceeded a
+    # megabyte" answers 0 over a denominator of TWO. That would have read as "the gap is small",
+    # which is the short-denominator failure this repo keeps finding, in the one place that would
+    # have closed the question by mistake.
+    _act = {}
+    _um.record_session_activity(_act, "2026-09-19T10:00:00")
+    _um.record_session_activity(_act, "2026-09-19T10:05:00")
+    _um.record_session_activity(_act, "2026-09-19T12:30:00")
+    check("a session with NO mandate still records a monotonic turn count — the sessions most "
+          "worth seeing are the ones the tool wrote least about, and that is backwards for a "
+          "structural reason: the recording hung off the mandate, and these have no mandate",
+          _act["turns"] == 3 and "mandate" not in _act)
+    check("...and the FIRST stamp is sticky while the last moves, so DURATION is derivable — "
+          "'long' is not answerable from a count alone, and a run of three turns over two hours "
+          "is a different thing from three turns over two minutes",
+          _act["first_turn_at"] == "2026-09-19T10:00:00"
+          and _act["last_turn_at"] == "2026-09-19T12:30:00")
+    _sg = inspect.getsource(_um.cmd_stopgate)
+    _before_mandate = _sg.index("record_session_activity(s)") < _sg.index('_mand = s.get("mandate")')
+    check("it is recorded BEFORE and OUTSIDE the mandate branch in cmd_stopgate — placing it under "
+          "any mandate condition would reproduce the exact gap it closes",
+          "record_session_activity(s)" in _sg and _before_mandate)
+    check("...and the turn-end saves UNCONDITIONALLY now, because a counter incremented in memory "
+          "and written only when some other branch happens to fire is a counter that reports "
+          "whatever that branch's frequency was",
+          _sg.count("save(s)") >= 1
+          and _sg.index("record_session_activity(s)") < _sg.rindex("save(s)"))
+    check("NOTHING READS IT. It is substrate, recorded so 'unbound AND long' becomes answerable "
+          "next month — the same sequencing as the finish-line facts, and the same refusal to "
+          "guess a threshold before there is anything to measure one against",
+          not any(w in inspect.getsource(_um.record_session_activity)
+                  for w in ("die(", "out(", "if s.get(\"turns\") >")))
+
     print("what a mandate said about its own finish line is recorded as FACTS, not a verdict:")
     # TWICE IN ONE EXCHANGE wcs's MEASUREMENT KILLED A DESIGN BEFORE IT WAS BUILT, and this is the
     # second. What I was going to build: --set nudges when the text carries no finish line, and

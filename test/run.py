@@ -8187,6 +8187,28 @@ def main():
           "promise the SET side never wrote down — which is what every clear-side gate proposed in "
           "this exchange foundered on, D and mine alike",
           "finish_line_facts(a.set)" in inspect.getsource(_um.cmd_mandate))
+    # SHOWRUNNER'S SECOND INSTRUMENT, offered explicitly as "not a request". Their measurement: 29
+    # mandates, 0 with the triggering instruction recorded beside them. balooga-owner's handover
+    # hypothesis was testable on balooga's data and not on showrunner's for exactly one reason —
+    # balooga's mandate text EMBEDS the human quote and showrunner's does not.
+    _cm = inspect.getsource(_um.cmd_mandate)
+    check("a mandate can carry the INSTRUCTION THAT PROMPTED IT, so the human-side half of this "
+          "question stops depending on an agent's memory of its own sessions — 29 mandates in one "
+          "consumer's log, 0 with the triggering instruction beside them",
+          "because_quote" in _cm)
+    # NAMED FOR WHAT IT IS. showrunner's own argument for why `authorize --reason` beats mandate_set
+    # as a source is that it is REQUIRED VERBATIM and so cannot drift into paraphrase. This field
+    # has no such protection — it is optional and the agent is the one typing — which is the same
+    # honesty `authorize` already owes about its own hatch.
+    check("...and it is recorded as an UNVERIFIED QUOTE rather than as 'the reason', because "
+          "nothing here can check that the agent did not paraphrase — a field that looked like the "
+          "human's words and was not would be worse than the gap it fills",
+          "because_verified" in _cm and '"because_verified"] = False' in _cm.replace("_mrec[", ""))
+    check("...and it is OPTIONAL, so an existing caller records exactly what it did before — the "
+          "field is absent from the entry rather than present and empty, which would make 'nobody "
+          "supplied one' and 'the tool wrote a blank' the same row",
+          'if getattr(a, "because", None):' in _cm)
+
     # NO NUDGE SHIPS. Their 42 records and this repo's 7 are different populations from the same
     # tool and the same author: their SHORTEST mandate is 198 characters, and this repo's log
     # contains the literal string "ship it". A threshold tuned on either misfires on the other.

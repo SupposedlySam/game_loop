@@ -38,6 +38,22 @@ In **their** words. The mandate is what the Stop gate holds the session to and w
 rehydrates from after compaction; a paraphrase that drifts toward what is easy to finish is how a
 run ends early and reports success.
 
+**Say what finishing looks like, and understand that it is yours to write.** Measured across 35
+mandates in five repos: when a finish condition is there at all, it is in the *agent's* words —
+the human says "work the issues" and what reaches the record is your summary of what you decided
+that meant. So a mandate with no boundary is not a gap in the brief you were given. It is a
+decision you made and did not write down.
+
+```bash
+./.game_loop/bin/game_loop mandate --set "<the work, and what finishing looks like>" \
+    --because "<the instruction that prompted this, verbatim>"
+```
+
+`--because` is optional and **unverified** — nothing can check that you did not paraphrase, so it
+is recorded as a quote you supplied rather than as established fact. It exists because one
+consumer's log held 29 mandates and 0 with the triggering instruction beside them, which made a
+whole class of question answerable on another repo's data and not on theirs.
+
 ## The three honest ways a turn can end while it is bound
 
 **1 — Progress, handing back, asking nothing.** The default.

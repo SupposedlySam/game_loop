@@ -3257,7 +3257,27 @@ def cmd_mandate(s, a):
     # THE FACTS ABOUT THE FINISH LINE RIDE THE SET RECORD, because the clear side cannot be made
     # answerable for a promise the set side never wrote down — which is what every clear-side gate
     # proposed in this exchange foundered on, mine included.
-    logline(dict({"kind": "mandate_set", "text": a.set}, **finish_line_facts(a.set)))
+    # THE INSTRUCTION THAT PROMPTED IT, IF THE AGENT WILL QUOTE ONE — showrunner's second
+    # instrument, offered explicitly as "not a request" and taken because it is cheap now and
+    # expensive to reconstruct later. Their measurement: 29 mandates, 0 with the triggering
+    # instruction recorded beside them. balooga-owner's handover hypothesis was testable on
+    # balooga's data and not on showrunner's for exactly one reason — balooga's mandate text
+    # EMBEDS the human quote and showrunner's does not. With this field the whole class of
+    # question is answerable from the log instead of from an agent's memory of its own sessions.
+    #
+    # NAMED `because_quote` AND NOT `reason`, and the distinction is the load-bearing part.
+    # showrunner's own argument for why `authorize --reason` is a better source than mandate_set
+    # is that it is REQUIRED VERBATIM, so it cannot drift into paraphrase the way a summary does.
+    # This field has no such protection: it is optional, and the agent is the one typing — the
+    # same honesty `authorize` already owes, where nothing can verify the human really said it.
+    # So it is recorded as a QUOTE the agent supplied, flagged unverified, and no consumer of the
+    # log may read it as established. A field that looked like the human's words and was not would
+    # be worse than the gap it fills.
+    _mrec = dict({"kind": "mandate_set", "text": a.set}, **finish_line_facts(a.set))
+    if getattr(a, "because", None):
+        _mrec["because_quote"] = a.because
+        _mrec["because_verified"] = False
+    logline(_mrec)
     out("✓ MANDATE bound. The Stop gate (protecting the human's attention) is now LIVE.",
         f"  {a.set}",
         "→ ending your turn now requires one of:",
@@ -13096,6 +13116,9 @@ def main():
                          "STOPPED delivering becomes visible from inside: one missed wake proves "
                          "nothing, a cadence gone silent proves the path is dead")
     md.add_argument("--set", help="the mandate, in the human's words")
+    md.add_argument("--because", metavar="QUOTE",
+                    help="the instruction that PROMPTED this mandate, verbatim. Optional, "
+                         "unverified, and recorded as a quote rather than as the reason")
     md.add_argument("--clear", action="store_true", help="release it (work genuinely done)")
     md.add_argument("--notes", help="why it's satisfied")
     md.add_argument("--park", action="store_true",

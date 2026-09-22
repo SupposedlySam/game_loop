@@ -27,6 +27,42 @@ twice. That is why the fixtures here assert against the *real* trigger's real st
 code, never against a description of what it's supposed to do, and why the log-based fixture below
 checks its own `kind` values against `game_loop kinds` rather than a hand-maintained list.
 
+## WHAT A BLOCKING TRIGGER MAY SELECT ON — `@me` is an ACCOUNT, not a session
+
+Reported on game_loop#130, from a real block. A gate selected the work it holds you to with
+`gh pr list --author "@me"`. On a machine where several agent sessions share one GitHub login —
+the normal case — `@me` does not identify a session. It identifies the **account**. So the gate
+saw every session's open PRs as its own and fired on whichever session happened to be ending a
+turn.
+
+Two sessions, agreed separate lanes. Session A opened a PR. The gate fired on **session B's**
+turn-end, naming session A's PR. The only remedy it offered was `touch <marker>`, and that marker
+means *"I wrote the description."* Session B could not satisfy it honestly, and refused — the
+right call, and one made under turn-end blocking pressure.
+
+**The rule, and the reason it is about blocking specifically:**
+
+> A trigger that **BLOCKS** must select on something *this session* owns.
+> A trigger that only **NOTIFIES** may select on the account.
+
+Widening is harmless for a notice — an issue involving the account is worth knowing about
+whoever touched it. For a block it is not a nuisance, it is corrosive: it routes an obligation to
+the one party structurally unable to discharge it honestly, and the remedy on offer means "I did
+the work". The gate's whole integrity rests on that marker being written by whoever wrote the
+thing; account-scoped selection works directly against it.
+
+**What IS session-scoped and available today:** local git state — the current branch, this
+worktree, unpushed commits, files this session wrote. `example-unpushed-at-stop.sh` blocks, and
+selects entirely on `git rev-list @{u}..HEAD`, which cannot see another session's work.
+
+**What is NOT available, said plainly so nobody builds on it:** game_loop does **not** record
+which session opened which pull request. There is no PR-to-session mapping anywhere in the tool,
+so "scope it by `GAME_LOOP_SESSION`" is not buildable for PRs today, however reasonable it sounds.
+
+**And when a blocking gate genuinely cannot tell:** say whose work it is and tell the agent to
+notify that author. Never offer a remedy whose meaning is "I did the work" to a session that did
+not do it. That keeps the rule and removes the invitation to lie, and it needs no new tracking.
+
 ## The example gates
 
 - **`example-harden-without-claim.sh`** (`stop`) — reads a synthetic `log.jsonl`. Tests it by

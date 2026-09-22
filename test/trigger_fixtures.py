@@ -47,6 +47,7 @@ import json
 import os
 import shutil
 import subprocess
+import re
 import sys
 import tempfile
 
@@ -376,6 +377,66 @@ def main():
     check("...and current branch is the feature branch, not main",
           _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == branch)
     shutil.rmtree(repo, ignore_errors=True)
+
+    print()
+    print("selection: a BLOCKING example may not decide whose work it is from the ACCOUNT (#130):")
+    # REPORTED ON #130, FROM A REAL BLOCK IN A CONSUMER'S TREE. A gate selected the work it holds
+    # you to with `gh pr list --author "@me"`. Where several agent sessions share one GitHub login
+    # — the normal case on this machine — `@me` identifies the ACCOUNT, not the session. The gate
+    # saw every session's open PRs as its own and fired on whichever session happened to be ending
+    # a turn: session A opened the PR, session B was blocked by it, and the only remedy offered was
+    # to touch a marker meaning "I wrote the description". Session B refused, correctly, under
+    # turn-end blocking pressure.
+    #
+    # WHY THIS IS ASSERTED RATHER THAN ONLY WRITTEN DOWN. The rule lives in the examples README,
+    # and a rule that lives only in prose is the thing this repo exists to stop being. game_loop
+    # cannot enforce it inside a consumer's own triggers.d — but it CAN refuse to ship an example
+    # that breaks it, and the examples are what people copy.
+    #
+    # WIDENING IS FINE FOR A NOTICE and corrosive for a BLOCK, which is why the rule is keyed on
+    # blocking rather than on the selector: an issue involving the account is worth knowing about
+    # whoever touched it, but an obligation routed to a session that cannot discharge it honestly
+    # leaves lying as the only way forward.
+    ACCOUNT_SCOPED = re.compile(r"--author\s+[\"']?@me|--involves\s+[\"']?@me|--assignee\s+[\"']?@me")
+    _examples = sorted(f for f in os.listdir(EXAMPLES_DIR) if f.endswith(".sh"))
+    check("there are examples to check at all — an empty directory would pass every rule below "
+          "while proving nothing about what this repo ships",
+          len(_examples) >= 3)
+    for _name in _examples:
+        _body = open(os.path.join(EXAMPLES_DIR, _name)).read()
+        # A gate BLOCKS if it can exit non-zero on the gate path. `exit 0` everywhere is a notice.
+        #
+        # NOT LINE-ANCHORED, and that was a real miss caught by probing this check rather than
+        # trusting it. The first version matched `^\s*exit\s+[1-9]`, so it read a line-initial
+        # `exit 2` and missed `[ -n "$prs" ] && exit 2` — which is the commonest shell form AND
+        # the exact shape #130 reported. A probe carrying the reported defect verbatim was waved
+        # through as "notifies only". That is this repo's recurring failure inside the check
+        # written to stop it: a proxy that merely correlates with the property being tested.
+        #
+        # COMMENTS STRIPPED FIRST, for the same mention-versus-use reason quoted spans are blanked
+        # elsewhere: every example here carries a CONTRACT comment explaining what a non-zero exit
+        # means, and a guard you cannot write a comment about is one somebody deletes.
+        _code = "\n".join(re.sub(r"#.*$", "", ln) for ln in _body.splitlines())
+        _blocks = bool(re.search(r"\bexit\s+[1-9]", _code))
+        _account = bool(ACCOUNT_SCOPED.search(_body))
+        # SAY WHAT WAS MEASURED, NOT MORE. This detects "carries a non-zero exit", which is a
+        # superset of "blocks a turn-end on a judgement about your work" — example-open-issues.sh
+        # exits non-zero to say the TRACKER refused, so could-not-look is not read as an empty
+        # queue, and its own header says it never blocks. The superset is the right side to err on
+        # (an account-scoped script that can exit non-zero for ANY reason can still stop the wrong
+        # session), but calling it "BLOCKS" would put a claim in the record that the check did not
+        # establish.
+        check("%s: %s, and %s" % (
+                  _name,
+                  "can exit non-zero" if _blocks else "always exits 0",
+                  "selects on the account (allowed — it cannot block anybody)" if _account and not _blocks
+                  else "does not decide whose work it is from the account"),
+              not (_blocks and _account))
+    check("...and the rule the examples are held to is WRITTEN DOWN where somebody copying one "
+          "will read it, because the assertion above protects this repo's examples and cannot "
+          "reach a consumer's own triggers.d",
+          "@me` is an ACCOUNT, not a session"
+          in open(os.path.join(EXAMPLES_DIR, "README.md")).read())
 
     print()
     print("meta — every trigger tested above has both a firing case and a quiet case:")

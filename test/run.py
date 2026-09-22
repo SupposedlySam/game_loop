@@ -10448,6 +10448,57 @@ def main():
               "so a verb that later reuses --notes is covered without anyone adding a pair",
               all(o + "-file" in _helps for o in ("--learning", "--mechanism", "--general")))
 
+
+        # EVERY PROSE OPTION ON EVERY VERB, AND THE TWIN MUST BE ONE resolve_prose CAN FIND.
+        # REPORTED BY showrunner, from their own tree, after reading a hole I recorded rather than
+        # closed: `showrunner role claim --who` refuses anything over 400 chars and names --who-file
+        # as the way through, and --who-file DOES NOT EXIST. Their twin-generator walked ONE level
+        # of subparsers and `role claim` is two, while the ceiling is enforced by option name across
+        # every verb. A ceiling naming an escape hatch that is not there is precisely the defect the
+        # twin was built to prevent, reintroduced by the TRAVERSAL rather than by the rule.
+        #
+        # MEASURED HERE AND CLEAN — 35 verbs, 44 prose options, every one with a working twin — and
+        # structurally so rather than luckily: this tool has ONE add_subparsers and the generator
+        # walks one level, so depth matches. This asserts it rather than trusting that it stays
+        # true, because the failure mode is SILENT in both halves. The generator's own comment says
+        # it: a dest the resolver cannot find means the --<opt>-file twin is created, accepted on
+        # the command line, and then quietly does nothing.
+        #
+        # THE SECOND HALF IS THE ONE --help CANNOT SEE. The checks above ask whether the twin is
+        # PRINTED; an option carrying an explicit `dest=` would print a perfect twin whose dest
+        # resolve_prose computes differently and skips — help text agreeing with a resolver that
+        # never runs.
+        _psrc = open(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py")).read()
+        _pbody = _psrc[_psrc.index("def main():"):]
+        _pcut = _pbody.index("add_prose_file_options(sub)") + len("add_prose_file_options(sub)")
+        _pstub = "def _build_parser():\n" + _pbody[_pbody.index("\n") + 1:_pcut] + "\n    return sub\n"
+        _pns = dict(vars(_um))
+        exec(compile(_pstub, "parser-slice", "exec"), _pns)      # noqa: S102
+        _psub = _pns["_build_parser"]()
+        _bad, _seen = [], 0
+        for _verb, _parser in sorted(_psub.choices.items()):
+            _dests = {a.dest for a in _parser._actions}
+            for _act in _parser._actions:
+                for _o in _act.option_strings:
+                    if _o not in _um.PROSE_OPTS:
+                        continue
+                    _seen += 1
+                    _want = _um._PROSE_DEST.get(_o) or _o[2:].replace("-", "_")
+                    if (_want + "_file") not in _dests or _act.dest != _want:
+                        _bad.append("%s %s (dest=%s, resolver looks for %s)"
+                                    % (_verb, _o, _act.dest, _want))
+        check("EVERY prose option on EVERY verb has a --<opt>-file twin whose dest resolve_prose "
+              "actually resolves — a ceiling naming an escape hatch that does not exist is the "
+              "shape a consumer hit in their own tree, where the generator walked one subparser "
+              "level and the verb sat two deep: " + (", ".join(_bad) or "none of %d" % _seen),
+              not _bad and _seen >= 40)
+        check("...and the walk's depth MATCHES the parser's, which is why the above is structural "
+              "rather than lucky — one add_subparsers, one level walked. A second level added "
+              "later would strand every prose option under it while --help still printed the twin",
+              _psrc.count("add_subparsers") == 1
+              and "for parser in sub.choices.values():" in inspect.getsource(
+                  _um.add_prose_file_options))
+
         # THE LIST ITSELF WENT STALE, which is what an enumeration does. The first version missed
         # `mandate --set` — the sentence the whole autonomy loop is driven by, and the most
         # expensive one in the tool to have three words eaten out of — plus the arm's question and

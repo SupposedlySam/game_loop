@@ -149,6 +149,58 @@ def stub_command(bindir, name, script_body):
     os.chmod(path, 0o755)
 
 
+# ── the selection detector, extracted so it can be driven against known-bad input ───────────────
+#
+# IT IS A FUNCTION RATHER THAN INLINE CODE FOR ONE REASON: a check cannot be trusted until it has
+# been observed to FIRE on the defect it names, and an expression buried in a loop cannot be handed
+# an input. Both versions of this detector shipped broken in consecutive commits, both read
+# correctly, and both had a green suite:
+#
+#   * the BLOCKING half matched `^\s*exit\s+[1-9]` — line-anchored — so `[ -n "$prs" ] && exit 2`
+#     was waved through. That is the commonest shell form AND the exact shape game_loop#130
+#     reported, missed by the check written to catch it.
+#   * the ACCOUNT half then read COMMENTS, so the example written to demonstrate the correct shape
+#     was flagged for quoting the wrong one in its own explanation.
+#
+# Reading the code agreed with me both times. Feeding it the bad input did not.
+
+ACCOUNT_SCOPED = re.compile(r"--author\s+[\"']?@me|--involves\s+[\"']?@me|--assignee\s+[\"']?@me")
+
+
+def classify_example(body):
+    """(can_exit_non_zero, selects_on_account) for one trigger script's source.
+
+    COMMENTS ARE STRIPPED FOR BOTH HALVES. Every example here carries a CONTRACT comment about
+    non-zero exits, and the #130 example must quote `--author "@me"` to say what not to do — so a
+    scan over raw text either invents a blocker or convicts the documentation. wcs's rule, learned
+    the hour a postmortem naming its own markers tripped the guard it was about: a guard you cannot
+    write about is one somebody switches off.
+
+    `can_exit_non_zero` is deliberately a SUPERSET of "blocks a turn-end on a judgement about your
+    work" — example-open-issues.sh exits non-zero to say the tracker refused. Erring wide is right
+    here, because an account-scoped script that can exit non-zero for ANY reason can still stop the
+    wrong session; the name says what is measured rather than what it implies.
+    """
+    code = "\n".join(re.sub(r"#.*$", "", ln) for ln in body.splitlines())
+    return bool(re.search(r"\bexit\s+[1-9]", code)), bool(ACCOUNT_SCOPED.search(code))
+
+
+# THE PROBES THIS DETECTOR MUST PASS BEFORE ITS VERDICT ON REAL FILES MEANS ANYTHING.
+# Each is a shape that actually shipped broken, kept as the input rather than as a memory of it.
+DETECTOR_PROBES = (
+    ("the #130 shape: blocks via `&& exit 2` and selects on the account",
+     'prs=$(gh pr list --author "@me" --json number)\n[ -n "$prs" ] && exit 2\nexit 0\n',
+     True, True),
+    ("a line-initial exit, which the first version DID catch — so the fix widened rather than "
+     "replaced",
+     'if true; then\n    exit 1\nfi\n', True, False),
+    ("the defect named in a COMMENT is documentation, not an invocation",
+     '# never do this: gh pr list --author "@me" selects the ACCOUNT\nexit 1\n', True, False),
+    ("a pure reporter that always exits 0 is not a blocker",
+     'echo "3 issues open"\nexit 0\n', False, False),
+)
+
+
 def run_stubbed_trigger(command, stub_name, stub_body, payload=None):
     """Run a raw shell `command` (e.g. copied from templates/triggers.example.json) with `stub_name`
     stubbed onto PATH ahead of the real PATH, and `payload` (a dict, or None) fed on stdin exactly
@@ -464,41 +516,21 @@ def main():
     # blocking rather than on the selector: an issue involving the account is worth knowing about
     # whoever touched it, but an obligation routed to a session that cannot discharge it honestly
     # leaves lying as the only way forward.
-    ACCOUNT_SCOPED = re.compile(r"--author\s+[\"']?@me|--involves\s+[\"']?@me|--assignee\s+[\"']?@me")
+    # THE DETECTOR PROVES IT CAN FIRE BEFORE ITS SILENCE ON REAL FILES IS WORTH ANYTHING. This is
+    # the encoded form of the only thing that caught either of its two broken versions: build the
+    # bad input, watch it fail. A detector weakened later — an anchor narrowed, a strip removed —
+    # goes red HERE, naming the shape it stopped seeing, instead of going quiet over the examples.
+    for _plabel, _pbody, _want_block, _want_acct in DETECTOR_PROBES:
+        _gb, _ga = classify_example(_pbody)
+        check("the detector itself is exercised — %s" % _plabel,
+              (_gb, _ga) == (_want_block, _want_acct))
     _examples = sorted(f for f in os.listdir(EXAMPLES_DIR) if f.endswith(".sh"))
     check("there are examples to check at all — an empty directory would pass every rule below "
           "while proving nothing about what this repo ships",
           len(_examples) >= 3)
     for _name in _examples:
-        _body = open(os.path.join(EXAMPLES_DIR, _name)).read()
-        # A gate BLOCKS if it can exit non-zero on the gate path. `exit 0` everywhere is a notice.
-        #
-        # NOT LINE-ANCHORED, and that was a real miss caught by probing this check rather than
-        # trusting it. The first version matched `^\s*exit\s+[1-9]`, so it read a line-initial
-        # `exit 2` and missed `[ -n "$prs" ] && exit 2` — which is the commonest shell form AND
-        # the exact shape #130 reported. A probe carrying the reported defect verbatim was waved
-        # through as "notifies only". That is this repo's recurring failure inside the check
-        # written to stop it: a proxy that merely correlates with the property being tested.
-        #
-        # COMMENTS STRIPPED FIRST, for the same mention-versus-use reason quoted spans are blanked
-        # elsewhere: every example here carries a CONTRACT comment explaining what a non-zero exit
-        # means, and a guard you cannot write a comment about is one somebody deletes.
-        _code = "\n".join(re.sub(r"#.*$", "", ln) for ln in _body.splitlines())
-        _blocks = bool(re.search(r"\bexit\s+[1-9]", _code))
-        # COMMENTS STRIPPED HERE TOO, and this half was missed the first time. The fix above
-        # stripped them for the BLOCKING detector and not for this one, so the example written to
-        # demonstrate the correct shape — which necessarily QUOTES `--author "@me"` to explain what
-        # not to do — was flagged as committing the defect it documents. wcs's rule, from the hour
-        # a postmortem naming its own markers tripped the guard it was about: a guard you cannot
-        # write about is one somebody switches off.
-        _account = bool(ACCOUNT_SCOPED.search(_code))
-        # SAY WHAT WAS MEASURED, NOT MORE. This detects "carries a non-zero exit", which is a
-        # superset of "blocks a turn-end on a judgement about your work" — example-open-issues.sh
-        # exits non-zero to say the TRACKER refused, so could-not-look is not read as an empty
-        # queue, and its own header says it never blocks. The superset is the right side to err on
-        # (an account-scoped script that can exit non-zero for ANY reason can still stop the wrong
-        # session), but calling it "BLOCKS" would put a claim in the record that the check did not
-        # establish.
+        _blocks, _account = classify_example(
+            open(os.path.join(EXAMPLES_DIR, _name)).read())
         check("%s: %s, and %s" % (
                   _name,
                   "can exit non-zero" if _blocks else "always exits 0",

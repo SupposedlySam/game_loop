@@ -63,10 +63,25 @@ so "scope it by `GAME_LOOP_SESSION`" is not buildable for PRs today, however rea
 notify that author. Never offer a remedy whose meaning is "I did the work" to a session that did
 not do it. That keeps the rule and removes the invitation to lie, and it needs no new tracking.
 
+**`example-own-branch-prs.sh` is the mechanism, not just the rule.** For a while this section said
+only the rule, which is how #130 happened in the first place: a consumer reached for the obvious
+selector because no correct one was shipped. That example asks the tracker the session-scoped
+question directly — `gh pr list --head "$(git rev-parse --abbrev-ref HEAD)"` — instead of listing
+the account's PRs and filtering afterwards. Its firing and quiet fixtures differ **only** by which
+branch the checkout is standing on, which is the property being claimed.
+
+What it still cannot do, and says so in its own header: two sessions on the **same branch** of the
+same checkout are indistinguishable to it and to everything else game_loop has. It narrows "the
+account" to "this branch". It does not reach "this session", and a gate built on it must not claim
+to — which is why it still tells you not to touch the marker if the work is not yours.
+
 ## The example gates
 
 - **`example-harden-without-claim.sh`** (`stop`) — reads a synthetic `log.jsonl`. Tests it by
   writing lines directly to `$GAME_LOOP_ROOT/log.jsonl` in a throwaway directory (fixture shape 1).
+- **`example-own-branch-prs.sh`** (`stop`) — the #130 shape: selects by the branch this checkout
+  is on, never by the account. Tested by moving one throwaway repo between branches with `gh`
+  stubbed (fixture shape 3 + 2), so the firing and quiet cases differ only in that one property.
 - **`example-unpushed-at-stop.sh`** (`stop`) — reads real git state. Tests it against a throwaway
   git repository, with and without a configured upstream (fixture shape 2).
 

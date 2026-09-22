@@ -378,6 +378,73 @@ def main():
           _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == branch)
     shutil.rmtree(repo, ignore_errors=True)
 
+
+    # ── example-own-branch-prs.sh — the MECHANISM behind the #130 rule ──────────────────────────
+    #
+    # The README beside these examples says a BLOCKING trigger must select on something this
+    # session owns, and for a while it said only that. A rule with no mechanism is how #130
+    # happened: the consumer's gate reached for the obvious selector, `--author "@me"`, and that is
+    # the ACCOUNT. This example is the shape to copy instead, so the rule ships with a way to obey
+    # it.
+    #
+    # THE FIRING AND QUIET CASES DIFFER ONLY BY WHICH BRANCH THE CHECKOUT IS STANDING ON. That is
+    # the property under test and it is also the whole claim: the current branch is what actually
+    # separated the two sessions in #130, which shared a checkout and a login but not a branch.
+    OWN_SH = os.path.join(EXAMPLES_DIR, "example-own-branch-prs.sh")
+    _own_repo = make_git_repo()
+    _git(_own_repo, "checkout", "-q", "-b", "feature-a")
+
+    # The stub answers the SESSION-SCOPED question the script asks — `--head <branch>` — rather
+    # than handing back the account's PRs for the script to filter. A stub that ignored --head
+    # would let a script selecting on the account pass this fixture, which is the one thing these
+    # assertions must not do.
+    GH_HEAD = ('case "$*" in\n'
+               '  *"--head feature-a"*) echo \'[{"number":41,"title":"session A work"}]\' ;;\n'
+               '  *"pr list"*) echo "[]" ;;\n'
+               'esac')
+    code, _o, err = run_stubbed_trigger(
+        "cd %s && GAME_LOOP_REPO=%s bash %s" % (_own_repo, _own_repo, OWN_SH), "gh", GH_HEAD)
+    check("FIRING — a PR headed by the branch this checkout is standing on is held against this "
+          "session, and the refusal NAMES the branch that made it ours",
+          code != 0 and "#41" in err and "feature-a" in err)
+    check("...and the refusal says NOT to touch the marker when the PR is not yours, because the "
+          "marker means 'I did the work' — that invitation to lie is the whole of #130, and a "
+          "narrower selector does not remove it for two sessions sharing one branch",
+          "do NOT touch the marker" in err and "Tell the session that opened it" in err)
+    record("example-own-branch-prs.sh", fired=True)
+
+    # SAME REPO, SAME STUB, SAME ACCOUNT — only the branch moves. Under `--author "@me"` this case
+    # is indistinguishable from the one above, which is exactly the defect being fixed.
+    _git(_own_repo, "checkout", "-q", "-b", "feature-b")
+    code, _o, err = run_stubbed_trigger(
+        "cd %s && GAME_LOOP_REPO=%s bash %s" % (_own_repo, _own_repo, OWN_SH), "gh", GH_HEAD)
+    check("quiet — another session's PR on a DIFFERENT branch is not this session's to answer for. "
+          "Only the branch changed between this and the case above; under an account selector the "
+          "two are the same call, and #130 is what that costs",
+          code == 0 and "#41" not in err)
+    record("example-own-branch-prs.sh", fired=False)
+
+    # COULD-NOT-LOOK IS NOT "NO PR" (INV8). A tracker that refuses and a branch with no PR are the
+    # same empty bytes, and treating them alike makes a blocking gate silently stop blocking.
+    GH_REFUSE = 'echo "HTTP 403: rate limited" >&2; exit 1'
+    _git(_own_repo, "checkout", "-q", "feature-a")
+    code, _o, err = run_stubbed_trigger(
+        "cd %s && GAME_LOOP_REPO=%s bash %s" % (_own_repo, _own_repo, OWN_SH), "gh", GH_REFUSE)
+    check("a tracker that REFUSES fails open rather than blocking on a question it could not ask "
+          "— the opposite trade from the report-only example above, and correct for each: a gate "
+          "must never block its own fix, while a report that cannot look must not claim silence",
+          code == 0)
+
+    # DETACHED HEAD OWNS NOTHING. `rev-parse --abbrev-ref HEAD` answers the literal string "HEAD"
+    # there, which is not a branch and would have been compared against one.
+    _git(_own_repo, "checkout", "-q", "--detach")
+    code, _o, _e = run_stubbed_trigger(
+        "cd %s && GAME_LOOP_REPO=%s bash %s" % (_own_repo, _own_repo, OWN_SH), "gh", GH_HEAD)
+    check("a DETACHED head owns no branch and therefore no PR — git answers the literal string "
+          "'HEAD' there, which would otherwise have been sent to the tracker as a branch name",
+          code == 0)
+    shutil.rmtree(_own_repo, ignore_errors=True)
+
     print()
     print("selection: a BLOCKING example may not decide whose work it is from the ACCOUNT (#130):")
     # REPORTED ON #130, FROM A REAL BLOCK IN A CONSUMER'S TREE. A gate selected the work it holds
@@ -418,7 +485,13 @@ def main():
         # means, and a guard you cannot write a comment about is one somebody deletes.
         _code = "\n".join(re.sub(r"#.*$", "", ln) for ln in _body.splitlines())
         _blocks = bool(re.search(r"\bexit\s+[1-9]", _code))
-        _account = bool(ACCOUNT_SCOPED.search(_body))
+        # COMMENTS STRIPPED HERE TOO, and this half was missed the first time. The fix above
+        # stripped them for the BLOCKING detector and not for this one, so the example written to
+        # demonstrate the correct shape — which necessarily QUOTES `--author "@me"` to explain what
+        # not to do — was flagged as committing the defect it documents. wcs's rule, from the hour
+        # a postmortem naming its own markers tripped the guard it was about: a guard you cannot
+        # write about is one somebody switches off.
+        _account = bool(ACCOUNT_SCOPED.search(_code))
         # SAY WHAT WAS MEASURED, NOT MORE. This detects "carries a non-zero exit", which is a
         # superset of "blocks a turn-end on a judgement about your work" — example-open-issues.sh
         # exits non-zero to say the TRACKER refused, so could-not-look is not read as an empty
@@ -429,7 +502,7 @@ def main():
         check("%s: %s, and %s" % (
                   _name,
                   "can exit non-zero" if _blocks else "always exits 0",
-                  "selects on the account (allowed — it cannot block anybody)" if _account and not _blocks
+                  "SELECTS ON THE ACCOUNT" if _account
                   else "does not decide whose work it is from the account"),
               not (_blocks and _account))
     check("...and the rule the examples are held to is WRITTEN DOWN where somebody copying one "

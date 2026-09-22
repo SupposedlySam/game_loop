@@ -11558,6 +11558,77 @@ def main():
                       for v in ("2026-09-02T23:59:00", "2026-09-03T00:01:00", "2026-08-31T10:00:00",
                                 "2026-09-04T10:00:00", "not-a-date", None)))
 
+
+        # THE DATE IS NOT THE SCOPE — the other half of what phase_written_note above is about.
+        # Its own docstring says it: "the decision was written to the record WITH the thing that
+        # scopes it, and the reader ignored the scope. There the scope was a HEAD; here it is a
+        # date." Right about the shape, and the date is half of it.
+        #
+        # OBSERVED SAME-DAY, TWICE IN ONE SESSION. A phase written at 00:22 was three commits stale
+        # by 00:47, so phase_written_note was correctly silent — same day, nothing wrong with the
+        # prose — while the phase claimed an open gap that had been closed two commits earlier, and
+        # the watchdog quoted that line back as current state to argue the session was idle.
+        _phn = _pgm.phase_head_note
+        check("a phase whose commit the tree has moved past is NAMED, with both commits and the "
+              "distance — the case the date note cannot see, because it happens within the hour",
+              "19472cd" in _phn({"head": "19472cd2"}, "d71efbba", 3)
+              and "d71efbba" in _phn({"head": "19472cd2"}, "d71efbba", 3)
+              and "3 commit(s) later" in _phn({"head": "19472cd2"}, "d71efbba", 3))
+        check("...and it is SILENT when the phase still names HEAD, so the warning means something "
+              "when it appears rather than being a banner every status carries",
+              _phn({"head": "abc1234"}, "abc1234", 0) == ""
+              and _phn({"head": "abc1234"}, "abc12345678", 0) == "")
+        # A CONSUMER UPGRADING HAS A PHASE WITH NO STAMP, and accusing a record that never claimed
+        # a commit would be a false report on every install the day they take this.
+        check("a phase stamped before this existed is silent — it never claimed a commit, so there "
+              "is nothing to be stale about, and every consumer has one the day they upgrade",
+              _phn({}, "abc1234", 3) == "" and _phn({"head": ""}, "abc1234", 3) == ""
+              and _phn(None, "abc1234", 3) == "")
+        # COULD NOT TELL ONLY SPEAKS WHEN THERE IS SOMETHING TO COMPARE. It needs a stamped phase
+        # AND a git that will not answer, so it is rare by construction — and it is exactly the
+        # case where staying quiet would be read as agreement.
+        check("an unreadable HEAD says NOTHING WAS COMPARED rather than staying quiet, and says it "
+              "only when a stamped phase exists to compare against",
+              "not agreement" in _phn({"head": "19472cd2"}, None, None)
+              and _phn({}, None, None) == "")
+        check("...and a distance that could not be counted still reports the two commits DIFFER, "
+              "rather than collapsing to the silent case on a missing number",
+              "not the same commit" in _phn({"head": "19472cd2"}, "d71efbba", None))
+        _trans_src = inspect.getsource(_pgm.cmd_trans)
+        check("`trans` stamps the COMMIT as well as the date, or there is nothing for any of the "
+              "above to read — the stamp is the half that makes the note possible",
+              'ph["head"] = _git("rev-parse", "--short", "HEAD")' in _trans_src)
+        # A PRODUCER NOTHING CALLS IS #4's SHAPE — a detector sitting where it cannot fire. Read
+        # from the file rather than from a function name, because the banner is assembled inline
+        # and there is no single callable to introspect.
+        _impl_src = open(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py")).read()
+        check("...and the status banner CARRIES it, beside the date note — a producer nothing "
+              "calls is #4's shape, a detector sitting where it cannot fire",
+              "phase_head_note(ph, *phase_head_facts(ph))" in _impl_src)
+        # THE TWIN, same rule as phase_written_note above: bin/watchdog imports nothing from
+        # _gl_impl.py, and the banner that was actually read stale is the WATCHDOG's.
+        _wd_hn = [n for n in ast.parse(_wd_src).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "phase_head_note"]
+        check("the watchdog carries its own copy of phase_head_note — its banner is the one that "
+              "quoted a stale phase back as current state",
+              len(_wd_hn) == 1)
+        check("...and the watchdog's ring CALLS it — a twin nothing calls is #4's shape, and this "
+              "ring is the banner that was read stale",
+              "phase_head_note(ph, *phase_head_facts(ph))" in _wd_src)
+        if _wd_hn:
+            _hm = ast.Module(body=_wd_hn, type_ignores=[])
+            ast.fix_missing_locations(_hm)
+            _hns = {}
+            exec(compile(_hm, "watchdog", "exec"), _hns)  # noqa: S102
+            _htwin = _hns["phase_head_note"]
+            check("...and the two copies AGREE on every case above, driven separately rather than "
+                  "diffed as text — two spellings that agree are fine, two behaviours that "
+                  "disagree are the bug",
+                  all(_htwin(p, h, a) == _phn(p, h, a) for p, h, a in (
+                      ({"head": "19472cd2"}, "d71efbba", 3), ({"head": "abc1234"}, "abc1234", 0),
+                      ({}, "abc1234", 3), ({"head": "19472cd2"}, None, None),
+                      ({"head": "19472cd2"}, "d71efbba", None), (None, "abc1234", 3))))
+
         # THE READER ITSELF, WHICH THE SIX CHECKS ABOVE NEVER DRIVE. Every one of them passes
         # `mark=` explicitly, so newest_mark() — the half that goes and asks git — is unexercised
         # by all of them. Measured rather than suspected: neutering newest_mark to (None, None)

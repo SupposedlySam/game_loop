@@ -689,6 +689,68 @@ def _box(lines):
     return "\n".join([top] + body + [bot])
 
 
+def phase_head_note(ph, head=None, ahead=None):
+    """The phase line was written at a COMMIT; say so once the tree has moved past it.
+
+    THE DATE IS NOT THE SCOPE, and `phase_written_note` beside this says why in its own words:
+    "the decision was written to the record WITH the thing that scopes it, and the reader ignored
+    the scope. There the scope was a HEAD; here it is a date." It was right about the shape and
+    the date is only half of it.
+
+    OBSERVED, SAME DAY, TWICE IN ONE SESSION. A phase written at 00:22 was three commits stale by
+    00:47 — so `phase_written_note` was correctly silent (same day, nothing to correct about the
+    prose) while the phase itself claimed an open gap that had been closed two commits earlier.
+    The watchdog then quoted that line back as current state to argue the session was idle. A
+    banner is read as a description of the tree, and nothing compared it to the tree.
+
+    PURE, and the git calls live at the call site, because `phase_written_note` is a TWIN carried
+    separately in bin/watchdog and the lesson recorded there is that a copy which is hard to drive
+    is a copy that silently diverges. Both of these take their facts as arguments so both can be
+    driven against the same table.
+
+    THREE ANSWERS, AND "COULD NOT TELL" ONLY SPEAKS WHEN THERE IS SOMETHING TO COMPARE:
+      * no recorded head — a phase stamped before this existed. Silent: accusing a record that
+        never claimed a commit would be a false report, and every consumer upgrading has one.
+      * a recorded head and git could not answer — ONE line saying so. It is rare by construction
+        (it needs a stamped phase AND a git that will not respond) and it is exactly the case
+        where silence would read as agreement.
+      * moved — name both commits and the distance.
+    """
+    if not isinstance(ph, dict):
+        return ""
+    was = str(ph.get("head") or "").strip()
+    if not was:
+        return ""
+    if not head:
+        return ("  phase stamped at %s; COULD NOT READ HEAD to compare — this is not agreement, "
+                "nothing was compared" % was[:8])
+    if head.startswith(was) or was.startswith(head):
+        return ""
+    if ahead is None:
+        return ("  ⚠ phase was written at %s and HEAD is %s — the distance could not be counted, "
+                "but they are not the same commit" % (was[:8], head[:8]))
+    return ("  ⚠ phase was written at %s · HEAD is now %s, %d commit(s) later — anything it says "
+            "about the tree describes THAT commit" % (was[:8], head[:8], ahead))
+
+
+def phase_head_facts(ph):
+    """(current HEAD short sha or None, commits HEAD is past the phase's head or None).
+
+    The impure half, kept apart so the note above can be driven from a table. Never raises — `_git`
+    degrades to None on a missing binary, no repo, or a locked index, and both halves of this read
+    as "could not tell" rather than as zero.
+    """
+    head = _git("rev-parse", "--short", "HEAD")
+    was = str((ph or {}).get("head") or "").strip() if isinstance(ph, dict) else ""
+    if not (head and was):
+        return head, None
+    n = _git("rev-list", "--count", "%s..HEAD" % was)
+    try:
+        return head, int(n)
+    except (TypeError, ValueError):
+        return head, None
+
+
 def phase_written_note(ph, when=None):
     """How old the phase line is, but ONLY once it is old enough to lie — "" on the same day.
 
@@ -755,7 +817,8 @@ def render_banner(s, frm=None):
         head,
         f"{TIER_NAMES.get(tier, tier).split(' (')[0]} · claims {s.get('claim_count', 0)} · "
         f"hardened {s.get('hardened_count', 0)}",
-    ] + ([note] if (note := phase_written_note(ph)) else []))
+    ] + ([note] if (note := phase_written_note(ph)) else [])
+      + ([hn] if (hn := phase_head_note(ph, *phase_head_facts(ph))) else []))
 
 
 def retro_overdue(s):
@@ -7564,6 +7627,12 @@ def cmd_trans(s, a):
     if a.doing is not None:
         ph["doing"] = a.doing
     ph["since"] = now()
+    # STAMP THE COMMIT, NOT ONLY THE DATE. `since` has been recorded since the beginning and the
+    # date alone cannot catch a phase that went stale within the hour it was written — measured
+    # here, a phase written at 00:22 was three commits behind by 00:47 and the date note was
+    # correctly silent the whole time. None when git cannot answer, which phase_head_note reads
+    # as "nothing to compare" rather than as agreement.
+    ph["head"] = _git("rev-parse", "--short", "HEAD")
     # A task-only update (just --doing) refreshes the current task without counting as a phase move,
     # so naming every task doesn't spam the retro nudge into being ignored.
     is_move = bool(a.tier or a.milestone)

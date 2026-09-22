@@ -2085,6 +2085,35 @@ MUTANTS += [
      "spellings that agree are fine, two behaviours that disagree are the bug. MEASURED AT 1 "
      "FIRST, through a section subset, and that number was wrong; the entry below is what came of "
      "finding out why.", 2),
+    ("phase_head_note -> a phase three commits behind reads as current",
+     ".game_loop/bin/_gl_impl.py::phase_head_note", '    return ""\n',
+     ['tree has moved past is NAMED', 'unreadable HEAD says NOTHING WAS COMPARED',
+      'distance that could not be counted', 'two copies AGREE, driven separately'],
+     "FLOOR OWED, RECORDED 0 — this file's standing precedent over a hand-measured number. "
+     "NEUTERED TO \"\" IS THE PRE-FIX WORLD EXACTLY: the phase carried a date and no commit, so "
+     "nothing compared the banner to the tree. Observed SAME-DAY twice in one session — a phase "
+     "written at 00:22 was three commits stale by 00:47, phase_written_note was correctly silent "
+     "because the prose was same-day, and the watchdog quoted that line back as current state to "
+     "argue the session was idle. EXPECT THE NOTHING-DIRECTION CAVEAT in full: neutered to \"\" "
+     "this satisfies every silent-case assertion BY CONSTRUCTION, so only the ones requiring it to "
+     "SPEAK can kill it, which is why those were written first.", 0),
+    ("phase_head_facts (the watchdog twin) -> the ring asks git nothing and compares nothing",
+     ".game_loop/bin/watchdog::phase_head_facts", "    return None, None\n",
+     ['watchdog carries its own copy of phase_head_note', 'two copies AGREE, driven separately'],
+     "FLOOR OWED, RECORDED 0. NOT A PRODUCER WHOSE MUTATION HIDES, and that is worth saying: "
+     "neutered to (None, None) the note it feeds returns the could-not-read line rather than "
+     "silence, so it swaps one message for another. It is declared because the denominator is the "
+     "point — a function that fetches the facts a gate decides on is exactly where a manufactured "
+     "'could not tell' would live. It carries its own nested `_g` rather than _gl_impl's `_git`, "
+     "because bin/watchdog imports nothing from there, which is the same reason the twin exists.", 0),
+    ("phase_head_note (the watchdog twin) -> the ring cannot tell a stale phase from a current one",
+     ".game_loop/bin/watchdog::phase_head_note", '    return ""\n',
+     ['two copies AGREE, driven separately', 'watchdog carries its own copy of phase_head_note', 'ring CALLS it'],
+     "FLOOR OWED, RECORDED 0. SAME REASON THE phase_written_note TWIN EXISTS, and the same hazard "
+     "its entry names: bin/watchdog imports nothing from _gl_impl.py, so a fix applied to one copy "
+     "works where you test it and not where it matters. It matters MORE here than for the date "
+     "twin — the watchdog's banner is the one that actually quoted a stale phase back as current "
+     "state, twice, which is the observed failure this producer exists for.", 0),
     ("subset_baseline_note -> a floor measured through a broken subset baseline reports nothing",
      "test/mutation_sweep.py::subset_baseline_note", '    return ""\n',
      ['finding about the mutant', 'RED subset baseline', 'baseline failures is capped',
@@ -2104,6 +2133,7 @@ MUTANTS += [
 
 
 NOT_SWEPT = {
+    ".game_loop/bin/watchdog::_g": "a CLOSURE inside phase_head_facts, not a module-level producer: it cannot be neutered independently of its only caller, and sweeping that caller sweeps it. Named here rather than left silent, which is what this file refuses.",
     # A TEST STUB IS NOT A PRODUCER. `_fake_git` exists inside test/run.py to feed
     # `release_distance` canned git output, so the two parsing decisions that broke there can be
     # driven without a fixture repo testing git instead of them. Neutering it would mutate the

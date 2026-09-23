@@ -9863,6 +9863,91 @@ def main():
                   for _t in ("resolveComment", "minimizePullRequestComment", "convertToDraft")))
         _set(mcp_standing_writes=["mcp__github__"])
 
+        # #131: `propose` WAS UNCLASSIFIED, SO NO CONFIG COULD GRANT IT HONESTLY. The reporter's
+        # CLAUDE.md sends corrections to `mcp__drops-fi__propose_agent_rule`, which files a proposal
+        # for a human to approve and creates nothing. It failed closed as UNCLASSIFIABLE, and each
+        # config key that looked like a remedy was one of these: never read, because
+        # mcp_standing_writes is consulted only on the mutating branch; false, because
+        # mcp_read_only_tools would have called a write read-only; or far too wide, because the
+        # whole-server trust also covers `file_ticket`. Result: 15 per-call `authorize` grants for
+        # one tool across 4 sessions.
+        _PROP = "mcp__drops-fi__propose_agent_rule"
+        _set(mcp_standing_writes=[])
+        _pd, _pr = _call(_PROP)
+        check("#131: `propose` is CLASSIFIED as a mutation — refused by default like every other "
+              "write, but refused as MUTATING rather than as unclassifiable, which is what lets "
+              "policy reach it at all",
+              _pd == "deny" and "classified as MUTATING" in _pr)
+        _set(mcp_standing_writes=[_PROP])
+        check("#131: ...so an EXACT mcp_standing_writes entry for it is now honoured — the grant "
+              "the reporter had to replace with fifteen per-call authorizations",
+              _call(_PROP)[0] == "allow")
+        check("#131: ...and that exact grant does not leak to a sibling on the same server: "
+              "`file_ticket` files Jira issues under a shared token, which is why the whole-server "
+              "trust was the wrong remedy in the first place",
+              _call("mcp__drops-fi__file_ticket")[0] == "deny")
+        _set(mcp_standing_writes=[])
+
+        # THE REMEDY TEXT POINTED AT THE DISHONEST OPTION. The only fix the UNCLASSIFIABLE refusal
+        # offered was mcp_read_only_tools, which for a tool that writes is a false statement the
+        # guard then acts on — its own comments call a mutation labelled read-only "a real bypass".
+        _ud2, _ur2 = _call("mcp__drops-fi__frobnicate_widget")
+        check("#131: an unclassifiable refusal now says NOT to list a writing tool as read-only, "
+              "and names the honest route (authorize, and report the verb upstream)",
+              _ud2 == "deny" and "do NOT list it as read-only" in _ur2
+              and "report the" in _ur2)
+
+        # THE SECOND PAPERCUT: after a refused `authorize`, a retry printed a refusal word-for-word
+        # identical to the first, which reads as "the grant was spent or ignored" when none existed.
+        check("#131: every gated refusal states the authorization state for THIS tool in THIS "
+              "session, so a retry after a refused `authorize` does not read as a spent grant",
+              "authorization state:" in _pr and "authorization state:" in _ur2)
+
+        # Driven directly, because the four answers need four state files and the guard reads one.
+        # ABSENT and UNREADABLE are different answers: the distinction load() already paid for.
+        _gsrc_m = open(os.path.join(REPO, ".game_loop", "bin", "guard-mcp-impl.sh")).read()
+        _as_src = _gsrc_m[_gsrc_m.index("def authorization_state("):
+                          _gsrc_m.index("_auth_line = authorization_state(tool)")]
+        _asns = {"os": os, "json": json, "datetime": datetime}
+        exec(compile(_as_src, "authorization_state", "exec"), _asns)  # noqa: S102
+        _as = _asns["authorization_state"]
+        _asdir = _tmpdir("gl131-")
+        _prev_sf = os.environ.get("STATE_F")
+
+        def _asf(content):
+            p = os.path.join(_asdir, "state-%d.json" % len(os.listdir(_asdir)))
+            if content is not None:
+                with open(p, "w") as f:
+                    f.write(content)
+            os.environ["STATE_F"] = p
+            return _as(_PROP)
+        try:
+            _absent = _asf(None)
+            _corrupt = _asf("{not json")
+            _spent = _asf(json.dumps({"authorized": [
+                {"path": "/x/" + _PROP, "uses_left": 0, "reason": "r"}]}))
+            _other = _asf(json.dumps({"authorized": [
+                {"path": "/x/mcp__drops-fi__file_ticket", "uses_left": 3, "reason": "r"}]}))
+        finally:
+            if _prev_sf is None:
+                os.environ.pop("STATE_F", None)
+            else:
+                os.environ["STATE_F"] = _prev_sf
+        check("#131: a session with NO state file yet has no grants — a real answer, not 'could "
+              "not read'",
+              "NO grant" in _absent)
+        check("#131: ...while a state file that exists and will not parse says it could not read, "
+              "and claims nothing — absent and unreadable are different answers",
+              "COULD NOT READ" in _corrupt and "NO grant" not in _corrupt)
+        check("#131: ...a SPENT grant is named as spent, which is the case the identical retry "
+              "text used to make indistinguishable from never having one",
+              "1 spent" in _spent)
+        check("#131: ...and a grant for a DIFFERENT tool on the same server is not this tool's — "
+              "matched on the tool name, never on the server",
+              "NO grant" in _other)
+        # Restore the prefix the next check's precondition depends on.
+        _set(mcp_standing_writes=["mcp__github__"])
+
         # A verb slot too generic to whitelist globally STAYS ambiguous: `user` and the leading
         # token of `systemPrompt` are real words in read-only names, so they keep failing closed
         # and a project names the exact tool in mcp_read_only_tools if it wants them.

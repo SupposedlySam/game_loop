@@ -7290,6 +7290,61 @@ def main():
     # The argument needs no incident: the cap counts CONSECUTIVE UNPRODUCTIVE rings, so the only
     # protection today is the agent finding filler while it waits. A safety property that degrades
     # as the agent gets more disciplined is broken in a way that looks like working.
+    # THE RING CAP WAS UNREACHABLE. It counts "consecutive UNPRODUCTIVE rings", and "productive" was
+    # measured as "the transcript grew", but a one-line reply ("nothing has changed") grows it too.
+    # So every answer re-armed the cap, and it never fired for any session that answered its
+    # rings, which is every live one. Measured on 2026-09-23 in this repo: 70 rings and 70
+    # rearms in an afternoon, 1780 rings over one session's life, against a cap of 3. "Did work" now
+    # means a TOOL CALL since the last ring, parsed from the transcript and never grepped.
+    print("a text-only reply does not re-arm the ring cap; a tool call does:")
+    cp_ = make_sandbox()
+    try:
+        _csd = os.path.join(cp_, ".game_loop", "sessions", "sess-cap")
+        os.makedirs(_csd, exist_ok=True)
+        _clog = os.path.join(cp_, ".game_loop", "log.jsonl")
+        _ctp = os.path.join(cp_, "transcript.jsonl")
+        _pre = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}]}}) + "\n"
+
+        def _cap_case(after_ring_lines):
+            with open(_ctp, "w") as f:
+                f.write(_pre)
+                for x in after_ring_lines:
+                    f.write(json.dumps(x) + "\n")
+            with open(os.path.join(_csd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "keep going", "at": "now"},
+                           "watchdog_rings": 1, "watchdog_last_ring_size": len(_pre)}, f)
+            open(_clog, "w").close()
+            run_watchdog(os.path.join(cp_, ".game_loop", "bin", "watchdog"),
+                         {"session_id": "sess-cap", "transcript_path": _ctp},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+            return read_or_empty(_clog)
+
+        _said = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Nothing has changed."}]}}
+        _did = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
+        _talk = {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": 'the signal is a block with "type": "tool_use"'}]}}
+        check("a TEXT-ONLY reply since the last ring does NOT re-arm the cap — that reply re-armed it "
+              "1780 times in one session, which is why a cap of 3 never fired",
+              '"watchdog_rearm"' not in _cap_case([_said]))
+        check("...while a TOOL CALL since the last ring does re-arm it, so a ring that got the "
+              "session moving still earns its budget back",
+              '"watchdog_rearm"' in _cap_case([_said, _did]))
+        check("...and prose that merely MENTIONS a tool_use block is not one: the transcript is "
+              "parsed, not grepped, or a paragraph about this check would count as the work",
+              '"watchdog_rearm"' not in _cap_case([_talk]))
+        _wsrc = open(os.path.join(REPO, ".game_loop", "bin", "watchdog")).read()
+        _af = [n for n in ast.parse(_wsrc).body
+               if isinstance(n, ast.FunctionDef) and n.name == "acted_since"]
+        _am = ast.Module(body=_af, type_ignores=[])
+        ast.fix_missing_locations(_am)
+        _ans = {"json": json}
+        exec(compile(_am, "watchdog", "exec"), _ans)  # noqa: S102
+        check("...and an UNREADABLE transcript answers None, so the caller keeps the old growth "
+              "rule rather than silencing or forcing anything on a read failure",
+              _ans["acted_since"]("/nonexistent/transcript.jsonl", 0) is None)
+    finally:
+        shutil.rmtree(cp_, ignore_errors=True)
+
     print("a declared wait holds the ring cap, and cannot become an off switch (#32):")
     wp = make_sandbox()
     try:

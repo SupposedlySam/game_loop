@@ -612,6 +612,14 @@ MUTANTS = [
      "killer is the one proving the same authorization opens a GATED project. The #131 assertions "
      "about the refusal's authorization-state line SURVIVE this mutant, correctly: they read "
      "authorization_state, a different producer, and do not depend on a grant being spent.", 2),
+    ("acted_since -> any reply re-arms the ring cap again, so it can never fire",
+     ".game_loop/bin/watchdog::acted_since", "    return None\n",
+     ['TEXT-ONLY reply since the last ring does NOT re-arm', 'MENTIONS a tool_use block is not one'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO None IS THE PRE-FIX WORLD EXACTLY, because the caller "
+     "falls back to 'the transcript grew', which a one-line reply satisfies. So the cap re-arms on "
+     "every answer and never fires — measured 70 rings / 70 rearms in one afternoon and 1780 over "
+     "one session against a cap of 3. Its killers are the two cases the old rule got wrong; the "
+     "tool-call case passes either way and is correctly not listed.", 0),
     ("embedded_python -> the guards' heredoc producers drop out of the denominator again",
      "test/mutation_sweep.py::embedded_python", "    return []\n",
      ['heredoc producers are IN the denominator', 'every excluded name is a producer the repo still HAS'],

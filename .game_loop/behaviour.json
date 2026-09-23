@@ -578,6 +578,15 @@
       "change": "A new refusal: `--expires` rejects a value that is neither a duration (30m/2h/7d/1w), a date, nor `never` — a bare number most notably, because read as minutes it lapses during the call that set it and read as days it covers a week of unattended runs.",
       "why_it_qualifies": "NOTICE FALSE, and the reason is the whole of it: this refusal is reachable ONLY by passing a flag that did not exist before this commit. Nobody who changes nothing about how they call `authorize` can meet it — an existing invocation has no --expires, parse_expires returns None for absent, and the grant is unbounded exactly as it was. The other half of the same change is additive in the same way: grants without an expires_at are honoured by all three guards byte for byte as before, so a consumer's live grants do not start lapsing because they upgraded.",
       "consequence": "Nothing changes for an existing caller. A caller who OPTS IN gets a grant the guard closes on its own, and a mistyped duration is refused at grant time rather than silently becoming 'never' — which is the failure this entry exists to say was considered rather than overlooked."
+    },
+    {
+      "seq": 61,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog (the ring cap)",
+      "change": "The ring cap now counts a ring as productive only when the session made a TOOL CALL since it. A text-only reply (\"nothing has changed\") no longer re-arms the cap, so after ring_cap consecutive rings answered only in text, the watchdog stands down and pages the human once, as its own comments always said it would.",
+      "why_it_qualifies": "Somebody who changed nothing WILL notice: a session idling under a standing mandate used to be rung forever and now stops after three rings and pages once. The old rule measured 'productive' as 'the transcript grew', which any reply satisfies, so the cap was unreachable for every session that answered its rings. Measured here: 70 rings / 70 rearms in one afternoon, 1780 over one session, against a cap of 3, zero stand-downs.",
+      "consequence": "An idle session under a standing mandate is paged ONCE after three empty replies instead of being woken indefinitely. A session that actually works between rings (any tool call) keeps its budget, as before. If the transcript cannot be read, the old growth rule still applies, so a read failure never silences the watchdog."
     }
   ],
   "schema": 1

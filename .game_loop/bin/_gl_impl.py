@@ -1052,12 +1052,36 @@ def fire_triggers(s, event, payload):
     moment whose exit code is a VERDICT needs the opposite shape, so it runs the same attachments
     through the same runner and decides for itself: see stop_trigger_block.
     """
+    todo = triggers_for(event)
+    if not todo:
+        return []
+    # A LOST UPDATE, OBSERVED. This used to run every trigger and then save(s), which writes back
+    # the WHOLE state dict the verb loaded when it started. Triggers can be slow: lamp's publish
+    # gate took ~8 minutes on 2026-09-23. Any state written during that window was silently erased,
+    # and it was. A `trans` at 18:36:51 vanished when `confidence --mark` (loaded 18:34:57) saved at
+    # the end of its publish trigger, and the phase line reverted to one the watchdog then quoted
+    # back as current. The watchdog's own ring counters live in the same file.
+    #
+    # So: persist the verb's own changes BEFORE the slow part, run the triggers, then RELOAD and
+    # merge in only what this function owns (its trigger records). The caller's `s` is refreshed IN
+    # PLACE, because cmd_fix and cmd_stepback call save(s) again afterwards and would otherwise
+    # write the stale copy one line later. If the reload cannot read the state, this falls back to
+    # the old behaviour rather than swapping defaults in over real state.
+    save(s)
     fired = []
-    for t in triggers_for(event):
+    for t in todo:
         name, ran, code, body, err = _run_trigger(s, t, event, payload)
         fired.append((name, ran and code == 0, body, err))
-    if not fired:
-        return []
+    mine = {n: (s.get("triggers") or {}).get(n) for n, _ok, _b, _e in fired}
+    global STATE_UNREADABLE
+    _was_unreadable = STATE_UNREADABLE
+    STATE_UNREADABLE = None
+    fresh = load()
+    if STATE_UNREADABLE is None and os.path.exists(STATE_F):
+        fresh.setdefault("triggers", {}).update({n: r for n, r in mine.items() if r is not None})
+        s.clear()
+        s.update(fresh)
+    STATE_UNREADABLE = STATE_UNREADABLE or _was_unreadable
     save(s)
     lines = [f"— triggers · {event} ——————————————————————————"]
     for name, ok, body, err in fired:

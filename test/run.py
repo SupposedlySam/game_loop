@@ -11384,6 +11384,66 @@ def main():
     finally:
         shutil.rmtree(gw, ignore_errors=True)
 
+    # A LOST UPDATE, OBSERVED 2026-09-23. fire_triggers ran every trigger and then save(s), writing
+    # back the WHOLE state dict the verb had loaded at its start. lamp's publish gate took ~8
+    # minutes, and a `trans` written at 18:36:51 was erased when `confidence --mark` (loaded at
+    # 18:34:57) saved at the end of it. The phase line reverted, and the watchdog quoted the old
+    # one back as current. Its ring counters live in the same file.
+    print("a slow trigger cannot erase state written while it ran (lost update):")
+    _lu_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+        "_gl_lostupd", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+    _lu = __import__("importlib.util", fromlist=["util"]).module_from_spec(_lu_spec)
+    _lu_spec.loader.exec_module(_lu)
+    _lud = _tmpdir("gllu-")
+    _lusf = os.path.join(_lud, "state.json")
+    _lu.STATE_F = _lusf
+    with open(_lusf, "w") as f:
+        json.dump({"phase": {"doing": "OLD"}, "watchdog_rings": 0}, f)
+    _lus = _lu.load()
+    _lus["verb_change"] = "made before the triggers"
+    _lu.triggers_for = lambda ev: [{"name": "slow-publish"}]
+
+    def _lu_slow(s_, t, ev, payload):
+        with open(_lusf) as f:
+            cur = json.load(f)
+        cur["phase"] = {"doing": "NEW, from a concurrent trans"}
+        cur["watchdog_rings"] = 2
+        with open(_lusf, "w") as f:
+            json.dump(cur, f)
+        s_.setdefault("triggers", {})["slow-publish"] = {"last": "ok"}
+        return "slow-publish", True, 0, "published", ""
+    _lu._run_trigger = _lu_slow
+    _lu.fire_triggers(_lus, "confidence", {})
+    with open(_lusf) as f:
+        _ludisk = json.load(f)
+    check("state written by ANOTHER process while a trigger ran SURVIVES the verb's save — the "
+          "phase stamp an 8-minute publish gate once erased",
+          _ludisk["phase"]["doing"].startswith("NEW") and _ludisk.get("watchdog_rings") == 2)
+    check("...and the verb's OWN change, made before the triggers, still lands, because it is "
+          "saved before the slow part rather than only after it",
+          _ludisk.get("verb_change") == "made before the triggers")
+    check("...and the trigger's own record is merged in, which is the only thing this function "
+          "owns in the fresh state",
+          (_ludisk.get("triggers") or {}).get("slow-publish") == {"last": "ok"})
+    check("...and the CALLER'S dict is refreshed in place, because cmd_fix and cmd_stepback save "
+          "it again afterwards and would otherwise write the stale copy one line later",
+          _lus["phase"]["doing"].startswith("NEW"))
+    with open(_lusf, "w") as f:
+        json.dump({"phase": {"doing": "P"}}, f)
+    _lus2 = _lu.load()
+    _lus2["keep"] = 1
+
+    def _lu_corrupt(s_, t, ev, payload):
+        with open(_lusf, "w") as f:
+            f.write("{not json")
+        return "x", True, 0, "", ""
+    _lu._run_trigger = _lu_corrupt
+    _lu.STATE_UNREADABLE = None
+    _lu.fire_triggers(_lus2, "confidence", {})
+    check("...and a reload that finds the state UNREADABLE keeps the verb's real dict rather than "
+          "swapping pristine defaults in over it",
+          _lus2.get("keep") == 1 and _lus2["phase"]["doing"] == "P")
+
     print("triggers — a project's own attachments to the loop:")
     tpp = make_sandbox()
     try:

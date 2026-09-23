@@ -600,6 +600,14 @@ MUTANTS = [
      "note to APPEAR can kill it. wcs is the measured instance this exists for — they read past "
      "\"5 live, 6 spent\" on every run of a long session and then reported that status did not "
      "surface grants at all.", 0),
+    ("embedded_python -> the guards' heredoc producers drop out of the denominator again",
+     "test/mutation_sweep.py::embedded_python", "    return []\n",
+     ['heredoc producers are IN the denominator', 'every excluded name is a producer the repo still HAS'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO [] IS THE PRE-FIX WORLD EXACTLY: the sixteen guard "
+     "producers vanish from the candidate set and the coverage gate goes back to returning 0 over "
+     "a denominator that excludes consume_authorization. It cannot do so SILENTLY any more, "
+     "because the sixteen NOT_SWEPT entries naming them then point at nothing, and the "
+     "stale-exclusion check refuses that.", 0),
     ("unbound_mandate_notice -> the notice never has anything to say",
      ".game_loop/bin/_gl_impl.py::unbound_mandate_notice", '    return ""\n',
      ['FIRES on the case it exists for', 'never REFUSES', 'says so in BOTH directions'],
@@ -2132,6 +2140,16 @@ MUTANTS += [
 ]
 
 
+_HEREDOC_GAP = (
+    "KNOWN GAP, NAMED 2026-09-23: embedded in a bash heredoc, so it was outside this sweep's "
+    "denominator ENTIRELY until embedded_python() taught source_files() to read heredocs — the gate "
+    "returned 0 over a set that silently excluded the guards' own decisions. It SHOULD be swept. "
+    "What is established: neuter() reaches it, textually (and the Nth twin via name#N). What is NOT "
+    "established: whether the rest of the run — the parse checks on the mutated host, the liveness "
+    "probe, the section map — handles a BASH host file, since every one of them was written for "
+    "Python hosts and none has been run on one. Declared rather than swept until that is measured.")
+
+
 NOT_SWEPT = {
     ".game_loop/bin/watchdog::_g": "a CLOSURE inside phase_head_facts, not a module-level producer: it cannot be neutered independently of its only caller, and sweeping that caller sweeps it. Named here rather than left silent, which is what this file refuses.",
     # A TEST STUB IS NOT A PRODUCER. `_fake_git` exists inside test/run.py to feed
@@ -2198,6 +2216,26 @@ NOT_SWEPT = {
     #
     # KNOWN GAPs — product producers that SHOULD be swept and are not yet. Declared so the run
     # reports them every time rather than letting the number sit at a comfortable 0 undecided.
+    # Sixteen guard producers that lived in bash heredocs. One gap, so one reason, written out
+    # LITERALLY per entry: this dict is read statically with ast.literal_eval, and a
+    # comprehension over a shared constant crashed that reader's shard (caught by prun, which
+    # refused to count the crash as green). The full account is _HEREDOC_GAP above.
+    ".game_loop/bin/guard-mcp-impl.sh::authorization_state": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-mcp-impl.sh::consume_authorization": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-mcp-impl.sh::leaves": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::_git_common": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::_git_common#2": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::_names": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::_status_names": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::git": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::offends": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::policy_name": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::probe_script_path": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::reads_only": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::resolve_scope": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::same_project": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::same_project#2": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-writes-impl.sh::tree_of": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
     
     
     ".game_loop/bin/_gl_impl.py::run_verify_check": "MEASURED AT 0 AND THAT IS NOT A COVERAGE GAP "
@@ -2632,6 +2670,30 @@ def candidates(src):
 SOURCE_DECLARES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
 
 
+_HEREDOC_PY = __import__("re").compile(r"<<'PY'[^\n]*\n(.*?)\nPY\n", __import__("re").S)
+
+
+def embedded_python(src):
+    """The Python blocks embedded in a bash file's `<<'PY'` heredocs, each one that parses.
+
+    THE DENOMINATOR HAD A FILE-SHAPED HOLE. source_files() kept a tracked file only when the whole
+    file parsed as Python, so a bash guard carrying its decision logic in heredocs was dropped
+    WHOLE — measured on 2026-09-23 at 16 producers outside the sweep, and they were not incidental
+    ones: `consume_authorization`, the function that decides whether a human's grant is spent, and
+    `same_project`, `offends`, `policy_name`, `reads_only`, the guards' actual decisions. The
+    coverage gate returned 0 over a set that silently excluded the code it most needed to watch,
+    which is the failure this file's header exists for, found in this file.
+    """
+    out = []
+    for block in _HEREDOC_PY.findall(src or ""):
+        try:
+            ast.parse(block)
+        except SyntaxError:
+            continue
+        out.append(block)
+    return out
+
+
 def source_files(tree=None):
     """Every TRACKED file that is Python source, asked of git rather than enumerated here.
 
@@ -2661,8 +2723,17 @@ def source_files(tree=None):
             continue
         try:
             with open(os.path.join(tree, rel)) as f:
-                mod = ast.parse(f.read())
-        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        try:
+            mod = ast.parse(text)
+        except (SyntaxError, ValueError):
+            # Not Python as a whole, but it may CARRY Python: a bash guard whose decisions live in
+            # heredocs. Counted when any embedded block declares a function.
+            if any(any(isinstance(n, ast.FunctionDef) for n in ast.walk(ast.parse(b)))
+                   for b in embedded_python(text)):
+                out.append(rel)
             continue
         if any(isinstance(n, SOURCE_DECLARES) for n in mod.body):
             out.append(rel)
@@ -2684,8 +2755,21 @@ def all_candidates(tree=None):
                 src = f.read()
         except OSError:
             continue
-        for name in candidates(src):
-            found[f"{rel}::{name}"] = (rel, name)
+        try:
+            ast.parse(src)
+            bodies = [src]
+        except (SyntaxError, ValueError):
+            bodies = embedded_python(src)
+        seen = {}
+        for body in bodies:
+            for name in candidates(body):
+                # TWINS STAY TWO. A guard file carries deliberate duplicates across its heredocs
+                # (`same_project` twice, `_git_common` twice), and this docstring's own rule is
+                # that a bare name must not merge two implementations into one decision. The
+                # second copy is `name#2`, stable while the blocks keep their order.
+                seen[name] = seen.get(name, 0) + 1
+                key = name if seen[name] == 1 else "%s#%d" % (name, seen[name])
+                found[f"{rel}::{key}"] = (rel, key)
     return found
 
 
@@ -2939,10 +3023,20 @@ def neuter(src, fn, body):
     Without that, an indent-aware match would produce a file that parses as something else entirely,
     which is the failure mode this file spent a day learning to check for.
     """
+    # `name#N` IS THE Nth COPY, the key all_candidates() gives a twin (a guard file carries
+    # `same_project` twice, in two heredocs). Without this the finder produced `same_project#2`
+    # and nothing could ever rewrite it: matched against a literal `def same_project#2(`, it was a
+    # candidate permanently unreachable, which the gate below refuses by name.
+    base_fn, _, nth = fn.partition("#")
+    want = int(nth) if nth.isdigit() else 1
     lines = src.split("\n")
+    hit = 0
     for i, l in enumerate(lines):
-        m = re.match(rf"^(\s*)def {re.escape(fn)}\(", l)
+        m = re.match(rf"^(\s*)def {re.escape(base_fn)}\(", l)
         if not m:
+            continue
+        hit += 1
+        if hit != want:
             continue
         indent = m.group(1)
         j = i + 1

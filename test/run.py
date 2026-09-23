@@ -13309,12 +13309,24 @@ def main():
     # only meaningful because the classifier below is shown to fire on a constructed case — an empty
     # live category otherwise reads as "nothing is owed" when it could equally be a check with
     # nothing to look at.
-    _expected_gaps = []
-    check("...and THIS repo has NO declared KNOWN GAP left — the section-map writer was the last, "
-          "and the next one anybody adds shows up HERE. A fact about "
-          "today, and the next one anybody adds or closes shows up HERE "
-          "rather than in a number nobody reads: " + (", ".join(_gaps(_ns)) or "none"),
-          _gaps(_ns) == _expected_gaps)
+    # WAS NONE, IS SIXTEEN — and "none" had been a fact about the denominator, not the repo. On
+    # 2026-09-23 source_files() learned to read bash heredocs, and sixteen guard producers that had
+    # never been counted at all came into view: consume_authorization, offends, same_project and
+    # the rest of the guards' decisions. The gaps did not appear that day; the list stopped being
+    # blind to them. They stay exact here, so closing one (by teaching the run to handle a bash host)
+    # or adding one shows up HERE, which is the job this assertion was written for.
+    _hd = ".game_loop/bin/guard-%s-impl.sh::%s"
+    _expected_gaps = sorted(
+        [_hd % ("mcp", n) for n in ("authorization_state", "consume_authorization", "leaves")]
+        + [_hd % ("writes", n) for n in ("_git_common", "_git_common#2", "_names", "_status_names",
+                                          "git", "offends", "policy_name", "probe_script_path",
+                                          "reads_only", "resolve_scope", "same_project",
+                                          "same_project#2", "tree_of")])
+    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the sixteen guard producers that "
+          "lived in bash heredocs — once uncountable, now named. A fact about today, and the next "
+          "one anybody adds or closes shows up HERE rather than in a number nobody reads: "
+          + (", ".join(g for g in _gaps(_ns) if g not in _expected_gaps) or "no surprises"),
+          sorted(_gaps(_ns)) == _expected_gaps)
     # A GAP MAY BE IN THE SWEEP'S OWN TOOLING, and that is not a loophole. This read
     # `startswith(".game_loop/bin/")` while every gap happened to be a shipped producer — true when
     # written, and it turned into a rule the moment `_write_section_map` became a declared gap: the
@@ -17949,7 +17961,9 @@ def main():
               f"{rel}::{n}"
               for rel in sweep.source_files(sweep.REPO)
               for n in (lambda src: [fn.name for fn in
-                                     [x for x in ast.walk(ast.parse(src))
+                                     [x for x in ast.walk(ast.parse(
+                                         src if sweep._parses(src)
+                                         else "\n\n".join(sweep.embedded_python(src))))
                                       if isinstance(x, ast.FunctionDef)]
                                      if any((lambda r: r.value is not None
                                              and isinstance(r.value, ast.Tuple)
@@ -18113,6 +18127,24 @@ def main():
     check("...and the producers this issue named are now IN the denominator rather than absent",
           {".game_loop/bin/verify::owed",
            ".game_loop/bin/watchdog::exhausted_windows"} <= set(real_found))
+    # THE DENOMINATOR HAD A FILE-SHAPED HOLE, found 2026-09-23 in the commit that added a guard
+    # function: source_files() kept a file only when the WHOLE file parsed as Python, so a bash
+    # guard carrying its decisions in heredocs was dropped whole. Sixteen producers, including
+    # consume_authorization — the function that decides whether a human's grant is spent — sat
+    # outside every count while the gate returned 0.
+    check("the guards' heredoc producers are IN the denominator — consume_authorization and "
+          "offends among them — rather than dropped with the bash file that carries them",
+          {".game_loop/bin/guard-mcp-impl.sh::consume_authorization",
+           ".game_loop/bin/guard-writes-impl.sh::offends",
+           ".game_loop/bin/guard-writes-impl.sh::same_project"} <= set(real_found))
+    check("...and a guard's deliberate TWINS stay two decisions, not one merged name — the rule "
+          "this file already states for two implementations sharing a name",
+          {".game_loop/bin/guard-writes-impl.sh::same_project",
+           ".game_loop/bin/guard-writes-impl.sh::same_project#2"} <= set(real_found))
+    check("...and the extractor reads only blocks that PARSE, so a heredoc of shell or prose can "
+          "never invent a producer",
+          sweep.embedded_python("x <<'PY'\ndef f():\n    return 1\nPY\ny <<'PY'\nnot python (\nPY\n")
+          == ["def f():\n    return 1"])
     # The regression this closes: a NEW source file arriving with an undecided producer must fail
     # the run rather than be quietly outside the count.
     # SUBTRACT WHAT IS ABOUT NOBODY. Two assertions in this suite redden for essentially any

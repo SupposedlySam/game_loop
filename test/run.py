@@ -3160,8 +3160,6 @@ def main():
         open(close_log, "w").close()
         r = gl(proj, "status", sid="sess-ret-3b", PATH=rpath)
         time.sleep(0.5)
-        print("DEBUG-FAILCLOSED>>>", repr(r.stdout[:400]), "survivor:", survivor.poll(),
-              "closelog:", repr(open(close_log).read()))
         check("...and a session that cannot establish which terminal it is in refuses as well — a "
               "guard whose failure mode is killing yourself must fail CLOSED, and 'not me' is not "
               "something an unanswered question proves",

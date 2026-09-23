@@ -13315,14 +13315,16 @@ def main():
     # the rest of the guards' decisions. The gaps did not appear that day; the list stopped being
     # blind to them. They stay exact here, so closing one (by teaching the run to handle a bash host)
     # or adding one shows up HERE, which is the job this assertion was written for.
+    # SIXTEEN, THEN FIFTEEN, the same day: consume_authorization was swept on its bash host (raw 8)
+    # and moved to MUTANTS, which proved a bash host can be measured at all.
     _hd = ".game_loop/bin/guard-%s-impl.sh::%s"
     _expected_gaps = sorted(
-        [_hd % ("mcp", n) for n in ("authorization_state", "consume_authorization", "leaves")]
+        [_hd % ("mcp", n) for n in ("authorization_state", "leaves")]
         + [_hd % ("writes", n) for n in ("_git_common", "_git_common#2", "_names", "_status_names",
                                           "git", "offends", "policy_name", "probe_script_path",
                                           "reads_only", "resolve_scope", "same_project",
                                           "same_project#2", "tree_of")])
-    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the sixteen guard producers that "
+    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the fifteen guard producers that still "
           "lived in bash heredocs — once uncountable, now named. A fact about today, and the next "
           "one anybody adds or closes shows up HERE rather than in a number nobody reads: "
           + (", ".join(g for g in _gaps(_ns) if g not in _expected_gaps) or "no surprises"),

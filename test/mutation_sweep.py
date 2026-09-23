@@ -600,6 +600,18 @@ MUTANTS = [
      "note to APPEAR can kill it. wcs is the measured instance this exists for — they read past "
      "\"5 live, 6 spent\" on every run of a long session and then reported that status did not "
      "surface grants at all.", 0),
+    ("consume_authorization -> no human grant is ever honoured for an MCP tool",
+     ".game_loop/bin/guard-mcp-impl.sh::consume_authorization", "    return False\n",
+     ['authorization opens a GATED project', 'heredoc producers are IN the denominator'],
+     "raw 8, floor 2. THE FIRST PRODUCER SWEPT ON A BASH HOST — measured 2026-09-23 in a clone, "
+     "and the measurement that turned the other fifteen heredoc producers from 'unmeasurable' into "
+     "'unmeasured'. It decides whether a human's grant is spent. FLOOR 2, NOT 8, on the sweep's own "
+     "count: of the 8, at least 2 name this producer's subject, and one of THOSE is bookkeeping — "
+     "neutered to `return False` it stops being a finding-or-nothing producer, so it leaves the "
+     "denominator and the denominator assertion fails. Real, but not behavioural. The behavioural "
+     "killer is the one proving the same authorization opens a GATED project. The #131 assertions "
+     "about the refusal's authorization-state line SURVIVE this mutant, correctly: they read "
+     "authorization_state, a different producer, and do not depend on a grant being spent.", 2),
     ("embedded_python -> the guards' heredoc producers drop out of the denominator again",
      "test/mutation_sweep.py::embedded_python", "    return []\n",
      ['heredoc producers are IN the denominator', 'every excluded name is a producer the repo still HAS'],
@@ -2142,12 +2154,9 @@ MUTANTS += [
 
 _HEREDOC_GAP = (
     "KNOWN GAP, NAMED 2026-09-23: embedded in a bash heredoc, so it was outside this sweep's "
-    "denominator ENTIRELY until embedded_python() taught source_files() to read heredocs — the gate "
-    "returned 0 over a set that silently excluded the guards' own decisions. It SHOULD be swept. "
-    "What is established: neuter() reaches it, textually (and the Nth twin via name#N). What is NOT "
-    "established: whether the rest of the run — the parse checks on the mutated host, the liveness "
-    "probe, the section map — handles a BASH host file, since every one of them was written for "
-    "Python hosts and none has been run on one. Declared rather than swept until that is measured.")
+    "denominator ENTIRELY until embedded_python() taught source_files() to read heredocs. It SHOULD "
+    "be swept, and it now CAN be: consume_authorization was swept on a bash host the same day and "
+    "was killed by 8. What remains is the run for each of these, not a missing capability.")
 
 
 NOT_SWEPT = {
@@ -2220,22 +2229,21 @@ NOT_SWEPT = {
     # LITERALLY per entry: this dict is read statically with ast.literal_eval, and a
     # comprehension over a shared constant crashed that reader's shard (caught by prun, which
     # refused to count the crash as green). The full account is _HEREDOC_GAP above.
-    ".game_loop/bin/guard-mcp-impl.sh::authorization_state": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-mcp-impl.sh::consume_authorization": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-mcp-impl.sh::leaves": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::_git_common": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::_git_common#2": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::_names": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::_status_names": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::git": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::offends": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::policy_name": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::probe_script_path": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::reads_only": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::resolve_scope": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::same_project": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::same_project#2": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
-    ".game_loop/bin/guard-writes-impl.sh::tree_of": "KNOWN GAP (bash heredoc host): reachable by neuter, but no run has been shown to handle a BASH host file yet — see _HEREDOC_GAP for the full account.",
+    ".game_loop/bin/guard-mcp-impl.sh::authorization_state": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-mcp-impl.sh::leaves": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::_git_common": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::_git_common#2": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::_names": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::_status_names": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::git": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::offends": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::policy_name": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::probe_script_path": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::reads_only": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::resolve_scope": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::same_project": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::same_project#2": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
+    ".game_loop/bin/guard-writes-impl.sh::tree_of": "KNOWN GAP (bash heredoc host): UNMEASURED, not unmeasurable — neuter reaches it and consume_authorization was swept on the same kind of host (raw 8). See _HEREDOC_GAP.",
     
     
     ".game_loop/bin/_gl_impl.py::run_verify_check": "MEASURED AT 0 AND THAT IS NOT A COVERAGE GAP "

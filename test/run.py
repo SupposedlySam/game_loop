@@ -17555,6 +17555,21 @@ def main():
     check("#117: ...and a file that never parsed as Python to begin with is skipped — a mutated "
           "JSON fixture must not be refused for having stopped being a program it never was",
           not sweep.declared_mutant_unparseable("not code {{{", "still not code")[0])
+    # A BASH HOST WAS SKIPPED, not merely excused. The check above stops at "the original does not
+    # parse", which for a guard whose Python lives in heredocs meant a malformed mutant body was
+    # never caught: the embedded program crashes at runtime, the guard behaves however a crash
+    # behaves, and the run reads that as a verdict. Driven against the real guard file.
+    _host = open(os.path.join(REPO, ".game_loop", "bin", "guard-mcp-impl.sh")).read()
+    _hgood, _ = sweep.neuter(_host, "consume_authorization", "    return False\n")
+    _hbad, _ = sweep.neuter(_host, "consume_authorization", "    return (\n")
+    check("a MALFORMED mutant inside a bash host's heredoc is refused, rather than skipped because "
+          "the host as a whole was never Python — it crashes the embedded program, and a crash is "
+          "not a verdict on the mutant",
+          sweep.declared_mutant_unparseable(_host, _hbad)[0]
+          and "heredoc" in sweep.declared_mutant_unparseable(_host, _hbad)[1])
+    check("...while a WELL-FORMED heredoc mutant passes, so the refusal is about the declared body "
+          "and not about the host being bash",
+          not sweep.declared_mutant_unparseable(_host, _hgood)[0])
     _mtxt = read_or_empty(os.path.join(REPO, "test", "mutation_sweep.py"))
     check("#117: ...and the two NOT MEASURED reasons are DIFFERENT SENTENCES in the source — a "
           "mutant that never ran and a mutant that ran and killed the suite are the third case "

@@ -3000,7 +3000,19 @@ def declared_mutant_unparseable(original, mutated):
     Asked only where the ORIGINAL parses, so a mutated JSON fixture is never refused for having
     stopped being a program it never was.
     """
-    if not _parses(original) or _parses(mutated):
+    if not _parses(original):
+        # A BASH HOST, whose Python lives in heredocs. This check used to stop at "the original does
+        # not parse" and return False, which for a heredoc producer meant it was SKIPPED ENTIRELY: a
+        # malformed mutant body crashes the embedded program at runtime, the guard then behaves
+        # however a crash behaves, and the run reads that as a verdict on the mutant. The host's own
+        # unit here is the heredoc block, so a mutation that leaves FEWER parseable blocks than the
+        # original had is the same failure, one level down.
+        before, after = len(embedded_python(original)), len(embedded_python(mutated))
+        if before and after < before:
+            return True, ("the body declared for it in MUTANTS is malformed, so a heredoc block in "
+                          "its bash host stopped being a program and NOTHING was exercised")
+        return False, ""
+    if _parses(mutated):
         return False, ""
     return True, ("the body declared for it in MUTANTS is malformed, so the file stopped being a "
                   "program and NOTHING was exercised")

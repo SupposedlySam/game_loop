@@ -7345,6 +7345,61 @@ def main():
     finally:
         shutil.rmtree(cp_, ignore_errors=True)
 
+    # A WATCHDOG DELAYED IN THE LIMIT PROBE DECIDED FROM ITS LAUNCH SNAPSHOT. The probe can take
+    # ~75s, and a laptop sleep stretches that to minutes; nothing supersedes a watchdog before it
+    # claims the pidfile. Observed 2026-09-24, every 30-min cycle: one launched before the Mac slept
+    # came back after a newer watchdog had rearmed AND rung (rings=1, new ring offset), read its own
+    # stale rings=3 and old offset, found old tool calls "since the last ring", and rearmed. So each
+    # cycle spent one extra ring. Here the stub probe plays the newer watchdog, writing that ring
+    # mid-probe.
+    print("a watchdog held up in the limit probe decides from the state as it is NOW:")
+    lp_ = make_sandbox()
+    try:
+        _lsd = os.path.join(lp_, ".game_loop", "sessions", "sess-lp")
+        os.makedirs(_lsd, exist_ok=True)
+        _lst = os.path.join(_lsd, "state.json")
+        _llog = os.path.join(lp_, ".game_loop", "log.jsonl")
+        _ltp = os.path.join(lp_, "transcript.jsonl")
+        _lines = [{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}},
+                  {"type": "assistant", "message": {"content": [{"type": "text", "text": "Nothing has changed."}]}}]
+        with open(_ltp, "w") as f:
+            for x in _lines:
+                f.write(json.dumps(x) + "\n")
+        _now_size = os.path.getsize(_ltp)
+        _mand = {"active": True, "text": "keep going", "at": "now"}
+        # launch snapshot: 3 rings, last ring measured BEFORE the tool call -> stale rearm bait
+        with open(_lst, "w") as f:
+            json.dump({"mandate": _mand, "watchdog_rings": 3, "watchdog_last_ring_size": 0}, f)
+        # mid-probe: the newer watchdog rearmed and rang once, after the tool call
+        _fresh = {"mandate": _mand, "watchdog_rings": 1, "watchdog_last_ring_size": _now_size,
+                  "_tpath": _ltp}
+        with open(os.path.join(lp_, ".game_loop", "bin", "limit-probe.sh"), "w") as f:
+            f.write("#!/bin/bash\ncat > \"$GL_TEST_STATE_F\" <<'J'\n" + json.dumps(_fresh) + "\nJ\n"
+                    "echo '{\"five_hour\":{\"used_percentage\":0,\"resets_at\":9999999999},"
+                    "\"seven_day\":{\"used_percentage\":1,\"resets_at\":9999999999}}'\n")
+        with open(os.path.join(lp_, ".game_loop", "config.local.json"), "w") as f:
+            json.dump({"limits": {"probe": {"enabled": True, "min_interval_sec": 900,
+                                            "max_interval_sec": 3600}}}, f)
+        with open(os.path.join(lp_, ".game_loop", "limits.json"), "w") as f:
+            json.dump({"captured_at": 1000, "windows": {}}, f)
+        open(_llog, "w").close()
+        run_watchdog(os.path.join(lp_, ".game_loop", "bin", "watchdog"),
+                     {"session_id": "sess-lp", "transcript_path": _ltp},
+                     WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0", GL_TEST_STATE_F=_lst,
+                     GAME_LOOP_GLOBAL_CONFIG="/nonexistent")
+        _lg = read_or_empty(_llog)
+        check("the probe actually ran in this case, so the assertions below are about a watchdog "
+              "that WAS held up in it, not one that skipped it",
+              '"watchdog_limit_probe"' in _lg and '"ok": true' in _lg)
+        check("...and it does NOT rearm from its launch snapshot: the newer watchdog's ring, "
+              "written while this one was probing, is what it reads (was: `rearm was=3`)",
+              '"watchdog_rearm"' not in _lg)
+        check("...so its ring is the SECOND of the cycle, counted on from the newer watchdog's, "
+              "rather than starting the cycle over at 1",
+              '"ring": 2' in _lg)
+    finally:
+        shutil.rmtree(lp_, ignore_errors=True)
+
     print("a declared wait holds the ring cap, and cannot become an off switch (#32):")
     wp = make_sandbox()
     try:

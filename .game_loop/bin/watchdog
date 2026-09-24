@@ -1049,6 +1049,17 @@ def main():
     refresh_limits_if_due()
     park_until_limit_resets(state)  # returns immediately when no window is exhausted
 
+    # RE-READ AFTER THE SLOW PART: the watchdog's half of 348453d. The refresh above can spawn a
+    # limit probe (~75s, and unbounded across a laptop sleep, which stops the clocks), and nothing
+    # supersedes a watchdog before it claims the pidfile below. So `state` can be minutes old here.
+    # Observed 2026-09-24, every 30-min cycle: a watchdog launched before the Mac slept came back
+    # after a newer one had rearmed AND rung, then decided from its launch snapshot (rings=3, the
+    # old ring offset), found the old tool calls "since the last ring", and rearmed again. The cap
+    # then spent one extra ring per cycle. Decide from the file as it is now; the one key this
+    # process owns in the dict is the transcript path.
+    state = load_state()
+    state["_tpath"] = tpath
+
     # RESET BEFORE THE CAP. The cap means CONSECUTIVE UNPRODUCTIVE rings — stand down only if ringing
     # is not getting the session working. If the transcript has grown since the last ring, the ring
     # WORKED, so the budget is spent honestly rather than burned once and never recovered.

@@ -1087,6 +1087,18 @@ def main():
         check("...and a quoted | does not hide a REAL redirect in the tail from the guard",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "echo 'a | b' > /etc/passwd"}})))
+        # THE SAME SPLITTER, THE OTHER SEPARATOR. `;` inside quotes, before a `>`, cut the quote off its
+        # string, so the `>` read as a redirect. Reported from a merge (game_loop_owner #318):
+        # flutter-device's awk for conflict markers was refused on a guard older than the #110 fix, and
+        # that same guard ALLOWED `echo 'a; b' > <outside>`. Measured 2026-09-25 on four installs on
+        # this machine (08-06 to 08-18) that never upgraded past it.
+        check("an awk program's quoted ; before a quoted > is DATA — the conflict-marker read (#318)",
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "awk '/^<<<<<<< /{p=1; print \"@@ line \" NR} p{print} "
+                             "/^>>>>>>> /{p=0; print \"\"}' src/a.ts"}}))
+        check("...and a quoted ; does not hide a REAL redirect in the tail from the guard",
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "echo 'a; b' > /etc/passwd"}})))
         check("a backslash-escaped quote does not close the string and expose a redirect",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a \\" b" > /etc/passwd'}})))

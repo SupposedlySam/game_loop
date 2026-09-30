@@ -967,7 +967,7 @@ def main():
                 if _line.startswith(_key):
                     _declared |= {w.strip().strip('"\'') for w in
                                   _line[len(_key):].rstrip("}").split(",") if w.strip()}
-            if _line.startswith("_DEST_FLAG = {"):
+            if _line.startswith(("_DEST_FLAG = {", "_INPLACE = {")):
                 _declared |= set(re.findall(r'"(\w+)":', _line))
         _unnamed = sorted(v for v in _declared if v and v not in _scope_block)
         check("every verb the guard dispatches on is NAMED in its SCOPE block (%d verbs) — four "
@@ -1099,6 +1099,55 @@ def main():
         check("...and a quoted ; does not hide a REAL redirect in the tail from the guard",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "echo 'a; b' > /etc/passwd"}})))
+        # IN-PLACE EDITORS, BOTH DIRECTIONS. Reported by gravity-brew-owner (game_loop_owner,
+        # 2026-09-28): `sed -i '' '/^  wakelock_plus: /d' pubspec.yaml` was refused naming the sed
+        # SCRIPT as its target. Probing the neighbourhood found the worse half: the rule matched
+        # the one spelling `-i`, so `-i.bak`, `--in-place`, `-Ei`, `-ni`, BSD `-I` and `perl -pi -e`
+        # -- the spelling everybody types -- all wrote outside the repo unchecked.
+        _IP_OUT = "/Users/nobody/inplace.txt"
+        _IP_WRITES = [
+            ("sed -i", f"sed -i 's/a/b/' {_IP_OUT}"),
+            ("sed -i ''", f"sed -i '' 's/a/b/' {_IP_OUT}"),
+            ("sed -i.bak", f"sed -i.bak 's/a/b/' {_IP_OUT}"),
+            ("sed --in-place", f"sed --in-place 's/a/b/' {_IP_OUT}"),
+            ("sed --in-place=.bak", f"sed --in-place=.bak 's/a/b/' {_IP_OUT}"),
+            ("sed -Ei", f"sed -Ei 's/a/b/' {_IP_OUT}"),
+            ("sed -ni", f"sed -ni 's/a/b/p' {_IP_OUT}"),
+            ("sed -I ''", f"sed -I '' 's/a/b/' {_IP_OUT}"),
+            ("sed -i -e", f"sed -i -e 's/a/b/' {_IP_OUT}"),
+            ("sed -e ... -i", f"sed -e 's/a/b/' -i {_IP_OUT}"),
+            ("sed -i '' /addr/d outside", f"sed -i '' '/^x/d' {_IP_OUT}"),
+            ("perl -pi -e", f"perl -pi -e 's/a/b/' {_IP_OUT}"),
+            ("perl -i -pe", f"perl -i -pe 's/a/b/' {_IP_OUT}"),
+            ("perl -pi.bak -e", f"perl -pi.bak -e 's/a/b/' {_IP_OUT}"),
+            ("ruby -pi -e", f"ruby -pi -e 'x' {_IP_OUT}"),
+        ]
+        _IP_FINE = [
+            ("the reported command", "sed -i '' '/^  wakelock_plus: /d' pubspec.yaml"),
+            ("GNU /addr/d in-repo", "sed -i '/^  wakelock_plus: /d' pubspec.yaml"),
+            ("-e /addr/d in-repo", "sed -i '' -e '/^x/d' -e '/^y/d' pubspec.yaml"),
+            ("--expression=/addr/d in-repo", "sed --in-place --expression='/^x/d' pubspec.yaml"),
+            ("-f script read FROM outside", "sed -i '' -f /Users/nobody/edit.sed pubspec.yaml"),
+            ("sed with no -i reading outside", "sed -n '/x/p' /etc/hosts"),
+            ("perl -pi s{/abs}{} in-repo", "perl -pi -e 's{/usr/bin}{x}' a.txt"),
+            ("perl -ne reading outside", "perl -ne '/x/ and print' /etc/hosts"),
+        ]
+        _ipmiss = [n for n, c in _IP_WRITES
+                   if not denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("every in-place spelling of sed/perl/ruby writing outside the repo is refused (%d "
+              "spellings) — the rule matched one, and the one everybody types was not it"
+              % len(_IP_WRITES), not _ipmiss)
+        _ipfalse = [n for n, c in _IP_FINE
+                    if denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {"command": c}}))]
+        check("...and a sed/perl SCRIPT is never read as a path: /addr/d, -e values, an -f script "
+              "file and a read without -i are all allowed (%d cases, gravity-brew's report first)"
+              % len(_IP_FINE), not _ipfalse)
+        _ipr = guard(wgproj, {"tool_name": "Bash", "tool_input": {
+            "command": f"sed -i '' '/^x/d' {_IP_OUT}"}})
+        _ipwhy = (json.loads(_ipr.stdout).get("hookSpecificOutput", {})
+                  .get("permissionDecisionReason", "") if denied(_ipr) else "")
+        check("...and the refusal names the FILE, not the script — right decision, right reason",
+              ("→ " + _IP_OUT) in _ipwhy and "→ /^x/d" not in _ipwhy)
         check("a backslash-escaped quote does not close the string and expose a redirect",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a \\" b" > /etc/passwd'}})))
@@ -13499,14 +13548,17 @@ def main():
     # or adding one shows up HERE, which is the job this assertion was written for.
     # SIXTEEN, THEN FIFTEEN, the same day: consume_authorization was swept on its bash host (raw 8)
     # and moved to MUTANTS, which proved a bash host can be measured at all.
+    # FIFTEEN, THEN SIXTEEN (2026-09-30): inplace_targets, the in-place sed/perl/ruby parser, was
+    # added on the same bash host. Declared rather than swept, and pinned both ways in the write
+    # guard section, so this count went up by the one producer that was ADDED, not by drift.
     _hd = ".game_loop/bin/guard-%s-impl.sh::%s"
     _expected_gaps = sorted(
         [_hd % ("mcp", n) for n in ("authorization_state", "leaves")]
         + [_hd % ("writes", n) for n in ("_git_common", "_git_common#2", "_names", "_status_names",
-                                          "git", "offends", "policy_name", "probe_script_path",
-                                          "reads_only", "resolve_scope", "same_project",
-                                          "same_project#2", "tree_of")])
-    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the fifteen guard producers that still "
+                                          "git", "inplace_targets", "offends", "policy_name",
+                                          "probe_script_path", "reads_only", "resolve_scope",
+                                          "same_project", "same_project#2", "tree_of")])
+    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the sixteen guard producers that still "
           "lived in bash heredocs — once uncountable, now named. A fact about today, and the next "
           "one anybody adds or closes shows up HERE rather than in a number nobody reads: "
           + (", ".join(g for g in _gaps(_ns) if g not in _expected_gaps) or "no surprises"),
@@ -20465,6 +20517,10 @@ def main():
               "line above pass for the wrong reason",
               len(_pt("echo hi\npython3 " + chr(60) * 2 + "'PY'\nx = 1\nPY\n")) == 1
               and _pt("echo hi\necho there\n") == [])
+        check("...and a COMMENT quoting a here-doc opener does not open one — a SCOPE line citing "
+              "`python3 - <<EOF` swallowed the whole guard and emptied this schema (2026-09-30)",
+              len(_pt("# e.g. python3 - " + chr(60) * 2 + "EOF ... EOF\necho hi\n"
+                      "python3 " + chr(60) * 2 + "'PY'\nx = 1\nPY\n")) == 1)
 
         # THE GATE, which is their suggestion 3. A reference nobody thinks to consult is rung 6;
         # naming the dead condition is the rung above it.

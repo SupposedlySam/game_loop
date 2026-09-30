@@ -4099,7 +4099,11 @@ def _python_trees(text):
     trees, lines, i = [], text.split("\n"), 0
     op = chr(60) + chr(60)
     while i < len(lines):
-        m = re.search(re.escape(op) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", lines[i])
+        # A COMMENT CANNOT OPEN A HERE-DOC. Bash ignores it, and this scanner did not: one SCOPE line
+        # quoting `python3 - <<EOF` as an example found no closing EOF and swallowed the rest of
+        # guard-writes-impl.sh, so every record kind the guard writes vanished from the schema.
+        m = (None if lines[i].lstrip().startswith("#") else
+             re.search(re.escape(op) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", lines[i]))
         if m:
             delim, body, i = m.group(2), [], i + 1
             while i < len(lines) and lines[i].strip() != delim:

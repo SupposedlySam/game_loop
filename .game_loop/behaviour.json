@@ -596,6 +596,15 @@
       "change": "A watchdog that was held up in the usage-limit probe now re-reads the session state before deciding whether work happened since the last ring. It used to decide from the state it read at launch, which can be minutes old: the probe takes ~75s, and a laptop sleep stretches it.",
       "why_it_qualifies": "Recorded, not announced: the visible effect is one ring fewer per idle cycle on a machine that sleeps. Before this, a delayed watchdog came back after a newer one had rearmed and rung, read its stale ring count and ring offset, counted old tool calls as new work, and rearmed the cap. Observed here every 30-min cycle on 2026-09-24.",
       "consequence": "The ring cap stands down after ring_cap consecutive text-only replies even when an older watchdog was still inside the probe. Nothing else in the decision changes: a tool call since the last ring still re-arms it."
+    },
+    {
+      "seq": 63,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "bash (in-place sed / perl / ruby)",
+      "change": "The write guard now parses in-place editors instead of matching the one spelling `-i`, and it checks only the FILES they rewrite. Two effects. ALLOWED NOW: a sed or perl script is no longer read as a path, so `sed -i '' '/^  x: /d' pubspec.yaml`, any `-e '/addr/d'`, and `sed -i -f /outside/edit.sed <in-repo file>` run. REFUSED NOW: in-place spellings that used to slip past unchecked -- `sed -i.bak`, `--in-place[=SUF]`, clustered `-Ei`/`-ni`, BSD `-I`, `perl -pi -e`, `perl -pi.bak`, `ruby -pi` -- are refused when the file they rewrite is outside the repo.",
+      "why_it_qualifies": "It changes what is refused in both directions. Reported by gravity-brew-owner (game_loop_owner, 2026-09-28) as a false refusal of a sed address script; probing the same rule found the larger half, a fail-open on the spelling people actually type (`perl -pi -e`).",
+      "consequence": "If you work around the old false refusal (routing a sed through a script, or re-spelling it to dodge the guard), you can stop. If your agent rewrites files outside the repo with `perl -pi -e` or `sed -i.bak`, those calls are refused now, where before they ran unchecked. Grant one with `game_loop authorize --path <prefix> --reason \"<the human's words>\"`, the same as any other outside write."
     }
   ],
   "schema": 1

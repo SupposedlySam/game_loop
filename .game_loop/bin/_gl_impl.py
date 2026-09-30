@@ -10100,6 +10100,34 @@ def cmd_confidence(s, a):
             "`self --pin` followed immediately by this verb satisfies it; that has happened here,\n"
             "27 seconds apart, which is why this paragraph exists (#104).\n"
             "Dogfooding is still the evidence — the pin is how you DECLARE it, not proof you did it.")
+    # IS THIS COMMIT ACTUALLY ON THE BRANCH CONSUMERS TRACK? Checked BEFORE the tag exists and before
+    # any trigger fires, because a mark's whole purpose is what it CAUSES, and every one of those
+    # effects needs the commit on the remote first.
+    #
+    # NOT HYPOTHETICAL, TWICE. First: another agent pushed to main while I worked, my `git push origin
+    # main` was rejected as non-fast-forward, and I pushed the tag and the channel anyway because
+    # they were separate commands; for several minutes `stable` named a commit my own rebase then
+    # orphaned. Second, 2026-09-30: stable-00cab6c4 was marked before its push, the lamp-publish
+    # trigger answered "not publishing: HEAD is not pushed yet" with ok:true, and the warning this
+    # used to print sat in the middle of the output. The tag and channel were pushed and read back,
+    # every signal said released, and lamp served the previous wish until a consumer noticed.
+    # A warning printed after the fact is rung 5; the order is load-bearing, so it is refused here.
+    upstream = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=REPO_ROOT,
+                              capture_output=True, text=True)
+    on_upstream = None
+    if upstream.returncode == 0 and upstream.stdout.strip():
+        anc = subprocess.run(["git", "merge-base", "--is-ancestor", sha, upstream.stdout.strip()],
+                             cwd=REPO_ROOT, capture_output=True, text=True)
+        on_upstream = anc.returncode == 0
+    if on_upstream is False:
+        die(f"THIS COMMIT IS NOT ON YOUR UPSTREAM BRANCH ({upstream.stdout.strip()}) YET.\n"
+            "A mark exists for what it causes — the channel consumers install from, and any publish\n"
+            "trigger — and none of that can work for a commit the remote does not have: a publish\n"
+            "trigger declines (and says ok), and a pushed channel pointer would name a commit no\n"
+            "branch contains. Push first, then mark:\n"
+            "    git push origin HEAD          # if this is rejected, STOP: rebase, re-verify, re-pin\n"
+            f"    game_loop confidence --mark {a.mark} ...\n"
+            "(Your local view of the upstream is what this reads; `git fetch` first if it is stale.)")
     tag = f"{a.mark}-{sha[:8]}"
     lines = [f"{a.mark} — marked {now()}",
              "",
@@ -10162,33 +10190,12 @@ def cmd_confidence(s, a):
         f"was already made;\n  what is being retried is everything the mark CAUSES, below.",
         *["  " + l for l in lines],
         "")
-    # IS THIS COMMIT ACTUALLY ON THE BRANCH CONSUMERS TRACK? Pushing the channel pointer at a commit
-    # that is not on main hands every consumer a tree reachable only by that tag — and if the commit
-    # is later rebased away, the pointer names something no branch contains.
-    #
-    # NOT HYPOTHETICAL. I did it today, to this repo: another agent pushed to main while I worked,
-    # my `git push origin main` was REJECTED as non-fast-forward, and I pushed the tag and the
-    # channel anyway because they were separate commands and the failure was three lines up. For
-    # several minutes `stable` named a commit missing that agent's work, which my own rebase then
-    # orphaned. A consumer installing in that window would have got it, and nothing would have said so.
-    upstream = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=REPO_ROOT,
-                              capture_output=True, text=True)
-    on_upstream = None
-    if upstream.returncode == 0 and upstream.stdout.strip():
-        anc = subprocess.run(["git", "merge-base", "--is-ancestor", sha, upstream.stdout.strip()],
-                             cwd=REPO_ROOT, capture_output=True, text=True)
-        on_upstream = anc.returncode == 0
-    if moved and on_upstream is False:
-        out("⚠ THIS COMMIT IS NOT ON YOUR UPSTREAM BRANCH YET, so pushing the channel pointer now",
-            "  would aim every consumer at a commit no branch contains — and a rebase would orphan",
-            "  it entirely. PUSH THE BRANCH FIRST and only push the pointer once that SUCCEEDS:",
-            f"    git push origin HEAD          # if this is rejected, STOP — do not push below",
-            f"    git push origin {tag}",
-            f"    git push origin --force {a.mark}",
-            "  The order is load-bearing, not tidiness.")
-    elif moved:
+    # The branch is already on the upstream (refused above otherwise), so what is left is the record
+    # and the channel pointer. HEAD stays first in the list: pushing it again is a no-op, and a
+    # checklist that starts somewhere other than the branch is how the order got lost once.
+    if moved:
         out(f"→ push these IN ORDER, and stop if one is rejected:",
-            f"    git push origin HEAD                  # the branch consumers track — FIRST",
+            f"    git push origin HEAD                  # the branch consumers track — already there",
             f"    git push origin {tag}",
             f"    git push origin --force {a.mark}      # the channel pointer consumers install from",
             f"  `{a.mark}` now names this commit, so `GAME_LOOP_CHANNEL={a.mark} ./install.sh <dir>`",

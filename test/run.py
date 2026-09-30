@@ -9090,6 +9090,40 @@ def main():
             _ish = f.read()
         check("install.sh records the level it installed from, defaulting to alpha",
               "CONFIDENCE" in _ish and 'GL_LEVEL="alpha"' in _ish)
+
+        # A MARK AHEAD OF ITS UPSTREAM IS REFUSED, before the tag and before any trigger. It used to
+        # WARN after tagging and fire the triggers anyway. 2026-09-30: stable-00cab6c4 was marked
+        # before its push, lamp's publish trigger said "not publishing: HEAD is not pushed yet" with
+        # ok:true, the warning scrolled by, and lamp served the previous release until a consumer
+        # asked why their upgrade found nothing. Everything above ran with NO upstream, which must
+        # stay unaffected; this gives the fixture a real one and takes it away again afterwards.
+        _bare = tempfile.mkdtemp(prefix="gl-conf-remote-")
+        try:
+            subprocess.run(["git", "init", "-q", "--bare", _bare], capture_output=True)
+            _cg("remote", "add", "origin_t", _bare)
+            _cg("push", "-q", "origin_t", "HEAD:refs/heads/main")
+            _cg("branch", "--set-upstream-to=origin_t/main")
+            _cg("commit", "-q", "--allow-empty", "-m", "ahead of upstream")
+            _ahead = _points_at("HEAD")
+            _mu = _conf("--mark", "beta", "--notes", "ahead")
+            check("marking a commit that is AHEAD of its upstream is refused, naming the push to do "
+                  "first — the mark exists for what it causes, and none of that can reach a commit "
+                  "the remote does not have",
+                  _mu.returncode != 0 and "NOT ON YOUR UPSTREAM BRANCH" in _mu.stdout + _mu.stderr
+                  and "git push origin HEAD" in _mu.stdout + _mu.stderr)
+            check("...and refused BEFORE anything happened: no tag, no moved channel, no trigger "
+                  "fired — a half-made mark is the state that looked released and was not",
+                  not _points_at("beta-" + _ahead[:8]) and _points_at("beta") != _ahead
+                  and "PUBLISHED" not in _mu.stdout)
+            _cg("push", "-q", "origin_t", "HEAD:refs/heads/main")
+            _mp = _conf("--mark", "beta", "--notes", "pushed")
+            check("...while the SAME commit, once pushed, marks normally — the refusal is about "
+                  "order, not a new obstacle to marking",
+                  _mp.returncode == 0 and _points_at("beta") == _ahead)
+        finally:
+            _cg("branch", "--unset-upstream")
+            _cg("remote", "remove", "origin_t")
+            shutil.rmtree(_bare, ignore_errors=True)
     finally:
         shutil.rmtree(cd, ignore_errors=True)
 

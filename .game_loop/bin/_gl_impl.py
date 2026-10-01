@@ -12230,6 +12230,20 @@ def cmd_status(s, a):
                          "    Recover the mandate from there and re-bind it, or clear it on the "
                          "record if it is done —\n"
                          "    then delete that copy, which is what stops this warning.")
+    # WHAT THIS SESSION LEFT WHERE A REBOOT WILL TAKE IT (#132). The write guard records every temp
+    # path a Write/Edit/Bash put a file at; under a mandate that is the exposure worth seeing BEFORE a
+    # restart, because the run that would have to recover it is the unattended one.
+    if m.get("active"):
+        try:
+            with open(os.path.join(os.path.dirname(STATE_F), "temp-writes")) as _f:
+                _tw = [l for l in _f.read().split("\n") if l]
+        except OSError:
+            _tw = []
+        if _tw:
+            mandate_line += (f"\n  ⚠ {len(_tw)} file(s) this session wrote under /tmp, /var/folders or "
+                             "$TMPDIR are cleared on reboot — e.g. " + _tw[-1] + "\n"
+                             "    anything that must outlive a restart belongs in .game_loop/ or "
+                             "your memory directory (#132)")
     session_line = (f"session: {SESSION[:8]} (state: .game_loop/sessions/…)" if SESSION
                     else "session: none detected — repo-global state (.game_loop/state.json)")
     others, active = _sibling_sessions()

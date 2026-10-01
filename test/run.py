@@ -1148,6 +1148,48 @@ def main():
                   .get("permissionDecisionReason", "") if denied(_ipr) else "")
         check("...and the refusal names the FILE, not the script — right decision, right reason",
               ("→ " + _IP_OUT) in _ipwhy and "→ /^x/d" not in _ipwhy)
+
+        # A TEMP PATH IS CLEARED ON REBOOT (#132). 2026-10-01: a restart emptied /private/tmp and
+        # took a campaign's house rules, a build patch and a published page's source with it, and
+        # nothing had said the location was temporary. A NOTE, never a block, once per path per
+        # session -- and never for the repo itself, which is where every sandbox here lives.
+        _tsid = "sess-temp-132"
+        _tw1 = "/private/tmp/gl-test-132-%d.txt" % os.getpid()
+        _tw2 = "/tmp/gl-test-132-bash-%d.txt" % os.getpid()
+        _r1 = guard(wgproj, {"tool_name": "Write",
+                             "tool_input": {"file_path": _tw1, "content": "x"}}, sid=_tsid)
+        check("a Write into /private/tmp is ALLOWED with a note that the location is cleared on "
+              "reboot, naming the path and where durable state belongs (#132)",
+              not denied(_r1) and "TEMP PATH, CLEARED ON REBOOT" in _r1.stdout
+              and "gl-test-132-" in _r1.stdout and ".game_loop/" in _r1.stdout)
+        _r2 = guard(wgproj, {"tool_name": "Write",
+                             "tool_input": {"file_path": _tw1, "content": "y"}}, sid=_tsid)
+        check("...and the same path again in the same session is NOT noted twice",
+              not denied(_r2) and "TEMP PATH" not in _r2.stdout)
+        _r3 = guard(wgproj, {"tool_name": "Bash",
+                             "tool_input": {"command": "echo x > " + _tw2}}, sid=_tsid)
+        check("...a Bash redirect into /tmp is noted the same way, so the shell is not the gap",
+              not denied(_r3) and "TEMP PATH, CLEARED ON REBOOT" in _r3.stdout)
+        _r4 = guard(wgproj, {"tool_name": "Write", "tool_input": {
+            "file_path": os.path.join(wgproj, "inrepo-132.txt"), "content": "x"}}, sid=_tsid)
+        _r5 = guard(wgproj, {"tool_name": "Bash",
+                             "tool_input": {"command": "echo x > inrepo-132b.txt"}}, sid=_tsid)
+        check("...while writes INTO THE REPO stay silent even when the repo itself sits under "
+              "/tmp, as every sandbox here does -- the advice would point back into the same dir",
+              wgproj.startswith(("/tmp", "/private/tmp", "/var/folders", tempfile.gettempdir()))
+              and not denied(_r4) and "TEMP PATH" not in _r4.stdout
+              and not denied(_r5) and "TEMP PATH" not in _r5.stdout)
+        _twf = os.path.join(wgproj, ".game_loop", "sessions", _tsid, "temp-writes")
+        _tw_rec = open(_twf).read().split() if os.path.exists(_twf) else []
+        check("...and the session records exactly the temp paths it wrote, once each, so status "
+              "can count the exposure",
+              sorted(_tw_rec) == sorted({os.path.realpath(_tw1), os.path.realpath(_tw2)}))
+        gl(wgproj, "mandate", "--set", "#132 status probe", sid=_tsid)
+        _st = gl(wgproj, "status", sid=_tsid).stdout
+        check("...and under a mandate, status says how many files this session left where a "
+              "reboot takes them, BEFORE the reboot rather than after",
+              "2 file(s) this session wrote under /tmp" in _st and "#132" in _st)
+        gl(wgproj, "mandate", "--clear", "--notes", "probe done", sid=_tsid)
         check("a backslash-escaped quote does not close the string and expose a redirect",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a \\" b" > /etc/passwd'}})))

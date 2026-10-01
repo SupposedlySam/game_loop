@@ -469,6 +469,56 @@ except OSError:
 PY
 }
 
+# A TEMP PATH IS CLEARED ON REBOOT, AND NOTHING SAID SO (#132). On 2026-10-01 a host restart emptied
+# /private/tmp and took a campaign's house rules, a build patch, a lead's briefs and the source of a
+# published page with it. The scratchpad the harness hands an agent lives there too, so it is the
+# natural place to put things -- which is exactly why a note at the moment of writing is worth more
+# than a rule somebody has to remember. Takes newline-separated candidate paths; prints the note iff
+# at least one of them is under a temp root and was not already noted this session, and records it
+# so the same path is never noted twice. Silence is the common answer, and it costs one python start.
+temp_note() {
+  TEMP_LIST="$1" TW_F="${STATE_F%/*}/temp-writes" REPO_REAL="$REPO_REAL" python3 <<'PYTMP' 2>/dev/null
+import os
+# THE REPO ITSELF IS NOT WHAT THIS IS ABOUT. A checkout that happens to live under /tmp (every test
+# sandbox, any scratch clone) would otherwise note on every in-repo write, and its advice -- move it
+# into .game_loop/ -- would point back into the same temp directory.
+repo = os.path.realpath(os.environ.get("REPO_REAL") or "/nonexistent-repo")
+roots = ["/tmp", "/private/tmp", "/var/folders"]
+if os.environ.get("TMPDIR"):
+    roots.append(os.environ["TMPDIR"])
+roots = sorted({os.path.realpath(r) for r in roots})
+f = os.environ["TW_F"]
+try:
+    with open(f) as fh:
+        seen = {l for l in fh.read().split("\n") if l}
+except OSError:
+    seen = set()
+new = []
+for p in os.environ["TEMP_LIST"].split("\n"):
+    real = os.path.realpath(p) if p else ""
+    if not real or real in seen or real in new or real == repo or real.startswith(repo + os.sep):
+        continue
+    if any(real == r or real.startswith(r + os.sep) for r in roots):
+        new.append(real)
+if not new:
+    raise SystemExit(0)
+try:
+    os.makedirs(os.path.dirname(f), exist_ok=True)
+    with open(f, "a") as fh:                  # append: concurrent hooks interleave, never clobber
+        fh.write("".join(p + "\n" for p in new))
+except OSError:
+    pass
+total = len(seen) + len(new)
+print("⚠ TEMP PATH, CLEARED ON REBOOT: " + ", ".join(new) + "\n"
+      "/tmp, /private/tmp, /var/folders and $TMPDIR are emptied when the machine restarts, and the\n"
+      "scratchpad the harness hands you lives there too. Fine for throwaway work. Anything that must\n"
+      "outlive a restart -- rules other sessions read, patches, the source of a published page,\n"
+      "recovery notes -- belongs in this repo's local-only state (.game_loop/, or another gitignored\n"
+      "dir) or in your memory directory.\n"
+      "(Noted once per path per session; %d temp path(s) written this session. #132)" % total)
+PYTMP
+}
+
 # A human-authorized, single-use exception (`game_loop authorize`). Takes the offending realpath;
 # prints "yes" iff a live authorization covers it, in which case the authorization is CONSUMED and
 # the spend logged — one authorization buys one mutation, whichever tool performs it. Shared by the
@@ -821,6 +871,11 @@ PYMEM
           note "$MEM_NOTE"
         fi
       fi
+      case "$fp" in                            # cheap prefix test first: most writes are in-repo
+        /tmp/*|/private/tmp/*|/var/folders/*|"${TMPDIR:-/nonexistent-tmpdir}"*)
+          tnote=$(temp_note "$fp")
+          [ -n "$tnote" ] && note "$tnote" ;;
+      esac
       exit 0
     fi
     if [ -n "$verdict" ]; then
@@ -2407,6 +2462,10 @@ def redirect_targets(seg):
 offenders = []
 policy_hits = []
 unresolved = []
+temp_hits = []
+_TEMP_ROOTS = sorted({os.path.realpath(r) for r in
+                      ["/tmp", "/private/tmp", "/var/folders"]
+                      + ([os.environ["TMPDIR"]] if os.environ.get("TMPDIR") else [])})
 
 
 def unexpandable(raw, cwd):
@@ -2573,6 +2632,12 @@ for seg in shell_segments(cmd):
                 unresolved.append(raw + chr(9) + fab)
             else:
                 offenders.append(bad)
+        # A WRITE INTO A TEMP ROOT (#132) is allowed, and cleared on reboot; bash decides whether it
+        # was already noted this session. A variable or substitution is skipped: unexpandable here.
+        if "$" not in raw and chr(96) not in raw:   # chr(96): a lone backquote breaks bash 3.2 here
+            _tp = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
+            if any(_tp == r or _tp.startswith(r + os.sep) for r in _TEMP_ROOTS):
+                temp_hits.append(_tp)
         # THE POLICY FILES, ON THE BASH PATH TOO (#86). Registered on Write/Edit only, the gate that
         # bounds the session was a suggestion against `>>` — and because nothing was refused,
         # nothing was logged either, which removes the very evidence #65 exists to preserve.
@@ -2588,12 +2653,16 @@ for p_ in dict.fromkeys(policy_hits):
     print("POLICY\t" + p_)
 for u_ in dict.fromkeys(unresolved):
     print("UNRESOLVED\t" + u_)
+for t_ in dict.fromkeys(temp_hits):
+    print("TEMP\t" + t_)
 PY
 )
 
     pol_line=$(printf '%s' "$offender" | grep '^POLICY\t' | head -1)
     unres_line=$(printf '%s' "$offender" | grep '^UNRESOLVED\t' | head -1)
-    offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | grep -v '^UNRESOLVED\t' | head -1)
+    temp_lines=$(printf '%s' "$offender" | grep '^TEMP\t' | cut -f2)
+    offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | grep -v '^UNRESOLVED\t' \
+               | grep -v '^TEMP\t' | head -1)
     if [ -n "$pol_line" ]; then
       pol_name=$(printf '%s' "$pol_line" | cut -f2)
       pol_real=$(printf '%s' "$pol_line" | cut -f3)
@@ -2772,6 +2841,14 @@ edit as its own call, then commit, and the gate sees the change it is meant to s
       [ -n "$commit_note" ] && commit_note="$commit_note
 "
       commit_note="$commit_note$cov_note"
+    fi
+    if [ -n "${temp_lines:-}" ]; then
+      tmp_note=$(temp_note "$temp_lines")
+      if [ -n "$tmp_note" ]; then
+        [ -n "$commit_note" ] && commit_note="$commit_note
+"
+        commit_note="$commit_note$tmp_note"
+      fi
     fi
     [ -n "$commit_note" ] && note "$commit_note"
     ;;

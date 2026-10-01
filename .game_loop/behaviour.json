@@ -614,6 +614,15 @@
       "change": "Marking a commit that is not yet on its upstream branch is now REFUSED, before the tag is created and before any confidence trigger fires. It used to create the tag, move the channel, fire the triggers, and print a warning to push the branch first. Projects with no upstream branch are unaffected.",
       "why_it_qualifies": "A new refusal on a release verb. 2026-09-30: stable-00cab6c4 was marked before its push; the lamp publish trigger declined ('HEAD is not pushed yet') while reporting ok, the warning scrolled past, and the release never reached lamp until a consumer (gravity-brew-owner) asked why their upgrade found nothing new.",
       "consequence": "Release in the order push, then mark: `git push origin HEAD`, then `game_loop confidence --mark <level>`, then push the tag and channel. A script that marks first and pushes after now stops at the mark with that order printed. Run `git fetch` first if your local view of the upstream is stale."
+    },
+    {
+      "seq": 65,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard (Write / Edit / Bash into a temp path)",
+      "change": "A write into /tmp, /private/tmp, /var/folders or $TMPDIR is still ALLOWED, but now carries a one-time note: the location is cleared on reboot, and anything that must outlive a restart belongs in the repo's local-only state or the memory directory. Noted once per path per session; never for paths inside the repo itself. Under an active mandate, `game_loop status` says how many files this session wrote there.",
+      "why_it_qualifies": "New output on ordinary calls, so a consumer will see it. Asked for in #132 after a 2026-10-01 reboot emptied /private/tmp and took a campaign's house rules, a build patch, briefs and a published page's source; the harness scratchpad lives there too, so it is the natural place to put things.",
+      "consequence": "Nothing is refused. The first write to each temp path in a session gets a short note; repeats are silent. If you keep durable state (rules other sessions read, patches, page sources) under a temp path, move it into .game_loop/ or another gitignored directory in the repo."
     }
   ],
   "schema": 1

@@ -1164,10 +1164,71 @@ _READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "branch", "remot
                   "ls-files", "config", "tag", "blame", "shortlog"}
 
 
+_ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _subst_bodies(text):
+    """The bodies of every command substitution in TEXT, depth-aware. A body cut off by the
+    segment splitter (which does not track them) runs to the end of TEXT."""
+    dp, bq = chr(36) + chr(40), chr(96)
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith(dp, i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith(dp, j):
+                    depth, j = depth + 1, j + 2
+                    continue
+                if text[j] == ")":
+                    depth -= 1
+                j += 1
+            out.append(text[i + 2:j - 1] if not depth else text[i + 2:])
+            i = j
+            continue
+        if text[i] == bq:
+            j = text.find(bq, i + 1)
+            out.append(text[i + 1:] if j < 0 else text[i + 1:j])
+            i = n if j < 0 else j + 1
+            continue
+        i += 1
+    return out
+
+
+def _assignment_reads_only(seg):
+    """A segment of nothing but NAME=value words writes no file of its own (kass-owner, 10-08:
+    'L=[a substitution]; git commit' was told it WRITES BEFORE IT COMMITS). It writes only if a
+    command substitution in it does, so each body is held to the same proof. Anything else in the
+    segment -- a command after the assignments -- is not decided here: False, as before."""
+    bodies = _subst_bodies(seg)
+    rest = seg
+    for b in bodies:
+        rest = rest.replace(b, "", 1)
+    try:
+        words = shlex.split(rest)
+    except ValueError:
+        return False
+    if not words or not all(_ASSIGN_WORD.match(w) for w in words):
+        return False
+    for b in bodies:
+        for sub in shell_segments(b):
+            sub = sub.strip().rstrip(")").strip()
+            if not sub:
+                continue
+            try:
+                sargv = shlex.split(sub)
+            except ValueError:
+                return False
+            if sargv and not reads_only(sub, sargv, os.path.basename(sargv[0])):
+                return False
+    return True
+
+
 def reads_only(seg, argv, verb):
     """True only for a segment this can PROVE does not write. Unrecognised is False, always."""
     if ">" in seg or "<" in seg:
         return False                 # a redirection turns any of these into a writer
+    if argv and _ASSIGN_WORD.match(argv[0]):
+        return _assignment_reads_only(seg)
     if verb == "git":
         rest = [a for a in argv[1:] if not a.startswith("-")]
         return bool(rest) and rest[0] in _READ_ONLY_GIT
@@ -2923,6 +2984,14 @@ def verb_words(seg):
     w = words_of(seg)
     while w and (ENV_ASSIGN.match(w[0]) or w[0] in WRAPPERS or w[0] in ("(", "{", "!")):
         w = w[1:]
+    # xargs RUNS the command after its options, and it is the fix the zsh note itself recommends,
+    # so a check behind it must still be read as a check (kass-owner, 10-08).
+    if w and os.path.basename(w[0]) == "xargs":
+        w = w[1:]
+        while w and w[0].startswith("-"):
+            opt, w = w[0], w[1:]
+            if opt in ("-n", "-I", "-L", "-P", "-d", "-s", "-E", "-a", "-J", "-R", "-S") and w:
+                w = w[1:]
     if len(w) >= 2 and w[0] in ("uv", "poetry", "pdm", "hatch", "pipenv") and w[1] == "run":
         w = w[2:]
     elif w and w[0] in ("npx", "bunx", "pnpx"):

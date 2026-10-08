@@ -1227,6 +1227,12 @@ def main():
             # prose ABOUT the pattern is not the pattern
             ("git commit -m \"ruff check . ; git push\"", "/bin/zsh", False, False),
             ("cat <<'X'\nruff check . ; git push\nX", "/bin/zsh", False, False),
+            # kass-owner's test of the release: A's own fix (xargs) must not hide B
+            ("L=$(git diff --name-only); grep py $L | xargs ruff check; git commit -m x",
+             "/bin/zsh", True, True),
+            ("git diff --name-only | xargs -n 1 ruff check; git push", "/bin/zsh", False, True),
+            ("git diff --name-only | xargs ruff check && git push", "/bin/zsh", False, False),
+            ("ls | xargs rm; git push", "/bin/zsh", False, False),
         ]
         _sh_wrong, _sh_denied = [], []
         for _c, _s, _ea, _eb in _SH_CASES:
@@ -5084,6 +5090,22 @@ def main():
             check("a provably read-only chain says nothing either",
                   "WRITES BEFORE IT COMMITS" not in brbundle("git status && git commit -m x").stdout
                   and "WRITES BEFORE IT COMMITS" not in brbundle("echo hi && git commit -m x").stdout)
+            # kass-owner, 10-08: an assignment is not a write. It is one only when a command
+            # substitution INSIDE it writes, and that body is held to the same proof as any segment.
+            check("a bare assignment ahead of the commit does not claim to write — "
+                  "L=$(git diff --name-only) and files=$(ls) change no file",
+                  "WRITES BEFORE IT COMMITS" not in brbundle(
+                      "L=$(git diff --name-only); git commit -m x").stdout
+                  and "WRITES BEFORE IT COMMITS" not in brbundle("files=$(ls); git commit -m x").stdout
+                  and "WRITES BEFORE IT COMMITS" not in brbundle("n=3; git commit -m x").stdout)
+            check("...but an assignment whose substitution WRITES still says so, and so does one "
+                  "that redirects, or runs a command after it",
+                  "WRITES BEFORE IT COMMITS" in brbundle(
+                      "x=$(sed -i '' s/a/b/ lib/swept_in.dart); git commit -am x").stdout
+                  and "WRITES BEFORE IT COMMITS" in brbundle(
+                      "x=$(printf two > lib/swept_in.dart); git commit -am x").stdout
+                  and "WRITES BEFORE IT COMMITS" in brbundle(
+                      "FOO=1 touch lib/new.dart; git commit -am x").stdout)
             check("a bundled `git add` is the OTHER note's case and does not claim to write — an "
                   "add changes no file's content",
                   "WRITES BEFORE IT COMMITS" not in brbundle("git add -A && git commit -m x").stdout)
@@ -13684,6 +13706,8 @@ def main():
     # SIXTEEN, THEN TWENTY-ONE (2026-10-08): the shell-hazard note (kass-owner's ungated push)
     # added gate_note, is_check, is_effect, shell_hazards and split_note on the same bash host.
     # Declared, and pinned both ways by the _SH_CASES block in the write guard section.
+    # TWENTY-ONE, THEN TWENTY-TWO (2026-10-08): _assignment_reads_only, from kass-owner's test of
+    # that release (a bare assignment was called a write). Same host, pinned both ways.
     _hd = ".game_loop/bin/guard-%s-impl.sh::%s"
     _expected_gaps = sorted(
         [_hd % ("mcp", n) for n in ("authorization_state", "leaves")]
@@ -13692,8 +13716,8 @@ def main():
                                           "probe_script_path", "reads_only", "resolve_scope",
                                           "same_project", "same_project#2", "tree_of",
                                           "gate_note", "is_check", "is_effect", "shell_hazards",
-                                          "split_note")])
-    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the twenty-one guard producers that still "
+                                          "split_note", "_assignment_reads_only")])
+    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the twenty-two guard producers that still "
           "lived in bash heredocs — once uncountable, now named. A fact about today, and the next "
           "one anybody adds or closes shows up HERE rather than in a number nobody reads: "
           + (", ".join(g for g in _gaps(_ns) if g not in _expected_gaps) or "no surprises"),

@@ -632,6 +632,15 @@
       "change": "Two new warnings on Bash commands; nothing is refused. (A) In zsh, an unquoted variable that was filled from a command substitution (or a $'..' string with a newline or space) and passed as an argument is noted: zsh passes it as ONE argument, however many lines or words it holds, where bash would split it. ${=name}, echo/printf/test and bash sessions are left alone. (B) In any shell, a check (ruff, pytest, tsc, dart/flutter test, cargo test, npm run lint, just check, verify, ...) joined to a git push/commit/merge/tag, gh pr create/merge, lamp publish or another publish/deploy by ; a newline, || or &, or whose output is piped into tail/grep without pipefail before an && push, is noted as not gating it.",
       "why_it_qualifies": "New output on ordinary calls, so a consumer will see it. Asked for by kass-owner after two branches were pushed behind a ruff check that never ran: zsh handed ruff one newline-joined argument, it failed, and the ; let the push run anyway. gravity-brew-owner added the pipe case: a dart test run piped to tail reported exit 0.",
       "consequence": "Nothing is refused. A matching command runs as before and carries a short note naming the variable or the check and the push, with the fix: ${=name}, an array or xargs for (A); && instead of ;, or set -o pipefail, for (B). Detection reads the command text, so an unusual spelling can be missed or noted wrongly; neither blocks anything."
+    },
+    {
+      "seq": 67,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard (Bash)",
+      "change": "Two corrections from kass-owner's test of seq 66. (1) A check run through xargs (git diff --name-only | xargs ruff check; git push) is now read as a check, so the 'does not gate' note fires on it; xargs is the fix the zsh note recommends, so following that advice no longer hides the second warning. (2) The commit gate's 'THIS COMMAND WRITES BEFORE IT COMMITS' note no longer fires on a bare assignment (L=$(git diff --name-only); git commit). An assignment counts as a write only when a command substitution inside it writes, is redirected, or a command follows it.",
+      "why_it_qualifies": "Output on ordinary calls changes in both directions: one note appears where it was missing, another stops appearing where it was wrong.",
+      "consequence": "Nothing is refused that was not before, and nothing allowed is now refused. Commands that pipe a check through xargs before an ungated push gain a note; a commit preceded only by variable assignments loses a false one."
     }
   ],
   "schema": 1

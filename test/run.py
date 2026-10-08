@@ -1190,6 +1190,60 @@ def main():
               "reboot takes them, BEFORE the reboot rather than after",
               "2 file(s) this session wrote under /tmp" in _st and "#132" in _st)
         gl(wgproj, "mandate", "--clear", "--notes", "probe done", sid=_tsid)
+
+        # A FAILED CHECK THAT LOOKS LIKE A PASS (kass-owner, gravity-brew-owner, 2026-10-08). The
+        # Bash tool runs zsh here: an unquoted list variable is ONE argument there (A), and a check
+        # joined to a push by ; / newline, or piped into tail, gates nothing (B). Two branches were
+        # pushed behind a check that never ran. Warnings only, never a deny -- detection is textual.
+        def _sh_guard(cmd, shell):
+            return subprocess.run(
+                [os.path.join(wgproj, ".game_loop", "bin", "guard-writes.sh")],
+                input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}),
+                capture_output=True, text=True, env=_env(wgproj, None, SHELL=shell))
+        _A, _B = "IS ONE ARGUMENT", "DOES NOT GATE"
+        _SH_CASES = [
+            # (command, shell, warns A, warns B) -- the reporter's five first
+            ("py=$(git diff --name-only | grep py); ruff check $py", "/bin/zsh", True, False),
+            ("git diff --name-only | grep py | xargs ruff check", "/bin/zsh", False, False),
+            ("py=$(git diff --name-only | grep py); ruff check ${=py}", "/bin/zsh", False, False),
+            ("ruff check . ; git push", "/bin/zsh", False, True),
+            ("ruff check . && git push", "/bin/zsh", False, False),
+            # the reporter's original command: both at once
+            ("files=$(git diff --name-only HEAD~1)\npy=$(echo \"$files\" | grep '\\.py$')\n"
+             "[ -n \"$py\" ] && ruff check $py && ruff format --check $py; SKIP=1 git push origin main",
+             "/bin/zsh", True, True),
+            # gravity-brew's: a pipe hands && the tail's exit status
+            ("dart test 2>&1 | tail -2 && git push", "/bin/zsh", False, True),
+            ("set -o pipefail; dart test 2>&1 | tail -2 && git push", "/bin/zsh", False, False),
+            ("dart test 2>&1 | tail -2", "/bin/zsh", False, False),
+            ("pytest -q\ngit commit -am wip", "/bin/zsh", False, True),
+            ("uv run pytest; git push", "/bin/zsh", False, True),
+            ("ruff check . && git add -A; git commit -m x", "/bin/zsh", False, True),
+            ("just build; git push", "/bin/zsh", False, False),
+            # A is zsh's: bash word-splits, so the same text is fine there
+            ("py=$(git diff --name-only); ruff check $py", "/bin/bash", False, False),
+            ("out=$(ls); echo $out", "/bin/zsh", False, False),
+            ("fs=$(ls *.py)\nfor f in $fs; do ruff check $f; done", "/bin/zsh", True, False),
+            # prose ABOUT the pattern is not the pattern
+            ("git commit -m \"ruff check . ; git push\"", "/bin/zsh", False, False),
+            ("cat <<'X'\nruff check . ; git push\nX", "/bin/zsh", False, False),
+        ]
+        _sh_wrong, _sh_denied = [], []
+        for _c, _s, _ea, _eb in _SH_CASES:
+            _r = _sh_guard(_c, _s)
+            if denied(_r):
+                _sh_denied.append(_c)
+            if ((_A in _r.stdout) != _ea) or ((_B in _r.stdout) != _eb):
+                _sh_wrong.append(_c)
+        check("in zsh, an unquoted list variable passed as an argument is WARNED as one argument, "
+              "and ${=name}/xargs/echo/bash are not (%d cases, kass-owner's five first)"
+              % len(_SH_CASES), not _sh_wrong)
+        check("...a check joined to push/commit by ; or a newline, or piped into tail, is warned "
+              "as not gating it -- and none of these is ever DENIED, only noted", not _sh_denied)
+        _shr = _sh_guard("ruff check . ; git push", "/bin/zsh")
+        check("...and the note names the check, the push, and the fix (&&)",
+              "ruff check ." in _shr.stdout and "GIT PUSH" in _shr.stdout and "&&" in _shr.stdout)
+
         check("a backslash-escaped quote does not close the string and expose a redirect",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": 'echo "a \\" b" > /etc/passwd'}})))
@@ -13627,14 +13681,19 @@ def main():
     # FIFTEEN, THEN SIXTEEN (2026-09-30): inplace_targets, the in-place sed/perl/ruby parser, was
     # added on the same bash host. Declared rather than swept, and pinned both ways in the write
     # guard section, so this count went up by the one producer that was ADDED, not by drift.
+    # SIXTEEN, THEN TWENTY-ONE (2026-10-08): the shell-hazard note (kass-owner's ungated push)
+    # added gate_note, is_check, is_effect, shell_hazards and split_note on the same bash host.
+    # Declared, and pinned both ways by the _SH_CASES block in the write guard section.
     _hd = ".game_loop/bin/guard-%s-impl.sh::%s"
     _expected_gaps = sorted(
         [_hd % ("mcp", n) for n in ("authorization_state", "leaves")]
         + [_hd % ("writes", n) for n in ("_git_common", "_git_common#2", "_names", "_status_names",
                                           "git", "inplace_targets", "offends", "policy_name",
                                           "probe_script_path", "reads_only", "resolve_scope",
-                                          "same_project", "same_project#2", "tree_of")])
-    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the sixteen guard producers that still "
+                                          "same_project", "same_project#2", "tree_of",
+                                          "gate_note", "is_check", "is_effect", "shell_hazards",
+                                          "split_note")])
+    check("...and THIS repo's declared KNOWN GAPs are EXACTLY the twenty-one guard producers that still "
           "lived in bash heredocs — once uncountable, now named. A fact about today, and the next "
           "one anybody adds or closes shows up HERE rather than in a number nobody reads: "
           + (", ".join(g for g in _gaps(_ns) if g not in _expected_gaps) or "no surprises"),

@@ -2831,6 +2831,280 @@ This gate is PreToolUse. A file that segment is about to change is not stale YET
 and can land in this commit unchecked — the checks above did not look at it and cannot. Run the
 edit as its own call, then commit, and the gate sees the change it is meant to see."
     fi
+    # A FAILED CHECK THAT LOOKS LIKE A PASS (kass-owner, gravity-brew-owner, 2026-10-08). The Bash tool
+    # runs the user's shell, and on this machine that is zsh, where two habits carried over from bash
+    # make a check that never ran indistinguishable from one that passed:
+    #   A. zsh does not word-split an unquoted parameter, so a list built with name=... and passed as
+    #      an unquoted name arrives as ONE argument, newlines and all, and the tool fails on a path
+    #      that does not exist. Measured by the reporter: args=1 in zsh, 2 in bash, same variable.
+    #   B. a check joined to a push/commit/publish by ; or a newline gates nothing, and a check piped
+    #      into tail/grep hands && the LAST stage's status. Two branches were pushed that way with a
+    #      check that never ran; a dart test run piped to tail reported exit 0.
+    # Both read command TEXT, so both WARN and never deny: a false positive costs a sentence, and a
+    # denial on a guess would block a command that may be fine. A is zsh-only (SHELL names the shell
+    # the tool runs); B holds in any shell. Computed here, after every check that can deny, so a
+    # refused command is never also lectured.
+    shell_note=$(SCAN="$scan_cmd" GL_SHELL="${SHELL:-}" python3 <<'PY' 2>/dev/null
+import os, re, sys
+
+BQ = chr(96)
+DP = chr(36) + chr(40)
+HD = chr(60) + chr(60)
+
+
+def split_ops(cmd):
+    """(segment, connector) pairs, quote- and substitution-aware. connector is the operator that
+    FOLLOWS the segment: one of && || ; | & newline, or "" at the end."""
+    out, buf, i, n = [], [], 0, len(cmd)
+    q, depth = None, 0
+    while i < n:
+        c = cmd[i]
+        if q is not None:
+            if c == chr(92) and q == chr(34) and i + 1 < n:
+                buf.append(cmd[i:i + 2]); i += 2; continue
+            buf.append(c)
+            if c == q:
+                q = None
+            i += 1; continue
+        if c == chr(92) and i + 1 < n:
+            buf.append(cmd[i:i + 2]); i += 2; continue
+        if c in ("'", chr(34), BQ):
+            q = c; buf.append(c); i += 1; continue
+        if cmd.startswith(DP, i):
+            depth += 1; buf.append(DP); i += 2; continue
+        if depth and c == "(":
+            depth += 1; buf.append(c); i += 1; continue
+        if depth and c == ")":
+            depth -= 1; buf.append(c); i += 1; continue
+        if depth:
+            buf.append(c); i += 1; continue
+        if c == "#" and (not buf or buf[-1] in (" ", chr(9), chr(10))):
+            while i < n and cmd[i] != chr(10):
+                i += 1
+            continue
+        two = cmd[i:i + 2]
+        if two in ("&&", "||"):
+            out.append(("".join(buf), two)); buf = []; i += 2; continue
+        if c == "|" and not "".join(buf).rstrip().endswith(">"):
+            out.append(("".join(buf), "|")); buf = []; i += 1; continue
+        if c in (";", chr(10)) or (c == "&" and not "".join(buf).rstrip().endswith((">", "<"))):
+            out.append(("".join(buf), c)); buf = []; i += 1; continue
+        buf.append(c); i += 1
+    out.append(("".join(buf), ""))
+    return [(s.strip(), op) for s, op in out]
+
+
+def strip_heredocs(cmd):
+    opener = re.compile(re.escape(HD) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+    lines, out, i = cmd.split(chr(10)), [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        delims = [d for _q, d in opener.findall(line)]
+        i += 1
+        while delims and i < len(lines):
+            if lines[i].strip() == delims[0]:
+                delims.pop(0)
+            i += 1
+    return chr(10).join(out)
+
+
+ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+WRAPPERS = {"command", "time", "env", "nice", "nohup", "exec", "builtin", "noglob"}
+
+
+def words_of(seg):
+    """Whitespace words with quoted strings kept whole (their quotes intact)."""
+    return re.findall(r"(?:\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\s\"'])+", seg)
+
+
+def verb_words(seg):
+    """The command's words with leading env assignments, wrappers and runners removed."""
+    w = words_of(seg)
+    while w and (ENV_ASSIGN.match(w[0]) or w[0] in WRAPPERS or w[0] in ("(", "{", "!")):
+        w = w[1:]
+    if len(w) >= 2 and w[0] in ("uv", "poetry", "pdm", "hatch", "pipenv") and w[1] == "run":
+        w = w[2:]
+    elif w and w[0] in ("npx", "bunx", "pnpx"):
+        w = w[1:]
+    elif len(w) >= 2 and w[0] in ("pnpm", "yarn", "bun") and w[1] in ("exec", "dlx"):
+        w = w[2:]
+    if len(w) >= 3 and os.path.basename(w[0]).startswith("python") and w[1] == "-m":
+        w = w[2:]
+    return [x.strip("\"'") for x in w]
+
+
+CHECK_HEADS = {"ruff", "biome", "pytest", "tsc", "mypy", "pyright", "eslint", "flake8", "pylint",
+               "shellcheck", "jest", "vitest", "mocha", "rspec", "phpunit", "bats", "tox", "nox",
+               "verify", "pre-commit", "golangci-lint", "swiftlint", "ktlint", "rubocop",
+               "stylelint", "markdownlint"}
+CHECK_SUBS = {"dart": {"test", "analyze", "format"}, "flutter": {"test", "analyze"},
+              "cargo": {"test", "check", "clippy", "fmt"}, "go": {"test", "vet"},
+              "npm": {"test", "run", "t"}, "pnpm": {"test", "run", "t"}, "yarn": {"test", "run"},
+              "bun": {"test", "run"}, "just": None, "make": None, "deno": {"test", "lint", "check"},
+              "swift": {"test"}, "gradle": {"test", "check"}, "./gradlew": {"test", "check"},
+              "mvn": {"test", "verify"}, "prettier": None, "black": None, "isort": None,
+              "dotnet": {"test", "format"}}
+CHECK_WORD = re.compile(r"(?:^|[:_-])(test|tests|check|checks|lint|verify|analy[sz]e|typecheck|ci)(?:$|[:_-])")
+
+
+def is_check(w):
+    if not w:
+        return False
+    head = os.path.basename(w[0])
+    if head in CHECK_HEADS:
+        return True
+    if w[0].endswith(("/verify", "test/run.py", "run_tests.sh")) or (head.startswith("python") and len(w) > 1 and w[1].endswith(("test/run.py", "run_tests.py"))):
+        return True
+    if head in ("prettier", "black", "isort"):
+        return "--check" in w or "-c" in w
+    subs = CHECK_SUBS.get(head, False)
+    if subs is False:
+        return False
+    rest = [x for x in w[1:] if not x.startswith("-")]
+    if not rest:
+        return False
+    if subs is None:                          # just / make: the target name decides
+        return bool(CHECK_WORD.search(rest[0]))
+    if rest[0] in ("run",) and len(rest) > 1:  # npm run lint
+        return bool(CHECK_WORD.search(rest[1]))
+    return rest[0] in subs and rest[0] != "run"
+
+
+def is_effect(w):
+    if not w:
+        return None
+    head = os.path.basename(w[0])
+    rest = [x for x in w[1:] if not x.startswith("-")]
+    sub = rest[0] if rest else ""
+    if head == "git" and sub in ("push", "commit", "merge", "tag"):
+        return "git " + sub
+    if head == "gh" and len(rest) >= 2 and (rest[0], rest[1]) in (("pr", "create"), ("pr", "merge"), ("release", "create")):
+        return "gh " + rest[0] + " " + rest[1]
+    if head == "lamp" and sub == "publish":
+        return "lamp publish"
+    if head == "game_loop" and sub == "confidence" and "--mark" in w:
+        return "game_loop confidence --mark"
+    if head in ("npm", "pnpm", "yarn", "cargo", "twine", "gem") and sub == "publish":
+        return head + " publish"
+    if head in ("dart", "flutter") and rest[:2] == ["pub", "publish"]:
+        return head + " pub publish"
+    if head in ("deploy", "vercel", "netlify", "firebase", "fly", "flyctl", "kubectl", "helm") and (head == "deploy" or sub in ("deploy", "apply", "upgrade", "install")):
+        return head + (" " + sub if sub else "")
+    return None
+
+
+def gate_note(cmd):
+    segs = split_ops(cmd)
+    pipefail = bool(re.search(r"set\s+-o\s+pipefail|setopt\s+pipe_?fail", cmd, re.I))
+    hits = []
+    i = 0
+    while i < len(segs):
+        w = verb_words(segs[i][0])
+        if not is_check(w):
+            i += 1
+            continue
+        check_txt, piped, ungated = segs[i][0], False, None
+        j = i
+        # the pipeline the check sits in: its exit status is the LAST stage's
+        while j < len(segs) and segs[j][1] == "|":
+            piped = True
+            j += 1
+        k = j
+        ops = []
+        while k + 1 < len(segs):
+            ops.append(segs[k][1])
+            k += 1
+            eff = is_effect(verb_words(segs[k][0]))
+            if eff:
+                bad = [o for o in ops if o not in ("&&", "|")]
+                if bad:
+                    ungated = (eff, bad[0])
+                elif piped and not pipefail:
+                    ungated = (eff, "pipe")
+                break
+        if ungated:
+            hits.append((check_txt, ungated[0], ungated[1]))
+        i = j + 1
+    if not hits:
+        return ""
+    check_txt, eff, how = hits[0]
+    name = {";": "a ;", chr(10): "a newline", "||": "||", "&": "&"}.get(how, how)
+    if how == "pipe":
+        why = ("its output is piped, so the exit status the && sees is the LAST pipe stage's, not the "
+               "check's; with pipefail off a failing check pipes into a succeeding tail/grep and reads "
+               "as a pass. Run the check unpiped, or run set -o pipefail first (zsh: read "
+               "${pipestatus[1]}).")
+    elif how == "||":
+        why = "|| runs the next command only when the check FAILS."
+    else:
+        why = ("%s runs the next command whatever the check returned, and a failed check followed "
+               "by %s looks just like a pass unless someone reads the error text. Join them with &&." % (name, name))
+    return ("⚠ THE CHECK DOES NOT GATE THE %s.\n    check : %s\n    then  : %s\n%s"
+            % (eff.upper(), check_txt[:120], eff, why))
+
+
+ASSIGN = re.compile(r"(?:^|[\s;&|(])(?:local\s+|typeset\s+|declare\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(\"?" + re.escape(DP) + r"|" + re.escape(chr(36)) + r"')")
+NOSPLIT_OK = {"echo", "print", "printf", "[", "[[", "test", "export", "local", "typeset",
+              "declare", ":", "return", "exit", "cd", "pushd"}
+
+
+def split_note(cmd):
+    names = set()
+    for m in ASSIGN.finditer(cmd):
+        if m.group(2) == chr(36) + "'":
+            body = cmd[m.end():].split("'", 1)[0]
+            if "\\n" not in body and " " not in body:
+                continue
+        names.add(m.group(1))
+    if not names:
+        return ""
+    found = []
+    for seg, _op in split_ops(cmd):
+        w = words_of(seg)
+        while w and ENV_ASSIGN.match(w[0]):
+            w = w[1:]
+        if not w:
+            continue
+        verb = os.path.basename(w[0])
+        if verb in NOSPLIT_OK:
+            continue
+        if verb == "for":
+            args = w[w.index("in") + 1:] if "in" in w else []
+        else:
+            args = w[1:]
+        for a in args:
+            m = re.fullmatch(re.escape(chr(36)) + r"\{?([A-Za-z_][A-Za-z0-9_]*)\}?", a)
+            if m and m.group(1) in names:
+                found.append((m.group(1), verb))
+    if not found:
+        return ""
+    var, verb = found[0]
+    return ("⚠ IN ZSH, $%s IS ONE ARGUMENT, HOWEVER MANY LINES OR WORDS IT HOLDS.\n"
+            "    %s gets it as a single argument: zsh does not word-split an unquoted parameter "
+            "(SH_WORD_SPLIT is off), where bash would.\n"
+            "A list from git diff / ls / grep then arrives as one name with newlines in it, and the "
+            "tool fails on a file that does not exist, often in a way that reads like an ordinary error. "
+            "Use ${=%s}, split it into an array first, or pipe the list to xargs."
+            % (var, verb, var))
+
+
+def shell_hazards(cmd, shell):
+    cmd = strip_heredocs(cmd)
+    parts = []
+    if os.path.basename(shell or "") == "zsh":
+        a = split_note(cmd)
+        if a:
+            parts.append(a)
+    b = gate_note(cmd)
+    if b:
+        parts.append(b)
+    return chr(10).join(parts)
+
+
+sys.stdout.write(shell_hazards(os.environ.get("SCAN", ""), os.environ.get("GL_SHELL", "")))
+PY
+)
     commit_note="${blast_note:-}"
     if [ -n "$edit_note" ]; then
       [ -n "$commit_note" ] && commit_note="$commit_note
@@ -2849,6 +3123,11 @@ edit as its own call, then commit, and the gate sees the change it is meant to s
 "
         commit_note="$commit_note$tmp_note"
       fi
+    fi
+    if [ -n "${shell_note:-}" ]; then
+      [ -n "$commit_note" ] && commit_note="$commit_note
+"
+      commit_note="$commit_note$shell_note"
     fi
     [ -n "$commit_note" ] && note "$commit_note"
     ;;

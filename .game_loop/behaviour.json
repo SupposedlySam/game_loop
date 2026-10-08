@@ -623,6 +623,15 @@
       "change": "A write into /tmp, /private/tmp, /var/folders or $TMPDIR is still ALLOWED, but now carries a one-time note: the location is cleared on reboot, and anything that must outlive a restart belongs in the repo's local-only state or the memory directory. Noted once per path per session; never for paths inside the repo itself. Under an active mandate, `game_loop status` says how many files this session wrote there.",
       "why_it_qualifies": "New output on ordinary calls, so a consumer will see it. Asked for in #132 after a 2026-10-01 reboot emptied /private/tmp and took a campaign's house rules, a build patch, briefs and a published page's source; the harness scratchpad lives there too, so it is the natural place to put things.",
       "consequence": "Nothing is refused. The first write to each temp path in a session gets a short note; repeats are silent. If you keep durable state (rules other sessions read, patches, page sources) under a temp path, move it into .game_loop/ or another gitignored directory in the repo."
+    },
+    {
+      "seq": 66,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard (Bash)",
+      "change": "Two new warnings on Bash commands; nothing is refused. (A) In zsh, an unquoted variable that was filled from a command substitution (or a $'..' string with a newline or space) and passed as an argument is noted: zsh passes it as ONE argument, however many lines or words it holds, where bash would split it. ${=name}, echo/printf/test and bash sessions are left alone. (B) In any shell, a check (ruff, pytest, tsc, dart/flutter test, cargo test, npm run lint, just check, verify, ...) joined to a git push/commit/merge/tag, gh pr create/merge, lamp publish or another publish/deploy by ; a newline, || or &, or whose output is piped into tail/grep without pipefail before an && push, is noted as not gating it.",
+      "why_it_qualifies": "New output on ordinary calls, so a consumer will see it. Asked for by kass-owner after two branches were pushed behind a ruff check that never ran: zsh handed ruff one newline-joined argument, it failed, and the ; let the push run anyway. gravity-brew-owner added the pipe case: a dart test run piped to tail reported exit 0.",
+      "consequence": "Nothing is refused. A matching command runs as before and carries a short note naming the variable or the check and the push, with the fix: ${=name}, an array or xargs for (A); && instead of ;, or set -o pipefail, for (B). Detection reads the command text, so an unusual spelling can be missed or noted wrongly; neither blocks anything."
     }
   ],
   "schema": 1

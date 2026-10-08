@@ -106,6 +106,13 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
   the watchdog polls the thread while the arm is live, and on a human reply it clears the arm and rings
   the answer into the run. The trust scope is stated in `notify.py`: a reply is taken as the human's
   words — anyone in the channel can answer, so scope the channel accordingly.
+- **A question asked at the desk waits for the human too.** With no Slack page, the Stop gate keeps the
+  arm (spent, so it is still one interruption) with the transcript offset it was asked at, and the
+  watchdog stays quiet until the human next **types** — an entry the harness marks
+  `origin.kind == "human"`. Hook feedback, task notifications and peer messages are not an answer. If
+  the transcript carries no origin marks at all, the watchdog cannot tell and treats the question as
+  answered, which rings as before. Until 10-08 the arm was dropped at the asking turn-end, so a
+  mandated session that asked was woken every turn-end until someone answered.
 
 ### The wake path — `mandate --wake-path`, `note --woke`, `doorbell`
 

@@ -620,7 +620,16 @@ MUTANTS = [
      "every answer and never fires — measured 70 rings / 70 rearms in one afternoon and 1780 over "
      "one session against a cap of 3. Its killers are the two cases the old rule got wrong; the "
      "tool-call case passes either way and is correctly not listed.", 0),
-    ("embedded_python -> the guards' heredoc producers drop out of the denominator again",
+    ("human_spoke_since -> every desk question reads as answered, and the watchdog rings again",
+     ".game_loop/bin/watchdog::human_spoke_since", "    return None\n",
+     ['a PEER message follow the question, the watchdog stays quiet'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO None IS THE PRE-FIX WORLD for a question asked at the "
+     "desk: the caller reads COULD NOT TELL as answered, so the arm is cleared at the next "
+     "turn-end and the watchdog rings while the human still holds an unanswered question — "
+     "harbor-owner's six wakes in ninety minutes. Its killer is the case where nothing but hook "
+     "feedback, a tool result and a peer message follow the question. The human-typed and "
+     "no-origin-marks cases clear the arm either way and are correctly not listed.", 0),
+    ("embedded_python ->the guards' heredoc producers drop out of the denominator again",
      "test/mutation_sweep.py::embedded_python", "    return []\n",
      ['heredoc producers are IN the denominator', 'every excluded name is a producer the repo still HAS'],
      "FLOOR OWED, RECORDED 0. NEUTERED TO [] IS THE PRE-FIX WORLD EXACTLY: the sixteen guard "

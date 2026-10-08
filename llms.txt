@@ -117,7 +117,9 @@ tells you outright when it has none, rather than printing a confident prompt tha
 
 `arm` requires the path to a file you ALREADY read that did NOT answer the question — if the answer was
 on disk, you don't need the human. `checkpoint` and `arm` are each single-use (consumed on the next
-turn-end). If you can predict the human's answer, don't ask; make the call and carry on.
+turn-end). A consumed arm still marks the question as outstanding: the watchdog stays quiet until the
+human answers (types in the session, or replies on Slack when it was paged), so asking does not buy a
+wake every turn-end. If you can predict the human's answer, don't ask; make the call and carry on.
 
 ## Usage limits: the handoff gate and the park
 

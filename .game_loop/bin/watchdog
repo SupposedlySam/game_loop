@@ -219,6 +219,7 @@ IDLE_SEC = int(os.environ.get("WATCHDOG_IDLE_SEC") or _WD["idle_sec"])
 # would conclude "working, not parked" every time — settle first, THEN measure.
 SETTLE_SEC = int(os.environ.get("WATCHDOG_SETTLE_SEC") or _WD["settle_sec"])
 CHUNK_SEC = 10          # bounds supersede latency
+ORIGIN_LOOKBACK = 4 * 1024 * 1024   # bytes human_spoke_since reads back to learn the harness marks origins
 RING_CAP = int(_WD["ring_cap"])  # consecutive unproductive rings before standing down
 # The probe's budget, settable beside the probe. Env override for the same reason as the others.
 PROBE_TIMEOUT_SEC = int(os.environ.get("WATCHDOG_PROBE_TIMEOUT_SEC")
@@ -335,6 +336,51 @@ def acted_since(path, offset):
                 isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
             return True
     return False
+
+
+def human_spoke_since(path, offset):
+    """Did the HUMAN type anything since byte `offset` of the transcript? True / False / None.
+
+    The answer to a question asked at the desk. A Slack-paged arm has its reply read back from the
+    thread; an arm with no page has only this, so it is what ends the wait (harbor-owner, 10-08).
+
+    Only an entry the harness marks `origin.kind == "human"` counts. Hook feedback, task
+    notifications and peer messages are user-role entries too, and every one of them would read as
+    an answer that nobody gave. None when the tail cannot be read, or when the transcript carries
+    no origin marks at all (an older harness): the caller treats COULD NOT TELL as answered, which
+    is the ringing behaviour from before this existed, never as a silence that might last forever.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, int(offset or 0)))
+            tail = f.read()
+    except (OSError, TypeError, ValueError):
+        return None
+    marked = False
+    for raw in tail.splitlines():
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue          # the offset can land mid-line; a partial first line is not a verdict
+        if not isinstance(rec, dict) or rec.get("type") != "user":
+            continue
+        origin = rec.get("origin")
+        if isinstance(origin, dict):
+            marked = True
+            if origin.get("kind") == "human":
+                return True
+    if not marked:
+        # A tail of nothing but tool results carries no marks either, and that is not an older
+        # harness. Look back a bounded window for ANY mark; a transcript can run to hundreds of MB,
+        # so the whole file is never read on a turn-end.
+        try:
+            with open(path, "rb") as f:
+                start = max(0, int(offset or 0) - ORIGIN_LOOKBACK)
+                f.seek(start)
+                marked = b'"origin":{"kind"' in f.read(int(offset or 0) - start)
+        except (OSError, TypeError, ValueError):
+            return None
+    return False if marked else None
 
 
 def quiet(why):
@@ -1028,6 +1074,25 @@ def main():
     # reach the run. (The classic case Slack paging exists for is precisely: mandate finished, agent
     # has a question, human away.) poll_slack_replies quiet()s when the arm is unpageable, so an
     # unmandated session without a Slack-armed question still falls straight through to the guard below.
+    # A QUESTION ASKED AT THE DESK IS STILL A QUESTION (harbor-owner, 10-08). An arm with no Slack
+    # page used to be NULLED at the turn-end that carried it, so the next watchdog read "nobody is
+    # waiting on you" while the human was holding an unanswered question, and rang every turn-end
+    # until somebody answered. Six wakes in ninety minutes, each a turn that only re-checked. The
+    # Stop gate now keeps it, spent, with the transcript offset it was asked at; the human's next
+    # typed message is the answer, and that is the only thing that ends the wait here.
+    armed = state.get("t3_armed") or {}
+    if armed.get("spent") and not armed.get("slack_ts"):
+        spoke = human_spoke_since(tpath, armed.get("asked_size"))
+        if spoke is False:
+            quiet("T3 asked at the desk — the human holds the ball until they next type")
+        st = load_state()
+        if (st.get("t3_armed") or {}).get("asked_at") == armed.get("asked_at"):
+            st["t3_armed"] = None
+            save_state(st)
+        logline({"kind": "watchdog_desk_answer", "question": armed.get("question"),
+                 "why": "the human typed since it was asked" if spoke
+                 else "could not tell whether the human answered; treated as answered"})
+        state = load_state()
     if state.get("t3_armed"):
         poll_slack_replies(state)
 

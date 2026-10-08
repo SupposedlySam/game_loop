@@ -7524,6 +7524,91 @@ def main():
     finally:
         shutil.rmtree(cp_, ignore_errors=True)
 
+    # A QUESTION ASKED AT THE DESK WAS FORGOTTEN AT THE TURN-END THAT ASKED IT (harbor-owner,
+    # 2026-10-08). An arm with no Slack page was NULLED by the Stop gate, so ~30s later the watchdog
+    # read "nobody is waiting on you (no T3 armed)" while the human held an unanswered question, and
+    # it rang every turn-end until they answered: six wakes in ninety minutes, each a turn that only
+    # re-checked. A Slack arm was already kept, spent; a desk arm now is too, and the human's next
+    # TYPED message is its answer. Hook feedback, task notifications and peer messages are user-role
+    # entries as well, and none of them is the human.
+    print("a question asked at the desk keeps the watchdog quiet until the human types:")
+    dk_ = make_sandbox()
+    try:
+        _dsid = "sess-desk"
+        _dsf = os.path.join(dk_, ".game_loop", "sessions", _dsid, "state.json")
+        _dlog = os.path.join(dk_, ".game_loop", "log.jsonl")
+        _dtp = os.path.join(dk_, "transcript.jsonl")
+        _dsrc = os.path.join(dk_, "read-me.md")
+        with open(_dsrc, "w") as f:
+            f.write("the docs did not answer it\n")
+        _asked = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Which one?"}]}}
+        with open(_dtp, "w") as f:
+            f.write(json.dumps({"type": "user", "origin": {"kind": "human"},
+                                "message": {"content": [{"type": "text", "text": "go"}]}}) + "\n")
+            f.write(json.dumps(_asked) + "\n")
+        gl(dk_, "mandate", "--set", "keep going", sid=_dsid)
+        gl(dk_, "arm", "--question", "staging or prod?", "--read", _dsrc, "--predict", "staging",
+           sid=_dsid)
+        r = gl(dk_, "stopgate", stdin=json.dumps({"last_assistant_message": "Staging or prod?",
+                                                   "transcript_path": _dtp}), sid=_dsid)
+        with open(_dsf) as f:
+            _dst = json.load(f)
+        _darm = _dst.get("t3_armed") or {}
+        check("the asking turn-end passes once, and a DESK arm is KEPT, spent, at the transcript "
+              "offset it was asked at — nulling it is what told the watchdog nobody was waiting",
+              r.returncode == 0 and _darm.get("spent") is True
+              and _darm.get("asked_size") == os.path.getsize(_dtp))
+        r = gl(dk_, "stopgate", stdin=json.dumps({"last_assistant_message": "And which region?"}),
+               sid=_dsid)
+        check("...and a kept arm is still ONE interruption: the next question is refused",
+              r.returncode == 2 and "STOP GATE CLOSED" in (r.stdout + r.stderr))
+
+        def _desk_case(tail, arm=None):
+            """Run the watchdog over the asked transcript plus TAIL; return (log, arm after)."""
+            with open(_dtp, "a") as f:
+                for x in tail:
+                    f.write(json.dumps(x) + "\n")
+            with open(_dsf) as f:
+                st = json.load(f)
+            if arm is not None:
+                st["t3_armed"] = arm
+            st["watchdog_rings"] = 0
+            with open(_dsf, "w") as f:
+                json.dump(st, f)
+            open(_dlog, "w").close()
+            run_watchdog(os.path.join(dk_, ".game_loop", "bin", "watchdog"),
+                         {"session_id": _dsid, "transcript_path": _dtp},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+            with open(_dsf) as f:
+                return read_or_empty(_dlog), json.load(f).get("t3_armed")
+
+        _hook = {"type": "user", "origin": {"kind": "task-notification"},
+                 "message": {"content": "<task-notification> Stop hook feedback"}}
+        _tool = {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}
+        _peer = {"type": "user", "origin": {"kind": "peer", "from": "unknown"},
+                 "message": {"content": "Another Claude session sent a message"}}
+        _log, _left = _desk_case([_hook, _tool, _peer])
+        check("while only hook feedback, a tool result and a PEER message follow the question, the "
+              "watchdog stays quiet and SAYS the human holds the ball — none of those is an answer",
+              "holds the ball" in _log and '"watchdog_ring"' not in _log
+              and (_left or {}).get("spent") is True)
+        _human = {"type": "user", "origin": {"kind": "human"},
+                  "message": {"content": [{"type": "text", "text": "staging"}]}}
+        _log, _left = _desk_case([_human])
+        check("...and once the human TYPES, the wait is over: the arm is cleared and the answer is "
+              "on the record, so the next idle turn-end rings as it always did",
+              _left is None and '"watchdog_desk_answer"' in _log
+              and "the human typed" in _log)
+        with open(_dtp, "w") as f:
+            f.write(json.dumps(_asked) + "\n")
+        _log, _left = _desk_case([_tool], arm={"question": "q", "spent": True, "asked_at": "x",
+                                              "asked_size": 0})
+        check("...and a transcript with NO origin marks at all (an older harness) is COULD NOT "
+              "TELL, treated as answered, never as a silence that might last forever",
+              _left is None and "could not tell" in _log)
+    finally:
+        shutil.rmtree(dk_, ignore_errors=True)
+
     # A WATCHDOG DELAYED IN THE LIMIT PROBE DECIDED FROM ITS LAUNCH SNAPSHOT. The probe can take
     # ~75s, and a laptop sleep stretches that to minutes; nothing supersedes a watchdog before it
     # claims the pidfile. Observed 2026-09-24, every 30-min cycle: one launched before the Mac slept
@@ -21110,6 +21195,9 @@ def main():
         # to say when the size it refused on was observed. State, never config — the same
         # `c\.get` arm matching `rec.get` that catches the two above.
         "observed_at": "the stamp on a recorded context reading, not config",
+        # The harness's mark on a transcript entry, read off `rec` in the watchdog's
+        # human_spoke_since to tell a typed answer from hook feedback. Transcript, never config.
+        "origin": "a field on a transcript entry, not config",
     }
 
     def _code_surface():

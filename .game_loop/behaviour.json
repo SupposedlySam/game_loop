@@ -641,6 +641,15 @@
       "change": "Two corrections from kass-owner's test of seq 66. (1) A check run through xargs (git diff --name-only | xargs ruff check; git push) is now read as a check, so the 'does not gate' note fires on it; xargs is the fix the zsh note recommends, so following that advice no longer hides the second warning. (2) The commit gate's 'THIS COMMAND WRITES BEFORE IT COMMITS' note no longer fires on a bare assignment (L=$(git diff --name-only); git commit). An assignment counts as a write only when a command substitution inside it writes, is redirected, or a command follows it.",
       "why_it_qualifies": "Output on ordinary calls changes in both directions: one note appears where it was missing, another stops appearing where it was wrong.",
       "consequence": "Nothing is refused that was not before, and nothing allowed is now refused. Commands that pipe a check through xargs before an ungated push gain a note; a commit preceded only by variable assignments loses a false one."
+    },
+    {
+      "seq": 68,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog / arm",
+      "change": "A question armed with `arm` and asked at the desk (no Slack page) is no longer forgotten at the turn-end that asks it. The Stop gate keeps the arm, marked spent, with the transcript offset it was asked at, as it already did for a Slack-paged arm. The watchdog stays quiet while it is outstanding, and clears it when the human next types a message (an entry the harness marks origin.kind == human). Hook feedback, task notifications and peer messages are not an answer. If the transcript carries no origin marks at all, the watchdog cannot tell and treats the question as answered, which is the previous behaviour. `authorize` no longer reports a spent question as a live armed one; it still names it as asked.",
+      "why_it_qualifies": "Watchdog behaviour on mandated sessions changes: a session that asked a question stops being woken every turn-end until the human answers. Reported by harbor-owner (six wakes in ninety minutes, no notify.json), confirmed by gravity-brew-owner.",
+      "consequence": "After `arm` and the asking turn-end, the watchdog no longer rings until the human types. The arm is still ONE interruption: a second question is refused at the Stop gate as before. A new `arm` replaces an outstanding one. A session whose human never answers stays quiet, exactly as a Slack-paged arm already did."
     }
   ],
   "schema": 1

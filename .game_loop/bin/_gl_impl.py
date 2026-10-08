@@ -5038,6 +5038,8 @@ def cmd_authorize(s, a):
     # Not a gate — an interactive human speaks directly and arms nothing — but the difference between
     # "a human was asked here" and "nobody was" stops being invisible in the record.
     _armed = s.get("t3_armed") or {}
+    if _armed.get("spent"):
+        _armed = {}       # asked already: that is asked_spent's claim below, not a live question's
     auth = {"path": real, "reason": a.reason, "at": now(), "uses_left": int(a.uses or 1),
             "expires_at": expires_at,
             "asked_via_arm": bool(_armed.get("question")),
@@ -7623,10 +7625,16 @@ def cmd_stopgate(s, a, payload):
             # one session, on two authorizations the human had explicitly granted out loud.
             s["t3_last_asked"] = {"question": (s["t3_armed"].get("question") or ""),
                                   "at": now()}
-            if s["t3_armed"].get("slack_ts"):
-                s["t3_armed"]["spent"] = True
-            else:
-                s["t3_armed"] = None
+            # A DESK ARM IS KEPT TOO (harbor-owner, 10-08). Nulling it told the watchdog nobody was
+            # waiting while the human held an unanswered question, and it rang every turn-end until
+            # they answered. Kept spent, with the transcript offset it was asked at, so the watchdog
+            # can tell the human's next typed message (the answer) from everything after it.
+            s["t3_armed"]["spent"] = True
+            s["t3_armed"]["asked_at"] = now()
+            try:
+                s["t3_armed"]["asked_size"] = os.path.getsize(payload.get("transcript_path"))
+            except (OSError, TypeError):
+                s["t3_armed"]["asked_size"] = None
             s["t3_spend_count"] = s.get("t3_spend_count", 0) + 1
         s["stop_ok"] = False                # CONSUME: one checkpoint == one turn-end
         s["stop_ok_notes"] = None

@@ -4,7 +4,9 @@
   "allow_write_roots": [],
   "deploy_verbs": [],
   "upstream_repos": [],
-  "mcp_read_only_tools": [],
+  "mcp_read_only_tools": [
+    "mcp__llm_chat__pending"
+  ],
   "trans_nudge_every": 12,
   "watchdog": {
     "idle_sec": 30,

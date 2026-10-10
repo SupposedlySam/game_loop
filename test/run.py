@@ -5085,6 +5085,18 @@ def main():
                   "WRITES BEFORE IT COMMITS" in r.stdout)
             # THE CONTROLS. A note that fires on every chained command is one people learn to
             # skip, and the two notes must not both claim the same command.
+            # A COMMIT MESSAGE READ FROM STDIN IS A MESSAGE (2026-10-09). Its subject line was
+            # named as a segment that writes, because a here-doc fed to git was scanned as shell.
+            check("a commit whose message comes from a here-doc via -F - does not claim its own "
+                  "message WRITES BEFORE IT COMMITS",
+                  "WRITES BEFORE IT COMMITS" not in brbundle(
+                      "git commit -F - <<'EOF'\nfix: printf x > lib/swept_in.dart\nEOF").stdout
+                  and "WRITES BEFORE IT COMMITS" not in brbundle(
+                      "git commit --file=- <<'EOF'\ndocs: note --woke\nEOF").stdout)
+            check("...but a here-doc fed to a SHELL ahead of the commit still says so: only git "
+                  "commit reading its message from stdin is exempt",
+                  "WRITES BEFORE IT COMMITS" in brbundle(
+                      "bash <<'EOF'\nprintf x > lib/swept_in.dart\nEOF\ngit commit -am x").stdout)
             check("a bare commit says nothing of the kind", "WRITES BEFORE IT COMMITS"
                   not in brbundle("git commit -m x").stdout)
             check("a provably read-only chain says nothing either",

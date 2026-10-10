@@ -955,6 +955,14 @@ while i < len(lines):
         # nothing (`tee f HD X` is already caught by its head) and cost the masquerade —
         # `bash -c cat HD X` ends in "cat" and would have been waved through as data.
         is_data = (os.path.basename(head[0]) if head else "") in DATA_SINKS
+        # A COMMIT MESSAGE READ FROM STDIN IS A MESSAGE (2026-10-09, found committing a doc fix).
+        # `git commit -F -` with its message in a here-doc had every message line scanned as shell,
+        # so the commit gate named the subject line as a segment that "WRITES BEFORE IT COMMITS".
+        # Never `git` as a whole: `git apply` fed a here-doc writes files. Only commit, only with
+        # its message file being stdin.
+        if not is_data and head and os.path.basename(head[0]) == "git" and "commit" in head \
+                and re.search(r"(?:^|\s)(?:-F\s*-|--file(?:=|\s+)-)(?:\s|$)", tail_cmd):
+            is_data = True
         delims = [d for _q, d in found]
         i += 1
         di = 0
@@ -1367,6 +1375,11 @@ def strip_redirections(args):
     return out
 
 
+# The closing word of a data here-doc survives scan_cmd (its body does not), and on a line of its own
+# it reads as a one-word command nothing can prove read-only. Collected here so it is skipped, not
+# reported as the segment that "WRITES BEFORE IT COMMITS".
+_HD_CLOSERS = {d for _q, d in re.findall(
+    re.escape(chr(60) * 2) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", cmd)}
 for seg in shell_segments(cmd):
     seg = seg.strip()
     if not seg:
@@ -1376,6 +1389,8 @@ for seg in shell_segments(cmd):
     except ValueError:
         argv = seg.split()
     if not argv:
+        continue
+    if len(argv) == 1 and argv[0] in _HD_CLOSERS:
         continue
     verb = os.path.basename(argv[0])
     args = argv[1:]

@@ -95,7 +95,17 @@ closure. It buys ONE turn-end, it cannot launder a question, and only `mandate -
 is for THEIR break, never your judgement — that is what the log records.
 
 Every gate above fires from INSIDE this session, which is the thing that stops working when a run
-goes quiet. If something outside pokes you on a timer, give it a prompt that carries this run:
+goes quiet. If something outside already wakes you, give it a prompt that carries this run.
+
+**Do not set up an unconditional timer to get one.** A cron or `/loop` fires its prompt every time,
+whether or not there is work, so an idle session is woken on every tick to answer "still nothing"
+(harbor-owner: every 15 minutes for a day). A wake should fire only when there is something to do.
+The ones that already work that way are hooks: the watchdog rings only while a mandate is bound,
+and an `asyncRewake` Stop hook (a GitHub or llm_chat waker) wakes only for new items. If you need a
+timed check, make it conditional: a background loop that exits, and so wakes you, only when
+`doorbell` or `status` reports something pending.
+
+For a wake from outside, the prompt is:
 
 ```
 ./.game_loop/bin/game_loop note --woke             # you were woken from outside — record the ARRIVAL

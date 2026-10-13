@@ -10902,6 +10902,23 @@ def main():
         check("...and it states what it does NOT fix: a short value with a backtick is still "
               "mangled and still accepted",
               "does not remove it" in _over.stderr)
+        # THE LAST LINE IS THE REFUSAL (flyby-owner, 2026-10-13). An agent read this refusal
+        # through `| tail -2`, saw the two lines above (advice that reads like a note on a
+        # success), and worked for a day believing its mandate and four checkpoints were recorded.
+        _tail = "GAMELOOP ✗ REFUSED — nothing was recorded."
+        check("...and its LAST line, on BOTH streams, is the refusal itself, so `| tail -1` of "
+              "either one reads REFUSED and never the closing advice",
+              _over.stdout.rstrip().splitlines()[-1:] == [_tail]
+              and _over.stderr.rstrip().splitlines()[-1:] == [_tail])
+        _mset = gl(pw, "mandate", "--set", _long, sid="sess-prose")
+        check("...and a refused `mandate --set` ends the same way, so a mandate that never landed "
+              "cannot read as bound",
+              _mset.returncode != 0 and _mset.stdout.rstrip().splitlines()[-1:] == [_tail])
+        _gate = gl(pw, "checkpoint", sid="sess-prose")
+        check("...and a multi-line GATE refusal (die) also ends on the refusal, not its advice",
+              _gate.returncode != 0
+              and (_gate.stdout.rstrip().splitlines()[-1:] == [_tail]
+                   or len(_gate.stdout.strip().splitlines()) == 1))
 
         # PAIRED: the same text, same length, through the file — or the bound is just a wall.
         _via = gl(pw, "note", "--text-file", _f, sid="sess-prose")
@@ -11923,6 +11940,11 @@ def main():
             "_gl_pubgap", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
         _pgm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_pg_spec)
         _pg_spec.loader.exec_module(_pgm)
+        # The gap now also reads every OTHER session's state, so loaded from this checkout it would
+        # see this repo's real trigger history. An empty sessions dir keeps the cases below about
+        # the state they are handed.
+        _pg_sessions = tempfile.mkdtemp(prefix="gl_pubgap_")
+        _pgm.SESSIONS_DIR = _pg_sessions
         _MARKED = datetime.datetime(2026, 9, 2, 11, 12, 0)
         _mk = ("beta-8ed5c6ca", _MARKED)
         _gap = _pgm.publish_gap(mark=_mk, attachments=["lamp-publish"],
@@ -11972,6 +11994,25 @@ def main():
               "reading that field rather than failing to find one",
               any("BEFORE this mark" in l for l in
                   _pgm.publish_gap(_handed_stale, mark=_mk, attachments=["lamp-publish"])))
+        # A RELEASE IS A FACT ABOUT THE CHECKOUT, NOT THE SESSION LOOKING. Observed 2026-10-09 →
+        # 10-13: stable-eede147b was re-marked and all three attachments ran, recorded in the
+        # marking session's state; `status` in every later session said "no run recorded at all"
+        # for four days, and the TRIGGERS block said "NEVER FIRED in this tree" beside it.
+        os.makedirs(os.path.join(_pg_sessions, "other"))
+        with open(os.path.join(_pg_sessions, "other", "state.json"), "w") as _fh:
+            json.dump({"triggers": {"lamp-publish": {"at": "2026-09-02T11:19:00", "ok": True}}}, _fh)
+        check("a run recorded by ANOTHER session in this checkout counts — the marking session is "
+              "not the only one allowed to know the release went out",
+              _pgm.publish_gap({"triggers": {}}, mark=_mk, attachments=["lamp-publish"]) == [])
+        check("...and the NEWER of two records wins, so this session's stale run cannot mask "
+              "another session's fresh one",
+              _pgm.publish_gap(_handed_stale, mark=_mk, attachments=["lamp-publish"]) == [])
+        with open(os.path.join(_pg_sessions, "other", "state.json"), "w") as _fh:
+            _fh.write("{not json")
+        check("...while an unreadable neighbour reads as NOT having run — the safe direction",
+              any("no run recorded at all" in l for l in
+                  _pgm.publish_gap({"triggers": {}}, mark=_mk, attachments=["lamp-publish"])))
+        shutil.rmtree(_pg_sessions, ignore_errors=True)
 
         # A DECISION THAT WAS WRITTEN DOWN AND NEVER READ BACK. `checkpoint --release-deferred`
         # logs the reason WITH the HEAD it was about, and then the next checkpoint refused again
@@ -14077,8 +14118,11 @@ def main():
         with open(_noext, "w") as f:
             f.write("def add(a, b):\n    return a + b\n")
         with open(os.path.join(mt, "t_noext.py"), "w") as f:
-            f.write("import importlib.machinery as mach\n"
-                    "m = mach.SourceFileLoader('p', 'prodbin').load_module()\n"
+            # spec_from_loader + exec_module, not SourceFileLoader.load_module: Python 3.15 removed
+            # load_module, and this fixture failed for that reason alone on 2026-10-13.
+            f.write("import importlib.machinery as mach, importlib.util as u\n"
+                    "ld = mach.SourceFileLoader('p', 'prodbin')\n"
+                    "m = u.module_from_spec(u.spec_from_loader('p', ld))\nld.exec_module(m)\n"
                     "assert m.add(2, 2) == 4\nprint('1 passed')\n")
         _ne = gl(mtw, "mutate", "--prove", "add adds", "--test", f"cd {mt} && python3 t_noext.py",
                  "--file", _noext, "--replace", "a + b", "--with", "a - b")

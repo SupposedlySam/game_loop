@@ -659,6 +659,15 @@
       "change": "A commit message read from stdin through a here-doc (git commit -F - or --file=-) is treated as data, like a here-doc fed to cat or tee: its lines are no longer scanned as shell. The commit gate also skips the here-doc's closing word on its own line. Together these stop the 'THIS COMMAND WRITES BEFORE IT COMMITS' note naming the message's subject line as a segment that writes. Only git commit with its message file being stdin is exempt; git apply fed a here-doc, or a here-doc fed to a shell or interpreter, is scanned as before.",
       "why_it_qualifies": "Output on an ordinary call changes: a false note on a common way to write a multi-line commit message goes away.",
       "consequence": "Nothing is refused or allowed differently. A commit whose message comes from a here-doc no longer carries a note claiming the message writes. A here-doc that runs as code ahead of a commit still gets the note."
+    },
+    {
+      "seq": 70,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "every verb (refusals)",
+      "change": "A refusal now ends on the refusal. A multi-line gate refusal (die) and every argument error (including '--notes is 450 chars; over 400 it must come from a file') end with the line 'GAMELOOP ✗ REFUSED — nothing was recorded.', and argument errors now reach stdout as well as stderr. Exit codes are unchanged: 3 for a gate refusal, 2 for an argument error.",
+      "why_it_qualifies": "Output of refused calls changes. Reported by flyby-owner: its mandate --set and four checkpoints were refused for length, it read them through '| tail -2', saw only the closing advice ('A SHORT value with a backtick in it is still mangled and still accepted — this bounds the exposure, it does not remove it.'), and worked for a day believing a mandate was bound.",
+      "consequence": "Reading a game_loop command's last line now tells you whether anything was recorded. A script that parsed the old last line of a refusal sees one more line; one that read argument errors only from stderr now also gets them on stdout."
     }
   ],
   "schema": 1

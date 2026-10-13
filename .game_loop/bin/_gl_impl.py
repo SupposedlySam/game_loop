@@ -568,6 +568,23 @@ def logline(rec):
 
 
 REFUSED_EXIT = 3   # a GATE said no. 2 stays what argparse and unhandled errors produce (#91)
+REFUSED_TAIL = "GAMELOOP ✗ REFUSED — nothing was recorded."
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, whose refusal ends on the refusal and reaches both streams.
+
+    Its own error() writes usage, then the message, to stderr only. The 400-char prose refusal is a
+    parser error with a long explanation, so `2>&1 | tail -2` showed two lines of advice and a
+    plain `| tail` showed nothing: flyby-owner's mandate and four checkpoints were all refused and
+    each read as recorded (2026-10-13). Same exit code as before, 2."""
+
+    def error(self, message):
+        body = "%s\n%s: error: %s\n%s\n" % (self.format_usage().rstrip(), self.prog, message,
+                                            REFUSED_TAIL)
+        sys.stdout.write(body)
+        sys.stderr.write(body)
+        sys.exit(2)
 
 
 def die(msg, code=REFUSED_EXIT):
@@ -591,6 +608,11 @@ def die(msg, code=REFUSED_EXIT):
     reading stderr.
     """
     text = "GAMELOOP ✗ " + msg
+    # THE LAST LINE IS THE REFUSAL (flyby-owner, 2026-10-13). A long reason ends on its explanation,
+    # and `| tail -1` is how agents read a command's outcome, so the line they saw was advice that
+    # reads like a note on a success. One agent worked for a day believing a mandate was bound.
+    if "\n" in msg:
+        text += "\n" + REFUSED_TAIL
     # BOTH STREAMS, which is what the reporter asked for and I first talked myself out of on
     # aesthetics. `2>/dev/null` is what anyone writes to keep a hook quiet, so a reason that lives
     # only on stderr is a reason a quiet hook discards — and a refusal nobody sees reads as success.
@@ -1326,7 +1348,7 @@ def triggers_report():
     if not entries:
         return []
     s = load()
-    seen = s.get("triggers") or {}
+    seen = triggers_seen_anywhere(s)     # "in this tree" means the checkout, not this session
     lines = ["TRIGGERS — this project's own attachments to the loop:"]
     for ev, t in entries:
         name = str(t.get("name") or "(unnamed)")
@@ -3849,6 +3871,39 @@ def newest_mark():
     return None, None
 
 
+def triggers_seen_anywhere(s=None):
+    """The newest recorded run of each trigger, across EVERY session in this checkout.
+
+    A trigger's run is written into the state of the session that fired it, and `publish_gap` used
+    to read only the session asking. So the session that made a mark saw its attachments run, and
+    every session after it was told they never had: stable-eede147b was re-marked 2026-10-09 21:26
+    and all three attachments ran (recorded in that session), yet `status` in each later session
+    said "no run recorded at all" for four days. A release is a fact about the checkout, not about
+    whichever session happens to be looking.
+
+    WHAT IT CANNOT SEE: a session whose state.json is unreadable, and a run recorded in a different
+    checkout of the same project. Both read as "did not run", which is the safe direction here.
+    """
+    seen = dict(((s if isinstance(s, dict) else load()).get("triggers") or {}))
+    try:
+        names = os.listdir(SESSIONS_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        try:
+            with open(os.path.join(SESSIONS_DIR, name, "state.json")) as fh:
+                theirs = (json.load(fh) or {}).get("triggers") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        for trig, rec in theirs.items() if isinstance(theirs, dict) else ():
+            if not isinstance(rec, dict) or not rec.get("at"):
+                continue
+            mine = seen.get(trig) or {}
+            if not mine.get("at") or str(rec["at"]) > str(mine["at"]):
+                seen[trig] = rec
+    return seen
+
+
 def publish_gap(s=None, mark=None, seen=None, attachments=None):
     """Marks made while a `confidence` attachment did NOT run — a release nobody can reach.
 
@@ -3873,7 +3928,7 @@ def publish_gap(s=None, mark=None, seen=None, attachments=None):
     if not attachments:
         return []                    # nothing attached: a mark IS the whole of the release here
     if seen is None:
-        seen = ((s if isinstance(s, dict) else load()).get("triggers") or {})
+        seen = triggers_seen_anywhere(s)
     behind = []
     for name in attachments:
         rec = seen.get(name) or {}
@@ -13135,7 +13190,7 @@ def resolve_prose(p, a):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="game_loop")
+    p = _Parser(prog="game_loop")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
 

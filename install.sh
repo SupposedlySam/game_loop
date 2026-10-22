@@ -1278,6 +1278,18 @@ for event, new_entries in block.items():
     for entry in new_entries:
         # de-dupe on the actual command strings so re-installing never stacks duplicates
         if any(c in existing_cmds for c in commands(entry)):
+            # ...but RAISE a timeout that is now too short, never lower one (#133). Skipping the
+            # whole entry kept every existing install on the 10s Stop timeout that killed stopgate
+            # mid-run, and only a fresh install would ever have got the fix.
+            want = {h.get("command", ""): h.get("timeout") for h in entry.get("hooks", [])}
+            for e in arr:
+                for h in e.get("hooks", []):
+                    w = want.get(h.get("command", ""))
+                    if isinstance(w, (int, float)) and isinstance(h.get("timeout"), (int, float)) \
+                            and h["timeout"] < w:
+                        print(f"  raised  {event} hook timeout {h['timeout']}s -> {w}s: "
+                              f"{h.get('command', '')[-40:]}")
+                        h["timeout"] = w
             continue
         arr.append(entry)
         existing_cmds.update(commands(entry))

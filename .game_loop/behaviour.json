@@ -668,6 +668,15 @@
       "change": "A refusal now ends on the refusal. A multi-line gate refusal (die) and every argument error (including '--notes is 450 chars; over 400 it must come from a file') end with the line 'GAMELOOP ✗ REFUSED — nothing was recorded.', and argument errors now reach stdout as well as stderr. Exit codes are unchanged: 3 for a gate refusal, 2 for an argument error.",
       "why_it_qualifies": "Output of refused calls changes. Reported by flyby-owner: its mandate --set and four checkpoints were refused for length, it read them through '| tail -2', saw only the closing advice ('A SHORT value with a backtick in it is still mangled and still accepted — this bounds the exposure, it does not remove it.'), and worked for a day believing a mandate was bound.",
       "consequence": "Reading a game_loop command's last line now tells you whether anything was recorded. A script that parsed the old last line of a refusal sees one more line; one that read argument errors only from stderr now also gets them on stdout."
+    },
+    {
+      "seq": 71,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "stopgate / install",
+      "change": "The `stop` triggers now share one time budget that ends before the Stop hook's own timeout: stop_trigger_budget_sec (default 60), cut to the stopgate hook's timeout in .claude/settings.json minus 4s when that is shorter. A trigger is capped to what is left, and one that does not fit is SKIPPED with a notice naming it. The shipped stopgate hook timeout is 120 (was 10), and re-running install raises an existing shorter stopgate timeout to the template's (never lowers one).",
+      "why_it_qualifies": "Stop-gate behaviour and installed settings change. Reported in #133: with triggers totalling about 35s against a 10s hook, the harness killed stopgate on every turn-end, so the gate never refused anything and one armed question was logged as spent 683 times while its count moved 16.",
+      "consequence": "The gate's verdict is always written: refusals reach the agent and an armed question is consumed once. A project whose stop triggers take longer than its hook allows sees them cut short or skipped, named, instead of the whole gate silently dying. Existing installs on a 10s hook are protected immediately (the budget reads the hook's timeout) and get 120 on their next install."
     }
   ],
   "schema": 1

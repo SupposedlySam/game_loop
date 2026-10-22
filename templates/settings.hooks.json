@@ -41,7 +41,7 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.game_loop/bin/game_loop stopgate",
-            "timeout": 10,
+            "timeout": 120,
             "statusMessage": "game_loop: is this turn-end earned?"
           },
           {

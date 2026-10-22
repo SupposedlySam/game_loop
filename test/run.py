@@ -12498,6 +12498,41 @@ def main():
               "that quietly stops holding is worse than one that never held",
               "impossible" in _runs[3].stderr and "4 consecutive turn-ends" in _runs[3].stderr
               and "the room is unreachable" in _runs[3].stderr)
+
+        # ── THE GATE FINISHES INSIDE ITS OWN HOOK (#133) ────────────────────────────────────────
+        # The harness kills a Stop hook at its `timeout`; a killed hook is non-blocking, and the
+        # consume runs after the triggers. With a 10s hook and triggers allowed 30s, every
+        # turn-end was an unchecked allow and one arm was "spent" 683 times while its count moved
+        # 16. Reproduced here: a 10s hook, a trigger that would run 30s, and one after it.
+        os.makedirs(os.path.join(stp, ".claude"), exist_ok=True)
+        with open(os.path.join(stp, ".claude", "settings.json"), "w") as f:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"type": "command", "timeout": 10,
+                                                      "command": ".game_loop/bin/game_loop stopgate"}]}]}}, f)
+        _attach_stop({"name": "slow", "command": "sleep 30", "timeout_sec": 30},
+                     {"name": "after-slow", "command": "exit 0", "timeout_sec": 30})
+        _bsrc = os.path.join(stp, "budget-src.md")
+        with open(_bsrc, "w") as f:
+            f.write("the docs did not answer it\n")
+        gl(stp, "mandate", "--set", "keep going", sid="sess-budget")
+        gl(stp, "arm", "--question", "which one?", "--read", _bsrc, "--predict", "a",
+           sid="sess-budget")
+        _t0 = time.time()
+        _bud = _end(sid="sess-budget", msg="Which one do you want?")
+        _took = time.time() - _t0
+        with open(os.path.join(stp, ".game_loop", "sessions", "sess-budget", "state.json")) as f:
+            _bst = json.load(f)
+        check("with a 10s Stop hook, the gate FINISHES inside it: triggers share what is left after "
+              "the verdict's reserve, so a 30s trigger is cut short rather than the gate killed",
+              _bud.returncode == 0 and _took < 10)
+        check("...and the arm is SPENT on that turn-end: the consume lands, so one question is one "
+              "interruption again instead of an excuse for every later turn",
+              (_bst.get("t3_armed") or {}).get("spent") is True
+              and _bst.get("t3_spend_count", 0) >= 1)
+        check("...and the trigger that did not fit is named as SKIPPED, not passed, with the hook "
+              "timeout to raise",
+              "SKIPPED" in _bud.stderr and "after-slow" in _bud.stderr
+              and "not a pass" in _bud.stderr and "timeout" in _bud.stderr)
+        os.remove(os.path.join(stp, ".claude", "settings.json"))
         # THE RESET, and it is the half that keeps the bound from being a one-way door: an
         # attachment that stood down must be able to come back, or the first bad afternoon disarms
         # it permanently and nothing says so.
@@ -15417,6 +15452,39 @@ def main():
     check("...and it does NOT gitignore .game_loop/, because the shared install tracks the payload "
           "on purpose — the disclosure would be a lie if the flag's half leaked into the default",
           ".game_loop/" not in read_or_empty(os.path.join(_shared_d, ".gitignore")))
+    # #133: a RE-install raises a stopgate timeout that is now too short, and never lowers one.
+    # The merge used to skip any entry whose command already existed, so every existing install
+    # stayed on the 10s Stop timeout that killed the gate mid-run.
+    def _set_stopgate_timeout(d, t):
+        _sf = os.path.join(d, ".claude", "settings.json")
+        with open(_sf) as f:
+            _sj = json.load(f)
+        for _g in _sj["hooks"]["Stop"]:
+            for _h in _g["hooks"]:
+                if "stopgate" in _h["command"]:
+                    _h["timeout"] = t
+        with open(_sf, "w") as f:
+            json.dump(_sj, f)
+
+    def _stopgate_timeouts(d):
+        with open(os.path.join(d, ".claude", "settings.json")) as f:
+            _sj = json.load(f)
+        return [_h.get("timeout") for _g in _sj["hooks"]["Stop"] for _h in _g["hooks"]
+                if "stopgate" in _h["command"]]
+
+    def _reinstall(d):
+        r = subprocess.run(["bash", os.path.join(REPO, "install.sh"), d], capture_output=True,
+                           text=True, env=_env(), stdin=subprocess.DEVNULL)
+        return (r.stdout or "") + (r.stderr or "")
+    _set_stopgate_timeout(_shared_d, 10)
+    _re_out = _reinstall(_shared_d)
+    check("#133: re-installing over a 10s stopgate timeout RAISES it to the template's, and says "
+          "so, instead of skipping the entry because its command already exists",
+          _stopgate_timeouts(_shared_d) == [120] and "raised" in _re_out)
+    _set_stopgate_timeout(_shared_d, 300)
+    _reinstall(_shared_d)
+    check("...and never LOWERS one a consumer raised further",
+          _stopgate_timeouts(_shared_d) == [300])
     _local_d, _local_out = _install_into("--local")
     check("#122: --local writes .claude/settings.local.json INSTEAD, so nothing installed reaches "
           "anybody who clones",

@@ -981,7 +981,7 @@ def triggers_for(event):
     return [t for t in e if isinstance(t, dict) and t.get("command")] if isinstance(e, list) else []
 
 
-def _run_trigger(s, t, event, payload, default_timeout=20.0):
+def _run_trigger(s, t, event, payload, default_timeout=20.0, max_timeout=None):
     """Run ONE attachment, record it, and report what happened. Raises nothing, ever.
 
     Returns (name, ran, code, body, err). `ran` is the distinction the `stop` moment lives on and
@@ -1006,6 +1006,9 @@ def _run_trigger(s, t, event, payload, default_timeout=20.0):
     over_default = None
     if event == "stop" and timeout > default_timeout:
         over_default = (timeout, default_timeout)
+    # The stop budget (#133): what is LEFT of it, not the trigger's own number, bounds this run.
+    if max_timeout is not None and timeout > max_timeout:
+        timeout = max(1.0, max_timeout)
     # GAME_LOOP_SESSION rides along for the same reason the waiting probe gets it (#60): a
     # checkout can hold many concurrent sessions, and a trigger that cannot tell which one it is
     # speaking for cannot scope anything it reads or writes. Empty means UNKNOWN -- the legacy
@@ -7346,6 +7349,48 @@ def _stop_verdict(s, payload):
 # tighter: what it asks for is a command in this session, where a `stop` attachment asks for an
 # effect somewhere else, and an effect somewhere else legitimately needs a retry.
 STOP_TRIGGER_BLOCK_LIMIT = 3
+# THE GATE MUST FINISH INSIDE ITS OWN HOOK (#133). The harness kills a Stop hook at its `timeout`,
+# a killed hook is non-blocking, and the consume (arm spent, checkpoint used) runs AFTER the
+# triggers. So with triggers summing past the hook's 10s, every turn-end was an unchecked allow and
+# one arm was "spent" 683 times while its count moved 16. The triggers now share a budget that
+# leaves STOP_GATE_RESERVE_SEC of the hook's timeout for the verdict itself.
+STOP_TRIGGER_BUDGET_SEC = 60.0
+STOP_GATE_RESERVE_SEC = 4.0
+
+
+def stop_hook_timeout():
+    """The `timeout` this project's Stop hook gives `stopgate`, read from .claude/settings*.json.
+
+    None when it cannot be read or no Stop hook runs stopgate: COULD NOT TELL, and the caller then
+    keeps its own budget rather than inventing a hook limit."""
+    best = None
+    for fn in ("settings.json", "settings.local.json"):
+        try:
+            with open(os.path.join(REPO_ROOT, ".claude", fn)) as f:
+                hooks = (json.load(f).get("hooks") or {}).get("Stop") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        for grp in hooks if isinstance(hooks, list) else []:
+            for h in (grp.get("hooks") or []) if isinstance(grp, dict) else []:
+                if isinstance(h, dict) and "stopgate" in str(h.get("command") or ""):
+                    try:
+                        t = float(h.get("timeout"))
+                    except (TypeError, ValueError):
+                        continue
+                    best = t if best is None else min(best, t)
+    return best
+
+
+def stop_trigger_budget():
+    """(seconds the stop triggers may spend in total, the hook timeout it was cut to or None)."""
+    try:
+        budget = float(config().get("stop_trigger_budget_sec") or STOP_TRIGGER_BUDGET_SEC)
+    except (TypeError, ValueError):
+        budget = STOP_TRIGGER_BUDGET_SEC
+    hook = stop_hook_timeout()
+    if hook is not None and hook - STOP_GATE_RESERVE_SEC < budget:
+        return max(0.0, hook - STOP_GATE_RESERVE_SEC), hook
+    return budget, None
 
 
 def stop_trigger_block(s, payload, notices):
@@ -7369,7 +7414,19 @@ def stop_trigger_block(s, payload, notices):
     tp = {k: payload.get(k) for k in fields if payload.get(k) is not None}
     tp.update({"event": "stop", "project": config().get("project_name"), "session": SESSION})
     blocks, seen = [], s.setdefault("stop_triggers", {})
+    budget, hook_cut = stop_trigger_budget()
+    deadline = time.time() + budget
+    skipped = []
     for t in trigs:
+        left = deadline - time.time()
+        if left < 1.0:
+            # OUT OF BUDGET: not run at all, which is COULD NOT TELL, same as a timeout. The streak is
+            # left alone for the same reason. Skipping is what lets the verdict below be written.
+            _nm = str(t.get("name") or "(unnamed)")
+            skipped.append(_nm)
+            logline({"kind": "stop_trigger_failed_open", "name": _nm, "why": "budget",
+                     "budget_sec": budget, "hook_timeout": hook_cut})
+            continue
         # ALL OF THEM RUN, even after one has already said no, and that is a decision rather than an
         # oversight. Short-circuiting would save nothing on the passing path (every attachment must
         # pass for the turn to end, so all of them run anyway) and would cost two things on the
@@ -7378,7 +7435,8 @@ def stop_trigger_block(s, payload, notices):
         # otherwise cost N turns to surface — and a skipped attachment can neither increment nor
         # reset its own count, so its bound would stop being measured in turn-ends and could sit on
         # a stale streak indefinitely. The latency is the sum of the timeouts either way.
-        name, ran, code, body, err = _run_trigger(s, t, "stop", tp, default_timeout=10.0)
+        name, ran, code, body, err = _run_trigger(s, t, "stop", tp, default_timeout=10.0,
+                                                  max_timeout=left)
         rec = seen.setdefault(name, {})
         n = rec.get("consecutive", 0)
         if not ran:
@@ -7427,6 +7485,17 @@ def stop_trigger_block(s, payload, notices):
         logline({"kind": "stop_trigger_block", "name": name, "consecutive": n,
                  "limit": STOP_TRIGGER_BLOCK_LIMIT, "detail": detail[:200]})
         blocks.append((name, n, detail))
+    if skipped:
+        why = (f"the Stop hook gives stopgate {hook_cut:.0f}s and the verdict needs "
+               f"{STOP_GATE_RESERVE_SEC:.0f}s of it" if hook_cut is not None
+               else f"stop_trigger_budget_sec is {budget:.0f}s")
+        notices.append(
+            f"⚠ STOP TRIGGERS SKIPPED — {len(skipped)} not run, out of time: {', '.join(skipped)}.\n"
+            f"  The triggers share {budget:.0f}s because {why}. Running past it would get this whole\n"
+            "  gate killed by the harness, which ends the turn UNCHECKED and leaves an armed question\n"
+            "  unspent (#133). The skipped ones are not a pass: nothing they check was looked for.\n"
+            + ("  Raise the stopgate Stop hook's \"timeout\" in .claude/settings.json (120 fits\n"
+               "  the default budget), or shorten the triggers.\n" if hook_cut is not None else ""))
     if not blocks:
         return None
     lines = ["STOP GATE CLOSED — this project attached a check to turn-end, and it says no.\n"]

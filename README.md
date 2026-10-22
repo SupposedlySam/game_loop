@@ -724,6 +724,12 @@ sometimes; an agent asked a direct question through a chat bridge did the work a
 without answering. Four things hold it in place:
 
 * **it runs on every turn-end**, so its timeout is a tax on every turn — the default is 10s, not 20;
+* **all `stop` attachments share one budget** that ends before the Stop hook does (#133). The harness
+  kills a Stop hook at its `timeout`, and a killed gate is an unchecked allow that never spends an
+  armed question. So the budget is `stop_trigger_budget_sec` (default 60), cut to the Stop gate hook's
+  `timeout` in `.claude/settings.json` minus 4s when that is shorter. An attachment that would not
+  fit is cut short or **SKIPPED**, loudly, and is not a pass. The shipped hook timeout is 120, and a
+  re-install raises a shorter one;
 * **it is bounded by consecutive count.** After **3** consecutive blocks from the same attachment it
   **stands down** with a loud notice and the turn ends; one pass resets the count. Every other block
   this gate issues is satisfiable from inside the session — a `stop` attachment's condition may be

@@ -12454,6 +12454,36 @@ def main():
               _seen_payload.get("last_assistant_message") == "I have finished the migration."
               and _seen_payload.get("event") == "stop"
               and _seen_payload.get("session") == "sess-stop")
+        check("...and says WHY the gate is letting this turn end — with nothing bound, that it is "
+              "inert — so an attachment can tell a turn the session bought from one it merely reached",
+              _seen_payload.get("gate_allowed_by") == "no_mandate")
+
+        # #134: AN ATTACHMENT WHOSE OWN ADVICE IS `arm` COULD NOT SEE THE ARM. It blocked, the arm
+        # stays unspent while anything blocks, and the next turn-end was the same arm and the same
+        # block until the bound stood it down — three turns per doorbell, for a session doing exactly
+        # what it was told. Driven with a trigger that honours an arm and nothing else, so the PAIR
+        # below differs only in what bought the turn-end.
+        _attach_stop({"name": "stall-check", "command":
+                      "python3 -c 'import json,sys; "
+                      "sys.exit(0 if json.load(sys.stdin).get(\"gate_allowed_by\")==\"arm\" else 1)'"})
+        gl(stp, "mandate", "--set", "ship the golden", sid="sess-134")
+        gl(stp, "arm", "--question", "approve the golden?", "--read", _stf, "--predict", "yes",
+           sid="sess-134")
+        _armed_end = _end(sid="sess-134", msg="Waiting on your approval of the golden.")
+        try:
+            with open(os.path.join(stp, ".game_loop", "sessions", "sess-134", "state.json")) as f:
+                _armed_after = json.load(f).get("t3_armed") or {}
+        except (OSError, ValueError):
+            _armed_after = {}
+        check("#134: a fresh arm reaches the attachment as `arm`, so one that honours it lets the "
+              "armed turn-end through — and the arm is SPENT there, not left to re-excuse the next",
+              _armed_end.returncode == 0 and _armed_after.get("spent") is True)
+        gl(stp, "checkpoint", "--notes", "golden posted; waiting", sid="sess-134")
+        _ck_end = _end(sid="sess-134", msg="Golden posted.")
+        check("...while the same attachment still BLOCKS a turn-end a checkpoint bought — the field "
+              "names the reason rather than meaning 'something allowed it'",
+              _ck_end.returncode == 2 and "stall-check" in _ck_end.stderr)
+        gl(stp, "mandate", "--clear", sid="sess-134")
 
         # ── FAIL OPEN, AND SAY SO ───────────────────────────────────────────────────────────────
         # A trigger that ERRORS must not wedge the session: a guard must never block its own fix

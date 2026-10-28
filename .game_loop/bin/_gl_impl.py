@@ -7393,7 +7393,19 @@ def stop_trigger_budget():
     return budget, None
 
 
-def stop_trigger_block(s, payload, notices):
+# WHY THE GATE IS LETTING THIS TURN END, as the attachments are told it (#134). Without it an
+# attachment could not see that the session had just done what it asked: a stall check whose own
+# advice is `arm` blocked the arm it asked for three turn-ends running, because the arm stays unspent
+# while anything blocks and nothing in the payload said one was there. Only the ATTACHMENT can know
+# whether an arm answers it ("the session is waiting on a human" does; "the tree is dirty" does not),
+# so the gate states the fact and decides nothing for it. Public words, not the log's `kind`s: a
+# consumer's script keys on these, and a log field renamed for the log's sake must not break it.
+STOP_ALLOWED_BY = {None: "no_mandate", "t3_spend": "arm", "checkpoint": "checkpoint",
+                   "mandate_park_stop": "park", "stop_gate_exhausted": "breaker",
+                   "stop_after_block": "reentry"}
+
+
+def stop_trigger_block(s, payload, notices, allowed_by=None):
     """Run this project's `stop` attachments. Returns the text that BLOCKS turn-end, or None.
 
     Non-zero exit blocks and its stderr goes back to the model — cmd_stopgate's contract, handed to
@@ -7412,7 +7424,8 @@ def stop_trigger_block(s, payload, notices):
     # transcript is work the harness has already done.
     fields = ("session_id", "transcript_path", "stop_hook_active", "last_assistant_message")
     tp = {k: payload.get(k) for k in fields if payload.get(k) is not None}
-    tp.update({"event": "stop", "project": config().get("project_name"), "session": SESSION})
+    tp.update({"event": "stop", "project": config().get("project_name"), "session": SESSION,
+               "gate_allowed_by": allowed_by})
     blocks, seen = [], s.setdefault("stop_triggers", {})
     budget, hook_cut = stop_trigger_budget()
     deadline = time.time() + budget
@@ -7664,7 +7677,9 @@ def cmd_stopgate(s, a, payload):
                 "  BLIND SPOT: an in-process subagent in the SAME tree shares this cwd and cannot be\n"
                 "  told apart here at all. The words are the only tell, which is where #88 landed too.")
         try:
-            tblock = stop_trigger_block(s, payload, notices)
+            tblock = stop_trigger_block(
+                s, payload, notices,
+                allowed_by=STOP_ALLOWED_BY.get((rec or {}).get("kind"), "other"))
         except Exception as exc:  # noqa: BLE001 — belt beside the braces in _run_trigger
             # That runner already turns everything a command can do into an answer, so reaching here
             # means the promise was wrong. This is the one case that would gate every turn-end in

@@ -1,0 +1,12 @@
+{
+  "name": "game_loop",
+  "install": "./install.sh {consumer}",
+  "provenance": {
+    ".game_loop/VERSION": "{sha}",
+    ".game_loop/CONFIDENCE": "{tag_prefix}"
+  },
+  "markers": {
+    ".game_loop/installed-by.json": "{\"name\":\"lamp\",\"upgrade\":\"lamp upgrade {geanie}\"}"
+  },
+  "installedStamp": ".game_loop/VERSION"
+}

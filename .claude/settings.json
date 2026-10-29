@@ -38,6 +38,17 @@
             "statusMessage": "game_loop: does this MCP call mutate?"
           }
         ]
+      },
+      {
+        "matcher": "CronCreate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"$CLAUDE_PROJECT_DIR/.game_loop_self/.game_loop\"; [ -x \"$d/bin/game_loop\" ] || d=\"$CLAUDE_PROJECT_DIR/.game_loop\"; GAME_LOOP_HOME=\"$CLAUDE_PROJECT_DIR/.game_loop\" exec \"$d\"/bin/game_loop crongate",
+            "timeout": 10,
+            "statusMessage": "game_loop: is this a recurring self-ping?"
+          }
+        ]
       }
     ],
     "Stop": [

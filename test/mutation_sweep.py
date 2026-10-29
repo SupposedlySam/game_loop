@@ -637,6 +637,20 @@ MUTANTS = [
      "a denominator that excludes consume_authorization. It cannot do so SILENTLY any more, "
      "because the sixteen NOT_SWEPT entries naming them then point at nothing, and the "
      "stale-exclusion check refuses that.", 0),
+    ("crongate_verdict -> every CronCreate is allowed, recurring or not (#135)",
+     ".game_loop/bin/_gl_impl.py::crongate_verdict", "    return True, None\n",
+     ['RECURRING CronCreate is denied', 'OMITS `recurring`', 'one-shot passes'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO (True, None) IS THE PRE-FIX WORLD EXACTLY: before #135 "
+     "nothing looked at CronCreate, and a 10-minute doorbell stayed armed for days while llms.txt "
+     "forbade it. The one-shot and other-tool assertions pass BY CONSTRUCTION under this neuter, "
+     "which is why each refusal assertion is paired with them rather than standing alone.", 0),
+    ("spend_tool_grant -> a human's CronCreate grant is never spent, so it never opens",
+     ".game_loop/bin/_gl_impl.py::spend_tool_grant", "    return None\n",
+     ['typed in another directory', 'says so out loud', 'grant is SPENT'],
+     "FLOOR OWED, RECORDED 0. NEUTERED TO None, every recurring cron is refused even with a "
+     "human's words on record, so the hatch the refusal text names would be a dead end. The "
+     "'next recurring cron is refused again' assertion passes BY CONSTRUCTION under this neuter; "
+     "only the assertions requiring the grant to OPEN the gate can kill it.", 0),
     ("unbound_mandate_notice -> the notice never has anything to say",
      ".game_loop/bin/_gl_impl.py::unbound_mandate_notice", '    return ""\n',
      ['FIRES on the case it exists for', 'never REFUSES', 'says so in BOTH directions'],
@@ -2236,6 +2250,9 @@ NOT_SWEPT = {
                               "not swept — the same call as read_or_empty above.",
     "test/run.py::_ssctx": "a suite fixture helper",
     "test/run.py::_ask": "a suite fixture helper",
+    "test/run.py::_cron_log": "a suite helper reading the #135 sandbox log: neutered to an empty "
+                              "list it reddens the two count assertions that use it, which is the "
+                              "safe direction, so there is no silence for a sweep to find",
     "test/run.py::_pol": "a suite fixture helper",
     "test/run.py::_guard_note": "a suite fixture helper that reads a guard's additionalContext",
     "test/run.py::_guard_block": "a suite fixture helper that reads a guard's refusal",

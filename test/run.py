@@ -12381,6 +12381,108 @@ def main():
     finally:
         shutil.rmtree(tpp, ignore_errors=True)
 
+    # ── A RECURRING SELF-PING IS REFUSED AT CREATION (#135) ─────────────────────────────────────
+    # llms.txt forbade an unconditional timer and an orchestrator kept a 10-minute doorbell armed for
+    # days anyway. Every refusal below is paired with the call it must NOT refuse, because a gate
+    # that denies every CronCreate passes each refusal check and is useless: the one-shot, the
+    # unrelated tool and the authorized call are what make the refusals mean something.
+    print("the cron gate — a recurring CronCreate is refused, a one-shot is not:")
+    cgp = make_sandbox()
+    try:
+        def _cron(ti, sid="sess-cron", tool="CronCreate"):
+            return gl(cgp, "crongate", sid=sid, stdin=json.dumps(
+                {"session_id": sid, "tool_name": tool, "tool_input": ti}))
+
+        def _hso(out):
+            """The hook's JSON answer, or {} — an empty stdout is the allow path, not an error."""
+            try:
+                return json.loads(out).get("hookSpecificOutput", {}) or {}
+            except ValueError:
+                return {}
+
+        def _cron_log(kind):
+            """Records of `kind` in the sandbox log, parsed: a substring match on the raw line would
+            also count a record that merely QUOTES the kind in its prompt. An unreadable log yields
+            no records, which fails every count asserted on it rather than satisfying one."""
+            recs = []
+            try:
+                with open(os.path.join(cgp, ".game_loop", "log.jsonl")) as f:
+                    recs = [json.loads(l) for l in f if l.strip()]
+            except (OSError, ValueError):
+                pass
+            return [r for r in recs if r.get("kind") == kind]
+
+        _ping = {"cron": "*/10 * * * *", "prompt": "check your background tasks", "recurring": True}
+        _r = _cron(_ping)
+        _why = _hso(_r.stdout).get("permissionDecisionReason", "")
+        check("#135: a RECURRING CronCreate is denied, exit 0 with a deny body — the PreToolUse "
+              "protocol, not a crash the host would read as a non-blocking error",
+              _r.returncode == 0 and denied(_r))
+        check("...and the refusal names the call it refused and the three ways forward: a "
+              "one-shot, a waiter recorded with `note --recovery`, and a human's `authorize`",
+              "*/10 * * * *" in _why and "check your background tasks" in _why
+              and "recurring: false" in _why and "note --recovery" in _why
+              and "authorize --path CronCreate" in _why)
+        check("...and it says what it does NOT see, so a quiet gate is not read as 'no timers here'",
+              "NOT SEEN BY THIS CHECK" in _why and "Monitor" in _why)
+        check("...and the refusal is LOGGED, so 'how often was a self-ping refused' is a count",
+              len(_cron_log("cron_gate_block")) == 1)
+        check("a CronCreate that OMITS `recurring` is refused too: the host's default is "
+              "recurring, so reading absence as one-shot would pass exactly the call that omits it",
+              denied(_cron({"cron": "7 * * * *", "prompt": "hourly release check"})))
+
+        _one = _cron({"cron": "30 14 29 10 *", "prompt": "check the deploy", "recurring": False})
+        check("...while an explicit one-shot passes, SILENTLY — it cost the reporter nothing, and a "
+              "notice on every reminder would be a tax on the case nobody asked to change",
+              _one.returncode == 0 and not denied(_one) and not _one.stdout.strip())
+        check("...and a payload for another tool passes, so the matcher is not the only thing "
+              "keeping this gate off every other call",
+              not denied(_cron(_ping, tool="Bash")))
+
+        # THE HATCH. Typed from a DIFFERENT directory than the hook runs in: a grant is stored
+        # realpathed, so matching it by full path would work only where it was typed, which a hook
+        # does not promise. This is the case HOST_TOOL_GRANTS exists for.
+        _elsewhere = _tmpdir("glcron-")
+        _az = subprocess.run([os.path.join(cgp, ".game_loop", "bin", "game_loop"), "authorize",
+                              "--path", "CronCreate", "--reason", "run the intake check every morning"],
+                             cwd=_elsewhere, capture_output=True, text=True,
+                             env=_env(sid="sess-cron"))
+        _ok = _cron(_ping)
+        _ctx = _hso(_ok.stdout).get("additionalContext", "")
+        check("a human's `authorize --path CronCreate`, typed in another directory, lets ONE "
+              "recurring cron through",
+              _az.returncode == 0 and _ok.returncode == 0 and not denied(_ok))
+        check("...and says so out loud, quoting the human's words, rather than spending the grant "
+              "in silence (#103)",
+              "ALLOWED" in _ctx and "run the intake check every morning" in _ctx
+              and len(_cron_log("authorized_tool")) == 1)
+        check("...and the grant is SPENT: the next recurring cron is refused again",
+              denied(_cron(_ping)))
+
+        _az2 = subprocess.run([os.path.join(cgp, ".game_loop", "bin", "game_loop"), "authorize",
+                               "--path", "CronCreate", "--reason", "every morning, please"],
+                              cwd=_elsewhere, capture_output=True, text=True,
+                              env=_env(sid="sess-cron"))
+        _rv = gl(cgp, "authorize", "--revoke", "CronCreate", "--reason", "changed my mind",
+                 sid="sess-cron")
+        check("`authorize --revoke CronCreate` finds that grant by NAME and disarms it, so the "
+              "hatch can be shut the same way it was opened",
+              _az2.returncode == 0 and _rv.returncode == 0 and "REVOKED" in _rv.stdout
+              and denied(_cron(_ping)))
+
+        # SHIPPED, NOT JUST WRITTEN. install.sh appends every template entry a consumer lacks, so
+        # the template IS what reaches them; a verb missing from it would pass every check above
+        # and never run anywhere but here.
+        with open(os.path.join(REPO, "templates", "settings.hooks.json")) as f:
+            _tmpl = json.load(f)["hooks"]["PreToolUse"]
+        check("the shipped hook template wires `crongate` on a CronCreate matcher",
+              any(e.get("matcher") == "CronCreate"
+                  and any(h.get("command", "").endswith("bin/game_loop crongate")
+                          for h in e.get("hooks", []))
+                  for e in _tmpl))
+    finally:
+        shutil.rmtree(cgp, ignore_errors=True)
+
     # ── THE MOMENT THAT DECIDES INSTEAD OF ANNOUNCING (#64) ─────────────────────────────────────
     # Every trigger above is an announcement whose exit code changes nothing — "a trigger never
     # blocks the work" is printed under each failure. This one blocks: non-zero refuses turn-end and
@@ -18972,8 +19074,8 @@ def main():
           and "byte-identical" not in _drift_txt)
     check("...and each still names the script it runs, so the wiring stays readable",
           all(any(t in c for t in ("guard-writes.sh", "guard-mcp.sh", "game_loop limitgate",
-                                   "game_loop stopgate", "game_loop sessionstart",
-                                   "watchdog")) for c in _cmds))
+                                   "game_loop crongate", "game_loop stopgate",
+                                   "game_loop sessionstart", "watchdog")) for c in _cmds))
 
     # THE CHECK EXISTED AND NOBODY WAS GOING TO RUN IT. Everything above proves `self` reports
     # drift — and `self` is a verb nothing invokes automatically, which this project's own

@@ -460,6 +460,34 @@ bar, and a handoff written one turn ago would read as stale forever.
 Writing the handoff opens the gate but does **not** shrink the context, so the refusal points at the
 one verb that finishes the job.
 
+### The cron gate — `game_loop crongate`
+
+A third `PreToolUse` hook, matched on `CronCreate` only (#135). It refuses a **recurring** job: a
+timer that wakes the session on every tick whether or not there is work. An orchestrator kept a
+10-minute doorbell and two daily crons armed for days, each tick re-invoking an idle session to
+answer "nothing in flight", while `llms.txt` already said not to. An absent `recurring` is refused
+too, because recurring is `CronCreate`'s own default.
+
+What it passes, on purpose:
+
+- **A one-shot** (`recurring: false`), silently. It cost the reporter nothing.
+- **`ScheduleWakeup`.** It exists only inside a `/loop` the human typed, and each wake is one-shot.
+- **A human's grant.** `game_loop authorize --path CronCreate --reason "<their exact words>"` lets
+  one recurring job through, says so in the call's context, and logs `authorized_tool`. The grant
+  is matched by name, so it works wherever it was typed, and `authorize --revoke CronCreate` shuts
+  it.
+
+The refusal points at the shape that costs no turn while idle: one `run_in_background` waiter that
+sleeps until its slot, runs the check, and exits only when there is something to act on. A waiter
+dies with its session, so the refusal also asks for `note --recovery` naming the relaunch command.
+
+Refusals are logged as `cron_gate_block`. A crash exits non-zero, which the host treats as a
+non-blocking error, so the gate fails **open**: a timer is a cost, not damage.
+
+**What it cannot see:** the same timer built another way, such as a `while true; sleep N` loop that
+prints every iteration inside Monitor, or a background job that exits on every tick. It also cannot
+list live cron jobs in `status`: `CronCreate` keeps them in memory and writes nothing to disk.
+
 ### The successor — `game_loop successor`
 
 game_loop has written a handoff at every turn-end since #45 and never started the session that reads
@@ -1298,7 +1326,7 @@ Everything lives in `.game_loop/`:
 | File | What it is |
 |---|---|
 | `bin/game_loop` | the CLI ENTRY POINT — a ~27-line stub that imports `_gl_impl.py`. It is not where the verbs live, and has not been since the split described below. |
-| `bin/_gl_impl.py` | the implementation: every verb, plus the stopgate/limitgate/statusline hook entrypoints. Split out of the stub for a measured reason — Python caches an imported module's bytecode and re-parses a `__main__` script on every invocation, which cost ~31ms of each of the 3,126 spawns one suite run makes. If a report names this file (pin drift does), this row is what it means. |
+| `bin/_gl_impl.py` | the implementation: every verb, plus the stopgate/limitgate/crongate/statusline hook entrypoints. Split out of the stub for a measured reason — Python caches an imported module's bytecode and re-parses a `__main__` script on every invocation, which cost ~31ms of each of the 3,126 spawns one suite run makes. If a report names this file (pin drift does), this row is what it means. |
 | `bin/watchdog` | the autonomy engine (Stop hook): idle rings, limit park, Slack reply forwarding |
 | `bin/guard-writes.sh` | the write guard (PreToolUse hook) |
 | `bin/verify` | the changed-file → owed-checks gate |

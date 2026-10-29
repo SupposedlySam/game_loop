@@ -2437,6 +2437,90 @@ def cmd_limitgate(s, a, payload):
     sys.exit(0)
 
 
+# A RECURRING SELF-PING IS REFUSED AT CREATION (#135). llms.txt said not to arm an unconditional timer
+# (13d413e), and an orchestrator kept a 10-minute doorbell plus two daily crons armed for days anyway:
+# every tick woke an idle session to answer "nothing in flight", and under a stop attachment each
+# tick then cost three turns (#134). The rule was prose, so it held only when somebody remembered
+# it. The reporter's own fix is the shape this points at: one background waiter that exits only
+# when there is something to act on, which costs no turn while idle.
+#
+# WHAT IS LEFT ALONE, on purpose. A one-shot (`recurring: false`) cost the reporter nothing.
+# `ScheduleWakeup` exists only inside a `/loop` the human typed, and each of its wakes is already
+# one-shot. Live jobs are not listed in `status` because there is nothing to read: CronCreate's own
+# description says its jobs are in-memory and nothing is written to disk.
+CRON_REFUSAL = """BLOCKED: a RECURRING CronCreate, which wakes this session on every tick whether or
+not there is anything to do (#135).
+
+  cron   : %s
+  prompt : %s
+
+Each tick re-invokes the session to find out that nothing happened, and it pays to re-orient every
+time. llms.txt already says not to do this; this check is that sentence enforced.
+
+A SCHEDULE IS NOT BY ITSELF A REASON FOR A CRON. Even "check at 8am and 2pm" works better as ONE
+background waiter that wakes nobody until there is work:
+
+  Bash with run_in_background: a script that sleeps until the slot, runs the check, and EXITS
+  ONLY when the check finds something to act on (or keeps failing). You are woken once, with
+  the finding.
+
+  The waiter dies with this session, so record how to relaunch it:
+    game_loop note --recovery "<the exact command that relaunches the waiter>"
+
+A one-shot reminder is not refused: pass recurring: false.
+
+If a HUMAN wants a turn on every tick, they can open this once. Quote them:
+    game_loop authorize --path CronCreate --reason "<their exact words>"
+
+NOT SEEN BY THIS CHECK: the same timer built another way, e.g. a `while true; sleep N` loop that
+prints every iteration inside Monitor, or a background job that exits on every tick. A hook cannot
+tell those apart from a real watch."""
+
+
+def crongate_verdict(payload):
+    """(allow, reason) for one PreToolUse payload. Pure, so the suite can drive it; the grant spend
+    and the log belong to cmd_crongate.
+
+    An ABSENT `recurring` is recurring, because that is CronCreate's own default: reading absence as
+    one-shot would wave through exactly the call that omits the field. Only an explicit `false` is
+    a one-shot."""
+    if payload.get("tool_name") != "CronCreate":
+        return True, None
+    ti = payload.get("tool_input") or {}
+    if ti.get("recurring") is False:
+        return True, None
+    prompt = " ".join(str(ti.get("prompt") or "").split())
+    return False, CRON_REFUSAL % (ti.get("cron") or "(none given)",
+                                  repr(prompt[:160] + ("…" if len(prompt) > 160 else "")))
+
+
+def cmd_crongate(s, a, payload):
+    """PreToolUse entrypoint for CronCreate. Same output protocol as cmd_limitgate: a deny is JSON on
+    stdout with permissionDecision=deny, always exit 0. A crash exits non-zero, which the host reads
+    as a non-blocking error, so this gate fails OPEN: a timer is a cost, not damage."""
+    allow, reason = crongate_verdict(payload)
+    if allow:
+        sys.exit(0)
+    ti = payload.get("tool_input") or {}
+    g = spend_tool_grant(s, "CronCreate")
+    if g:
+        # ANNOUNCED, NOT SILENT (#103): a grant spent without a word reads later as if the human
+        # sanctioned whatever happened to spend it.
+        logline({"kind": "authorized_tool", "tool": "CronCreate", "cron": ti.get("cron"),
+                 "reason": g.get("reason"), "uses_left": g.get("uses_left")})
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "additionalContext":
+                "game_loop: a recurring CronCreate was ALLOWED by a human's authorization, and one "
+                "use was spent: %r (%d use(s) left)." % (g.get("reason"), g.get("uses_left") or 0)}}))
+        sys.exit(0)
+    logline({"kind": "cron_gate_block", "cron": ti.get("cron"),
+             "prompt": str(ti.get("prompt") or "")[:200]})
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": reason}}))
+    sys.exit(0)
+
+
 # CODE_ROOT, not ROOT: the probe is executable code, so under a pin it must come from the
 # pinned copy alongside every other script rather than from the project it is guarding.
 PROBE_SCRIPT = os.path.join(CODE_ROOT, "bin", "limit-probe.sh")
@@ -4950,15 +5034,36 @@ def grant_live(a, now_iso=None):
     return int((a or {}).get("uses_left") or 0) > 0 and not grant_expired(a, now_iso)
 
 
+# HOST TOOLS A GRANT MAY NAME (#135). `authorize --path CronCreate` is stored realpathed, under the
+# directory it was typed in, so read back by full path it would match only from that directory, and a
+# hook does not promise that cwd. Read back by BASENAME instead, as a `gh ` verb is, and only for
+# names listed here, for grant_matches' own reason.
+HOST_TOOL_GRANTS = ("CronCreate",)
+
+
+def spend_tool_grant(s, tool):
+    """Spend one use of a live grant naming host tool `tool`, and return it; None when none is live.
+
+    Uses grant_live and grant_matches rather than its own test, so this gate cannot honour a grant
+    that `status` calls lapsed. Saves the decrement itself: a grant spent in memory and never written
+    is a hatch that stays open."""
+    for g in s.get("authorized", []) or []:
+        if grant_live(g) and grant_matches(g, tool):
+            g["uses_left"] = int(g.get("uses_left") or 0) - 1
+            save(s)
+            return g
+    return None
+
+
 def grant_matches(a, target):
     """Does grant `a` name `target`? Asked three ways, because `authorize` does not store what was
     typed: it realpaths `--path`, so a verb grant lands as `<cwd>/gh issue close` and the gh guard
     reads it back by BASENAME. A revoke that compared only the stored form would silently miss
     exactly the grants a human is most likely to name by hand.
 
-    The basename form is accepted ONLY for a `gh ` verb. Matching any grant by basename would let
-    `--revoke game_loop` disarm a grant on `/Users/x/dev/game_loop`, which is a different act than
-    the one asked for.
+    The basename form is accepted ONLY for a `gh ` verb or a name in HOST_TOOL_GRANTS. Matching any
+    grant by basename would let `--revoke game_loop` disarm a grant on `/Users/x/dev/game_loop`,
+    which is a different act than the one asked for.
     """
     stored = (a.get("path") or "").strip()
     t = (target or "").strip()
@@ -4967,7 +5072,7 @@ def grant_matches(a, target):
     if stored == t:
         return True
     base = os.path.basename(stored)
-    if base.startswith("gh ") and base == t:
+    if (base.startswith("gh ") or base in HOST_TOOL_GRANTS) and base == t:
         return True
     return stored == os.path.realpath(os.path.expanduser(t))
 
@@ -12141,6 +12246,7 @@ def self_hooks_block(code):
         wire("guard-writes.sh"),
         wire("guard-mcp.sh"),
         wire("game_loop limitgate"),
+        wire("game_loop crongate"),
         wire("game_loop stopgate"),
         wire("game_loop sessionstart"),
         wire("watchdog"),
@@ -13494,6 +13600,7 @@ def main():
 
     sub.add_parser("stopgate")    # Stop-hook entrypoint; not for humans
     sub.add_parser("limitgate")   # PreToolUse entrypoint (usage-limit handoff gate); not for humans
+    sub.add_parser("crongate")    # PreToolUse entrypoint (recurring CronCreate refusal); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart/PostCompact entrypoint; not for humans
     md = sub.add_parser("model")
@@ -13542,7 +13649,7 @@ def main():
     add_prose_file_options(sub)
     a = p.parse_args()
     resolve_prose(p, a)
-    if a.cmd in ("stopgate", "limitgate", "statusline", "sessionstart"):
+    if a.cmd in ("stopgate", "limitgate", "crongate", "statusline", "sessionstart"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses
         # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
         try:
@@ -13561,7 +13668,7 @@ def main():
             # Publish where the PARENT reads, on every hook run, so the verdict stays current
             # without the Crawler knowing or cooperating.
             write_model_verdict()
-        {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate,
+        {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate, "crongate": cmd_crongate,
          "statusline": cmd_statusline,
          "sessionstart": cmd_sessionstart}[a.cmd](load(), a, payload)
         return

@@ -1298,7 +1298,7 @@ with open(settings_f, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 print("  merged  .claude/" + os.path.basename(settings_f)
-      + " (PreToolUse guard + limitgate + Stop gate + watchdog)")
+      + " (PreToolUse guard + limitgate + crongate + Stop gate + watchdog)")
 # SAY WHICH FILE, AND WHAT THAT MEANS. This is the SHARED, source-controlled settings file, and
 # .game_loop/ is tracked too, so committing this turns the gates on for everyone who clones the
 # repo — which is the design, and was never told to the person choosing it. "merged

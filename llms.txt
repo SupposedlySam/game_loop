@@ -105,6 +105,13 @@ and an `asyncRewake` Stop hook (a GitHub or llm_chat waker) wakes only for new i
 timed check, make it conditional: a background loop that exits, and so wakes you, only when
 `doorbell` or `status` reports something pending.
 
+This is enforced for `CronCreate` (#135): `game_loop crongate` refuses a RECURRING job (an absent
+`recurring` counts, since that is the host's default) and passes a one-shot (`recurring: false`). A
+background waiter dies with its session, so record how to relaunch it with `note --recovery`. If a
+human really wants a turn on every tick, they open it once:
+`game_loop authorize --path CronCreate --reason "<their exact words>"`. It does not see the same
+timer built another way, such as a `while true; sleep` loop inside Monitor.
+
 For a wake from outside, the prompt is:
 
 ```

@@ -639,18 +639,26 @@ MUTANTS = [
      "stale-exclusion check refuses that.", 0),
     ("crongate_verdict -> every CronCreate is allowed, recurring or not (#135)",
      ".game_loop/bin/_gl_impl.py::crongate_verdict", "    return True, None\n",
-     ['RECURRING CronCreate is denied', 'OMITS `recurring`', 'one-shot passes'],
-     "FLOOR OWED, RECORDED 0. NEUTERED TO (True, None) IS THE PRE-FIX WORLD EXACTLY: before #135 "
-     "nothing looked at CronCreate, and a 10-minute doorbell stayed armed for days while llms.txt "
-     "forbade it. The one-shot and other-tool assertions pass BY CONSTRUCTION under this neuter, "
-     "which is why each refusal assertion is paired with them rather than standing alone.", 0),
+     ['RECURRING CronCreate is denied', 'OMITS `recurring`', 'names the call it refused',
+      'what it does NOT see', 'refusal is LOGGED', 'grant is SPENT', 'finds that grant by NAME',
+      "quoting the human's words, rather than spending"],
+     "NEUTERED TO (True, None) IS THE PRE-FIX WORLD EXACTLY: before #135 nothing looked at "
+     "CronCreate, and a 10-minute doorbell stayed armed for days while llms.txt forbade it. The "
+     "one-shot and other-tool assertions pass BY CONSTRUCTION under this neuter, which is why each "
+     "refusal assertion is paired with them rather than standing alone. MEASURED 2026-10-29 at "
+     "31eabc6, in a CLONE: SWEEP_ONLY reported 10 killed; neutering by hand and diffing the suite's "
+     "FAIL rows gave exactly 8 distinct names, every one of them a #135 assertion and each matched "
+     "by a mark above. The floor is the 8, the number with a name behind each unit.", 8),
     ("spend_tool_grant -> a human's CronCreate grant is never spent, so it never opens",
      ".game_loop/bin/_gl_impl.py::spend_tool_grant", "    return None\n",
-     ['typed in another directory', 'says so out loud', 'grant is SPENT'],
-     "FLOOR OWED, RECORDED 0. NEUTERED TO None, every recurring cron is refused even with a "
-     "human's words on record, so the hatch the refusal text names would be a dead end. The "
-     "'next recurring cron is refused again' assertion passes BY CONSTRUCTION under this neuter; "
-     "only the assertions requiring the grant to OPEN the gate can kill it.", 0),
+     ['typed in another directory', "quoting the human's words, rather than spending"],
+     "NEUTERED TO None, every recurring cron is refused even with a human's words on record, so "
+     "the hatch the refusal text names would be a dead end. The 'next recurring cron is refused "
+     "again' assertion passes BY CONSTRUCTION under this neuter; only the assertions requiring the "
+     "grant to OPEN the gate can kill it, and there are two. MEASURED 2026-10-29 at 31eabc6, in a "
+     "CLONE: SWEEP_ONLY reported 4 killed; neutering by hand and diffing the FAIL rows gave exactly "
+     "those 2. A floor of 2 is thin by this file's own measure (under 3), and it is thin because "
+     "the hatch has two observable effects, not because a third assertion was skipped.", 2),
     ("unbound_mandate_notice -> the notice never has anything to say",
      ".game_loop/bin/_gl_impl.py::unbound_mandate_notice", '    return ""\n',
      ['FIRES on the case it exists for', 'never REFUSES', 'says so in BOTH directions'],

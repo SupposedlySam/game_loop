@@ -68,9 +68,13 @@
         "exercise_note": "the host writes this through our own tap, so a snapshot in the expected shape IS the claim holding, observed on the consumer's machine rather than on the author's",
         "exercisable": "yes",
         "exercisable_why": "exercised: a snapshot in the expected shape IS the claim, and the missing-field arm is its positive control",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "RE-READ against 2.1.251 from a LIVE PAYLOAD this machine captured, not from a stamp: .game_loop/limits.json written by the statusline tap at 2026-09-01 14:27. It carries windows five_hour and seven_day, and each one carries used_percentage AND resets_at — which is exactly what the claim asserts, field for field. crossed_at and notified are game_loop's own additions, not the host's. This is the strongest form available here: an observation of the running host, so it cannot be stale in the way a version stamp can."
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "Reported by the drops owner agent in game_loop#146, who read it on a machine whose session was served by the 2.1.319 binary (attributed by PID with lsof). A live limits.json written by the statusline tap at 2026-11-09 15:48 carries five_hour and seven_day, each with used_percentage and resets_at. SECONDHAND: this checkout's own limits.json dates from 2026-10-23, so the observation is the reporter's, not mine.",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251"
+        }
       },
       {
         "id": "statusline-config-keys",
@@ -80,9 +84,13 @@
         "ledger": "statusLine config keys",
         "exercisable": "no",
         "exercisable_why": "unconditional: the host either honours the keys or does not, and I cannot construct the case where it does not",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "PARTIAL RE-READ against the running 2.1.251 binary, and PARTIAL is the honest word: `statusLine` occurs 28 times and `refreshInterval` 3, so those two keys are present. `padding` (312) and `type` (3831) are NOT evidence — both are ordinary words in a 230MB binary, and the 2.1.246 reading said the same of `padding` at 407. So this re-read establishes that the statusline config surface still EXISTS and still names refreshInterval; it does NOT establish the value semantics (min 1s), which no string count can show. Open this field before quoting the claim. Drift worth noting and not over-reading: statusLine went 29 -> 28 and padding 407 -> 312 between builds. Counts in a binary move for reasons that have nothing to do with a config surface, so neither number is a finding."
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "PARTIAL RE-READ by me against the 2.1.319 binary at ~/.vscode/extensions/anthropic.claude-code-2.1.319-darwin-arm64: statusLine occurs 66 times and refreshInterval 12, matching the count in game_loop#146. As before, a string count shows the config surface exists and still names refreshInterval; it does not show the value semantics (min 1s).",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251"
+        }
       },
       {
         "id": "no-rate-limits-in-hooks",
@@ -92,10 +100,14 @@
         "ledger": "Hook payloads carry rate-limit data",
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence and exercisable, not yet exercised: every hook invocation supplies a payload I control, and the payload carrying session_id is the positive control that the read worked while rate_limits was still absent",
-        "verified_on": "2026-08-26",
-        "verified_against": null,
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
         "exercised_by": "the Stop payload's own keys, scanned on every turn-end, with session_id present as the control that the read worked",
-        "verified_how": "EXERCISED today: .game_loop/probe/claims-observed.json, written by a real Stop hook at 21:46, records rate_limit_keys: [] with control: True — the payload was genuine (session_id present) and carried no rate-limit key anywhere. VERSION NOT ATTRIBUTED, and that is why verified_against is null rather than 2.1.246: the hook ran with no CLAUDE_CODE_EXECPATH in its environment, so the observation cannot name the build it watched. The tool records that as an explicit null with its reason instead of inferring one."
+        "verified_how": "Reported by the drops owner agent in game_loop#146, who read it on a machine whose session was served by the 2.1.319 binary (attributed by PID with lsof). probe/claims-observed.json, from a Stop hook at 15:49, records rate_limit_keys: [] with control: true. The artifact records host_version null (no CLAUDE_CODE_EXECPATH in the hook environment), so the version is attributed by the session the hook ran in, not read off the capture.",
+        "previous_reading": {
+          "verified_on": "2026-08-26",
+          "verified_against": null
+        }
       },
       {
         "id": "no-headless-usage-flag",
@@ -105,9 +117,14 @@
         "ledger": "A headless `claude usage` / `--usage` flag exists",
         "exercisable": "no",
         "exercisable_why": "unconditional: the case where the flag exists is the one I cannot construct, so there is nothing to provoke and no control to pair",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "RE-READ against the RUNNING binary at CLAUDE_CODE_EXECPATH (anthropic.claude-code-2.1.251-darwin-arm64), by its own --help. The 18 subcommands it lists are agents, attach, auth, auto-mode, doctor, gateway, import, install, logs, mcp, plugin|plugins, project, respawn, rm, setup-token, stop|kill, ultrareview, update|upgrade — no `usage` among them — and `--usage` occurs 0 times. WITH A CONTROL, because an absence read from a file proves nothing if the file was not read: `--output-format` occurs 5 times in the same text. One false positive worth keeping: the first grep matched `Usage: claude [options] [command] [prompt]`, the help HEADER rather than a subcommand — a word in every --help ever written, and reading it as evidence would have flipped the verdict."
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "Reported by the drops owner agent in game_loop#146, who read it on a machine whose session was served by the 2.1.319 binary (attributed by PID with lsof). --help lists no usage subcommand and --usage occurs 0 times, with --output-format as the control. My own string count in the same binary agrees: --usage 0. See rate_limit_event_note for the headless path that now exists without the flag.",
+        "rate_limit_event_note": "2026-11-09, game_loop#146: still holds AS WORDED, and the outcome it guards against has arrived by another door. A headless `-p --output-format json` or stream-json run emits a rate_limit_event carrying server-side unifiedWindows (five_hour and seven_day, each with utilization, resetsAt and status). Present in the 2.1.319 binary 30 times. So harness code CAN read server-side utilization, at the price of one session.",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251"
+        }
       },
       {
         "id": "no-readable-ratelimit-headers",
@@ -119,7 +136,8 @@
         "exercisable_why": "unconditional: nothing local produces the headers, so no run can discriminate",
         "verified_on": "2026-07-29",
         "verified_against": null,
-        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists — but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says."
+        "reverify_attempt": "2026-08-13 against 2.1.223: COULD NOT TELL, deliberately not stamped. 14 distinct anthropic-ratelimit-unified-* header names are present in the client, so the subject still exists — but the claim is about PERSISTENCE to somewhere harness code can read, and a minified binary establishes that neither way. A version stamp here would record that the header names exist, which is not what this claim says.",
+        "rate_limit_event_note": "2026-11-09, game_loop#146: still holds AS WORDED, and the outcome it guards against has arrived by another door. A headless `-p --output-format json` or stream-json run emits a rate_limit_event carrying server-side unifiedWindows (five_hour and seven_day, each with utilization, resetsAt and status). Present in the 2.1.319 binary 30 times. So harness code CAN read server-side utilization, at the price of one session."
       },
       {
         "id": "no-weekly-opus-window",
@@ -130,22 +148,31 @@
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL absence, now exercised: our own tap supplies the input, a known window present is the mechanism demonstrably firing, and an unexpected window would falsify it",
         "exercised_by": "a known window present in limits.json (the control) with no third window beside it (the claim)",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "RE-READ against 2.1.251 from the same live payload (2026-09-01 14:27): the windows present are EXACTLY five_hour and seven_day, and no other. The claim rules out a PER-MODEL weekly limit, so seven_day is expected and is not a counterexample — reading it as one was the mistake this re-read nearly made before the claim's own text was checked. STILL PARTIAL in the same way as before, and recorded so: an absence in one captured payload is evidence about that payload. A per-model window that only appears once a limit is approached would not be in it, and nothing here can construct that state."
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "Reported by the drops owner agent in game_loop#146, who read it on a machine whose session was served by the 2.1.319 binary (attributed by PID with lsof). The same payload carries exactly five_hour and seven_day. A headless rate_limit_event from 2.1.319 agrees: its unifiedWindows holds the same two and no others. Still PARTIAL in the same way as before: a per-model window that appears only near a limit would be in neither.",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251"
+        }
       },
       {
         "id": "fresh-session-token-floor",
-        "says": "a fresh session costs ~38.4k input tokens before answering at 2.1.246, of which ~24.9k is irreducible base preamble read from cache; MCP schemas are ~1.2k and the rest is tool definitions and per-session setup",
+        "says": "a fresh session costs ~38-40k input tokens before answering with NO MCP servers (39,556 at 2.1.319), and MCP and tool definitions add on top of that in proportion to what is configured: ~41k more with 32 servers and 373 tools",
         "source": "measured: claude -p ... --output-format json at 2.1.223",
         "breaks": "the recommendation against spawning sessions to sample usage rests on this floor; if it dropped to near zero the objection would weaken and a polling probe might be fine",
         "ledger": "A fresh Claude Code session costs ~31.5k INPUT tokens before it answers anything, and ~24k of that is irreducible",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "EXERCISED at 2.1.251, two probes as documented, and the result is PARTIAL with one half REFUTED as measurable. THE TOTAL HOLDS: baseline 37,105 input-side (2 in / 17,109 cache-create / 19,994 cache-read) against 38,371 recorded at 2.1.246 — a fresh session still costs ~37-38k before answering, which is what the headline asserts. THE MCP SHARE COULD NOT BE MEASURED, and the attempt says why: --strict-mcp-config came back at 38,559, HIGHER than the baseline, so the difference is -1,454. MCP schemas cannot subtract tokens. The two runs' cache-create/cache-read split differs by ~3k (17,109/19,994 versus 15,585/22,972), so run-to-run variance in cache warmth is larger than the ~1.2k share the exercise subtracts for. One pair of probes cannot isolate it; the earlier ~1.2k figure came from one pair too, and this result is the reason to doubt the method rather than the earlier number. THE DECOMPOSITION IS THE PART THAT MOVED: 'of which ~24.9k is irreducible base preamble read from cache' reads ~20.0k here, and given the variance above, that field should be treated as unstable rather than as a measured constant. Also worth the next reader's time: each probe takes longer than ten minutes, so it must be run unbounded — a 10-minute timeout kills it and leaves an empty file that reads exactly like a failure. Two of my four attempts today died that way.",
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "CONTROLLED RE-READ at 2.1.319, after game_loop#146 reported 81,032 input-side and called the floor refuted. That run had 32 MCP servers and 373 tools in init, so it could not separate the host from the configuration. The control, run by me on the same 2.1.319 binary: `claude -p 'reply with the single word: ok' --output-format json --strict-mcp-config --settings '{\"disableAllHooks\":true}'` gave 39,556 (2 in / 15,414 cache-create / 24,140 cache-read). So the HOST floor holds at about the 2.1.251 figure (37,105), and the reported 81k is ~41k of MCP and tool definitions. What is REFUTED is the old decomposition's 'MCP schemas are ~1.2k': that was true of a light configuration, and it scales with what a machine has configured. One run each, so treat the split as loose. The recommendation stands and is stronger on a heavily configured machine. TWO METHOD NOTES. With hooks disabled the run took about 1-6 s, so the old 'longer than ten minutes, run unbounded' note was hook time, not the model call. And here --output-format json returned ONE OBJECT whose usage is at the top level, while the reporter saw an array of events (an init event, rate_limit_event, assistant, result); something in their settings changes the shape, so read usage from the result element when it is a list.",
         "exercisable": "yes",
         "exercisable_why": "CONDITIONAL and exercisable, and the CHEAP path is now known. Previously recorded as not-yet because the exercise spends the resource it measures and needs network and credentials. That reasoning was sound and INCOMPLETE: the statusline payload's context_window carries ABSOLUTE counts (total_input_tokens, context_window_size, current_usage.input_tokens), not only used_percentage — read out of 2.1.223's own embedded schema on 2026-08-13. So `limitprobe` already spawns a FRESH session and its render already carries this claim's number: the exercise can ride a spawn that is being paid for anyway, instead of buying one. Still a debt, but a debt with a costed route rather than a reason to leave it alone.",
-        "exercised_by": "`claude -p 'reply with the single word: ok' --output-format json`, run on the binary at CLAUDE_CODE_EXECPATH, summing input_tokens + cache_creation_input_tokens + cache_read_input_tokens; repeat with --strict-mcp-config for the MCP share"
+        "exercised_by": "`claude -p 'reply with the single word: ok' --output-format json --strict-mcp-config --settings '{\"disableAllHooks\":true}'` on the binary at CLAUDE_CODE_EXECPATH, summing input_tokens + cache_creation_input_tokens + cache_read_input_tokens from the result (the top-level object, or the element with type 'result' when the output is an array). Repeat without --strict-mcp-config for the configuration's MCP and tool share.",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251",
+          "verified_how": "EXERCISED at 2.1.251, two probes as documented, and the result is PARTIAL with one half REFUTED as measurable. THE TOTAL HOLDS: baseline 37,105 input-side (2 in / 17,109 cache-create / 19,994 cache-read) against 38,371 recorded at 2.1.246 — a fresh session still costs ~37-38k before answering, which is what the headline asserts. THE MCP SHARE COULD NOT BE MEASURED, and the attempt says why: --strict-mcp-config came back at 38,559, HIGHER than the baseline, so the difference is -1,454. MCP schemas cannot subtract tokens. The two runs' cache-create/cache-read split differs by ~3k (17,109/19,994 versus 15,585/22,972), so run-to-run variance in cache warmth is larger than the ~1.2k share the exercise subtracts for. One pair of probes cannot isolate it; the earlier ~1.2k figure came from one pair too, and this result is the reason to doubt the method rather than the earlier number. THE DECOMPOSITION IS THE PART THAT MOVED: 'of which ~24.9k is irreducible base preamble read from cache' reads ~20.0k here, and given the variance above, that field should be treated as unstable rather than as a measured constant. Also worth the next reader's time: each probe takes longer than ten minutes, so it must be run unbounded — a 10-minute timeout kills it and leaves an empty file that reads exactly like a failure. Two of my four attempts today died that way."
+        }
       },
       {
         "id": "statusline-context-window",
@@ -155,9 +182,13 @@
         "ledger": "The statusline payload exposes only a PERCENTAGE of context used",
         "exercisable": "yes",
         "exercisable_why": "EXERCISED 2026-08-24. Our own limit probe records the raw block to probe/context-window.json, uninterpreted, so a later reading is a real observation rather than a memory of one — which is exactly what closed it.",
-        "verified_on": "2026-09-01",
-        "verified_against": "2.1.251",
-        "verified_how": "FULL RE-READ of a captured payload, and full is warranted this time: .game_loop/probe/context-window.json, observed 2026-09-01 14:27, carries EVERY field the claim names — context_window_size, total_input_tokens, total_output_tokens, used_percentage, remaining_percentage, and current_usage with all four of input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens. Not a string count in a binary: the actual block the host sent. ONE HONEST WEAKNESS, and it is the probe's rather than the claim's: the capture records host_version: null, with its own reason — 'no CLAUDE_CODE_EXECPATH in the environment'. So the payload is from this machine today, in a session whose EXECPATH is the 2.1.251 binary, but the ARTIFACT does not name the build it came from. The version above is attributed by session context, not read off the capture. A probe that cannot name the build it watched is the exact gap this file's freshness machinery depends on closing."
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "Reported by the drops owner agent in game_loop#146, who read it on a machine whose session was served by the 2.1.319 binary (attributed by PID with lsof). probe/context-window.json observed 2026-11-09 15:48 with host_version 2.1.319 carries total_input_tokens, total_output_tokens, context_window_size and all four current_usage fields. This one NAMES its build, which the 2.1.251 capture could not.",
+        "previous_reading": {
+          "verified_on": "2026-09-01",
+          "verified_against": "2.1.251"
+        }
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

@@ -699,6 +699,31 @@ The bound is measured against this repo's own logged prose, not chosen for round
 `.game_loop/triggers.json` (gitignored; see `templates/triggers.example.json`) lets a project hang
 its own command on a moment in the loop. Nothing is attached by default.
 
+**Two files, one format.** `triggers.json` is this machine's and stays gitignored, because it holds
+site wiring: local paths, room names, sometimes a credential. `.game_loop/triggers.shared.json` is
+the project's. Commit it, and the rules in it reach every checkout and every Crawler worktree. Both
+are read, shared entries first. A local entry with the **same name** replaces the shared one on that
+machine, which is how one machine switches a project rule off, and `status` reports the replacement
+so it is never silent. Write shared commands relative to `$GAME_LOOP_ROOT` (the `.game_loop/` the
+trigger runs under), not as absolute paths, so they work in every tree.
+
+**A `stop` check game_loop ships: `stopcheck announced-work`.** The Stop gate's announce-then-stop
+check is inert without a mandate, on purpose: it must not sit between a human and a conversation.
+A project whose agents should keep going without one, such as an owner agent steered live, attaches
+the same idea as a trigger:
+
+```json
+{"stop": [{"name": "announced-work",
+           "command": "\"$GAME_LOOP_ROOT/bin/game_loop\" stopcheck announced-work"}]}
+```
+
+It refuses a turn-end whose closing lines announce work (a "Next:" label, "next I'll", "I'm going
+to …") when nothing **after** the last announcement hands the turn back: no question, nothing
+waiting on the human, no blocker named. It is stricter than the mandate gate on purpose, because a
+project opted in. It stands aside while a mandate is bound, since the gate covers that turn-end, and
+while a background task is still running, since that is an honest wait. As a `stop` trigger it gets
+the bounds below for free, including the consecutive count, which counts only its own blocks.
+
 | Event | Fires when | Typically used for |
 |---|---|---|
 | `harden` | a learning was just encoded into an artifact | share the transferable form with other agents |

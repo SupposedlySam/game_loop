@@ -1039,13 +1039,56 @@ TRIGGER_EVENTS = {
 }
 
 
-def load_triggers():
+# THE PROJECT'S TRIGGERS, TRACKED, beside the machine's own (reported from gravity_brew). triggers.json
+# is gitignored on purpose: it holds site wiring, local paths and sometimes a credential. That also
+# kept a project's RULES from reaching its other checkouts and every showrunner Crawler worktree, so
+# a stop check written for the project held on one machine only. triggers.shared.json is the
+# committed half: the same format, merged under the local file, and a local entry with the same
+# name REPLACES the shared one, so a machine can still override or switch off a project rule. The
+# override is reported by `status`, never silent, because a rule the team believes is running and
+# one machine has replaced is the same observable from that machine.
+TRIGGERS_SHARED_F = os.path.join(ROOT, "triggers.shared.json")
+
+
+def _read_trigger_file(path):
     try:
-        with open(TRIGGERS_F) as f:
+        with open(path) as f:
             d = json.load(f)
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
+
+
+def _trigger_name(t):
+    return t.get("name") if isinstance(t, dict) and isinstance(t.get("name"), str) else None
+
+
+def trigger_overrides():
+    """[(event, name)] for every shared entry a local entry of the same name replaces."""
+    shared, local = _read_trigger_file(TRIGGERS_SHARED_F), _read_trigger_file(TRIGGERS_F)
+    out = []
+    for ev, sl in shared.items():
+        ll = local.get(ev)
+        if not (isinstance(sl, list) and isinstance(ll, list)):
+            continue
+        local_names = {_trigger_name(t) for t in ll} - {None}
+        out += [(ev, n) for n in (_trigger_name(t) for t in sl) if n in local_names]
+    return out
+
+
+def load_triggers():
+    """The shared file's entries, then the local file's, per moment; local wins on a name."""
+    shared, local = _read_trigger_file(TRIGGERS_SHARED_F), _read_trigger_file(TRIGGERS_F)
+    out = {}
+    for ev in list(shared) + [e for e in local if e not in shared]:
+        sl = shared.get(ev) if isinstance(shared.get(ev), list) else None
+        ll = local.get(ev) if isinstance(local.get(ev), list) else None
+        if sl is None and ll is None:
+            out[ev] = local.get(ev, shared.get(ev))   # a comment key, kept as it was
+            continue
+        local_names = {_trigger_name(t) for t in (ll or [])} - {None}
+        out[ev] = [t for t in (sl or []) if _trigger_name(t) not in local_names] + (ll or [])
+    return out
 
 
 def triggers_for(event):
@@ -1482,6 +1525,10 @@ def triggers_report():
         lines.append("      It cannot fire, and exit 0 is also what a satisfied guard does — so "
                      "broken and quiet")
         lines.append("      are the same observable from outside. → game_loop kinds")
+    for ev, name in trigger_overrides():
+        lines.append(f"  ⚠ [{ev}] {name} — the PROJECT's rule in triggers.shared.json is REPLACED on "
+                     "this machine by triggers.json's entry of the same name. The team's version is "
+                     "not the one running here.")
     unused = [e for e in TRIGGER_EVENTS if not triggers_for(e)]
     if unused:
         lines.append("  → moments with nothing attached: " + ", ".join(sorted(unused)))
@@ -2671,6 +2718,102 @@ def cmd_crongate(s, a, payload):
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
         "permissionDecisionReason": reason}}))
     sys.exit(0)
+
+
+# ── shipped stop attachments ────────────────────────────────────────────────────────────────────
+#
+# A CHECK GAME_LOOP SHIPS AND A PROJECT ATTACHES, rather than a mode of the Stop gate. Reported from
+# gravity_brew: with no mandate bound the gate is inert ON PURPOSE (`_stop_verdict`: it must never
+# sit between the human and a normal conversation), and that is most of an owner agent's day.
+# Jonah steers live, nobody binds a mandate, and an owner ended a turn on a closing "Next:" list
+# with nothing blocking it. Their workaround was a hand-rolled Stop hook, which then let a stall
+# through because its "allow the second stop" escape keyed on stop_hook_active, a flag any Stop
+# hook's block sets.
+#
+# WHY AN ATTACHMENT AND NOT A CONFIG SWITCH: the `stop` trigger runner already owns everything this
+# needs and gets right. It bounds blocks per attachment (STOP_TRIGGER_BLOCK_LIMIT, which counts
+# only this check's own blocks, so another hook cannot spend its escape), shares the turn-end
+# budget, fails open loudly, and reports every outcome in `status`. A config switch inside the gate
+# would need all of that a second time. As a verb it is one line in triggers.shared.json, and that
+# file is committed, so it reaches every checkout and every Crawler worktree.
+#
+# STRICTER THAN THE MANDATE GATE, deliberately, because a project opted in to it. The mandate gate
+# reads "next up is X" as an honest plan. Here a closing "Next:" label counts as announced work,
+# because that is the reported failure. What excuses it is POSITION: only a hand-back that comes
+# AFTER the last announcement counts. Measured by the reporter: an earlier "whenever you say" about
+# something else excused a later "Next, step 2: I'll start…".
+_NEXT_LABEL_PAT = re.compile(
+    r"^\s*(?:[-*•]\s*|\d+[.)]\s*)?\*{0,2}next(?:\s+(?:for me|up|steps?|step \d+))?\*{0,2}\s*[:,]",
+    re.I)
+_HANDBACK_PAT = re.compile(
+    r"\b(?:waiting (?:on|for)|blocked on|needs? (?:you|your)|when you(?:'re| are) ready|"
+    r"whenever (?:you|suits)|your (?:call|ok|go-ahead|decision)|let me know|tell me|"
+    r"(?:after|once|when) you (?:approve|confirm|decide|reply|answer|say|reload|restart))\b", re.I)
+_ANNOUNCE_TAIL_LINES = 12
+
+
+def announced_work_verdict(payload, mandate_active=False):
+    """(block, why) for one Stop payload. Pure, so the suite can drive every branch.
+
+    Allows, and says why, when: a mandate is bound (the Stop gate's own announce check owns that
+    turn-end, and two checks on one sentence would block it twice), a background task is still
+    running (an honest wait: its completion re-invokes the session), the closing message cannot be
+    read (a check that cannot read its input must not start refusing), or nothing is announced.
+    """
+    if mandate_active:
+        return False, "a mandate is bound; the Stop gate's own announce check covers this turn-end"
+    running = [t for t in (payload.get("background_tasks") or [])
+               if isinstance(t, dict) and t.get("status") == "running"]
+    if running:
+        return False, ("%d background task(s) still running, so the session is waiting on "
+                       "something that will wake it" % len(running))
+    text, why_not = _last_assistant_text(payload)
+    if not text:
+        return False, "the closing message could not be read (%s)" % why_not
+    # Quoted spans are blanked so a message can QUOTE an announcement without being one, the same
+    # protection _closing gives the mandate gate. Bold is KEPT: "**Next:**" is the reported shape.
+    blanked = re.sub(r'"[^"\n]*"', '""', text)
+    blanked = re.sub(r"`[^`\n]*`", "``", blanked)
+    lines = [ln for ln in blanked.strip().splitlines() if ln.strip()][-_ANNOUNCE_TAIL_LINES:]
+    last = None
+    for i, ln in enumerate(lines):
+        if _NEXT_LABEL_PAT.search(ln) or _promised_to_continue(ln):
+            last = i
+    if last is None:
+        return False, "no announced work in the closing lines"
+    after = "\n".join(lines[last:])
+    if _asked_the_user(after) or _HANDBACK_PAT.search(after):
+        return False, "the turn hands back to the human after its last announcement"
+    return True, lines[last].strip()[:160]
+
+
+ANNOUNCED_WORK_BLOCK = """announced-work: your closing message announces work and then ends the turn.
+
+    you wrote: %s
+
+Nothing after that line hands the turn back: no question, nothing waiting on the human, no
+background task still running. If the work is yours to do now, do it. If it really is blocked,
+say on what ("blocked on <fact>", "waiting for you to <x>"), and that line ends the turn honestly.
+
+This check is game_loop's `stopcheck announced-work`, attached by this project as a `stop` trigger."""
+
+
+def cmd_stopcheck(s, a, payload):
+    """`stop` trigger entrypoint. exit 0 = no objection; exit 2 = block, stderr is the reason.
+
+    FAILS OPEN ON ITS OWN ERROR, and says so: a non-zero exit from a trigger is read as a block, so
+    a crash here would refuse every turn-end for a reason nobody wrote."""
+    try:
+        block, why = announced_work_verdict(
+            payload, bool((s.get("mandate") or {}).get("active")))
+    except Exception as exc:  # noqa: BLE001
+        print("stopcheck announced-work could not decide (%s); not objecting" % exc,
+              file=sys.stderr)
+        sys.exit(0)
+    if not block:
+        sys.exit(0)
+    print(ANNOUNCED_WORK_BLOCK % why, file=sys.stderr)
+    sys.exit(2)
 
 
 # CODE_ROOT, not ROOT: the probe is executable code, so under a pin it must come from the
@@ -7779,7 +7922,12 @@ def stop_trigger_block(s, payload, notices, allowed_by=None):
     # whether a turn may end wants the same evidence this gate uses — the closing message above all,
     # since "did it answer the question" is a question about that text — and re-deriving it from the
     # transcript is work the harness has already done.
-    fields = ("session_id", "transcript_path", "stop_hook_active", "last_assistant_message")
+    # background_tasks rides along because a turn that ends while one is RUNNING is an honest wait
+    # (its completion re-invokes the session), which is the first thing an announce check must
+    # tell apart from a stall. Missing from this list, `stopcheck announced-work` read every such
+    # wait as a stall: the check existed and its input never arrived.
+    fields = ("session_id", "transcript_path", "stop_hook_active", "last_assistant_message",
+              "background_tasks")
     tp = {k: payload.get(k) for k in fields if payload.get(k) is not None}
     tp.update({"event": "stop", "project": config().get("project_name"), "session": SESSION,
                "gate_allowed_by": allowed_by})
@@ -7877,8 +8025,11 @@ def stop_trigger_block(s, payload, notices, allowed_by=None):
         "which is the entire reason it holds every time rather than most times. Do ONE of these:\n\n"
         "  1. DO WHAT IT ASKS, then end the turn again. Nearly always correct: the check is cheap\n"
         "     and it passes the moment the thing it wants is true.\n"
-        "  2. If it is WRONG, it is not a law — it is a line in .game_loop/triggers.json. Fix the\n"
-        "     command or detach it. Nothing here stops you editing the file that configures it.\n\n"
+        "  2. If it is WRONG, it is not a law — it is a line in .game_loop/triggers.json (this\n"
+        "     machine's) or .game_loop/triggers.shared.json (the project's, committed). Fix the\n"
+        "     command or detach it. Nothing here stops you editing the file that configures it.\n"
+        "     A project rule is the team's: change it in a commit they can see, or override it\n"
+        "     for this machine with an entry of the same name in triggers.json.\n\n"
         f"It stands down after {STOP_TRIGGER_BLOCK_LIMIT} consecutive blocks and lets the turn end,\n"
         "so an attachment whose condition nobody present can satisfy cannot trap this session.")
     return "\n".join(lines)
@@ -13873,6 +14024,10 @@ def main():
     sub.add_parser("crongate")    # PreToolUse entrypoint (recurring CronCreate refusal); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart entrypoint (also after compaction); not for humans
+    stc = sub.add_parser("stopcheck")  # a `stop` trigger game_loop ships; attach it, do not run it
+    stc.add_argument("check", choices=["announced-work"],
+                     help="announced-work: refuse a turn-end whose closing lines announce work "
+                          "with nothing after them handing the turn back")
     md = sub.add_parser("model")
     md.add_argument("--json", action="store_true",
                     help="emit the verdict as JSON — the form a PARENT reads, since the session "
@@ -13919,7 +14074,8 @@ def main():
     add_prose_file_options(sub)
     a = p.parse_args()
     resolve_prose(p, a)
-    if a.cmd in ("stopgate", "limitgate", "crongate", "statusline", "sessionstart"):
+    if a.cmd in ("stopgate", "limitgate", "crongate", "statusline", "sessionstart",
+                 "stopcheck"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses
         # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
         try:
@@ -13940,7 +14096,7 @@ def main():
             write_model_verdict()
         {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate, "crongate": cmd_crongate,
          "statusline": cmd_statusline,
-         "sessionstart": cmd_sessionstart}[a.cmd](load(), a, payload)
+         "sessionstart": cmd_sessionstart, "stopcheck": cmd_stopcheck}[a.cmd](load(), a, payload)
         return
     set_session(env_session())
     s = load()

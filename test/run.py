@@ -13125,6 +13125,56 @@ def main():
               "inert — so an attachment can tell a turn the session bought from one it merely reached",
               _seen_payload.get("gate_allowed_by") == "no_mandate")
 
+        # TRACKED TRIGGERS AND THE SHIPPED ANNOUNCE CHECK (reported from gravity_brew). A project's
+        # stop rule lived only in the gitignored triggers.json, so it held on one machine; and the
+        # announce-then-stop check was inert without a mandate, which is most of an owner agent's
+        # day. One mechanism answers both: a committed triggers.shared.json attaching
+        # `stopcheck announced-work`, a verb game_loop ships.
+        _shf = os.path.join(stp, ".game_loop", "triggers.shared.json")
+        _sc_cmd = '"$GAME_LOOP_ROOT/bin/game_loop" stopcheck announced-work'
+        with open(_shf, "w") as f:
+            json.dump({"stop": [{"name": "announced-work", "command": _sc_cmd}]}, f)
+        if os.path.exists(_stf):
+            os.remove(_stf)
+        _next = "Shipped the parser.\n\n**Next:**\n- the brew guide's backend\n- the timer screen"
+        _an = _end(sid="sess-announce", msg=_next)
+        check("a stop rule in the TRACKED triggers.shared.json runs with no local triggers.json at "
+              "all, and the shipped announce check BLOCKS a closing 'Next:' list with no mandate bound",
+              _an.returncode == 2 and "announced-work" in _an.stderr
+              and "you wrote: **Next:**" in _an.stderr)
+        _ok_ends = [
+            "Shipped the parser and released it as #12.",
+            "Shipped the parser.\n\n**Next:** the backend, once you approve the schema.",
+            "Shipped the parser. Next up is the backend. Want me to start it?",
+            "**Next:** blocked on Jonah's decision about the schema.",
+            "I wrote about why \"Next I'll take #63\" was wrong.",
+        ]
+        check("...and it does NOT block an ending that hands back AFTER the announcement, asks, "
+              "names a blocker, merely quotes one, or announces nothing (5 shapes)",
+              all(_end(sid="sess-announce-ok", msg=m).returncode == 0 for m in _ok_ends))
+        check("...nor a turn-end while a BACKGROUND TASK is still running, which is an honest wait "
+              "— the field has to reach the trigger for this to be decidable at all",
+              _end(sid="sess-announce-bg", msg=_next,
+                   background_tasks=[{"id": "b1", "status": "running"}]).returncode == 0)
+        check("...and position decides: an earlier hand-back does not excuse a LATER announcement",
+              _end(sid="sess-announce-pos", msg="No release yet, whenever you say.\n\n"
+                   "**Next, step 2:** I'll start by wiring the API.").returncode == 2)
+        _attach_stop({"name": "announced-work", "command": "exit 0"})
+        _ov = _end(sid="sess-announce-ov", msg=_next)
+        _ov_status = gl(stp, "status", sid="sess-announce-ov").stdout
+        check("a local triggers.json entry with the SAME NAME replaces the project's rule on this "
+              "machine, and `status` says the team's version is not the one running here",
+              _ov.returncode == 0 and "REPLACED on this machine" in _ov_status
+              and "announced-work" in _ov_status)
+        _attach_stop({"name": "local-only", "command": "echo 'local says no' >&2; exit 1"})
+        _both = _end(sid="sess-announce-both", msg=_next)
+        check("...while a local entry with a DIFFERENT name runs BESIDE the shared one, not instead "
+              "of it",
+              _both.returncode == 2 and "local says no" in _both.stderr
+              and "announced-work:" in _both.stderr)
+        os.remove(_shf)
+        os.remove(_stf)
+
         # #134: AN ATTACHMENT WHOSE OWN ADVICE IS `arm` COULD NOT SEE THE ARM. It blocked, the arm
         # stays unspent while anything blocks, and the next turn-end was the same arm and the same
         # block until the bound stood it down — three turns per doorbell, for a session doing exactly

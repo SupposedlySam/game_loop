@@ -637,6 +637,24 @@ MUTANTS = [
      "a denominator that excludes consume_authorization. It cannot do so SILENTLY any more, "
      "because the sixteen NOT_SWEPT entries naming them then point at nothing, and the "
      "stale-exclusion check refuses that.", 0),
+    ("announced_work_verdict -> no closing message is ever announced work",
+     ".game_loop/bin/_gl_impl.py::announced_work_verdict", "    return False, 'neutered'\n",
+     ["shipped announce check BLOCKS", "position decides", "runs BESIDE the shared one"],
+     "NEUTERED TO 'never block' IS THE REPORTED WORLD (gravity_brew, 2026-11-09): an owner agent "
+     "ended a turn on a closing Next: list with no mandate bound, and nothing objected. The five "
+     "honest endings, the background-task wait and the override pass BY CONSTRUCTION under this "
+     "neuter, which is why each is paired with a block. MEASURED 2026-11-09 at 2ceb44b plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
+    ("load_triggers -> no trigger file is ever read",
+     ".game_loop/bin/_gl_impl.py::load_triggers", "    return {}\n",
+     ["TRACKED triggers.shared.json runs", "BLOCKS turn-end (exit 2)"],
+     "EMPTY IS THE NOTHING-ATTACHED ANSWER, and every trigger in the tree then reads as a project "
+     "that attached nothing: no announcement runs, no stop check refuses, and status goes silent "
+     "about all of them. MEASURED 2026-11-09 at 2ceb44b plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 69.", 69),
+    ("trigger_overrides -> a local entry never shadows a project rule",
+     ".game_loop/bin/_gl_impl.py::trigger_overrides", "    return []\n",
+     ["the team's version is not the one running here"],
+     "EMPTY IS THE SILENT OVERRIDE: one machine replaces the project's stop rule and nothing says "
+     "so, so the team believes a rule is running where it is not. MEASURED 2026-11-09 at 2ceb44b plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 1.", 1),
     ("crongate_verdict -> every CronCreate is allowed, recurring or not (#135)",
      ".game_loop/bin/_gl_impl.py::crongate_verdict", "    return True, None\n",
      ['RECURRING CronCreate is denied', 'OMITS `recurring`', 'names the call it refused',

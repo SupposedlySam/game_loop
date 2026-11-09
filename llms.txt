@@ -71,7 +71,14 @@ When a human binds a mandate (`game_loop mandate --set "..."`), two hooks keep y
 A project can also attach **its own check** to turn-end (a `stop` trigger — see the Triggers section
 of the README). That one runs with or without a mandate: if it exits non-zero the turn is refused and
 *its* stderr is the reason, naming what it wants. Do what it asks and end the turn again; if it is
-wrong, it is a line in `.game_loop/triggers.json` and you may fix or remove it.
+wrong, it is a line in `.game_loop/triggers.json` (this machine's) or
+`.game_loop/triggers.shared.json` (the project's, committed) and you may fix or remove it. A project
+rule is the team's: change it in a commit, or override it here with a same-named entry in
+`triggers.json`, which `status` reports.
+
+The one game_loop ships is `stopcheck announced-work`. If it refuses you, your closing lines
+announced work and nothing after them handed the turn back. Do the work, or say what it is blocked
+on. A background task still running counts as an honest wait.
 
 It stands down after 3 **consecutive** blocks — which bounds an attachment that keeps refusing, and
 does **not** bound a single refusal. A block you never retry never increments again, so the

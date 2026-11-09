@@ -731,6 +731,15 @@
       "change": "tap, enter, scroll, swipe and say are now MUTATING verbs. mcp__marionette__tap, enter_text, scroll_to, swipe and mcp__llm_chat__say used to be refused as UNCLASSIFIABLE. They are now refused as MUTATING, which routes them to mcp_standing_writes and authorize, and a server prefix grant now covers them.",
       "consequence": "a project holding a prefix grant such as mcp__marionette__ stops being refused on UI input to its debug build. A project with no grant sees the refusal reason change from 'cannot be classified' to 'classified as MUTATING', and the remedy it names is the ordinary authorize or a standing write, not an exact grant.",
       "why_it_qualifies": "a consumer who changed nothing sees calls that were refused now allowed under an existing prefix grant, and a different refusal reason where there is none. Reported from gravity_brew, where each of these failed closed under a whole-server grant."
+    },
+    {
+      "seq": 78,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "stop triggers / stopcheck announced-work (new)",
+      "change": "Stop triggers are now read from .game_loop/triggers.shared.json (tracked, the project's) as well as triggers.json (gitignored, this machine's). A local entry with the same name replaces the shared one, and status reports that. A NEW verb, `stopcheck announced-work`, is a stop check a project attaches. It refuses a turn-end whose closing lines announce work with nothing after them handing the turn back. It stands aside while a mandate is bound or a background task is running. The stop trigger payload now also carries the host's background_tasks. The stop-trigger refusal text now names both files.",
+      "consequence": "nothing changes for a project that adds neither file. A project that commits a triggers.shared.json has its stop rules enforced in every checkout and Crawler worktree, where before they held on one machine. One that attaches stopcheck announced-work will see turn-ends refused that the mandate-less Stop gate used to pass.",
+      "why_it_qualifies": "a consumer who changed nothing sees the refusal text change. One who adopts the shared file sees refusals in trees that never had them. Reported from gravity_brew: an owner agent ended a turn on a closing Next: list with no mandate bound, and their hand-rolled hook's escape had been spent by another Stop hook's block."
     }
   ],
   "schema": 1

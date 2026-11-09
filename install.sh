@@ -997,6 +997,16 @@ if [ -f "$SRC/llms.txt" ]; then
   echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/llms.txt (the agent brief — what a refusal points at)"
 fi
 
+# THE REACH RULES SHIP, and are always refreshed: game_loop's wording of advice that showrunner's
+# reach gate gives when an agent hand-rolls something game_loop already does. The rules describe
+# game_loop's behaviour, so game_loop words them. If showrunner held its own copy, that copy would
+# be a second statement of game_loop's behaviour, free to disagree with this one. A project without
+# showrunner carries the file and nothing reads it, which costs one small file.
+if [ -f "$SRC/.game_loop/reach.json" ]; then
+  cp "$SRC/.game_loop/reach.json" "$TARGET/.game_loop/reach.json"
+  echo "  $([ "$FRESH" = 1 ] && echo copied || echo refreshed)  .game_loop/reach.json (advice showrunner's reach gate gives on game_loop's behalf)"
+fi
+
 # Stamp the game_loop commit we installed from, so `status` can flag when a re-install is due. From a
 # clone that's HEAD; from the curl/tarball path (no .git) ask GitHub for the ref's sha. Best effort.
 GL_SHA=""

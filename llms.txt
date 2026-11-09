@@ -569,6 +569,13 @@ diff of the messages would show.
 naming the file it was read from, what would falsify it, and whether it can be re-checked live.
 `status` re-reads the stamps and says which have gone stale — one of them went stale in a day.
 
+`.game_loop/reach.json` is advice, never a refusal: game_loop's wording of what showrunner's reach
+gate says when you hand-roll something game_loop already handles, such as running `verify` or the
+suite under `nohup` or with a trailing `&`, which loses the completion notification (use
+`run_in_background`). Only repos with showrunner installed read it. Each rule carries `fires_on` and
+`silent_on` examples, and the suite runs every example through showrunner's own matcher when it
+can find one (`../showrunner/lib`, or `$SHOWRUNNER_LIB`), and prints NOT RUN when it cannot.
+
 ## Deeper docs
 
 - `README.md` — the human-facing overview and quickstart.

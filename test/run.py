@@ -16135,6 +16135,11 @@ def main():
     check("...and it does NOT gitignore .game_loop/, because the shared install tracks the payload "
           "on purpose — the disclosure would be a lie if the flag's half leaked into the default",
           ".game_loop/" not in read_or_empty(os.path.join(_shared_d, ".gitignore")))
+    check("the installer ships reach.json byte for byte and says so: showrunner's reach gate reads it "
+          "from the CONSUMER's .game_loop/, so a copy that stayed in this repo would advise nobody",
+          read_or_empty(os.path.join(_shared_d, ".game_loop", "reach.json"))
+          == read_or_empty(os.path.join(SRC_GAME_LOOP, "reach.json")) != ""
+          and ".game_loop/reach.json" in _shared_out)
     # #133: a RE-install raises a stopgate timeout that is now too short, and never lowers one.
     # The merge used to skip any entry whose command already existed, so every existing install
     # stayed on the 10s Stop timeout that killed the gate mid-run.
@@ -16910,6 +16915,56 @@ def main():
               _st.count("'no-weekly-opus-window' CONFIRMED") == 1)
     finally:
         shutil.rmtree(pw2, ignore_errors=True)
+
+    print("the reach rules game_loop words for showrunner's reach gate:")
+    # ADVICE IS A CLAIM ABOUT WHICH COMMANDS IT FITS. showrunner's reach gate reads
+    # .game_loop/reach.json and adds each rule as game_loop:<name>, advice only. A pattern that
+    # stops matching goes silent, which is also what a rule with nothing to say looks like, so each
+    # rule carries its own fires_on and silent_on examples, and both directions are checked here.
+    # THE REAL CONSUMER WHEN IT CAN BE FOUND: showrunner's matcher empties quoted text, drops heredoc
+    # bodies and matches at a command boundary, and re-implementing that here would be a second copy
+    # of someone else's logic, free to drift. So WITHOUT showrunner the example check is NOT RUN,
+    # and says so. A plain re.match fallback was tried and measured wrong in a fresh clone: it does
+    # not split `cd x && nohup ..` at the `&&`, so it failed a rule the real matcher fires on.
+    with open(os.path.join(SRC_GAME_LOOP, "reach.json")) as f:
+        _reach = json.load(f)
+    _rrules = _reach.get("rules") or []
+    check("reach.json carries at least one rule, each with a name, tools, a COMPILING pattern, a "
+          "message, and examples in BOTH directions",
+          len(_rrules) >= 1 and all(
+              isinstance(r.get("name"), str) and r.get("tools") and isinstance(r.get("message"), str)
+              and isinstance(r.get("pattern"), str) and re.compile(r["pattern"])
+              and r.get("fires_on") and r.get("silent_on") for r in _rrules)
+          and len({r["name"] for r in _rrules}) == len(_rrules))
+    _sr_lib = os.environ.get("SHOWRUNNER_LIB") or os.path.join(os.path.dirname(REPO), "showrunner",
+                                                                  "lib")
+    _via_sr = os.path.isfile(os.path.join(_sr_lib, "showrunner", "reach.py"))
+    if not _via_sr:
+        print("    NOT RUN: the fires_on/silent_on examples need showrunner's matcher, and none was "
+              "found at %s (set SHOWRUNNER_LIB to point at one)" % _sr_lib)
+    else:
+        _rprog = (
+            "import json, sys\n"
+            "root, lib = sys.argv[1], sys.argv[2]\n"
+            "rules = json.load(open(root + '/.game_loop/reach.json'))['rules']\n"
+            "sys.path.insert(0, lib)\n"
+            "from showrunner import reach\n"
+            "def fires(r, c):\n"
+            "    return 'game_loop:' + r['name'] in [h[0] for h in reach.advise('Bash', {'command': c}, root)]\n"
+            "bad = [(r['name'], 'should fire', c) for r in rules for c in r['fires_on'] if not fires(r, c)]\n"
+            "bad += [(r['name'], 'should be silent', c) for r in rules for c in r['silent_on'] if fires(r, c)]\n"
+            "print(json.dumps(bad))\n")
+        _rr = subprocess.run([sys.executable, "-I", "-c", _rprog, REPO, _sr_lib],
+                             capture_output=True, text=True)
+        try:
+            _rbad = json.loads(_rr.stdout)
+        except ValueError:
+            _rbad = ["could not run: " + (_rr.stderr or "")[-300:]]
+        print("    (matched with showrunner's own reach.advise, from %s)" % _sr_lib)
+        check("every reach rule fires on each of its fires_on examples and stays silent on each "
+              "silent_on one, through showrunner's real matcher"
+              + ("" if not _rbad else " — wrong: %s" % _rbad),
+              _rr.returncode == 0 and _rbad == [])
 
     print("a claim about the HOST cannot go stale quietly (showrunner's INV20):")
     # A limitation written in prose ages exactly like a premise does, and nothing here noticed. The

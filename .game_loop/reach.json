@@ -1,0 +1,28 @@
+{
+  "_about": "Advice, never a refusal. showrunner's reach gate (lib/showrunner/reach.py) reads this file and adds each rule under the name game_loop:<name>. It reads name, tools, pattern and message, and ignores the rest. A pattern is a Python regex, matched case-insensitively at the START of a command segment, after heredoc bodies are dropped and quoted text is emptied. fires_on and silent_on are this repo's own examples: test/run.py runs every one through the real matcher, so a rule cannot drift from what it claims. Only repos with showrunner installed see these rules.",
+  "rules": [
+    {
+      "name": "detached-check",
+      "tools": ["Bash"],
+      "pattern": "(nohup|setsid)\\s+(\\S*/)?(\\.game_loop/bin/verify|python3?\\s+(\\S*/)?test/(run|prun|mutation_sweep)\\.py)\\b|(\\S*/)?(\\.game_loop/bin/verify|python3?\\s+(\\S*/)?test/(run|prun|mutation_sweep)\\.py)\\b[^\\n]*[^&>]&\\s*(disown\\b.*)?$",
+      "message": "You are detaching a game_loop check from this session (nohup, setsid or a trailing &). A detached run gives up the completion notification: nothing wakes you when it finishes, and its result sits in a file that only you know to read. Run the same command with the Bash tool's run_in_background instead. It keeps running across turns and re-invokes you when it exits, with its output.",
+      "fires_on": [
+        "nohup ./.game_loop/bin/verify > /tmp/verify.log 2>&1 &",
+        "cd /repo && nohup python3 test/run.py > run.log 2>&1 &",
+        "nohup python3 test/mutation_sweep.py",
+        "setsid python3 test/prun.py",
+        "$PWD/.game_loop/bin/verify > verify.log 2>&1 &",
+        "./.game_loop/bin/verify > verify.log 2>&1 & disown"
+      ],
+      "silent_on": [
+        "./.game_loop/bin/verify",
+        "./.game_loop/bin/verify 2>&1 | tail -20",
+        "./.game_loop/bin/verify > verify.log 2>&1",
+        "python3 test/run.py --section install",
+        "nohup make build &",
+        "echo \"nohup ./.game_loop/bin/verify &\"",
+        "cat > note.md <<'EOF'\nnohup ./.game_loop/bin/verify &\nEOF"
+      ]
+    }
+  ]
+}

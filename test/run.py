@@ -16980,6 +16980,90 @@ def main():
     finally:
         shutil.rmtree(pw2, ignore_errors=True)
 
+    print("require_read: a file the project says must be read before certain writes:")
+    # Reported from gravity_brew: the human kept asking for the design rules to be followed, because a
+    # screen written turns after reading the doc is written without its rules in front of the writer.
+    # Every refusal below is paired with the same write allowed, or the arm is satisfied by a guard
+    # that refuses everything.
+    rq = make_sandbox()
+    try:
+        os.makedirs(os.path.join(rq, "lib"), exist_ok=True)
+        os.makedirs(os.path.join(rq, "docs"), exist_ok=True)
+        with open(os.path.join(rq, "docs", "design.md"), "w") as f:
+            f.write("# Type\nUse the scale.\n")
+        _rq_cfg = os.path.join(rq, ".game_loop", "config.json")
+        with open(_rq_cfg) as f:
+            _rq_base = json.load(f)
+
+        def _rq_rules(rules):
+            with open(_rq_cfg, "w") as f:
+                json.dump(dict(_rq_base, **({"require_read": rules} if rules else {})), f)
+
+        _doc = os.path.join(rq, "docs", "design.md")
+        _human = {"type": "user", "origin": {"kind": "human"},
+                  "message": {"role": "user", "content": "build the timer screen"}}
+        _note = {"type": "user", "origin": {"kind": "task-notification"},
+                 "message": {"role": "user", "content": "<task-notification>done</task-notification>"}}
+
+        def _read(path, **inp):
+            return {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Read", "id": "r1", "input": dict(file_path=path, **inp)}]}}
+
+        def _tx(*recs):
+            p = os.path.join(rq, "tx-%d.jsonl" % len(os.listdir(rq)))
+            with open(p, "w") as f:
+                for r_ in recs:
+                    f.write(json.dumps(r_) + "\n")
+            return p
+
+        def _w(path, tx, tool="Write"):
+            ti = ({"file_path": os.path.join(rq, path), "content": "x"} if tool == "Write"
+                  else {"command": path})
+            return guard(rq, {"session_id": "sess-rq", "tool_name": tool, "tool_input": ti,
+                              "transcript_path": tx, "cwd": rq})
+
+        _t_none = _tx(_human)
+        _rq_rules(None)
+        check("with NO require_read rule a write is untouched — the control",
+              not denied(_w("lib/timer.dart", _t_none)))
+        _rq_rules([{"writes": ["lib/*.dart"], "except": ["*.g.dart"], "read": "docs/design.md"}])
+        _r = _w("lib/timer.dart", _t_none)
+        check("with a rule, a write to a matching path with NO Read since the human's message is "
+              "REFUSED, naming the file to read and the path it guards",
+              denied(_r) and "requires reading docs/design.md" in _r.stdout
+              and "lib/timer.dart" in _r.stdout)
+        check("...and a Read of it since that message opens the write — a SECTION read (offset and "
+              "limit) counts, so nobody is pushed into dumping the whole file",
+              not denied(_w("lib/timer.dart", _tx(_human, _read(_doc, offset=1, limit=20)))))
+        check("...but a Read from BEFORE the human's message does not — their message is often the "
+              "new rule itself",
+              denied(_w("lib/timer.dart", _tx(_read(_doc), _human))))
+        check("...while a task notification after the Read is NOT a human message, so it does not "
+              "re-demand the read (the reporter's own gate got this wrong)",
+              not denied(_w("lib/timer.dart", _tx(_human, _read(_doc), _note))))
+        check("an EXCEPT glob, a path no rule names, and the required doc itself all write freely — "
+              "fixing the doc must not need reading it first",
+              not denied(_w("lib/timer.g.dart", _t_none)) and not denied(_w("README.md", _t_none))
+              and not denied(_w("docs/design.md", _t_none)))
+        _rb = _w("echo x > lib/clock.dart", _t_none, tool="Bash")
+        check("a SHELL write is checked too, from the targets the write guard already resolves — "
+              "one parser of where a command writes, not two",
+              denied(_rb) and "lib/clock.dart" in _rb.stdout)
+        check("...and a shell write to a path no rule names is not",
+              not denied(_w("echo x > notes.txt", _t_none, tool="Bash")))
+        check("a transcript that cannot be read FAILS OPEN — not evidence that nothing was read, and "
+              "a guard must never block its own fix",
+              not denied(_w("lib/timer.dart", os.path.join(rq, "no-such.jsonl"))))
+        _old_human = {"type": "user", "message": {"role": "user", "content": "build it"}}
+        _old_note = {"type": "user", "message": {"role": "user",
+                                                 "content": "<task-notification>x</task-notification>"}}
+        check("a transcript from a host with NO origin field still finds the human: a plain user "
+              "message is the boundary and a task notification is not",
+              denied(_w("lib/timer.dart", _tx(_read(_doc), _old_human)))
+              and not denied(_w("lib/timer.dart", _tx(_old_human, _read(_doc), _old_note))))
+    finally:
+        shutil.rmtree(rq, ignore_errors=True)
+
     print("the reach rules game_loop words for showrunner's reach gate:")
     # ADVICE IS A CLAIM ABOUT WHICH COMMANDS IT FITS. showrunner's reach gate reads
     # .game_loop/reach.json and adds each rule as game_loop:<name>, advice only. A pattern that

@@ -2816,6 +2816,183 @@ def cmd_stopcheck(s, a, payload):
     sys.exit(2)
 
 
+# ── require_read: a file the project says must be READ before certain writes ───────────────────
+#
+# Reported from gravity_brew: the human kept having to ask for the design rules to be followed, because
+# a screen written several turns after reading docs/design_system.md is written without its rules
+# in front of the writer. Their own PreToolUse gate refused the first write to a screen file until
+# the doc had been Read since the last user message. It belongs here because it is INV2's shape
+# applied to a write: name a real file you read before acting on what it says.
+#
+# config.json (project policy, which a session cannot edit):
+#   "require_read": [{"writes": ["lib/**/*.dart"], "except": ["**/*.g.dart"],
+#                     "read": "docs/design_system.md"}]
+#
+# SINCE THE LAST HUMAN MESSAGE, not since the session began, at the reporter's measured request: the
+# human's message is often the new rule itself, so a read from before it misses exactly what was
+# just asked for. The cost they accepted: a long session re-reads after each human message.
+#
+# A SECTION COUNTS. A Read with an offset or a limit opens the gate like a whole-file Read, because
+# demanding the whole file pushes an agent into dumping it, which is not reading.
+#
+# WHAT IT CANNOT SEE: whether what was read was USED. It converts "never looked" into "looked",
+# which is a lower bar than "followed" and much higher than silence.
+_REQUIRE_READ_SCAN_BYTES = 64 * 1024 * 1024   # how far back a boundary is searched before giving up
+
+
+def _is_human_record(rec):
+    """True for a user record a HUMAN typed; False for tool results and anything the harness injected.
+
+    THE DISCRIMINATOR IS `origin.kind`, read off a real transcript on 2026-11-09 (Claude Code
+    2.1.318): a typed message carries {"kind": "human"}, while task notifications, Stop-hook
+    feedback and peer-session messages carry their own kinds. A record with NO origin is from a host
+    older than the field; it counts as human unless it is meta, a compaction summary, a tool result,
+    or opens with a task-notification tag, which is the only fallback that does not need the field.
+    """
+    if rec.get("type") != "user":
+        return False
+    origin = rec.get("origin")
+    if isinstance(origin, dict):
+        return origin.get("kind") == "human"
+    if rec.get("isMeta") or rec.get("isCompactSummary"):
+        return False
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return False
+        content = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
+    return not str(content or "").lstrip().startswith("<task-notification>")
+
+
+def _records_backwards(path, max_bytes=_REQUIRE_READ_SCAN_BYTES):
+    """Yield decoded transcript records from the END, without reading the whole file first."""
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos, buf, scanned = f.tell(), b"", 0
+        while pos > 0 and scanned < max_bytes:
+            step = min(1 << 20, pos)
+            pos -= step
+            scanned += step
+            f.seek(pos)
+            buf = f.read(step) + buf
+            lines = buf.split(b"\n")
+            buf = lines[0]
+            for raw in reversed(lines[1:]):
+                if raw.strip():
+                    try:
+                        yield json.loads(raw)
+                    except ValueError:
+                        continue
+        if pos == 0 and buf.strip():
+            try:
+                yield json.loads(buf)
+            except ValueError:
+                pass
+
+
+def reads_since_last_human(transcript_path):
+    """(realpaths Read since the last human message, None) or (None, why_not).
+
+    A boundary not found within the scan bound is reported as could-not-tell, never as "no human
+    message", because the second would credit every Read since the session began."""
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return None, "no readable transcript_path in the payload"
+    reads = set()
+    for rec in _records_backwards(transcript_path):
+        if _is_human_record(rec):
+            return reads, None
+        if rec.get("type") != "assistant":
+            continue
+        for b in (rec.get("message") or {}).get("content") or []:
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Read":
+                fp = (b.get("input") or {}).get("file_path")
+                if isinstance(fp, str) and fp:
+                    reads.add(os.path.realpath(fp))
+    return None, "no human message found within the last %d MB of the transcript" % (
+        _REQUIRE_READ_SCAN_BYTES >> 20)
+
+
+def require_read_rules(cfg=None):
+    """The well-formed require_read rules, each {writes: [..], except: [..], read: <path>}."""
+    out = []
+    for r in ((cfg if cfg is not None else config()).get("require_read") or []):
+        if not isinstance(r, dict) or not isinstance(r.get("read"), str):
+            continue
+        writes = [w for w in (r.get("writes") or []) if isinstance(w, str)]
+        if writes:
+            out.append({"writes": writes, "read": r["read"],
+                        "except": [e for e in (r.get("except") or []) if isinstance(e, str)]})
+    return out
+
+
+def require_read_unmet(targets, rules, reads, repo_root):
+    """[(rule, repo-relative target)] for each write a rule covers whose file was not read.
+
+    Pure. A target outside repo_root is no rule's business (the write guard decides those), and the
+    required file itself is never gated by its own rule, or fixing the doc would need reading it
+    first. Globs are fnmatch patterns over the repo-relative path, so `*` also crosses `/`."""
+    import fnmatch
+    root = os.path.realpath(repo_root)
+    unmet = []
+    for t in targets:
+        real = os.path.realpath(t if os.path.isabs(t) else os.path.join(root, t))
+        if not real.startswith(root + os.sep):
+            continue
+        rel = os.path.relpath(real, root)
+        for r in rules:
+            doc = os.path.realpath(os.path.join(root, r["read"]))
+            if real == doc:
+                continue
+            if not any(fnmatch.fnmatch(rel, w) for w in r["writes"]):
+                continue
+            if any(fnmatch.fnmatch(rel, e) for e in r["except"]):
+                continue
+            if doc not in reads:
+                unmet.append((r, rel))
+    return unmet
+
+
+REQUIRE_READ_BLOCK = """BLOCKED: this project requires reading %(read)s before writing %(target)s.
+
+There is no Read of %(read)s since the human's last message. Read it, then retry. A section is
+enough: a Read with an offset or a limit counts. One Read opens every write this rule covers
+until the human's next message.
+
+Since the last HUMAN message, not since the session began: their message is often the new rule
+itself, so a Read from before it misses exactly what they just asked for. Task notifications and
+other injected messages do not reset it.
+
+This is the project's own rule (config.json -> require_read: writes %(writes)s). It cannot see
+whether what you read was used, only that you looked."""
+
+
+def cmd_readcheck(s, a, payload):
+    """The write guard's require_read check. Prints a refusal on stdout, or nothing; always exit 0.
+
+    Called only when config carries require_read, with the resolved write targets in
+    GL_READ_TARGETS (one per line). FAILS OPEN, and says so on stderr: a guard must never block its
+    own fix (INV5), and a transcript it cannot read is not evidence that nothing was read."""
+    try:
+        targets = [t for t in os.environ.get("GL_READ_TARGETS", "").splitlines() if t.strip()]
+        rules = require_read_rules()
+        if not (targets and rules):
+            sys.exit(0)
+        reads, why_not = reads_since_last_human(payload.get("transcript_path"))
+        if reads is None:
+            print("require_read could not tell (%s); not refusing" % why_not, file=sys.stderr)
+            sys.exit(0)
+        unmet = require_read_unmet(targets, rules, reads, REPO_ROOT)
+    except Exception as exc:  # noqa: BLE001
+        print("require_read could not decide (%s); not refusing" % exc, file=sys.stderr)
+        sys.exit(0)
+    if unmet:
+        rule, rel = unmet[0]
+        logline({"kind": "require_read_block", "read": rule["read"], "target": rel})
+        print(REQUIRE_READ_BLOCK % {"read": rule["read"], "target": rel,
+                                    "writes": ", ".join(rule["writes"])})
+    sys.exit(0)
+
+
 # CODE_ROOT, not ROOT: the probe is executable code, so under a pin it must come from the
 # pinned copy alongside every other script rather than from the project it is guarding.
 PROBE_SCRIPT = os.path.join(CODE_ROOT, "bin", "limit-probe.sh")
@@ -14024,6 +14201,7 @@ def main():
     sub.add_parser("crongate")    # PreToolUse entrypoint (recurring CronCreate refusal); not for humans
     sub.add_parser("statusline")  # statusline entrypoint (limits tap + one-row render); not for humans
     sub.add_parser("sessionstart")  # SessionStart entrypoint (also after compaction); not for humans
+    sub.add_parser("readcheck")   # the write guard's require_read check; not for humans
     stc = sub.add_parser("stopcheck")  # a `stop` trigger game_loop ships; attach it, do not run it
     stc.add_argument("check", choices=["announced-work"],
                      help="announced-work: refuse a turn-end whose closing lines announce work "
@@ -14075,7 +14253,7 @@ def main():
     a = p.parse_args()
     resolve_prose(p, a)
     if a.cmd in ("stopgate", "limitgate", "crongate", "statusline", "sessionstart",
-                 "stopcheck"):
+                 "stopcheck", "readcheck"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses
         # that deliver payloads without a session_id. Parsed BEFORE load(): it decides whose state.
         try:
@@ -14096,7 +14274,8 @@ def main():
             write_model_verdict()
         {"stopgate": cmd_stopgate, "limitgate": cmd_limitgate, "crongate": cmd_crongate,
          "statusline": cmd_statusline,
-         "sessionstart": cmd_sessionstart, "stopcheck": cmd_stopcheck}[a.cmd](load(), a, payload)
+         "sessionstart": cmd_sessionstart, "stopcheck": cmd_stopcheck,
+         "readcheck": cmd_readcheck}[a.cmd](load(), a, payload)
         return
     set_session(env_session())
     s = load()

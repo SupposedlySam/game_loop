@@ -417,6 +417,24 @@ note() {
   exit 0
 }
 
+# REQUIRE_READ (reported from gravity_brew): a project can name a file that must be READ, since the
+# human's last message, before writes matching its globs. The decision lives in `game_loop
+# readcheck`, which is pure Python the suite drives; this only hands it the targets this guard has
+# already resolved, so there is one parser of where a command writes, not two.
+# FREE WHEN UNUSED: no rule in config means no fork at all. FAILS OPEN on any error, because a guard
+# must never block its own fix (INV5), and readcheck prints nothing when it cannot tell.
+# CODE_DIR, not GAMELOOP_DIR: under a pin the check must be the pinned code's, like this script.
+require_read_gate() {
+  case "$CONFIG_MERGED" in *require_read*) ;; *) return 0 ;; esac
+  [ -n "$1" ] || return 0
+  local _rr_out
+  _rr_out=$(printf '%s' "$payload" | GL_READ_TARGETS="$1" "$CODE_DIR/bin/game_loop" readcheck 2>/dev/null) || return 0
+  if [ -n "$_rr_out" ]; then
+    deny "$_rr_out"
+  fi
+  return 0
+}
+
 MEM_NOTE=$(cat <<'MEMEOF'
 📝 THIS IS RUNG 6 — the last resort on the game_loop ladder.
 
@@ -809,6 +827,7 @@ else:
 PY
 )
     if [ "$verdict" = "yes" ]; then
+      require_read_gate "$fp"                  # a project rule may want a file read first
       record_edit "$fp"                        # an in-repo write IS this session's work (issue #21)
       # A MEMORY IS RUNG 6, AND RUNG 6 IS THE LAST RESORT ON THIS PROJECT'S OWN LADDER. `harden`
       # exists to turn a learning into something ENFORCED instead of remembered; a memory is exactly
@@ -2539,6 +2558,7 @@ offenders = []
 policy_hits = []
 unresolved = []
 temp_hits = []
+inrepo_hits = []
 _TEMP_ROOTS = sorted({os.path.realpath(r) for r in
                       ["/tmp", "/private/tmp", "/var/folders"]
                       + ([os.environ["TMPDIR"]] if os.environ.get("TMPDIR") else [])})
@@ -2722,6 +2742,12 @@ for seg in shell_segments(cmd):
         pol = policy_name(raw, cwd)
         if pol:
             policy_hits.append(pol)
+        # IN-REPO TARGETS, for require_read. Only a target that resolves without expansion: a variable
+        # is unknown here, and guessing its value would refuse or allow on a guess.
+        if not bad and "$" not in raw and chr(96) not in raw:
+            _ir = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
+            if _ir == repo or _ir.startswith(repo + os.sep):
+                inrepo_hits.append(_ir)
 
 for o in dict.fromkeys(offenders):
     print(o)
@@ -2731,14 +2757,18 @@ for u_ in dict.fromkeys(unresolved):
     print("UNRESOLVED\t" + u_)
 for t_ in dict.fromkeys(temp_hits):
     print("TEMP\t" + t_)
+for i_ in dict.fromkeys(inrepo_hits):
+    print("INREPO\t" + i_)
 PY
 )
 
     pol_line=$(printf '%s' "$offender" | grep '^POLICY\t' | head -1)
     unres_line=$(printf '%s' "$offender" | grep '^UNRESOLVED\t' | head -1)
     temp_lines=$(printf '%s' "$offender" | grep '^TEMP\t' | cut -f2)
+    inrepo_lines=$(printf '%s' "$offender" | grep '^INREPO\t' | cut -f2)
     offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | grep -v '^UNRESOLVED\t' \
-               | grep -v '^TEMP\t' | head -1)
+               | grep -v '^TEMP\t' | grep -v '^INREPO\t' | head -1)
+    require_read_gate "$inrepo_lines"
     if [ -n "$pol_line" ]; then
       pol_name=$(printf '%s' "$pol_line" | cut -f2)
       pol_real=$(printf '%s' "$pol_line" | cut -f3)

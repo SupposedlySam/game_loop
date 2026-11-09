@@ -189,6 +189,18 @@
           "verified_on": "2026-09-01",
           "verified_against": "2.1.251"
         }
+      },
+      {
+        "id": "transcript-human-origin",
+        "says": "a user record the human typed carries origin {kind: human}; task notifications, Stop-hook feedback and peer-session messages carry their own kinds",
+        "source": "read in this repo's own session transcript (~/.claude/projects/<slug>/<session>.jsonl) at 2.1.318",
+        "breaks": "require_read finds the human-turn boundary by this field. If it moved, every record would fall to the no-origin fallback, which still finds plain typed messages but could take an injected message without the task-notification tag for a human one and re-demand the read early",
+        "ledger": "A typed user message in the transcript carries origin.kind \"human\"",
+        "exercisable": "yes",
+        "exercisable_why": "CONDITIONAL and exercisable: any session's own transcript is the evidence, and a task-notification record beside a human one is the positive control that the field discriminates",
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.318",
+        "verified_how": "Counted in session dc549bfb's transcript: 21 user records with origin.kind human, 43 with task-notification, 5 with peer, and none without an origin among those kinds. Compaction summaries carried isCompactSummary and skill bodies isMeta. One session, one host version."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

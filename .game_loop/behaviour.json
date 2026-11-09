@@ -740,6 +740,15 @@
       "change": "Stop triggers are now read from .game_loop/triggers.shared.json (tracked, the project's) as well as triggers.json (gitignored, this machine's). A local entry with the same name replaces the shared one, and status reports that. A NEW verb, `stopcheck announced-work`, is a stop check a project attaches. It refuses a turn-end whose closing lines announce work with nothing after them handing the turn back. It stands aside while a mandate is bound or a background task is running. The stop trigger payload now also carries the host's background_tasks. The stop-trigger refusal text now names both files.",
       "consequence": "nothing changes for a project that adds neither file. A project that commits a triggers.shared.json has its stop rules enforced in every checkout and Crawler worktree, where before they held on one machine. One that attaches stopcheck announced-work will see turn-ends refused that the mandate-less Stop gate used to pass.",
       "why_it_qualifies": "a consumer who changed nothing sees the refusal text change. One who adopts the shared file sees refusals in trees that never had them. Reported from gravity_brew: an owner agent ended a turn on a closing Next: list with no mandate bound, and their hand-rolled hook's escape had been spent by another Stop hook's block."
+    },
+    {
+      "seq": 79,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard: require_read (new)",
+      "change": "A NEW refusal, active only when config.json names require_read. A Write/Edit, or a shell write the guard resolves, to a path matching a rule's writes globs (and none of its except globs) is refused until the rule's read file has been Read since the human's last message. The human's message is found by origin.kind == human; a record with no origin falls back to a plain user message that is not meta, a compaction summary, a tool result, or a task notification. It fails open when the transcript cannot be read.",
+      "consequence": "nothing changes for a project that does not set require_read. One that does sees writes refused until the agent reads the named file, once per human message.",
+      "why_it_qualifies": "a project that adds the key gets refusals it never had. Reported from gravity_brew, where the human had to keep asking for the project's design rules to be followed; their hand-rolled gate also re-demanded the read after every task notification, which this one does not."
     }
   ],
   "schema": 1

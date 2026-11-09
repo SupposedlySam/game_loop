@@ -44,6 +44,13 @@ _Things we read at the pinned version, by hand, and confirmed. Each with a sourc
   whether cache reads are discounted against it. The probe's cost is measured; the fraction of a
   window it consumes is not. Nor does it establish that the ~24k floor is constant across models or
   releases — it is one reading at one version.
+- **A typed user message in the transcript carries origin.kind "human"**: injected user records
+  carry their own kind (`task-notification`, `peer`), and compaction summaries and skill bodies are
+  `isMeta` or `isCompactSummary`. Read off this repo's own transcript on 2026-11-09 at Claude Code
+  2.1.318: 21 human, 43 task-notification and 5 peer records, every one with the field. This is
+  what `require_read` uses as the human-turn boundary. What it does NOT establish: that the field
+  is documented, or stable across releases. A record with no origin falls back to a plain user
+  message that is not meta, a summary, a tool result or a task notification.
 
 ## RULED-OUT
 

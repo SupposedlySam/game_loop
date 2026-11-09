@@ -269,6 +269,10 @@ reduces the damage, it does not remove the class.
   itself and reported the edit as a fix it had applied. **If a call you need is refused, that is a
   config question for the human** — widening the policy yourself removes the evidence that the
   refusal ever happened. (`LEDGER.md` is notes, not policy, and stays writable.)
+- **A project can require a file to be READ before certain writes** (`require_read` in
+  config.json). If a write is refused with "requires reading <file>", Read that file (a section is
+  enough) and retry. It counts only Reads since the human's last message, because that message is
+  often the new rule. `game_loop readcheck` is the guard's entrypoint for it, not a verb to run.
 - **Configured deploy/publish verbs are denied anywhere.** An unattended agent does not fire real
   deploys/releases. Escalate to the human.
 - **`git commit` is refused if owed checks are stale** (when `.game_loop/verify.yaml` has rules). Run

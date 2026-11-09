@@ -637,6 +637,27 @@ MUTANTS = [
      "a denominator that excludes consume_authorization. It cannot do so SILENTLY any more, "
      "because the sixteen NOT_SWEPT entries naming them then point at nothing, and the "
      "stale-exclusion check refuses that.", 0),
+    ("_is_human_record -> no message is ever a human's",
+     ".game_loop/bin/_gl_impl.py::_is_human_record", "    return False\n",
+     ["is REFUSED, naming the file to read", "a Read from BEFORE", "a SHELL write is checked too"],
+     "NO BOUNDARY IS FOUND, so every write falls to could-not-tell and FAILS OPEN: the gate goes "
+     "silent everywhere while looking like a project whose agents always read first. MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.",
+     4),
+    ("reads_since_last_human -> the transcript can never be read",
+     ".game_loop/bin/_gl_impl.py::reads_since_last_human", "    return None, 'neutered'\n",
+     ["is REFUSED, naming the file to read", "a Read from BEFORE", "a SHELL write is checked too"],
+     "COULD-NOT-TELL EVERYWHERE is the fail-open path taken on every write, which is the reported "
+     "world: the doc unread and the screen written. MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 7, of which 3 are bookkeeping rows (with this neutered, its helpers are reachable only from the suite), so the floor is the 4.", 4),
+    ("require_read_rules -> the config never names a rule",
+     ".game_loop/bin/_gl_impl.py::require_read_rules", "    return []\n",
+     ["is REFUSED, naming the file to read", "a SHELL write is checked too"],
+     "NO RULES IS THE UNCONFIGURED PROJECT, and a configured one then reads exactly like it. "
+     "MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.", 4),
+    ("require_read_unmet -> every covered write counts as read",
+     ".game_loop/bin/_gl_impl.py::require_read_unmet", "    return []\n",
+     ["is REFUSED, naming the file to read", "a Read from BEFORE", "a SHELL write is checked too"],
+     "NOTHING UNMET IS THE GATE THAT NEVER REFUSES: the allow arms pass by construction under this "
+     "neuter, which is why each is paired with a refusal. MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.", 4),
     ("announced_work_verdict -> no closing message is ever announced work",
      ".game_loop/bin/_gl_impl.py::announced_work_verdict", "    return False, 'neutered'\n",
      ["shipped announce check BLOCKS", "position decides", "runs BESIDE the shared one"],

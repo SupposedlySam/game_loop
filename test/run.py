@@ -10857,6 +10857,20 @@ def main():
               _call("mcp__other__connect")[0] == "deny")
         _set(mcp_standing_writes=[])
 
+        # UI INPUT AND A CHAT POST, reported from gravity_brew: the same strand as `connect`, one
+        # level down. Each one writes, so each must be MUTATING, never read-only.
+        _ui = ["mcp__marionette__tap", "mcp__marionette__enter_text",
+               "mcp__marionette__scroll_to", "mcp__marionette__swipe", "mcp__llm_chat__say"]
+        _uir = {t: _call(t) for t in _ui}
+        check("UI input (tap, enter_text, scroll_to, swipe) and llm_chat's `say` are CLASSIFIED as "
+              "mutations — refused by default as MUTATING, not as unclassifiable or read-only",
+              all(d == "deny" and "classified as MUTATING" in r for d, r in _uir.values()))
+        _set(mcp_standing_writes=["mcp__marionette__"])
+        check("...so the marionette server grant gravity_brew already holds covers all four UI verbs",
+              all(_call(t)[0] == "allow" for t in _ui[:4])
+              and _call("mcp__llm_chat__say")[0] == "deny")
+        _set(mcp_standing_writes=[])
+
         # THE REMEDY TEXT POINTED AT THE DISHONEST OPTION. The only fix the UNCLASSIFIABLE refusal
         # offered was mcp_read_only_tools, which for a tool that writes is a false statement the
         # guard then acts on — its own comments call a mutation labelled read-only "a real bypass".

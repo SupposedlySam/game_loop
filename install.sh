@@ -1400,9 +1400,10 @@ if unknown:
 # from the template would leave every existing install carrying it forever. Only game_loop's OWN
 # command is removed (it routes through .game_loop/bin/ and names the verb); anything else on the
 # event is somebody else's and stays.
-#   PostCompact (#141): a PostCompact hook's result is shown to the human and never reaches the
-#   model, and its hookSpecificOutput failed validation after every compaction. SessionStart runs
-#   again with source "compact" and carries the context, so the registration bought only an error.
+#   PostCompact (#141): game_loop's JSON hookSpecificOutput failed validation on that event after
+#   every compaction. SessionStart runs again with source "compact" and carries the context, so the
+#   registration bought only an error. (Plain stdout from PostCompact can reach the model, as
+#   measured on 2.1.319; it would only have been a second copy of the same context.)
 RETIRED = {"PostCompact": "game_loop sessionstart"}
 for event, verb in RETIRED.items():
     arr = hooks.get(event)

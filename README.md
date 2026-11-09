@@ -760,6 +760,14 @@ without answering. Four things hold it in place:
 * **a block is counted** like any other, so `status`'s gate tally and the log answer "why did this
   not stop" without anyone reconstructing it.
 
+**Do not build your own "block once, then allow" on `stop_hook_active`.** The payload sets it when
+the turn is continuing after ANY Stop hook's block: game_loop's own gate, a watchdog rewake, another
+project hook. So a check that allows "the second stop" on that flag lets through a turn-end it never
+blocked, because somebody else spent its one escape (reported from gravity_brew, where exactly this
+let a stall through). Key the escape on what YOUR check blocked, such as a hash of the message it
+refused. As a `stop` attachment you need neither, because the per-attachment consecutive count above
+already counts only your own blocks.
+
 Your project's own rules live in three files the installer seeds once and never overwrites:
 `.game_loop/INVARIANTS.md` (your non-negotiables), `.game_loop/verify.yaml` (what a change owes), and
 `.game_loop/config.json`.

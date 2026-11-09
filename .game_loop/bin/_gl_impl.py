@@ -8797,11 +8797,15 @@ def cmd_sessionstart(s, a, payload):
     after a compaction, with `source: "compact"`, and their additionalContext reaches the model.
 
     NOT PostCompact (#141). This was registered on PostCompact too, on the reading that the event
-    was in the settings schema's enum. Registered is not delivered: read in the Claude Code 2.1.318
-    binary, a PostCompact hook's result becomes only `userDisplayMessage`, shown to the human and
-    never to the model, and its hookSpecificOutput is VALIDATED against an event list PostCompact
-    is not in. So echoing the event name failed validation after every compaction, loudly in the
-    /compact output, while the SessionStart(compact) run beside it delivered the context. A
+    was in the settings schema's enum. What this hook printed was JSON `hookSpecificOutput`, and
+    read in the Claude Code 2.1.318 binary that is VALIDATED against an event list PostCompact is
+    not in. So echoing the event name failed validation after every compaction, loudly in the
+    /compact output, while the SessionStart(compact) run beside it delivered the context.
+    NARROWED, NOT GENERAL: this used to say a PostCompact result "never reaches the model". That
+    was read from the JSON path of one binary. showrunner measured 2.1.319 on 2026-11-09: PLAIN
+    STDOUT from a PostCompact hook did reach the model, beside the SessionStart(compact) text. So
+    the event is not inert; it is redundant here, because SessionStart(compact) already carries
+    the full context, and a second copy would only cost a second rehydration's worth of tokens. A
     PostCompact payload is answered with silence, for installs that still carry the registration;
     install.sh retires it. Relabelling the output "SessionStart" was rejected: it would validate,
     and then print the whole status as JSON at the human after every compaction.

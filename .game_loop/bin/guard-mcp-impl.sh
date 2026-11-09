@@ -357,6 +357,13 @@ MUTATE_VERBS = {
     # exactly what `start`/`stop`/`restart` above already cover.
     "background", "foreground", "hot", "setup", "build", "open", "key", "pointer", "record",
     "screenshot",
+    # UI input to a running app, reported from gravity_brew on 2026-11-09: `mcp__marionette__tap`,
+    # `enter_text`, `scroll_to` and `swipe` each drive a debug build on a device. They are the same
+    # tier as `key` and `pointer` above, and left UNCLASSIFIED they failed closed where the
+    # server's prefix grant could not reach them (a prefix never covers an unclassified verb, #140).
+    "tap", "enter", "scroll", "swipe",
+    # Posting a message (`mcp__llm_chat__say`): the same act as `send` and `post`, so it writes.
+    "say",
 }
 # Deliberately still UNCLASSIFIED, so they keep failing closed: verb slots that are real words in a
 # read-only tool name but far too generic to whitelist globally — the leading token of

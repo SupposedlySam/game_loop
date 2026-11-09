@@ -693,8 +693,8 @@
       "notice": true,
       "verb": "sessionstart (the PostCompact hook) / install",
       "change": "A PostCompact payload now gets NO output, and the shipped template no longer registers PostCompact; a re-install removes game_loop's own PostCompact entry and leaves any other hook on that event alone (#141). The rehydration after a compaction is unchanged: Claude Code runs SessionStart hooks again with source \"compact\", and that run carries the full context.",
-      "consequence": "the 'PostCompact [command hook 1] failed: Hook JSON output validation failed' line after every /compact goes away. If you read your status after compaction from the PostCompact output, it was never reaching the model; read it from the SessionStart(compact) run, which is where it always arrived.",
-      "why_it_qualifies": "a consumer who changed nothing sees a hook stop failing and a settings entry removed on re-install. Reported from the desktop app: echoing hookEventName \"PostCompact\" failed Claude Code's validation, which accepts no hookSpecificOutput for that event; read in the 2.1.318 binary, a PostCompact result only becomes a message shown to the human."
+      "consequence": "the 'PostCompact [command hook 1] failed: Hook JSON output validation failed' line after every /compact goes away. The context after a compaction arrives from the SessionStart(compact) run, as it always did.",
+      "why_it_qualifies": "a consumer who changed nothing sees a hook stop failing and a settings entry removed on re-install. Reported from the desktop app: echoing hookEventName \"PostCompact\" failed Claude Code's validation, which accepts no hookSpecificOutput for that event. CORRECTED 2026-11-09: this entry first said a PostCompact result only reaches the human. That was read from the JSON path of the 2.1.318 binary; showrunner measured 2.1.319 and plain stdout from PostCompact DID reach the model. The retirement stands because SessionStart(compact) already carries the context."
     },
     {
       "seq": 74,
@@ -722,6 +722,15 @@
       "change": "The report on other hooks found on Stop and PreToolUse no longer says to delete them (#144). Hooks from tools the installer knows (showrunner, llm_chat) are named as coexisting and left alone; any other is listed with 'check that each one is yours'. Nothing is removed either way.",
       "consequence": "an agent reading the install output is no longer told to switch off showrunner's guards or a project's own safety hook. The unknown-hook list still appears, so a genuine leftover is still surfaced.",
       "why_it_qualifies": "a consumer who changed nothing sees different install output, and the old output, followed literally, disabled real gates. Reported on a repo that also runs showrunner."
+    },
+    {
+      "seq": 77,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "guard-mcp (MCP tool calls)",
+      "change": "tap, enter, scroll, swipe and say are now MUTATING verbs. mcp__marionette__tap, enter_text, scroll_to, swipe and mcp__llm_chat__say used to be refused as UNCLASSIFIABLE. They are now refused as MUTATING, which routes them to mcp_standing_writes and authorize, and a server prefix grant now covers them.",
+      "consequence": "a project holding a prefix grant such as mcp__marionette__ stops being refused on UI input to its debug build. A project with no grant sees the refusal reason change from 'cannot be classified' to 'classified as MUTATING', and the remedy it names is the ordinary authorize or a standing write, not an exact grant.",
+      "why_it_qualifies": "a consumer who changed nothing sees calls that were refused now allowed under an existing prefix grant, and a different refusal reason where there is none. Reported from gravity_brew, where each of these failed closed under a whole-server grant."
     }
   ],
   "schema": 1

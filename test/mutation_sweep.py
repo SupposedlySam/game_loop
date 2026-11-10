@@ -667,6 +667,25 @@ MUTANTS = [
      "with a flutter run listed as in flight. The five honest endings, the in-flight waits and the "
      "override pass BY CONSTRUCTION under this neuter, which is why each is paired with a block. "
      "MEASURED 2026-11-09 at cf8a31f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 7.", 7),
+    ("leftovers_verdict -> no closing message ever leaves work undone",
+     ".game_loop/bin/_gl_impl.py::leftovers_verdict", "    return False, 'neutered', None\n",
+     ["a closing 'Not done yet:' list", "EACH ITEM ANSWERS FOR ITSELF",
+      "HEADING over a doable item"],
+     "NEVER LEFT UNDONE IS THE REPORTED WORLD (gravity_brew, 2026-11-10): a closing 'Not done "
+     "yet:' over doable bullets, after a mandate --clear, ended the turn. The eight honest endings "
+     "pass BY CONSTRUCTION under this neuter, which is why each is paired with a block. "
+     "MEASURED 2026-11-10 at 50623d0 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
+    ("leftover_items -> no leftovers section is ever found",
+     ".game_loop/bin/_gl_impl.py::leftover_items", "    return []\n",
+     ["a closing 'Not done yet:' list", "HEADING over a doable item"],
+     "NOTHING FOUND is the same allow by a different road: the verdict is intact and has nothing "
+     "to judge. MEASURED 2026-11-10 at 50623d0 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
+    ("_closing_lines -> the closing message is never readable",
+     ".game_loop/bin/_gl_impl.py::_closing_lines", "    return None, None, 'neutered'\n",
+     ["shipped announce check BLOCKS", "a closing 'Not done yet:' list"],
+     "UNREADABLE FAILS OPEN BY DESIGN, so this neuter turns BOTH stop verdicts into allows: the "
+     "shared reader is the one place where a break silences the announce check and the leftovers "
+     "check together. MEASURED 2026-11-10 at 50623d0 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 10.", 10),
     ("in_flight_work -> the host never lists anything in flight",
      ".game_loop/bin/_gl_impl.py::in_flight_work", "    return []\n",
      ["closing lines that wait on it", "a PENDING one is"],

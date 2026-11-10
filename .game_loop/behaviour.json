@@ -41,25 +41,7 @@
     "three lines below the fix says the bare verb as a whole word still trips it. Both were written",
     "by the same author in the same commit and both were accurate — the limit was simply written",
     "where a reader of the record never looks. An entry must carry its own caveats, because the",
-    "person acting on it is not reading the guard.",
-    {
-      "seq": 80,
-      "sha": "(this commit)",
-      "notice": true,
-      "verb": "stopcheck announced-work: in-flight work no longer excuses on its own",
-      "change": "A background task (running or pending) or a session cron used to excuse an announce-then-stop just by being listed, and only running tasks counted. Now in-flight work excuses the stop only when the lines after the last announcement say the work waits on it (once/when/after ... finishes, completes, lands, comes back; still running; in the background). A block lists what was in flight. session_crons is forwarded to stop triggers. Every allow prints its reason and the first 80 characters of the judged text, and the trigger log line now records a passing trigger's stdout as its detail.",
-      "consequence": "a project with stopcheck attached sees blocks on turn-ends it used to allow: a closing announcement while a long-lived task (a device run, a server, a Monitor) is listed, with no words saying the work waits on it. Such a turn now ends only once the closing lines say it waits on a task. Pending tasks and session crons now count as in flight.",
-      "why_it_qualifies": "turn-ends that used to pass now block. Reported from gravity_brew (sid 8af6d41d, 2026-11-09): 'Next I'm picking up the walkthrough fixes:' ended the turn while flutter runs and Monitors were listed as running, and the human had to say 'Harden the stop'."
-    },
-    {
-      "seq": 81,
-      "sha": "(this commit)",
-      "notice": true,
-      "verb": "watchdog: background subagents hold the ring",
-      "change": "The watchdog now reads background_tasks from the Stop payload. While it lists a running or pending subagent or workflow whose own transcript (subagents/agent-<id>.jsonl, or any file under the session's subagents/ or workflows/ when no id matches) was written in the last 30 minutes, the watchdog holds instead of ringing, re-checking every idle_sec, and stands down quietly when the session's transcript grows. Silence past the bound (env WATCHDOG_HARNESS_QUIET_SEC) ends the hold with a ring that has a new 'subagents' line naming the tasks. The same hold runs before a page at the ring cap. Shell and monitor tasks never hold.",
-      "consequence": "a mandated run that ends its turn with background subagents in flight is no longer rung while they work. A run whose listed subagents went silent for 30 minutes, or whose subagent transcripts cannot be found, is rung as before, now with the reason.",
-      "why_it_qualifies": "fewer rings in a case that used to ring. Reported from gravity_brew (2026-11-10 ~00:40): a mandate bound and six background subagents running, and the watchdog rang twice while the project's waiting probe, which tracks Crawlers rather than this session's subagents, said not waiting."
-    }
+    "person acting on it is not reading the guard."
   ],
   "changes": [
     {
@@ -767,6 +749,42 @@
       "change": "A NEW refusal, active only when config.json names require_read. A Write/Edit, or a shell write the guard resolves, to a path matching a rule's writes globs (and none of its except globs) is refused until the rule's read file has been Read since the human's last message. The human's message is found by origin.kind == human; a record with no origin falls back to a plain user message that is not meta, a compaction summary, a tool result, or a task notification. It fails open when the transcript cannot be read.",
       "consequence": "nothing changes for a project that does not set require_read. One that does sees writes refused until the agent reads the named file, once per human message.",
       "why_it_qualifies": "a project that adds the key gets refusals it never had. Reported from gravity_brew, where the human had to keep asking for the project's design rules to be followed; their hand-rolled gate also re-demanded the read after every task notification, which this one does not."
+    },
+    {
+      "seq": 80,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "stopcheck announced-work: in-flight work no longer excuses on its own",
+      "change": "A background task (running or pending) or a session cron used to excuse an announce-then-stop just by being listed, and only running tasks counted. Now in-flight work excuses the stop only when the lines after the last announcement say the work waits on it (once/when/after ... finishes, completes, lands, comes back; still running; in the background). A block lists what was in flight. session_crons is forwarded to stop triggers. Every allow prints its reason and the first 80 characters of the judged text, and the trigger log line now records a passing trigger's stdout as its detail.",
+      "consequence": "a project with stopcheck attached sees blocks on turn-ends it used to allow: a closing announcement while a long-lived task (a device run, a server, a Monitor) is listed, with no words saying the work waits on it. Such a turn now ends only once the closing lines say it waits on a task. Pending tasks and session crons now count as in flight.",
+      "why_it_qualifies": "turn-ends that used to pass now block. Reported from gravity_brew (sid 8af6d41d, 2026-11-09): 'Next I'm picking up the walkthrough fixes:' ended the turn while flutter runs and Monitors were listed as running, and the human had to say 'Harden the stop'."
+    },
+    {
+      "seq": 81,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog: background subagents hold the ring",
+      "change": "The watchdog now reads background_tasks from the Stop payload. While it lists a running or pending subagent or workflow whose own transcript (subagents/agent-<id>.jsonl, or any file under the session's subagents/ or workflows/ when no id matches) was written in the last 30 minutes, the watchdog holds instead of ringing, re-checking every idle_sec, and stands down quietly when the session's transcript grows. Silence past the bound (env WATCHDOG_HARNESS_QUIET_SEC) ends the hold with a ring that has a new 'subagents' line naming the tasks. The same hold runs before a page at the ring cap. Shell and monitor tasks never hold.",
+      "consequence": "a mandated run that ends its turn with background subagents in flight is no longer rung while they work. A run whose listed subagents went silent for 30 minutes, or whose subagent transcripts cannot be found, is rung as before, now with the reason.",
+      "why_it_qualifies": "fewer rings in a case that used to ring. Reported from gravity_brew (2026-11-10 ~00:40): a mandate bound and six background subagents running, and the watchdog rang twice while the project's waiting probe, which tracks Crawlers rather than this session's subagents, said not waiting."
+    },
+    {
+      "seq": 82,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "stopcheck announced-work: a closing leftovers list is judged too",
+      "change": "The check now also reads a leftovers section anywhere in the closing message: a line of its own labelled 'Not done yet:', 'Still to do:', 'Still open:', 'Remaining:', 'Outstanding:', 'Follow-ups:', 'To do:', 'Open items:', 'Left for a later pass:' and the like (with a colon, or as a heading or a whole bold line). Each item under it must hand back (a question, 'needs your call', 'waiting on <who>'), name a blocker ('blocked on <fact>'), say it is out of scope, or wait on work in flight; 'nothing' and 'none' count as nothing left. A hand-back after the last section excuses all of it. A block names each item that does none of those. An allow's logged reason now carries both verdicts.",
+      "consequence": "a project with stopcheck attached sees blocks on turn-ends it used to allow: a closing list of work not done in which some item gives no reason that needs anyone else. One human-owned item no longer excuses a doable one beside it. A turn ends once each item is done, given its blocker, or handed back.",
+      "why_it_qualifies": "turn-ends that used to pass now block. Reported from gravity_brew (sid 8af6d41d, 2026-11-10): after a mandate --clear, a closing '**Not done yet:**' over three bullets, two of them work the agent could do itself, was allowed as 'no announced work', and the human called it an unintentional stop."
+    },
+    {
+      "seq": 83,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard: rm -rf under a mandate (a cleared mandate, and the rm-rf hatch)",
+      "change": "The recursive+force rm refusal now counts a mandate as live only while it is active (and not parked); it used to read the mandate's text alone, which survives `mandate --clear`. And the remedy it has always printed, `authorize --path rm-rf --reason \"..\"`, now works: such a grant buys one recursive delete, announced as AUTHORIZATION SPENT and logged as authorized_rmrf with the command. The gh outward-write hatch and this one now share one named-hatch consumer; the gh hatch's behaviour and log line are unchanged.",
+      "consequence": "a session whose state carries a cleared mandate no longer has rm -rf refused. One with a live mandate and an rm-rf grant has one delete allowed and the grant spent. A grant recorded before this change under that name is spendable now, so check `status` for one you no longer mean.",
+      "why_it_qualifies": "refusals that used to fire now allow. Reported from showrunner (2026-11-10): a mandate cleared on 2026-09-03 still triggered 'while a MANDATE is live', and the printed authorize was recorded and never consulted, with the human present and approving the delete."
     }
   ],
   "schema": 1

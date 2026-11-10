@@ -2794,6 +2794,23 @@ def in_flight_work(payload):
     return out
 
 
+
+def _closing_lines(payload):
+    """(non-empty lines, judged, why_not) of the closing message, as the stop checks read it.
+
+    Quoted spans are blanked so a message can QUOTE an announcement or a leftovers label without
+    making one, the same protection _closing gives the mandate gate. Bold is KEPT: "**Next:**" and
+    "**Not done yet:**" are the reported shapes. Lines keep their leading whitespace, because an
+    indented line continues the list item above it. `lines` is None when the text could not be
+    read, and why_not then says why."""
+    text, why_not = _last_assistant_text(payload)
+    if not text:
+        return None, None, why_not
+    judged = " ".join(text.split())[:80]
+    blanked = re.sub(r'"[^"\n]*"', '""', text)
+    blanked = re.sub(r"`[^`\n]*`", "``", blanked)
+    return [ln.rstrip() for ln in blanked.strip().splitlines() if ln.strip()], judged, None
+
 def announced_work_verdict(payload, mandate_active=False):
     """(block, why, judged) for one Stop payload. Pure, so the suite can drive every branch.
 
@@ -2816,15 +2833,10 @@ def announced_work_verdict(payload, mandate_active=False):
     """
     if mandate_active:
         return False, "a mandate is bound; the Stop gate's own announce check covers this turn-end", None
-    text, why_not = _last_assistant_text(payload)
-    if not text:
+    all_lines, judged, why_not = _closing_lines(payload)
+    if all_lines is None:
         return False, "the closing message could not be read (%s)" % why_not, None
-    judged = " ".join(text.split())[:80]
-    # Quoted spans are blanked so a message can QUOTE an announcement without being one, the same
-    # protection _closing gives the mandate gate. Bold is KEPT: "**Next:**" is the reported shape.
-    blanked = re.sub(r'"[^"\n]*"', '""', text)
-    blanked = re.sub(r"`[^`\n]*`", "``", blanked)
-    lines = [ln for ln in blanked.strip().splitlines() if ln.strip()][-_ANNOUNCE_TAIL_LINES:]
+    lines = all_lines[-_ANNOUNCE_TAIL_LINES:]
     last = None
     for i, ln in enumerate(lines):
         if _NEXT_LABEL_PAT.search(ln) or _promised_to_continue(ln):
@@ -2861,6 +2873,144 @@ suite finishes I'll commit"). A device run, a server or a watcher that never fin
 wake you to do the announced work."""
 
 
+
+# ── LEFTOVERS: a closing list of work not done, that nothing hands back ─────────────────────────
+#
+# Reported from gravity_brew (2026-11-10, session 8af6d41d). The agent finished a wave, ran
+# `mandate --clear`, and ended the turn on a closing message whose last section was
+# "**Not done yet:**" over three bullets, two of them work it could do itself ("I left the split
+# for a later pass"). The human read it as an unintentional stop. This check DID read that message,
+# and allowed it as "no announced work in the closing lines": it knew "Next:" and "I'll continue",
+# and a list of what is NOT done announces nothing. It reports what is left, and that is the same
+# stop in the past tense.
+#
+# EACH ITEM ANSWERS FOR ITSELF. An item is excused when it hands back (a question, "needs your
+# call", "waiting on Weber"), names a blocker ("blocked on a second source"), is out of scope, or
+# waits on work the host lists as in flight. One human-owned item does not excuse a doable one
+# beside it, which a whole-section check would have allowed. A hand-back AFTER the section (a
+# closing "Want me to do these now?") excuses all of it, by the same position rule the announce
+# check uses.
+#
+# THE WHOLE MESSAGE IS READ, not the last twelve lines, because a leftovers section sits in the
+# middle of a closing message as often as at its end, and the label is narrow enough to afford it:
+# it must be a line of its own (a heading, a bold label, or a label with a colon).
+#
+# REJECTED: a `mandate --clear --leftovers none|<list>` flag, which the reporter offered. The clear's
+# notes in the reported case already said "done" and named nothing outstanding. A flag is one more
+# thing the agent writes about itself, while the closing message is what the human actually reads.
+#
+# WHAT IT CANNOT SEE: whether an item really needs nobody. "Blocked on a second source" ends the turn
+# whether or not a second search would have found one. It turns a silent leftover into a stated
+# reason, which a human can judge, and does no more than that.
+_LEFTOVER_LABEL_PAT = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[-*•]\s*)?(\*{0,2})"
+    r"(not (?:done|finished)(?: yet)?|not yet (?:done|finished)|"
+    r"still (?:to do|open|outstanding|undone|left)|left (?:to do|undone|open|over)|"
+    r"leftovers?|remaining(?: work| items)?|outstanding(?: work| items)?|"
+    r"follow[- ]?ups?|to[- ]?dos?|open items|"
+    r"(?:left )?for (?:a|the) (?:later|next|future) (?:pass|session|turn|round|wave))"
+    r"\s*(?::\s*\1|\1\s*:)\s*(.*)$",
+    re.I)
+# A label with no colon counts only as a heading or a whole bold line: a bare "Remaining" on a line
+# of its own is as likely a table caption as a section.
+_LEFTOVER_HEADING_PAT = re.compile(
+    r"^\s*(?:#{1,6}\s*|\*\*)(?:not (?:done|finished)(?: yet)?|not yet done|still to do|"
+    r"still open|left to do|leftovers?|remaining(?: work| items)?|outstanding(?: work| items)?|"
+    r"follow[- ]?ups?|to[- ]?dos?|open items)(?:\*\*)?\s*$", re.I)
+_LIST_ITEM_PAT = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(.*)$")
+# "Remaining: nothing." is the opposite of a leftover, and the suite's own default closing says it.
+_NOTHING_LEFT_PAT = re.compile(
+    r"^\W*(?:nothing|none|n/?a|nil|no(?:ne|thing)? (?:left|outstanding|remaining|open))\W*$", re.I)
+_OUT_OF_SCOPE_PAT = re.compile(
+    r"\b(?:out of (?:the )?scope|not in (?:the |this )?scope|outside (?:the |this )?scope|"
+    r"(?:by|as) design|won't do|will not do|declined)\b", re.I)
+
+
+def leftover_items(lines):
+    """[(first_line, end_line, [item, ...])] for every leftovers section in `lines`. Pure.
+
+    An item is a list line under the label, with any indented lines below it joined on. Text on the
+    label's own line ("Not done yet: the Mazzer split") is an item too. A label with neither takes
+    the next line as its one item, so a prose paragraph under a heading is judged instead of
+    skipped."""
+    out = []
+    i = 0
+    while i < len(lines):
+        m = _LEFTOVER_LABEL_PAT.match(lines[i])
+        if not m and not _LEFTOVER_HEADING_PAT.match(lines[i]):
+            i += 1
+            continue
+        start, items = i, []
+        inline = m.group(3).strip().strip("*").strip() if m else ""
+        if inline:
+            items.append(inline)
+        j = i + 1
+        while j < len(lines):
+            ln = lines[j]
+            if _LEFTOVER_LABEL_PAT.match(ln) or _LEFTOVER_HEADING_PAT.match(ln):
+                break
+            li = _LIST_ITEM_PAT.match(ln)
+            if li:
+                items.append(li.group(1).strip())
+            elif ln[:1].isspace() and items:
+                items[-1] += " " + ln.strip()
+            elif not items:
+                items.append(ln.strip())
+                j += 1
+                break
+            else:
+                break
+            j += 1
+        out.append((start, j, items))
+        i = j
+    return out
+
+
+def _leftover_excused(item, waiting):
+    return bool(_NOTHING_LEFT_PAT.match(item) or _asked_the_user(item) or _HANDBACK_PAT.search(item)
+                or _OUT_OF_SCOPE_PAT.search(item) or (waiting and _AWAIT_PAT.search(item)))
+
+
+def leftovers_verdict(payload):
+    """(block, why, judged) for one Stop payload: does the closing message list work left undone
+    that nothing hands back? Pure, so the suite can drive every branch. `why` on a block is the
+    unexcused items, one per line.
+
+    Takes no mandate flag, unlike announced_work_verdict: the Stop gate's own announce check does
+    not read a leftovers list, so nothing is checked twice. In practice it runs on every turn-end
+    the gate lets through (stop triggers run only then), which with a mandate bound means after a
+    checkpoint, an arm or a park has allowed it. Allows when the closing message cannot
+    be read, lists nothing left, every item hands back or names its blocker, or the lines after the
+    last section hand the turn back."""
+    lines, judged, why_not = _closing_lines(payload)
+    if lines is None:
+        return False, "the closing message could not be read (%s)" % why_not, None
+    sections = leftover_items(lines)
+    if not sections:
+        return False, "no leftovers listed", judged
+    after = "\n".join(lines[sections[-1][1]:])
+    if _asked_the_user(after) or _HANDBACK_PAT.search(after):
+        return False, "the turn hands back to the human after the leftovers", judged
+    waiting = in_flight_work(payload)
+    open_items = [it for _, _, items in sections for it in items
+                  if not _leftover_excused(it, waiting)]
+    if not open_items:
+        return False, "every leftover hands back or names its blocker", judged
+    return True, "\n".join("    - " + it[:160] for it in open_items[:6]), judged
+
+
+LEFTOVERS_BLOCK = """announced-work: your closing message lists work not done, and nothing hands it back.
+
+  left with no reason that needs anyone else:
+%s
+
+A list of what is left is the same stop as "Next:", in the past tense. For each item: if it is
+yours to do now, do it. If it is really blocked, say on what, on the item's own line ("blocked on
+<fact>", "needs your call on <x>", "waiting on <who>"), or say it is out of scope. One item that
+needs the human does not excuse the others beside it.%s
+
+This check is game_loop's `stopcheck announced-work`, attached by this project as a `stop` trigger."""
+
 def cmd_stopcheck(s, a, payload):
     """`stop` trigger entrypoint. exit 0 = no objection; exit 2 = block, stderr is the reason.
 
@@ -2874,6 +3024,13 @@ def cmd_stopcheck(s, a, payload):
     try:
         block, why, judged = announced_work_verdict(
             payload, bool((s.get("mandate") or {}).get("active")))
+        template = ANNOUNCED_WORK_BLOCK
+        if not block:
+            l_block, l_why, l_judged = leftovers_verdict(payload)
+            if l_block:
+                block, why, template = True, l_why, LEFTOVERS_BLOCK
+            else:
+                why, judged = "%s; %s" % (why, l_why), judged or l_judged
     except Exception as exc:  # noqa: BLE001
         print("stopcheck announced-work could not decide (%s); not objecting" % exc,
               file=sys.stderr)
@@ -2884,7 +3041,7 @@ def cmd_stopcheck(s, a, payload):
     waiting = in_flight_work(payload)
     extra = (ANNOUNCED_WORK_IN_FLIGHT % "\n".join("  - " + w for w in waiting[:5])
              if waiting else "")
-    print(ANNOUNCED_WORK_BLOCK % (why, extra), file=sys.stderr)
+    print(template % (why, extra), file=sys.stderr)
     sys.exit(2)
 
 

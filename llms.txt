@@ -80,6 +80,10 @@ The one game_loop ships is `stopcheck announced-work`. If it refuses you, your c
 announced work and nothing after them handed the turn back. Do the work, or say what it is blocked
 on. A background task in flight counts as an honest wait only when your closing lines say the work
 waits on it ("once the suite finishes I'll commit"). The block lists what was in flight.
+It also refuses a closing leftovers list ("Not done yet:", "Still open:", "Follow-ups:") when an
+item gives no reason that needs anyone else. Each item answers for itself: do it, or say on its
+own line what blocks it ("blocked on <fact>", "needs your call on <x>", "waiting on <who>"), or
+that it is out of scope.
 
 It stands down after 3 **consecutive** blocks — which bounds an attachment that keeps refusing, and
 does **not** bound a single refusal. A block you never retry never increments again, so the

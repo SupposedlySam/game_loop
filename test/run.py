@@ -13343,6 +13343,42 @@ def main():
         check("...and position decides: an earlier hand-back does not excuse a LATER announcement",
               _end(sid="sess-announce-pos", msg="No release yet, whenever you say.\n\n"
                    "**Next, step 2:** I'll start by wiring the API.").returncode == 2)
+        # LEFTOVERS ARE THE SAME STOP IN THE PAST TENSE (gravity_brew, 2026-11-10). After a
+        # `mandate --clear`, a closing "**Not done yet:**" over bullets the agent could do itself
+        # was allowed as "no announced work"; the human called it an unintentional stop. The shape
+        # below is that message's, cut down.
+        _left = ("Split the EG-1 and pushed it.\n\n**Not done yet:**\n"
+                 "- **Mazzer Mini:** the sale dates aren't found, so I left the split for a later "
+                 "pass.\n- **Timemore 064S II:** needs its own entry.")
+        _lb = _end(sid="sess-left", msg=_left)
+        check("a closing 'Not done yet:' list of work nothing hands back is BLOCKED with no "
+              "mandate bound, and the block names EACH item left",
+              _lb.returncode == 2 and "lists work not done" in _lb.stderr
+              and "Mazzer Mini" in _lb.stderr and "Timemore 064S II" in _lb.stderr)
+        _lm = _end(sid="sess-left-mixed", msg="Shipped.\n\n**Still open:**\n"
+                   "- #146: needs your call on the probe.\n- the bypass log: not built.")
+        check("...and EACH ITEM ANSWERS FOR ITSELF: one that needs the human does not excuse a "
+              "doable one beside it, and the block names only the doable one",
+              _lm.returncode == 2 and "the bypass log" in _lm.stderr
+              and "#146" not in _lm.stderr)
+        _left_ok = [
+            "Done. Remaining: nothing.",
+            "Shipped.\n\nNot done yet: the Mazzer split, blocked on its sale dates.",
+            "Shipped.\n\n**Still open:**\n- #146: needs your call.\n- the rule: waiting on "
+            "your go-ahead.",
+            "Shipped.\n\n**Not done yet:**\n- A\n- B\n\nWant me to take these now?",
+            "Done.\n\n**Remaining:**\n- deploy (not in scope for this wave)",
+            "Done.\n\n**Still open:**\n- Should the probe read rate_limit_event?",
+            'I wrote about "Not done yet:" lists.',
+            "Done.\n\nRemaining\n| a | b |",
+        ]
+        check("...and it does NOT block an empty list, items that each name a blocker or hand "
+              "back, a closing ask after the list, out-of-scope items, a question, a quoted label "
+              "or a bare table caption (8 shapes)",
+              all(_end(sid="sess-left-ok", msg=m).returncode == 0 for m in _left_ok))
+        check("...a '## Follow-ups' HEADING over a doable item is a leftovers section too",
+              _end(sid="sess-left-head", msg="Shipped.\n\n## Follow-ups\n- rename the "
+                   "flag").returncode == 2)
         _attach_stop({"name": "announced-work", "command": "exit 0"})
         _ov = _end(sid="sess-announce-ov", msg=_next)
         _ov_status = gl(stp, "status", sid="sess-announce-ov").stdout
@@ -17717,6 +17753,15 @@ def main():
           [k for k in _req if not _synthetic.get(k)] == ["consequence"])
     check("...and seq is unique and monotonic, since it is the ordering shas cannot provide",
           [e["seq"] for e in _bh["changes"]] == sorted({e["seq"] for e in _bh["changes"]}))
+    # AN ENTRY IN THE COMMENT IS AN ENTRY NOBODY GETS. seq 80 and 81 were appended to the "//" array,
+    # which sits above "changes" in the file: every check above passed, because each one reads
+    # only "changes", and no consumer was ever told about either change. Found when seq 82 was
+    # being added (2026-11-10).
+    _stray = [e.get("seq") for e in _bh.get("//", []) if isinstance(e, dict)]
+    check("...and no entry sits outside \"changes\": the \"//\" note is prose only, since the "
+          "reader skips everything but \"changes\""
+          + (" · stray seq " + ", ".join(map(str, _stray)) if _stray else ""),
+          not _stray and all(isinstance(x, str) for x in _bh.get("//", [])))
 
     # WHERE THE REFUSALS ACTUALLY LIVE, DERIVED — because the watch list is a list of SPELLINGS and
     # a list of spellings cannot report what it is missing. WATCHED named the `game_loop` stub, and
@@ -21121,7 +21166,7 @@ def main():
             return h.get("permissionDecisionReason", "") if h.get(
                 "permissionDecision") == "deny" else ""
 
-        _state({"text": "keep going, nobody is watching"})
+        _state({"active": True, "text": "keep going, nobody is watching"})
         _d = _ask("rm -rf /tmp/gl-throwaway")
         check("#79: `rm -rf` under a live mandate is REFUSED — an interactive approval is the one "
               "hazard in an unattended run that fails silent, because a run blocked on a prompt is "
@@ -21156,10 +21201,60 @@ def main():
         check("#79: THE LOAD-BEARING ARM — with NO mandate the same command is allowed. This gate "
               "exists because a mandate claims nobody is watching, not because rm -rf is bad",
               _ask("rm -rf /tmp/gl-throwaway") == "")
-        _state({"text": "a job", "parked": {"by": "human", "at": "now"}})
+        _state({"active": True, "text": "a job", "parked": {"by": "human", "at": "now"}})
         check("#79: ...and a PARKED mandate is allowed too — the human called the break, so by "
               "definition they are present to answer a prompt",
               _ask("rm -rf /tmp/gl-throwaway") == "")
+        # A CLEARED MANDATE IS NOT LIVE (showrunner, 2026-11-10). `mandate --clear` keeps the text
+        # for the record and sets active false; the guard read the text alone, so a session cleared
+        # in September was refused "while a MANDATE is live" with status saying none.
+        _state({"active": False, "text": "dispatch a Crawler on hf-stale-pin",
+                "cleared_at": "2026-09-03T04:02:26"})
+        check("#79: ...and a CLEARED mandate is allowed: its text survives the clear for the "
+              "record, and a mandate is live only while it is active",
+              _ask("rm -rf /tmp/gl-throwaway") == "")
+
+        # THE PRINTED REMEDY IS SPENDABLE (showrunner, 2026-11-10). The refusal named
+        # `authorize --path rm-rf` from the day it shipped and nothing read that grant: the human's
+        # words were recorded and the next delete was refused identically. The grant's shape is
+        # what `authorize` writes: the name realpath'd against the cwd it ran in.
+        def _grants(*names):
+            with open(os.path.join(_sd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "keep going"},
+                           "authorized": [{"path": os.path.join(_pp, n), "uses_left": 1,
+                                           "reason": "Jonah: yes, delete it"} for n in names]}, f)
+
+        def _uses():
+            with open(os.path.join(_sd, "state.json")) as f:
+                return [a.get("uses_left") for a in json.load(f).get("authorized", [])]
+
+        _log = os.path.join(_pph, "log.jsonl")
+        _grants("rm-rf")
+        _spent_r = subprocess.run(
+            ["bash", os.path.join(_pph, "bin", "guard-writes.sh")],
+            input=json.dumps({"tool_name": "Bash", "session_id": "s1",
+                              "tool_input": {"command": "rm -rf /tmp/gl-throwaway"}}),
+            capture_output=True, text=True, cwd=_pp, env=dict(os.environ, CLAUDE_PROJECT_DIR=_pp))
+        try:
+            with open(_log) as f:
+                _rl = [json.loads(l) for l in f if '"authorized_rmrf"' in l]
+        except (OSError, ValueError):
+            _rl = []
+        check("#79: an `authorize --path rm-rf` grant BUYS the refused delete, and says so out "
+              "loud: the call is not denied, the spend is announced with the human's words, and "
+              "the grant is consumed",
+              '"deny"' not in _spent_r.stdout and "AUTHORIZATION SPENT" in _spent_r.stdout
+              and "Jonah: yes, delete it" in _spent_r.stdout and _uses() == [0])
+        check("#79: ...and the spend lands in the log with the COMMAND it bought, so the record "
+              "says which delete the human's words were spent on",
+              bool(_rl) and _rl[-1].get("command") == "rm -rf /tmp/gl-throwaway"
+              and _rl[-1].get("reason") == "Jonah: yes, delete it")
+        check("#79: ...and it buys ONE: the next recursive delete is refused again",
+              "recursive+force" in _ask("rm -rf /tmp/gl-throwaway"))
+        _grants("gh issue comment", "some-dir")
+        check("#79: ...while a gh grant or a PATH grant does not buy a delete, and neither is "
+              "spent trying: each hatch is its own family",
+              "recursive+force" in _ask("rm -rf /tmp/gl-throwaway") and _uses() == [1, 1])
     finally:
         shutil.rmtree(_pp, ignore_errors=True)
 
@@ -21410,7 +21505,7 @@ def main():
         _sd3 = os.path.join(_f3h, "sessions", "s1")
         os.makedirs(_sd3, exist_ok=True)
         with open(os.path.join(_sd3, "state.json"), "w") as f:
-            json.dump({"mandate": {"text": "keep going"}}, f)
+            json.dump({"mandate": {"text": "keep going", "active": True}}, f)
 
         check("#83: a grep whose SEARCH PATTERN contains the verb is allowed — splitting on shell "
               "operators before tokenising tore the quoted regex apart and left the verb in command "

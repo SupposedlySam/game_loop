@@ -426,6 +426,7 @@ documented for it in [`llms.txt`](llms.txt). The short version:
 | `claim --assert ".." --read <path>` | Assert something about the outside world, with the receipt. |
 | `harden --learning .. --artifact <path>` | Turn a lesson into something enforced instead of remembered. |
 | `authorize --path <prefix> --reason ".." [--uses N]` | Your one-time, logged permission for a single write outside the repo. `--uses N` when you authorised a run of several, rather than being interrupted once per call. A reason citing the agent's *own* brief rather than you is refused — see below. If the *same reason* has bought a hatch before, the grant still stands but says so loudly and names the `allow_write_roots` line that replaces it: a recurring cross-repo write is config, not a one-off. |
+| `authorize --path rm-rf --reason ".."` | A **named** grant, not a path: it buys one refused act rather than one write. `rm-rf` buys one `rm` with recursive+force while a mandate is live (refused then because a permission prompt in an unattended run waits forever); `--path "gh pr create"` buys one outward GitHub write from the shell. The refusal prints the exact name. Each name is its own family: a gh grant never buys a delete, and a path grant never buys either. The spend is logged with the command it bought. |
 | `authorize --revoke <path> [--reason ".."]` | Withdraw a grant you no longer need. It is **disarmed, not deleted**: the balance goes to zero and the record keeps what the grant was for, because "logged forever" is the whole value of the hatch and deleting takes the evidence with it. A revoke that matches nothing **refuses** rather than reporting success — a success line over an empty match set leaves the hatch armed while the record says it was closed. `status` counts revoked grants apart from spent ones. |
 | `authorize --path <prefix> --reason ".." --expires <when>` | Bound the grant in **time** as well as in path and count. `30m` / `2h` / `7d` / `1w`, a date (`2026-09-30`, meaning the end of that day), or `never` — which stays the default. After it lapses the guard refuses the call and **spends nothing**. A bare number is refused: read as minutes it lapses during the call that set it, read as days it covers a week of unattended runs, and nothing downstream can tell which you meant. Time is the one dimension of this hatch that acts while nobody is looking, which is exactly when a stale grant is dangerous; `status` prints a live grant's age once it is more than a day old, and says when it has no expiry. |
 | `confidence --mark beta\|stable [--ref <sha>] [--recheck]` | Record how much this project stands behind a commit. `--recheck` re-runs the gate instead of trusting the tag. |
@@ -733,8 +734,20 @@ waiting on the human, no blocker named. It is stricter than the mandate gate on 
 project opted in. It stands aside while a mandate is bound, since the gate covers that turn-end. A
 background task or a session cron in flight excuses the stop only when the closing lines say the work
 waits on it ("once the suite finishes I'll commit"), because a `flutter run` to a phone or a server
-never finishes into a wake-up for the announced work. Every allow is logged with its reason and the
-start of the text it judged. As a `stop` trigger it gets
+never finishes into a wake-up for the announced work.
+
+It also reads a **leftovers list** anywhere in the closing message: a line of its own such as
+"Not done yet:", "Still to do:", "Still open:", "Remaining:" or "Follow-ups:" (with a colon, or as a
+heading or a whole bold line). A list of what is left is the same stop in the past tense. **Each
+item answers for itself**: it passes when it hands back ("needs your call on X", "waiting on Weber",
+a question), names a blocker ("blocked on a second source"), is out of scope, or waits on work in
+flight. One item that needs the human does not excuse a doable one beside it. "Remaining: nothing"
+is not a leftover, and a hand-back after the list ("Want me to take these now?") excuses all of it.
+Unlike the announce half, it does not stand aside for a mandate: it judges every turn-end the Stop
+gate lets through, since the gate never reads a leftovers list.
+It cannot tell whether a stated blocker is real; it turns a silent leftover into a stated reason a
+human can judge. Every allow is logged with its reason and the start of the text it judged. As a
+`stop` trigger it gets
 the bounds below for free, including the consecutive count, which counts only its own blocks.
 
 | Event | Fires when | Typically used for |

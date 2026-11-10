@@ -614,6 +614,66 @@ for a in st.get("authorized", []):
 PY
 }
 
+# A NAMED HATCH: a grant matched on a NAME rather than on a path. `authorize` realpaths what it is
+# given, so `--path "gh issue comment"` or `--path rm-rf` is recorded as "<cwd>/<name>", and the
+# basename is what carries meaning. FAMILY keeps the hatches apart in both directions: a candidate
+# must start with it ("gh ", "rm-rf"), so a path grant can never be spent by a named act, nor a
+# named grant by a filesystem write, nor a gh grant by a delete. Prints the same three lines as
+# consume_authorization (yes / reason / uses left) when a grant was spent, nothing otherwise.
+#
+# ONE CONSUMER FOR EVERY NAMED HATCH, because the second one was never written. The rm -rf refusal
+# printed `authorize --path rm-rf` as its remedy from the day it shipped, and nothing read that
+# grant: a human's words were recorded, the next delete was refused identically, and the grant sat
+# unspent (showrunner, 2026-11-10). The gh door had its own inline copy of this loop; a remedy that
+# names a hatch now has one function to call instead of one to write.
+consume_named_hatch() {
+  OFFENDER="$1" FAMILY="$2" LOG_KIND="$3" LOG_CMD="${4:-}" STATE_F="$STATE_F" \
+    GAMELOOP_DIR="$GAMELOOP_DIR" SID="$SID" python3 <<'PY'
+import datetime, json, os, sys
+off = os.environ["OFFENDER"]
+family = os.environ["FAMILY"]
+state_f = os.environ["STATE_F"]
+try:
+    with open(state_f) as f:
+        st = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+for a in st.get("authorized", []):
+    if a.get("uses_left", 0) <= 0:
+        continue
+    # LAPSED IS ITS OWN ANSWER, and it is checked HERE rather than only in `status` because
+    # a grant the report calls dead while the guard still honours it is worse than no expiry
+    # at all. All three consumers carry the identical two lines for that reason.
+    _exp = a.get("expires_at")
+    if _exp and datetime.datetime.now().isoformat(timespec="seconds") >= str(_exp):
+        continue          # the clock closed this hatch; it spends nothing
+    for cand in (a.get("path", "") or "", os.path.basename(a.get("path", "") or "")):
+        if not cand.startswith(family):
+            continue
+        if off == cand or off.startswith(cand):
+            a["uses_left"] -= 1
+            try:
+                with open(state_f, "w") as f:
+                    json.dump(st, f, indent=2); f.write("\n")
+                with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
+                    rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
+                    sid = os.environ.get("SID", "")
+                    if sid:
+                        rec["sid"] = sid[:8]
+                    rec.update({"kind": os.environ["LOG_KIND"], "verb": off,
+                                "reason": a.get("reason"), "uses_left": a["uses_left"]})
+                    if os.environ.get("LOG_CMD"):
+                        rec["command"] = os.environ["LOG_CMD"][:200]
+                    f.write(json.dumps(rec) + "\n")
+            except OSError:
+                sys.exit(0)
+            print("yes")
+            print((a.get("reason") or "").replace("\n", " ").strip())
+            print(a.get("uses_left", 0))
+            sys.exit(0)
+PY
+}
+
 # $tool, $fp and $cmd were derived from the payload above, in the same single parse.
 
 case "$tool" in
@@ -1031,8 +1091,11 @@ try:
 except Exception:
     sys.exit(0)
 m=d.get("mandate") or {}
-# a PARKED mandate is not an unattended run — the human called the break and is by definition present
-print("yes" if m.get("text") and not m.get("parked") else "")' 2>/dev/null)
+# a PARKED mandate is not an unattended run — the human called the break and is by definition present.
+# A CLEARED one is not a run at all: `mandate --clear` keeps the text for the record and sets active
+# false, and this test once read the text alone, so a session cleared in September was still refused
+# "while a MANDATE is live" in November while status said none (showrunner, 2026-11-10).
+print("yes" if m.get("active") and m.get("text") and not m.get("parked") else "")' 2>/dev/null)
       if [ -n "$_gl_mandated" ]; then
         # RECURSIVE AND FORCE, and they need not share a token: `rm -r -f` is the same command as
         # `rm -rf`, and a regex demanding one flag carrying both letters misses it. Found by
@@ -1089,7 +1152,15 @@ while i < len(toks):
 if hit:
     sys.stdout.write(hit)
 ' 2>/dev/null)
+        _gl_rmrf_auth=""
         if [ -n "$_gl_rmrf" ]; then
+          _gl_rmrf_auth=$(consume_named_hatch "rm-rf" "rm-rf" "authorized_rmrf" "$scan_cmd")
+        fi
+        if [ -n "$_gl_rmrf" ] && [ -n "$_gl_rmrf_auth" ]; then
+          note "$(consumed_note "rm-rf" \
+                    "$(printf '%s\n' "$_gl_rmrf_auth" | sed -n '2p')" \
+                    "$(printf '%s\n' "$_gl_rmrf_auth" | sed -n '3p')")"
+        elif [ -n "$_gl_rmrf" ]; then
           deny "BLOCKED: \`rm\` with recursive+force, while a MANDATE is live.
 
 This is not a judgement about the delete. It is that an interactive approval is the one hazard in
@@ -1106,6 +1177,9 @@ There is essentially always a non-prompting way:
 
 If the delete genuinely has to happen this way, say so on the record:
     ${GAMELOOP_DIR}/bin/game_loop authorize --path rm-rf --reason \"<the human's exact words>\"
+One grant buys one recursive delete, and the spend is logged with the command. Run the authorize as
+its OWN call: this gate fires before any part of a command runs, so authorize-then-rm in one command
+is refused as a whole and the hatch is never granted.
 
 WHAT THIS CANNOT SEE (INV6): a delete inside a script, a python3 -c shutil.rmtree, or any MCP tool.
 It reads the Bash command string only. This covers an observed failure, never the class — the full
@@ -2167,52 +2241,7 @@ for piece in re.split(r"(?:\|\||&&|[;|&\n])", cmd):
 PY
 )
     if [ -n "$gh_hit" ]; then
-      gh_auth=$(OFFENDER="$gh_hit" STATE_F="$STATE_F" GAMELOOP_DIR="$GAMELOOP_DIR" SID="$SID" python3 <<'PY'
-# THE SAME HATCH THE MCP DOOR SPENDS, matched on the verb string rather than a path, exactly as
-# guard-mcp does for a tool name. `authorize` realpaths what it is given, so "gh issue comment"
-# is recorded as "<cwd>/gh issue comment"; the basename is what carries meaning. Requiring the
-# candidate to start with "gh " keeps the hatches separate in both directions -- a path grant can
-# never be spent by a gh call, nor a gh grant by a filesystem write.
-import datetime, json, os, sys
-off = os.environ["OFFENDER"]
-state_f = os.environ["STATE_F"]
-try:
-    with open(state_f) as f:
-        st = json.load(f)
-except (OSError, ValueError):
-    sys.exit(0)
-for a in st.get("authorized", []):
-    if a.get("uses_left", 0) <= 0:
-        continue
-    # LAPSED IS ITS OWN ANSWER, and it is checked HERE rather than only in `status` because
-    # a grant the report calls dead while the guard still honours it is worse than no expiry
-    # at all. All three consumers carry the identical two lines for that reason.
-    _exp = a.get("expires_at")
-    if _exp and datetime.datetime.now().isoformat(timespec="seconds") >= str(_exp):
-        continue          # the clock closed this hatch; it spends nothing
-    for cand in (a.get("path", "") or "", os.path.basename(a.get("path", "") or "")):
-        if not cand.startswith("gh "):
-            continue
-        if off == cand or off.startswith(cand):
-            a["uses_left"] -= 1
-            try:
-                with open(state_f, "w") as f:
-                    json.dump(st, f, indent=2); f.write("\n")
-                with open(os.path.join(os.environ["GAMELOOP_DIR"], "log.jsonl"), "a") as f:
-                    rec = {"t": datetime.datetime.now().isoformat(timespec="seconds")}
-                    sid = os.environ.get("SID", "")
-                    if sid:
-                        rec["sid"] = sid[:8]
-                    rec.update({"kind": "authorized_gh", "verb": off,
-                                "reason": a.get("reason"), "uses_left": a["uses_left"]})
-                    f.write(json.dumps(rec) + "\n")
-            except OSError:
-                sys.exit(0)
-            print("yes")
-            print((a.get("reason") or "").replace("\n", " ").strip())
-            sys.exit(0)
-PY
-)
+      gh_auth=$(consume_named_hatch "$gh_hit" "gh " "authorized_gh")
       if [ -n "$gh_auth" ]; then
         printf '%s\n' "gh: '$gh_hit' allowed by a spent human authorization — $(printf '%s' "$gh_auth" | sed -n 2p)" >&2
       else

@@ -5942,20 +5942,26 @@ def sessionless_grant_refusal(a):
 # the rm-rf hatch the rm guard prints was confirmed as "one mutation outside this repo" with a path
 # under the cwd, which reads as a grant for a file that does not exist. A Crawler took it at its
 # word, saw the next delete still refused (on a release before the hatch was wired), and armed
-# another, and another. The guard spends these families by basename (guard-writes-impl.sh:
-# consume_named_hatch), and the suite checks that every family the guard spends is named here.
+# another, and another. The guards spend these families by basename (guard-writes-impl.sh:
+# consume_named_hatch; guard-mcp-impl.sh: the mcp__ candidates), and the suite checks that every
+# family either guard spends is named here. The MCP family was missed in the first version of this
+# list and found the same day, by spending an MCP grant and reading its confirmation.
+#
+# (family, matched as a prefix, what one use buys; {name} is the granted name)
 _NAMED_HATCHES = (
-    ("rm-rf", "one `rm` with recursive+force, refused while a mandate is live"),
-    ("gh ", "one outward GitHub write from the shell (`gh issue`, `gh pr`, `gh api -X ..`)"),
+    ("rm-rf", False, "one `rm` with recursive+force, refused while a mandate is live"),
+    ("gh ", True, "one outward GitHub write from the shell matching `{name}`"),
+    ("mcp__", True, "one call to `{name}` (or to any tool it prefixes) the MCP guard refuses as "
+                    "mutating"),
 )
 
 
 def named_hatch(path):
     """What a named grant buys, or None when `path` is an ordinary path grant. Pure."""
     base = os.path.basename(os.path.realpath(os.path.expanduser(str(path or ""))))
-    for family, buys in _NAMED_HATCHES:
-        if base == family.strip() or (family.endswith(" ") and base.startswith(family)):
-            return buys
+    for family, prefix, buys in _NAMED_HATCHES:
+        if base == family.strip() or (prefix and base.startswith(family)):
+            return buys.format(name=base)
     return None
 
 def cmd_authorize(s, a):

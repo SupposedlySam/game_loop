@@ -21361,6 +21361,12 @@ def main():
               "not call it a mutation outside this repo",
               _ngr.returncode == 0 and "NAMED grant" in _ngr.stdout
               and "recursive+force" in _ngr.stdout and "outside this repo" not in _ngr.stdout)
+        _ngm = gl(_ng, "authorize", "--path", "mcp__github__addIssueComment", "--reason",
+                  "Jonah: post it", sid="sess-named")
+        check("#148: ...and an MCP tool grant is announced as named too, naming the tool",
+              _ngm.returncode == 0 and "NAMED grant" in _ngm.stdout
+              and "`mcp__github__addIssueComment`" in _ngm.stdout
+              and "outside this repo" not in _ngm.stdout)
         check("#148: ...while an ordinary path grant reads exactly as it did",
               _ngp.returncode == 0 and "one mutation outside this repo" in _ngp.stdout
               and "NAMED grant" not in _ngp.stdout)
@@ -21369,7 +21375,11 @@ def main():
     # THE TWO LISTS AGREE. The guard spends named grants by family; `authorize` announces them from
     # its own list. A family the guard spends that the list lacks is announced as a path again.
     _gw_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh"))
-    _spent_families = set(re.findall(r'consume_named_hatch "[^"]*" "([^"]+)"', _gw_src))
+    _gm_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-mcp-impl.sh"))
+    # BOTH GUARDS. The first version read only the write guard and so missed mcp__, which the MCP
+    # guard spends by the same basename rule; it was found by spending one and reading the output.
+    _spent_families = (set(re.findall(r'consume_named_hatch "[^"]*" "([^"]+)"', _gw_src))
+                       | set(re.findall(r'cand\.startswith\("([^"]+)"\)', _gm_src)))
     _gl_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
     _named_block = _gl_src.split("_NAMED_HATCHES = (", 1)[-1].split("\n)\n", 1)[0]
     _announced = set(re.findall(r'^\s*\("([^"]+)",', _named_block, re.M))

@@ -1096,6 +1096,23 @@ def triggers_for(event):
     return [t for t in e if isinstance(t, dict) and t.get("command")] if isinstance(e, list) else []
 
 
+
+# A FAILURE SAYS WHY AT THE END. A command that prints progress and then fails puts its reason on
+# its last lines, and a trigger that reports on stdout (lamp's publish trigger does, by design) has
+# nothing on stderr at all. The headline used to say only "exited 1 with nothing on stderr", true and
+# useless: on 2026-11-10 the reason (lamp's registry was written by another agent mid-publish, run
+# it again) sat 2,800 lines below that headline, after the whole of game_loop's own suite, and the
+# owner reran the publish by hand without having read it. The head of such output is where it
+# STARTED; the tail is the verdict.
+_TAIL_LINES = 3
+_LONG_TRIGGER_OUTPUT = 40
+
+
+def _output_tail(text, n=_TAIL_LINES, width=300):
+    """The last `n` non-empty lines of `text`, joined with ' · ' and capped at `width`, or ''."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    return " · ".join(lines[-n:])[-width:]
+
 def _run_trigger(s, t, event, payload, default_timeout=20.0, max_timeout=None):
     """Run ONE attachment, record it, and report what happened. Raises nothing, ever.
 
@@ -1148,7 +1165,10 @@ def _run_trigger(s, t, event, payload, default_timeout=20.0, max_timeout=None):
         if timeout > 0 and _spent >= timeout * 0.75:
             near_cap = (_spent, timeout)
         if code != 0 and not err:
-            err = f"exited {code} with nothing on stderr"
+            # 150 so the whole headline fits the 200-character detail the log and state keep.
+            _tail = _output_tail(body, width=150)
+            err = (f"exited {code} with nothing on stderr; its output ends: {_tail}" if _tail
+                   else f"exited {code} with nothing on stderr or stdout")
     except subprocess.TimeoutExpired:
         ran, body, err = False, "", f"timed out after {timeout:.0f}s"
     except Exception as exc:  # noqa: BLE001 — see below; the promise above has to be true
@@ -1235,7 +1255,12 @@ def fire_triggers(s, event, payload):
             # Loud, and it says the verb still stands — otherwise the next reader assumes it didn't.
             lines.append(f"  ✗ {name} FAILED — {err or 'no detail'}")
             if body:
-                lines.extend("     " + l for l in body.splitlines())
+                _bl = body.splitlines()
+                lines.extend("     " + l for l in _bl)
+                # A LONG OUTPUT PUSHES THE HEADLINE OUT OF SIGHT, so its verdict is repeated where
+                # the reader is: at the bottom, beside the line saying the work still stands.
+                if len(_bl) > _LONG_TRIGGER_OUTPUT:
+                    lines.append(f"     ✗ {name} failed; above, it ended with: {err}")
             lines.append(f"     (the {event} itself stands; a trigger never blocks the work)")
     return lines
 

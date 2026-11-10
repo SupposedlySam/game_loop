@@ -12591,6 +12591,37 @@ def main():
               _bad.returncode == 0 and "HARDENED" in _bad.stdout
               and "never blocks the work" in _bad.stdout)
 
+        # THE REASON IS AT THE END (2026-11-10). lamp's publish trigger reports on stdout, after
+        # thousands of lines of the gate's suite; the headline said only "exited 1 with nothing on
+        # stderr", and the reason sat 2,800 lines below it.
+        _tp_write({"harden": [{"name": "tp-long",
+                               "command": "for i in $(seq 1 60); do echo progress $i; done; "
+                                          "echo 'the registry changed; run it again'; exit 1"}]})
+        _long = _harden("--general", "G")
+        _long_head = _fl(_long.stdout, "tp-long FAILED")
+        check("a trigger that fails with NOTHING on stderr names the END of its stdout in the "
+              "headline, where a failing command says why, not just that stderr was empty",
+              "its output ends:" in _long_head and "run it again" in _long_head)
+        _long_lines = _long.stdout.splitlines()
+        _recap = [i for i, l in enumerate(_long_lines) if "above, it ended with:" in l]
+        _last_progress = max((i for i, l in enumerate(_long_lines) if l.strip() == "progress 60"),
+                             default=-1)
+        check("...and when its output is LONG, that verdict is repeated BELOW the output, where a "
+              "reader of the bottom of the screen is",
+              bool(_recap) and _recap[-1] > _last_progress >= 0
+              and "run it again" in _long_lines[_recap[-1]])
+        _tp_write({"harden": [{"name": "tp-short",
+                               "command": "echo 'gate said no'; exit 1"}]})
+        _short = _harden("--general", "G")
+        check("...while a SHORT output gets no recap, because its headline is still on screen, and "
+              "a command that printed nothing at all says that rather than quoting an empty tail",
+              "above, it ended with:" not in _short.stdout
+              and "gate said no" in _fl(_short.stdout, "tp-short FAILED"))
+        _tp_write({"harden": [{"name": "tp-mute", "command": "exit 1"}]})
+        check("...(the silent one)",
+              "with nothing on stderr or stdout" in _fl(_harden("--general", "G").stdout,
+                                                         "tp-mute FAILED"))
+
         _tp_write({"harden": [{"name": "tp-slow", "command": "sleep 5", "timeout_sec": 1}]})
         _slow = _harden("--general", "G")
         check("a trigger that hangs is bounded and SAYS it timed out",

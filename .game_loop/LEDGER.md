@@ -59,6 +59,13 @@ _Things we read at the pinned version, by hand, and confirmed. Each with a sourc
   that can excuse an announce-then-stop, but only when the closing lines say the work waits on it.
   What it does NOT establish: which statuses appear in practice (read from the schema, not from a
   live payload), or that a listed task will ever finish: a `flutter run` is a `shell` task too.
+- **A background subagent's transcript sits beside the session's, named by its agentId**: the
+  session transcript `<id>.jsonl` has a directory `<id>/` holding `subagents/agent-<agentId>.jsonl`
+  (with a `.meta.json`) and `workflows/`. A subagent's `background_tasks` id is its agentId (the
+  2.1.319 binary maps a local_agent's task_id to agentId). Read on 2026-11-10 in gravity_brew's
+  session, which launched six. The watchdog uses the file's last write as proof the subagent is still
+  alive. What it does NOT establish: that a subagent waiting on one long tool call writes anything
+  meanwhile, which is why the silence bound is 30 minutes and not less.
 
 ## RULED-OUT
 

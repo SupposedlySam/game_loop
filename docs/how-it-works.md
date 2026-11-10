@@ -82,6 +82,11 @@ Guardrails on the watchdog itself:
 - **Ring cap** — after `ring_cap` *consecutive unproductive* rings it stands down (a nag that never
   quits gets ignored). The moment the transcript grows after a ring, the budget resets: the ring
   worked.
+- **The session's own background subagents are a wait** — the Stop payload lists in-flight work,
+  and a running subagent or workflow holds the watchdog without any probe, for as long as the
+  subagent's own transcript keeps being written. Shell tasks and monitors do not count, since a
+  device run or a server never finishes into a wake-up. Reported from gravity_brew: six subagents
+  running under a mandate, and the watchdog rang twice because idle looked like parked.
 - **A declared wait is held** — when `waiting_probe` says the run is waiting on work it dispatched, the
   watchdog does not ring, and it does not leave either. It re-runs the probe every `idle_sec` and rings
   the moment the answer changes, quoting the probe's reason. One look was not enough: it used to exit

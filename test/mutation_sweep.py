@@ -714,6 +714,30 @@ MUTANTS = [
      "NEUTERED TO ONE quiet() IS THE PRE-FIX WORLD: a first \"waiting\" exits and the end of the wait "
      "rings nobody. MEASURED 2026-11-04 at 427ed2f, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 17 rows. Three of them are the reachability scan noticing owner_chain lost "
      "its only caller, which is real and not about this behaviour, so the floor is the 14.", 14),
+    ("harness_tracked_work -> the payload never lists a subagent",
+     ".game_loop/bin/watchdog::harness_tracked_work", "    return []\n",
+     ["a running background SUBAGENT whose transcript is being written HOLDS",
+      "goes QUIET past the bound"],
+     "NOTHING TRACKED IS THE REPORTED WORLD (gravity_brew, 2026-11-10): six subagents running under "
+     "a mandate and the watchdog rang twice. The shell-task and ended-task arms pass BY CONSTRUCTION "
+     "under this neuter, which is why each is paired with a hold. MEASURED 2026-11-10 at 7ba6473 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows (the 2 sweep-gate rows that also failed in the clean clone excluded): 6 of the new section's 8.", 6),
+    ("harness_work_last_write -> no subagent transcript is ever found",
+     ".game_loop/bin/watchdog::harness_work_last_write", "    return None\n",
+     ["a running background SUBAGENT whose transcript is being written HOLDS",
+      "any fresh write under the session's subagents/"],
+     "NEVER FOUND MAKES EVERY SUBAGENT UNVERIFIABLE, so the hold never starts: the reported false "
+     "positive again, by a different road. MEASURED 2026-11-10 at 7ba6473 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows (the 2 sweep-gate rows that also failed in the clean clone excluded): 5; the not-found arm passes by construction under it.", 5),
+    ("harness_wait_verdict -> the listed subagents are never alive",
+     ".game_loop/bin/watchdog::harness_wait_verdict", "    return False, 'neutered'\n",
+     ["a running background SUBAGENT whose transcript is being written HOLDS",
+      "already silent at the first look rings at once"],
+     "NEVER ALIVE RINGS A HEALTHY FAN-OUT. MEASURED 2026-11-10 at 7ba6473 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows (the 2 sweep-gate rows that also failed in the clean clone excluded): 9, of which 3 are the reachability scan noticing its helper lost its only caller, so the floor is the 6.", 6),
+    ("hold_for_harness_work -> background subagents never hold the ring",
+     ".game_loop/bin/watchdog::hold_for_harness_work", "    return \"\"\n",
+     ["a running background SUBAGENT whose transcript is being written HOLDS",
+      "goes QUIET past the bound"],
+     "THE ENTRY POINT ITSELF: neutered, the watchdog is the one gravity_brew reported. MEASURED 2026-11-10 at 7ba6473 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows (the 2 sweep-gate rows that also failed in the clean clone excluded): 9, of which 3 are the reachability scan noticing its helpers lost "
+     "their only caller, so the floor is the 6.", 6),
     ("owner_gone -> a hold never notices its session has gone",
      ".game_loop/bin/watchdog::owner_gone", "    return False\n",
      ['a hold whose session has gone'],
@@ -2372,6 +2396,10 @@ NOT_SWEPT = {
     "test/run.py::_hwlog": "a suite helper polling the hold sandbox's log: neutered to False it "
                            "reddens the assertions that wait on it, which is the safe direction",
     "test/run.py::_hwend": "a suite helper bounding a held watchdog's exit: neutered to None the "
+                           "exit-code assertions that read it go red, which is the safe direction",
+    "test/run.py::_hslog": "_hwlog's twin for the background-subagent sandbox: neutered to False it "
+                           "reddens the assertions that wait on it, which is the safe direction",
+    "test/run.py::_hsend": "_hwend's twin for the background-subagent sandbox: neutered to None the "
                            "exit-code assertions that read it go red, which is the safe direction",
     "test/run.py::_cron_log": "a suite helper reading the #135 sandbox log: neutered to an empty "
                               "list it reddens the two count assertions that use it, which is the "

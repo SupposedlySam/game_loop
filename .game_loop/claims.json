@@ -213,6 +213,18 @@
         "verified_on": "2026-11-09",
         "verified_against": "2.1.319",
         "verified_how": "Read in resources/native-binary/claude of the 2.1.319 VS Code extension: the Stop schema describes background_tasks as 'In-flight background work (running/pending + backgrounded)' and session_crons as the cron tasks that will wake the session; the builder maps local_bash to type shell with command, local_agent to subagent with agent_type, monitor_mcp and mcp_task to server and tool, local_workflow to name. Read from the source, not observed in a live payload."
+      },
+      {
+        "id": "subagent-transcript-beside-session",
+        "says": "a background subagent writes its own transcript to subagents/agent-<agentId>.jsonl in the directory named after the session transcript (minus .jsonl), and a subagent's background_tasks id is its agentId",
+        "source": "read in gravity_brew's session directory (8af6d41d) and in the 2.1.319 binary, which maps a local_agent's task_id to its agentId",
+        "breaks": "the watchdog holds for background subagents only while their transcripts are being written. If the files moved, it would fall back to any file under subagents/ and workflows/, and with none found it rings as before: a false ring, never a silenced one",
+        "ledger": "A background subagent's transcript sits beside the session's, named by its agentId",
+        "exercisable": "yes",
+        "exercisable_why": "CONDITIONAL and exercisable: any session that launches a background Agent creates the file, and the Agent tool's result names the agentId to look for",
+        "verified_on": "2026-11-10",
+        "verified_against": "2.1.319",
+        "verified_how": "gravity_brew's session launched six background subagents at 2026-11-10T05:26Z; each Agent result carried an agentId (e.g. a2ddc6c0814b4fda0) and the session directory holds subagents/agent-a2ddc6c0814b4fda0.jsonl with a .meta.json beside it. The binary's orphan-agent restore emits task_id: agentId with task_type local_agent. That session ran 2.1.312; the binary read is 2.1.319."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

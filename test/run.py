@@ -8328,6 +8328,142 @@ def main():
                 _pr.stderr.close()
         shutil.rmtree(hw, ignore_errors=True)
 
+    # THE SESSION'S OWN SUBAGENTS ARE A WAIT (gravity_brew, 2026-11-10 ~00:40). A mandate bound, six
+    # background subagents running, and the watchdog rang twice: the transcript does not grow while
+    # they work, and the project's probe (showrunner's) knows about Crawlers, not about them. The Stop
+    # payload lists them, so the watchdog holds while they are alive, and only for kinds that END.
+    # Every arm that does not ring is paired with one that does.
+    print("watchdog: background subagents the harness will finish are a wait, while they are alive:")
+    hs = make_sandbox()
+    _hs_live = []
+    try:
+        _hsl = os.path.join(hs, ".game_loop", "log.jsonl")
+        _hss = os.path.join(hs, ".game_loop", "sessions", "sess-sub")
+        os.makedirs(_hss, exist_ok=True)
+        _hst = os.path.join(hs, "sess-sub.jsonl")
+        _hsdir = os.path.join(hs, "sess-sub", "subagents")
+        _hsbin = os.path.join(hs, ".game_loop", "bin", "watchdog")
+        # The reporter's own probe answer, so the subagents are what has to hold the ring.
+        with open(os.path.join(hs, ".game_loop", "config.local.json"), "w") as f:
+            json.dump({"watchdog": {"waiting_probe": "echo 'showrunner: NOT WAITING' >&2; exit 1"}},
+                      f)
+        _sub = {"id": "a2ddc6c0814b4fda0", "type": "subagent", "status": "running",
+                "description": "Research grinders A specs", "agent_type": "general-purpose"}
+        _phone = {"id": "b7", "type": "shell", "status": "running",
+                  "description": "flutter run to the phone", "command": "fvm flutter run -d 988a"}
+
+        def _hsset(sub_age=None, sub_name="agent-a2ddc6c0814b4fda0.jsonl"):
+            with open(os.path.join(_hss, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "fill the gear library", "at": "now"},
+                           "watchdog_rings": 0, "watchdog_last_ring_size": 0}, f)
+            open(_hsl, "w").close()
+            with open(_hst, "w") as f:
+                f.write("{}\n")
+            shutil.rmtree(os.path.join(hs, "sess-sub"), ignore_errors=True)
+            if sub_age is not None:
+                os.makedirs(_hsdir, exist_ok=True)
+                _f = os.path.join(_hsdir, sub_name)
+                with open(_f, "w") as f:
+                    f.write("{}\n")
+                _t = time.time() - sub_age
+                os.utime(_f, (_t, _t))
+
+        def _hspay(*tasks):
+            return {"session_id": "sess-sub", "transcript_path": _hst,
+                    "background_tasks": list(tasks)}
+
+        def _hsstart(payload, **envx):
+            pr = subprocess.Popen([_hsbin], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE, text=True,
+                                  env=_env(WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0", **envx))
+            pr.stdin.write(json.dumps(payload))
+            pr.stdin.close()
+            _hs_live.append(pr)
+            return pr
+
+        def _hslog(needle):
+            for _ in range(60):
+                if needle in read_or_empty(_hsl):
+                    return True
+                time.sleep(0.25)
+            return False
+
+        def _hsend(pr):
+            try:
+                return pr.wait(timeout=WATCHDOG_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                pr.kill()
+                return None
+
+        _hsset(sub_age=0)
+        _p = _hsstart(_hspay(_sub))
+        _armed = _hslog('"watchdog_harness_wait"')
+        time.sleep(3)
+        check("a running background SUBAGENT whose transcript is being written HOLDS the watchdog: "
+              "alive past the first look and not ringing, though the project's probe says NOT "
+              "WAITING — the reported false positive",
+              _armed and _p.poll() is None and '"watchdog_ring"' not in read_or_empty(_hsl)
+              and '"waiting": true' in read_or_empty(_hsl))
+        with open(_hst, "a") as f:
+            f.write('{"task-notification": 1}\n')
+        _rc = _hsend(_p)
+        check("...and the subagent's notification arriving (the transcript grows) ends the hold "
+              "quietly, which is the wake the harness promised",
+              _rc == 0 and "the session went back to work during a hold" in read_or_empty(_hsl)
+              and '"watchdog_ring"' not in read_or_empty(_hsl))
+
+        _hsset(sub_age=0)
+        _p = _hsstart(_hspay(_sub), WATCHDOG_HARNESS_QUIET_SEC="3")
+        _rc = _hsend(_p)
+        _err = _p.stderr.read() if _rc is not None else ""
+        check("a subagent that goes QUIET past the bound ends the hold and RINGS, naming the task — "
+              "a snapshot from the turn-end is not a promise that it is still alive",
+              _rc == 2 and "subagents     : the wait on background subagents" in _err
+              and "subagent: Research grinders A specs" in _err
+              and "the background subagents went quiet" in read_or_empty(_hsl))
+
+        _hsset(sub_age=3600)
+        _r = run_watchdog(_hsbin, _hspay(_sub), WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        check("...and one already silent at the first look rings at once, saying for how long",
+              _r.returncode == 2 and "have written nothing for 60 min" in _r.stderr)
+
+        _hsset(sub_age=None)
+        _r = run_watchdog(_hsbin, _hspay(_sub), WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        check("a subagent whose transcript cannot be found is NOT a wait: unverifiable rings, "
+              "conservative toward not waiting like the probe",
+              _r.returncode == 2 and "none of their transcripts could be found" in _r.stderr)
+
+        _hsset(sub_age=0)
+        _r = run_watchdog(_hsbin, _hspay(_phone), WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        check("a SHELL task is never a wait, however live: a `flutter run` to a phone never "
+              "finishes into a wake-up, so it rings with no subagent line",
+              _r.returncode == 2 and "subagents     :" not in _r.stderr
+              and '"watchdog_harness_wait"' not in read_or_empty(_hsl))
+
+        _hsset(sub_age=0)
+        _r = run_watchdog(_hsbin, _hspay(dict(_sub, status="completed")),
+                          WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        check("...nor is a subagent listed as ENDED",
+              _r.returncode == 2 and '"watchdog_harness_wait"' not in read_or_empty(_hsl))
+
+        _hsset(sub_age=0, sub_name="agent-some-other-numbering.jsonl")
+        _p = _hsstart(_hspay(_sub))
+        _armed = _hslog('"watchdog_harness_wait"')
+        time.sleep(2)
+        check("when no file carries the listed id, any fresh write under the session's subagents/ "
+              "counts, so a host that numbers them differently still holds",
+              _armed and _p.poll() is None and '"waiting": true' in read_or_empty(_hsl))
+        _p.kill()
+        _p.wait()
+    finally:
+        for _pr in _hs_live:
+            if _pr.poll() is None:
+                _pr.kill()
+                _pr.wait()
+            if _pr.stderr:
+                _pr.stderr.close()
+        shutil.rmtree(hs, ignore_errors=True)
+
     # A SESSION'S RECORD LIVES WHERE ITS HOOKS RUN. An orchestrator running from the main checkout can
     # `cd` into a worktree to land a merge, and `./.game_loop/bin/game_loop` is then that worktree's
     # provisioned copy. `attribute` printed "✓ ATTRIBUTED" into the worktree's state, the commit gate

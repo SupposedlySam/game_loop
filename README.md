@@ -523,6 +523,15 @@ the watchdog. The contract is three-valued:
 | `1` | Not waiting — there is work here. The watchdog rings, and the ring quotes the first line the probe printed (stderr, or stdout if stderr is empty), so print what the run should do next. |
 | anything else, a timeout, or an unrunnable command | **Could not answer.** Still rings, *and* `status` reports the probe as FAILING. |
 
+**Your own background subagents need no probe.** The Stop payload lists the session's in-flight
+work, and while it names a background **subagent** or **workflow** the watchdog holds the same way
+a probe's "waiting" does: no ring, a re-check every `idle_sec`, and a quiet stand-down when the
+subagent's completion wakes the session. It holds only while that work is alive, judged by whether
+the subagent's own transcript (`<session>/subagents/agent-<id>.jsonl`) has been written in the last
+30 minutes (env override `WATCHDOG_HARNESS_QUIET_SEC`); past that it rings, naming the tasks that
+went quiet. Shell tasks and monitors never count: a `flutter run` to a phone is a shell task that
+never finishes into a wake-up, and the payload types it exactly like a test suite.
+
 **Say what your probe's budget is.** `watchdog.waiting_probe_timeout_sec` (default `15`, env
 override `WATCHDOG_PROBE_TIMEOUT_SEC`) bounds how long the probe may take; it runs on every tick, so
 the default is deliberately small. A probe that exceeds it is killed and lands in the third row —

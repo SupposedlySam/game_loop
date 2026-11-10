@@ -50,6 +50,15 @@
       "change": "A background task (running or pending) or a session cron used to excuse an announce-then-stop just by being listed, and only running tasks counted. Now in-flight work excuses the stop only when the lines after the last announcement say the work waits on it (once/when/after ... finishes, completes, lands, comes back; still running; in the background). A block lists what was in flight. session_crons is forwarded to stop triggers. Every allow prints its reason and the first 80 characters of the judged text, and the trigger log line now records a passing trigger's stdout as its detail.",
       "consequence": "a project with stopcheck attached sees blocks on turn-ends it used to allow: a closing announcement while a long-lived task (a device run, a server, a Monitor) is listed, with no words saying the work waits on it. Such a turn now ends only once the closing lines say it waits on a task. Pending tasks and session crons now count as in flight.",
       "why_it_qualifies": "turn-ends that used to pass now block. Reported from gravity_brew (sid 8af6d41d, 2026-11-09): 'Next I'm picking up the walkthrough fixes:' ended the turn while flutter runs and Monitors were listed as running, and the human had to say 'Harden the stop'."
+    },
+    {
+      "seq": 81,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog: background subagents hold the ring",
+      "change": "The watchdog now reads background_tasks from the Stop payload. While it lists a running or pending subagent or workflow whose own transcript (subagents/agent-<id>.jsonl, or any file under the session's subagents/ or workflows/ when no id matches) was written in the last 30 minutes, the watchdog holds instead of ringing, re-checking every idle_sec, and stands down quietly when the session's transcript grows. Silence past the bound (env WATCHDOG_HARNESS_QUIET_SEC) ends the hold with a ring that has a new 'subagents' line naming the tasks. The same hold runs before a page at the ring cap. Shell and monitor tasks never hold.",
+      "consequence": "a mandated run that ends its turn with background subagents in flight is no longer rung while they work. A run whose listed subagents went silent for 30 minutes, or whose subagent transcripts cannot be found, is rung as before, now with the reason.",
+      "why_it_qualifies": "fewer rings in a case that used to ring. Reported from gravity_brew (2026-11-10 ~00:40): a mandate bound and six background subagents running, and the watchdog rang twice while the project's waiting probe, which tracks Crawlers rather than this session's subagents, said not waiting."
     }
   ],
   "changes": [

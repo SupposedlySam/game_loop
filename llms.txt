@@ -411,6 +411,10 @@ never silent — a hook whose verdict came back truncated has judged, and only t
 #   ARMED, IT IS A BACKSTOP: while the probe says waiting the watchdog stays alive and re-runs it
 #   every idle_sec, then rings when the wait ends, quoting the probe's reason. So you may checkpoint
 #   and end your turn on a wait even if the message meant to wake you never arrives.
+#   YOUR OWN BACKGROUND SUBAGENTS ARE A WAIT WITH NO PROBE: while the Stop payload lists a running
+#   subagent or workflow, the watchdog holds instead of ringing, for as long as that subagent's own
+#   transcript keeps being written (30 min of silence ends it, env WATCHDOG_HARNESS_QUIET_SEC). A
+#   background SHELL task (a dev server, a `flutter run`) or a Monitor never counts.
 #   ITS BUDGET IS watchdog.waiting_probe_timeout_sec (default 15, env
 #   WATCHDOG_PROBE_TIMEOUT_SEC). The probe runs on EVERY tick, so the default is small on purpose —
 #   but a probe that is merely SLOW is killed and reads as FAILING, indistinguishable from broken

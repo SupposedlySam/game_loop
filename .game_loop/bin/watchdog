@@ -949,8 +949,12 @@ def owner_gone(chain):
     return False
 
 
-def hold_while_waiting(tpath, why, base):
+def hold_while_waiting(tpath, why, base, verdict=None, ended="the probe stopped saying waiting"):
     """Stay alive through a declared wait, and return the probe's reason the moment it ends.
+
+    `verdict(due)` -> (waiting, detail) is what is re-asked on each tick; the default is the
+    project's waiting probe. The harness-tracked wait (hold_for_harness_work) passes its own, so the
+    two waits share one set of stand-down rules rather than two copies drifting apart.
 
     ONE LOOK WAS NOT A WAIT. This used to exit at the first "waiting" verdict, about idle_sec after
     the turn ended, and nothing re-armed until the next turn-end, which an idle session never reaches.
@@ -1014,14 +1018,15 @@ def hold_while_waiting(tpath, why, base):
             stand_down("the session that started this hold is gone")
         now = time.time()
         due = now - last_log >= HOLD_LOG_EVERY_SEC
-        waiting, detail = waiting_verdict(tpath, log_if_waiting=due)
+        waiting, detail = (verdict(due) if verdict
+                           else waiting_verdict(tpath, log_if_waiting=due))
         probes += 1
         if due:
             last_log = now
         if waiting:
             why = detail or why
             continue
-        logline({"kind": "watchdog_hold_end", "ended": "the probe stopped saying waiting",
+        logline({"kind": "watchdog_hold_end", "ended": ended,
                  "held_sec": int(now - started), "probes": probes, "detail": detail})
         # THE WAIT MAY HAVE OUTLASTED THE WINDOW. The limit park ran before this hold, possibly hours
         # ago, and a ring is an API call into whatever wall has arrived since.
@@ -1030,7 +1035,114 @@ def hold_while_waiting(tpath, why, base):
         return detail
 
 
-def ring(state, rings, probe_note=""):
+# ── work the HARNESS will finish into a wake-up ─────────────────────────────────────────────────
+#
+# Reported from gravity_brew (2026-11-10 ~00:40): a mandate bound, six background subagents running,
+# the checkpoint naming them, and this watchdog rang twice anyway. Their completions were going to
+# re-invoke the session; the transcript simply does not grow while they run, so idle looked parked.
+# The project's waiting probe could not help: it is showrunner's, and it knows about Crawlers, not
+# about this session's own subagents. The Stop payload does know (Claude Code 2.1.319 lists in-flight
+# work in `background_tasks`), so the watchdog reads it.
+#
+# ONLY KINDS THAT END. A subagent or a workflow finishes and the harness turns that into a wake-up.
+# A `shell` task can be a test suite or a `flutter run` to a phone that never ends, and a monitor
+# can watch for ever; the payload types both the same way, so neither may silence a watchdog whose
+# failure mode is a wedged run nobody rings. Conservative toward NOT waiting, same as the probe.
+#
+# AND ONLY WHILE THEY ARE ALIVE. The payload is a snapshot from the turn-end. A subagent that hangs
+# or dies without its notification arriving would otherwise hold this watchdog for the full bound,
+# so each tick asks whether the subagents are still WRITING: each one's own transcript is
+# subagents/agent-ID.jsonl in the session's directory beside its transcript, and workflows keep
+# theirs under workflows/. Silence past HARNESS_WORK_QUIET_SEC ends the hold, and the ring says
+# which tasks went quiet.
+HARNESS_WAKES = frozenset({"subagent", "workflow"})
+_TASK_ENDED = frozenset({"completed", "complete", "done", "failed", "killed", "stopped",
+                         "cancelled", "canceled", "error"})
+HARNESS_WORK_QUIET_SEC = int(os.environ.get("WATCHDOG_HARNESS_QUIET_SEC") or 1800)
+
+
+def harness_tracked_work(payload):
+    """[(label, id)] for in-flight subagents and workflows on this Stop payload. Pure."""
+    out = []
+    for t in payload.get("background_tasks") or []:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get("type") or "").strip().lower() not in HARNESS_WAKES:
+            continue
+        if str(t.get("status") or "").strip().lower() in _TASK_ENDED:
+            continue
+        what = " ".join(str(t.get("description") or t.get("name") or t.get("id") or "").split())
+        out.append(("%s: %s" % (t.get("type"), what[:60]), str(t.get("id") or "")))
+    return out
+
+
+def harness_work_last_write(tpath, ids):
+    """Epoch of the newest write by the listed work, or None when there is nothing to look at.
+
+    A listed subagent's own transcript is preferred. When none of the ids names a file (a later host
+    may number them differently), any file under the session's subagents/ and workflows/ counts, which
+    errs toward holding only while SOMETHING the session dispatched is still moving."""
+    if not tpath or not str(tpath).endswith(".jsonl"):
+        return None
+    base = str(tpath)[:-len(".jsonl")]
+    mtimes = []
+    for i in ids:
+        if not i:
+            continue
+        try:
+            mtimes.append(os.path.getmtime(os.path.join(base, "subagents", "agent-%s.jsonl" % i)))
+        except OSError:
+            pass
+    if mtimes:
+        return max(mtimes)
+    for sub in ("subagents", "workflows"):
+        d = os.path.join(base, sub)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for name in names:
+            try:
+                mtimes.append(os.path.getmtime(os.path.join(d, name)))
+            except OSError:
+                pass
+    return max(mtimes) if mtimes else None
+
+
+def harness_wait_verdict(tpath, tracked):
+    """(waiting, detail): is the dispatched work the payload listed still alive?"""
+    labels = "; ".join(l for l, _ in tracked[:3]) + (" …" if len(tracked) > 3 else "")
+    last = harness_work_last_write(tpath, [i for _, i in tracked])
+    if last is None:
+        return False, ("%d background subagent(s) were listed at turn-end, and none of their "
+                       "transcripts could be found to check they are alive (%s)"
+                       % (len(tracked), labels))
+    quiet_for = time.time() - last
+    if quiet_for < HARNESS_WORK_QUIET_SEC:
+        return True, "%d background subagent(s) still working (%s)" % (len(tracked), labels)
+    return False, ("the %d background subagent(s) listed at turn-end have written nothing for "
+                   "%d min (%s); check on them" % (len(tracked), int(quiet_for // 60), labels))
+
+
+def hold_for_harness_work(payload, tpath, base):
+    """Hold while the payload's subagents and workflows are alive. Returns the note a ring carries
+    about them ("" when none were listed). Exits quietly, like every hold, when the session goes back
+    to work, which is what a completed subagent's notification makes it do."""
+    tracked = harness_tracked_work(payload)
+    if not tracked:
+        return ""
+    waiting, why = harness_wait_verdict(tpath, tracked)
+    logline({"kind": "watchdog_harness_wait", "waiting": waiting,
+             "tasks": [l for l, _ in tracked], "detail": why})
+    if not waiting:
+        return why
+    ended = hold_while_waiting(tpath, why, base,
+                               verdict=lambda _due: harness_wait_verdict(tpath, tracked),
+                               ended="the background subagents went quiet")
+    return "the wait on background subagents this watchdog was holding has ended — " + ended
+
+
+def ring(state, rings, probe_note="", harness_note=""):
     ph = state.get("phase") or {}
     m = state.get("mandate") or {}
     logline({"kind": "watchdog_ring", "mandate": m.get("text"),
@@ -1084,6 +1196,7 @@ def ring(state, rings, probe_note=""):
         + (f"{_head_note}\n" if _head_note else "")
         + f"  game_loop says: nobody is waiting on you (no T3 armed)\n"
         + (f"  waiting probe : {probe_note}\n" if probe_note else "")
+        + (f"  subagents     : {harness_note}\n" if harness_note else "")
         + f"  harness says  : the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
         "Both cannot be true. You are under an autonomy mandate with work outstanding and you are\n"
         "doing nothing. The Stop gate can stop you SAYING the wrong thing, but it cannot press go for\n"
@@ -1326,7 +1439,12 @@ def main():
             state["watchdog_rings"] = rings = 0
 
     if rings >= RING_CAP:
-        # Before spending the human: is this run waiting on work it dispatched? (#32)
+        # Before spending the human: is this run waiting on work it dispatched? (#32) Its own
+        # background subagents first, since the harness will wake it when they finish.
+        if harness_tracked_work(payload):
+            if not claim_pidfile():
+                quiet("cannot write pidfile")
+            hold_for_harness_work(payload, tpath, transcript_size(tpath))
         _w, _why = waiting_verdict(tpath)
         if _w:
             logline({"kind": "watchdog_wait_held", "rings": rings, "detail": _why,
@@ -1419,6 +1537,13 @@ def main():
     # to reach this quiet is for the project's own check to positively assert there is nothing to do.
     #
     # AND IT STOPS THE RING ONLY FOR AS LONG AS IT VERIFIES: see hold_while_waiting.
+    #
+    # The session's OWN dispatched work comes first: background subagents the harness will finish
+    # into a wake-up (hold_for_harness_work). When they go quiet the project's probe is still asked.
+    _harness_note = hold_for_harness_work(payload, tpath, before)
+    if _harness_note:
+        state = load_state()
+        state["_tpath"] = tpath
     _w, _why = waiting_verdict(tpath)
     _held = _w
     if _w:
@@ -1442,7 +1567,7 @@ def main():
                  "note": "could not size the transcript; not ringing on an unmeasured guess"})
         quiet("cannot measure transcript growth")
 
-    ring(state, state.get("watchdog_rings", 0), probe_note(_why, held=_held))
+    ring(state, state.get("watchdog_rings", 0), probe_note(_why, held=_held), _harness_note)
 
 
 if __name__ == "__main__":

@@ -721,8 +721,11 @@ the same idea as a trigger:
 It refuses a turn-end whose closing lines announce work (a "Next:" label, "next I'll", "I'm going
 to …") when nothing **after** the last announcement hands the turn back: no question, nothing
 waiting on the human, no blocker named. It is stricter than the mandate gate on purpose, because a
-project opted in. It stands aside while a mandate is bound, since the gate covers that turn-end, and
-while a background task is still running, since that is an honest wait. As a `stop` trigger it gets
+project opted in. It stands aside while a mandate is bound, since the gate covers that turn-end. A
+background task or a session cron in flight excuses the stop only when the closing lines say the work
+waits on it ("once the suite finishes I'll commit"), because a `flutter run` to a phone or a server
+never finishes into a wake-up for the announced work. Every allow is logged with its reason and the
+start of the text it judged. As a `stop` trigger it gets
 the bounds below for free, including the consecutive count, which counts only its own blocks.
 
 | Event | Fires when | Typically used for |

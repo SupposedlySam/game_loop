@@ -41,7 +41,16 @@
     "three lines below the fix says the bare verb as a whole word still trips it. Both were written",
     "by the same author in the same commit and both were accurate — the limit was simply written",
     "where a reader of the record never looks. An entry must carry its own caveats, because the",
-    "person acting on it is not reading the guard."
+    "person acting on it is not reading the guard.",
+    {
+      "seq": 80,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "stopcheck announced-work: in-flight work no longer excuses on its own",
+      "change": "A background task (running or pending) or a session cron used to excuse an announce-then-stop just by being listed, and only running tasks counted. Now in-flight work excuses the stop only when the lines after the last announcement say the work waits on it (once/when/after ... finishes, completes, lands, comes back; still running; in the background). A block lists what was in flight. session_crons is forwarded to stop triggers. Every allow prints its reason and the first 80 characters of the judged text, and the trigger log line now records a passing trigger's stdout as its detail.",
+      "consequence": "a project with stopcheck attached sees blocks on turn-ends it used to allow: a closing announcement while a long-lived task (a device run, a server, a Monitor) is listed, with no words saying the work waits on it. Such a turn now ends only once the closing lines say it waits on a task. Pending tasks and session crons now count as in flight.",
+      "why_it_qualifies": "turn-ends that used to pass now block. Reported from gravity_brew (sid 8af6d41d, 2026-11-09): 'Next I'm picking up the walkthrough fixes:' ended the turn while flutter runs and Monitors were listed as running, and the human had to say 'Harden the stop'."
+    }
   ],
   "changes": [
     {

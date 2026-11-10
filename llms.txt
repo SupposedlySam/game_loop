@@ -78,7 +78,8 @@ rule is the team's: change it in a commit, or override it here with a same-named
 
 The one game_loop ships is `stopcheck announced-work`. If it refuses you, your closing lines
 announced work and nothing after them handed the turn back. Do the work, or say what it is blocked
-on. A background task still running counts as an honest wait.
+on. A background task in flight counts as an honest wait only when your closing lines say the work
+waits on it ("once the suite finishes I'll commit"). The block lists what was in flight.
 
 It stands down after 3 **consecutive** blocks — which bounds an attachment that keeps refusing, and
 does **not** bound a single refusal. A block you never retry never increments again, so the

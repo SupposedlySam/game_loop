@@ -201,6 +201,18 @@
         "verified_on": "2026-11-09",
         "verified_against": "2.1.318",
         "verified_how": "Counted in session dc549bfb's transcript: 21 user records with origin.kind human, 43 with task-notification, 5 with peer, and none without an origin among those kinds. Compaction summaries carried isCompactSummary and skill bodies isMeta. One session, one host version."
+      },
+      {
+        "id": "stop-payload-in-flight-work",
+        "says": "the Stop payload carries background_tasks (in-flight work only: {id, type, status, description, command?, agent_type?, server?, tool?, name?}, type one of shell/subagent/monitor/workflow/MCP task...) and session_crons ({id, schedule, recurring, prompt})",
+        "source": "read in the running binary at 2.1.319 (the client's own Stop hook input schema and the builder that fills it from the task registry)",
+        "breaks": "stopcheck announced-work counts these as in-flight work that can excuse an announce-then-stop when the closing lines wait on it. If they moved, no wait would be seen and an honest 'once the suite finishes' turn-end would block once, which costs a turn and loses no check",
+        "ledger": "The Stop payload lists in-flight work: background_tasks and session_crons",
+        "exercisable": "yes",
+        "exercisable_why": "CONDITIONAL and exercisable: any Stop hook can dump its own stdin while a background task runs, and a turn-end with nothing in flight is the control (the schema says the array is then empty)",
+        "verified_on": "2026-11-09",
+        "verified_against": "2.1.319",
+        "verified_how": "Read in resources/native-binary/claude of the 2.1.319 VS Code extension: the Stop schema describes background_tasks as 'In-flight background work (running/pending + backgrounded)' and session_crons as the cron tasks that will wake the session; the builder maps local_bash to type shell with command, local_agent to subagent with agent_type, monitor_mcp and mcp_task to server and tool, local_workflow to name. Read from the source, not observed in a live payload."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

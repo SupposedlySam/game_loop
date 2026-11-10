@@ -13106,7 +13106,9 @@ def main():
         # "did it answer the question" is a question about that text.
         _attach_stop({"name": "reads-payload",
                       "command": f"cat > {shlex.quote(_pay)}; exit 0"})
-        _end(msg="I have finished the migration.")
+        _end(msg="I have finished the migration.",
+             session_crons=[{"id": "c0", "schedule": "0 9 * * *", "recurring": True,
+                             "prompt": "x"}])
         try:
             # DEFENSIVELY, because the file is the assertion. An attachment that never ran writes
             # nothing, and letting that raise here would take the whole suite down with it — every
@@ -13116,10 +13118,12 @@ def main():
                 _seen_payload = json.load(f)
         except (OSError, ValueError):
             _seen_payload = {}
-        check("the payload carries the agent's CLOSING MESSAGE and names the moment, so an "
-              "attachment can decide about this turn rather than about the world in general",
+        check("the payload carries the agent's CLOSING MESSAGE, names the moment, and passes the "
+              "host's session_crons through, so an attachment can decide about this turn rather "
+              "than about the world in general",
               _seen_payload.get("last_assistant_message") == "I have finished the migration."
               and _seen_payload.get("event") == "stop"
+              and (_seen_payload.get("session_crons") or [{}])[0].get("id") == "c0"
               and _seen_payload.get("session") == "sess-stop")
         check("...and says WHY the gate is letting this turn end — with nothing bound, that it is "
               "inert — so an attachment can tell a turn the session bought from one it merely reached",
@@ -13152,10 +13156,54 @@ def main():
         check("...and it does NOT block an ending that hands back AFTER the announcement, asks, "
               "names a blocker, merely quotes one, or announces nothing (5 shapes)",
               all(_end(sid="sess-announce-ok", msg=m).returncode == 0 for m in _ok_ends))
-        check("...nor a turn-end while a BACKGROUND TASK is still running, which is an honest wait "
-              "— the field has to reach the trigger for this to be decidable at all",
-              _end(sid="sess-announce-bg", msg=_next,
-                   background_tasks=[{"id": "b1", "status": "running"}]).returncode == 0)
+        # IN FLIGHT IS NOT AN EXCUSE ON ITS OWN (gravity_brew, 2026-11-09). Any running task used to
+        # waive the check, and a `flutter run` to a phone, which never finishes into a wake-up, let
+        # "Next I'm picking up the walkthrough fixes:" end the turn. The shapes are the host's own
+        # (Claude Code 2.1.319's Stop schema): type, status, description, command.
+        _phone = {"id": "b7", "type": "shell", "status": "running",
+                  "description": "flutter run to the phone",
+                  "command": "fvm flutter run --debug -d 988a"}
+        _bg_plain = _end(sid="sess-announce-bg", msg=_next, background_tasks=[_phone])
+        check("a closing 'Next:' list is BLOCKED even while a background task runs, when nothing "
+              "in the closing lines waits on it, and the block NAMES what is in flight so the "
+              "agent can see which task the check counted",
+              _bg_plain.returncode == 2 and "you wrote: **Next:**" in _bg_plain.stderr
+              and "shell: flutter run to the phone" in _bg_plain.stderr)
+        _waits = ("Shipped the parser.\n\n**Next:** once the suite finishes I'll commit and "
+                  "push it.")
+        check("...while the SAME task with closing lines that wait on it ('once the suite "
+              "finishes') is an honest wait and ends the turn",
+              _end(sid="sess-announce-bg-ok", msg=_waits,
+                   background_tasks=[{"id": "b8", "type": "shell", "status": "running",
+                                      "description": "python3 test/run.py"}]).returncode == 0)
+        check("...and those waiting words with NOTHING in flight are still a stall: nothing will "
+              "wake the session when 'the suite finishes'",
+              _end(sid="sess-announce-bg-none", msg=_waits).returncode == 2)
+        check("...a task listed as ENDED is not in flight, a PENDING one is, and so is a session "
+              "cron (a ScheduleWakeup), so each of the three is judged by what the host listed",
+              _end(sid="sess-announce-bg-ended", msg=_waits,
+                   background_tasks=[{"id": "b9", "type": "shell", "status": "completed",
+                                      "description": "python3 test/run.py"}]).returncode == 2
+              and _end(sid="sess-announce-bg-pending", msg=_waits,
+                       background_tasks=[{"id": "b10", "type": "subagent", "status": "pending",
+                                          "description": "review"}]).returncode == 0
+              and _end(sid="sess-announce-cron", msg=_waits,
+                       session_crons=[{"id": "c1", "schedule": "*/20 * * * *",
+                                       "recurring": True, "prompt": "check CI"}]).returncode == 0)
+        # AN ALLOW IS RECORDED WITH ITS REASON. A silent exit 0 logged `"detail": ""`, and the
+        # reporter could not tell which excuse had let their stall through.
+        _end(sid="sess-announce-why", msg="Shipped the parser and released it as #12.")
+        try:
+            with open(os.path.join(stp, ".game_loop", "log.jsonl")) as f:
+                _why = [json.loads(l) for l in f if '"announced-work"' in l]
+        except (OSError, ValueError):
+            _why = []
+        _why_last = _why[-1].get("detail", "") if _why else ""
+        check("...and an ALLOW lands in the log with its reason AND the start of the text it "
+              "judged, so a turn-end that should have been refused can be explained afterwards",
+              _why and _why[-1].get("ok") is True
+              and "no announced work in the closing lines" in _why_last
+              and "judged: Shipped the parser and released it" in _why_last)
         check("...and position decides: an earlier hand-back does not excuse a LATER announcement",
               _end(sid="sess-announce-pos", msg="No release yet, whenever you say.\n\n"
                    "**Next, step 2:** I'll start by wiring the API.").returncode == 2)

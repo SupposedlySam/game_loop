@@ -51,6 +51,14 @@ _Things we read at the pinned version, by hand, and confirmed. Each with a sourc
   what `require_read` uses as the human-turn boundary. What it does NOT establish: that the field
   is documented, or stable across releases. A record with no origin falls back to a plain user
   message that is not meta, a summary, a tool result or a task notification.
+- **The Stop payload lists in-flight work: background_tasks and session_crons**: each task is
+  `{id, type, status, description}` plus `command` for a shell task, `agent_type` for a subagent,
+  `server`/`tool` for a monitor or MCP task and `name` for a workflow; the schema calls it
+  "running/pending + backgrounded" work. session_crons are `{id, schedule, recurring, prompt}`. Read
+  in Claude Code 2.1.319's own binary on 2026-11-09. `stopcheck announced-work` treats both as work
+  that can excuse an announce-then-stop, but only when the closing lines say the work waits on it.
+  What it does NOT establish: which statuses appear in practice (read from the schema, not from a
+  live payload), or that a listed task will ever finish: a `flutter run` is a `shell` task too.
 
 ## RULED-OUT
 

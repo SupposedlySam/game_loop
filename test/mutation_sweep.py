@@ -659,12 +659,20 @@ MUTANTS = [
      "NOTHING UNMET IS THE GATE THAT NEVER REFUSES: the allow arms pass by construction under this "
      "neuter, which is why each is paired with a refusal. MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.", 4),
     ("announced_work_verdict -> no closing message is ever announced work",
-     ".game_loop/bin/_gl_impl.py::announced_work_verdict", "    return False, 'neutered'\n",
-     ["shipped announce check BLOCKS", "position decides", "runs BESIDE the shared one"],
+     ".game_loop/bin/_gl_impl.py::announced_work_verdict", "    return False, 'neutered', None\n",
+     ["shipped announce check BLOCKS", "position decides", "runs BESIDE the shared one",
+      "BLOCKED even while a background task runs", "NOTHING in flight are still a stall"],
      "NEUTERED TO 'never block' IS THE REPORTED WORLD (gravity_brew, 2026-11-09): an owner agent "
-     "ended a turn on a closing Next: list with no mandate bound, and nothing objected. The five "
-     "honest endings, the background-task wait and the override pass BY CONSTRUCTION under this "
-     "neuter, which is why each is paired with a block. MEASURED 2026-11-09 at 2ceb44b plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
+     "ended a turn on a closing Next: list with no mandate bound, and nothing objected; then again "
+     "with a flutter run listed as in flight. The five honest endings, the in-flight waits and the "
+     "override pass BY CONSTRUCTION under this neuter, which is why each is paired with a block. "
+     "MEASURED 2026-11-09 at cf8a31f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 7.", 7),
+    ("in_flight_work -> the host never lists anything in flight",
+     ".game_loop/bin/_gl_impl.py::in_flight_work", "    return []\n",
+     ["closing lines that wait on it", "a PENDING one is"],
+     "NOTHING IN FLIGHT turns every honest 'once the suite finishes' wait into a block, which is "
+     "the over-correction this fix could have shipped instead of the reported under-correction. "
+     "MEASURED 2026-11-09 at cf8a31f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
     ("load_triggers -> no trigger file is ever read",
      ".game_loop/bin/_gl_impl.py::load_triggers", "    return {}\n",
      ["TRACKED triggers.shared.json runs", "BLOCKS turn-end (exit 2)"],

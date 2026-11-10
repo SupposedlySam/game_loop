@@ -1175,8 +1175,11 @@ def _run_trigger(s, t, event, payload, default_timeout=20.0, max_timeout=None):
         body = (body + "\n" + _margin) if body else _margin
     rec = s.setdefault("triggers", {}).setdefault(name, {})
     rec.update({"event": event, "at": now(), "ok": ok, "detail": (err or body)[:200]})
+    # The LOG carries what the state record carries. It used to log stderr only, so an attachment
+    # that passed with a reason on stdout logged `"detail": ""`, and gravity_brew could not tell
+    # after the fact why `stopcheck announced-work` had let a stall through.
     logline({"kind": "trigger", "name": name, "event": event, "ok": ok,
-             "detail": (err or "")[:200]})
+             "detail": (err or body)[:200]})
     return name, ran, code, body, err
 
 
@@ -2751,25 +2754,72 @@ _HANDBACK_PAT = re.compile(
     r"(?:after|once|when) you (?:approve|confirm|decide|reply|answer|say|reload|restart))\b", re.I)
 _ANNOUNCE_TAIL_LINES = 12
 
+# WAITING ON IT, SAID OUT LOUD. The words that tie an announcement to work already in flight:
+# "once the suite finishes I'll commit", "the build is still running". They count only when the
+# host also lists something in flight, because the same sentence with nothing running is a stall
+# that sounds patient.
+_AWAIT_PAT = re.compile(
+    r"\b(?:once|when|after|as soon as|until)\b[^\n]{0,80}?\b(?:"
+    r"finish(?:es|ed)?|complete[sd]?|lands?|(?:is|are|it's|they're)\s+(?:done|back|green)|"
+    r"comes? back|returns?|reports?|pass(?:es)?|fails?|fires?|wakes?|exits?|ends?|arrives?|"
+    r"goes green)\b"
+    r"|\bstill (?:running|going|building|in progress)\b"
+    r"|\bin the background\b", re.I)
+# The host's array holds IN-FLIGHT work only ("running/pending + backgrounded", Claude Code 2.1.319's
+# own schema text). A status in this set is filtered out anyway, in case a later build stops
+# filtering and starts listing finished tasks as well.
+_TASK_ENDED = frozenset({"completed", "complete", "done", "failed", "killed", "stopped",
+                         "cancelled", "canceled", "error"})
+
+
+def in_flight_work(payload):
+    """One short label per thing the host says is still in flight for this session: background
+    tasks (shell, subagent, monitor, workflow, MCP task) and session crons. Pure.
+
+    The labels are what the block shows, so the agent sees WHICH task the check counted. A
+    `flutter run` on a phone and a test suite are both 'shell', and only the agent can tell
+    which one its next step is waiting on."""
+    out = []
+    for t in payload.get("background_tasks") or []:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get("status") or "").strip().lower() in _TASK_ENDED:
+            continue
+        what = (t.get("description") or t.get("command") or t.get("name")
+                or t.get("agent_type") or t.get("id") or "")
+        out.append("%s: %s" % (t.get("type") or "task", " ".join(str(what).split())[:60]))
+    for cron in payload.get("session_crons") or []:
+        if isinstance(cron, dict):
+            out.append("scheduled wake-up: %s" % (cron.get("schedule") or "?"))
+    return out
+
 
 def announced_work_verdict(payload, mandate_active=False):
-    """(block, why) for one Stop payload. Pure, so the suite can drive every branch.
+    """(block, why, judged) for one Stop payload. Pure, so the suite can drive every branch.
 
-    Allows, and says why, when: a mandate is bound (the Stop gate's own announce check owns that
-    turn-end, and two checks on one sentence would block it twice), a background task is still
-    running (an honest wait: its completion re-invokes the session), the closing message cannot be
-    read (a check that cannot read its input must not start refusing), or nothing is announced.
+    `judged` is the start of the closing text this verdict read, or None when it read none. An
+    allow is recorded with both, so a turn-end that should have been refused can be explained
+    after the fact.
+
+    Allows when: a mandate is bound (the Stop gate's own announce check owns that turn-end, and two
+    checks on one sentence would block it twice), the closing message cannot be read (a check that
+    cannot read its input must not start refusing), nothing is announced, the turn hands back to
+    the human after its last announcement, or the closing lines say the work waits on something
+    the host lists as in flight.
+
+    IN FLIGHT IS NOT ENOUGH ON ITS OWN, and this was measured. Any running task used to excuse
+    the stop. gravity_brew ended a turn on "Next I'm picking up the walkthrough fixes:" while a
+    `flutter run` to a phone and long-lived Monitors were listed as running. None of those would
+    ever finish into a wake-up for the fixes, and the human had to say "Harden the stop". A task
+    being in flight says something will wake the session. It does not say that the announced
+    work waits on it. Only the closing lines can say that.
     """
     if mandate_active:
-        return False, "a mandate is bound; the Stop gate's own announce check covers this turn-end"
-    running = [t for t in (payload.get("background_tasks") or [])
-               if isinstance(t, dict) and t.get("status") == "running"]
-    if running:
-        return False, ("%d background task(s) still running, so the session is waiting on "
-                       "something that will wake it" % len(running))
+        return False, "a mandate is bound; the Stop gate's own announce check covers this turn-end", None
     text, why_not = _last_assistant_text(payload)
     if not text:
-        return False, "the closing message could not be read (%s)" % why_not
+        return False, "the closing message could not be read (%s)" % why_not, None
+    judged = " ".join(text.split())[:80]
     # Quoted spans are blanked so a message can QUOTE an announcement without being one, the same
     # protection _closing gives the mandate gate. Bold is KEPT: "**Next:**" is the reported shape.
     blanked = re.sub(r'"[^"\n]*"', '""', text)
@@ -2780,39 +2830,61 @@ def announced_work_verdict(payload, mandate_active=False):
         if _NEXT_LABEL_PAT.search(ln) or _promised_to_continue(ln):
             last = i
     if last is None:
-        return False, "no announced work in the closing lines"
+        return False, "no announced work in the closing lines", judged
     after = "\n".join(lines[last:])
     if _asked_the_user(after) or _HANDBACK_PAT.search(after):
-        return False, "the turn hands back to the human after its last announcement"
-    return True, lines[last].strip()[:160]
+        return False, "the turn hands back to the human after its last announcement", judged
+    waiting = in_flight_work(payload)
+    if waiting and _AWAIT_PAT.search(after):
+        return False, ("the closing lines wait on in-flight work (%s)"
+                       % "; ".join(waiting[:3])), judged
+    return True, lines[last].strip()[:160], judged
 
 
 ANNOUNCED_WORK_BLOCK = """announced-work: your closing message announces work and then ends the turn.
 
     you wrote: %s
 
-Nothing after that line hands the turn back: no question, nothing waiting on the human, no
-background task still running. If the work is yours to do now, do it. If it really is blocked,
-say on what ("blocked on <fact>", "waiting for you to <x>"), and that line ends the turn honestly.
+Nothing after that line hands the turn back: no question, nothing waiting on the human, and
+nothing saying the work waits on a task still in flight. If the work is yours to do now, do it.
+If it really is blocked, say on what ("blocked on <fact>", "waiting for you to <x>"), and that
+line ends the turn honestly.%s
 
 This check is game_loop's `stopcheck announced-work`, attached by this project as a `stop` trigger."""
+
+ANNOUNCED_WORK_IN_FLIGHT = """
+
+In flight for this session right now:
+%s
+A task in flight excuses this only when your closing lines say the work waits on it ("once the
+suite finishes I'll commit"). A device run, a server or a watcher that never finishes will not
+wake you to do the announced work."""
 
 
 def cmd_stopcheck(s, a, payload):
     """`stop` trigger entrypoint. exit 0 = no objection; exit 2 = block, stderr is the reason.
 
+    AN ALLOW SAYS WHY, on stdout, which the stop runner records as the trigger's detail and never
+    shows the model. An allow used to exit silently, and when gravity_brew's turn-end got through
+    that should have been refused, the log held `"detail": ""` and nothing could say which excuse
+    had fired.
+
     FAILS OPEN ON ITS OWN ERROR, and says so: a non-zero exit from a trigger is read as a block, so
     a crash here would refuse every turn-end for a reason nobody wrote."""
     try:
-        block, why = announced_work_verdict(
+        block, why, judged = announced_work_verdict(
             payload, bool((s.get("mandate") or {}).get("active")))
     except Exception as exc:  # noqa: BLE001
         print("stopcheck announced-work could not decide (%s); not objecting" % exc,
               file=sys.stderr)
         sys.exit(0)
     if not block:
+        print("allowed: %s%s" % (why, " | judged: %s" % judged if judged else ""))
         sys.exit(0)
-    print(ANNOUNCED_WORK_BLOCK % why, file=sys.stderr)
+    waiting = in_flight_work(payload)
+    extra = (ANNOUNCED_WORK_IN_FLIGHT % "\n".join("  - " + w for w in waiting[:5])
+             if waiting else "")
+    print(ANNOUNCED_WORK_BLOCK % (why, extra), file=sys.stderr)
     sys.exit(2)
 
 
@@ -8103,8 +8175,10 @@ def stop_trigger_block(s, payload, notices, allowed_by=None):
     # (its completion re-invokes the session), which is the first thing an announce check must
     # tell apart from a stall. Missing from this list, `stopcheck announced-work` read every such
     # wait as a stall: the check existed and its input never arrived.
+    # session_crons for the same reason: a ScheduleWakeup or a CronCreate is the host saying the
+    # session will be woken again, which is in-flight work just as a background task is.
     fields = ("session_id", "transcript_path", "stop_hook_active", "last_assistant_message",
-              "background_tasks")
+              "background_tasks", "session_crons")
     tp = {k: payload.get(k) for k in fields if payload.get(k) is not None}
     tp.update({"event": "stop", "project": config().get("project_name"), "session": SESSION,
                "gate_allowed_by": allowed_by})

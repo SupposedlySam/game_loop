@@ -2174,6 +2174,12 @@ for v in verbs:
 PY
 )
     if [ -n "$deploy_hit" ]; then
+      # THE EXAMPLE BELOW IS ESCAPED, QUOTES AND DOLLAR BOTH, AND MUST STAY SO (#147). Unescaped,
+      # its own double quotes closed this string, leaving $(cat <file>) as a real, unquoted command
+      # substitution. bash 5.3 refuses to PARSE the file with it (the `<file>)` is a syntax error),
+      # so the whole guard failed open for a user who had upgraded. bash 3.2 parses it and then RUNS
+      # it: every deploy refusal printed "" where the example belonged, plus a syntax error on
+      # stderr. The suite parses every .sh under each bash it can find, and checks this text.
       deny "BLOCKED: deploy/publish verb '$deploy_hit'.
 
 This is an irreversible, outward-facing action (a real publish/release/deploy). An unattended agent
@@ -2182,7 +2188,7 @@ hatch, by design. (Configured in .game_loop/config.json -> deploy_verbs.)
 
 WRITING ABOUT THE VERB RATHER THAN RUNNING IT? A commit message, an issue body, a doc quoting a
 command — then your PROSE tripped this, not a deploy. Put the text in a file and pass the path:
-  git commit -F <file>   ·   <verb> --<option>-file <file>   ·   <verb> --<option> "$(cat <file>)"
+  git commit -F <file>   ·   <verb> --<option>-file <file>   ·   <verb> --<option> \"\$(cat <file>)\"
 The whole word in prose is matched deliberately: narrowing to command position would miss a real
 deploy nested in an interpreter argument, and missing a real publish is the expensive direction.
 That trade is worth stating here rather than only in the source, because this message is where

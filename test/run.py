@@ -12172,6 +12172,16 @@ def main():
               _dep(_D + " myimage:latest") and _dep("make build && " + _D))
         check("...and a configured verb is refused with its own arguments after it",
               _dep(_P + " --domain example.com"))
+        # THE HINT PRINTS WHAT IT SAYS (#147). Its `"$(cat <file>)"` example sat unescaped inside a
+        # double-quoted deny string: bash 5.3 would not parse the guard at all, and bash 3.2 ran
+        # the substitution, so the refusal said `""` and stderr carried a syntax error.
+        _dr = guard(dp, {"tool_name": "Bash", "cwd": dp,
+                         "tool_input": {"command": _P + " --domain example.com"}})
+        check("...and the refusal's how-to-pass-prose hint prints its `$(cat <file>)` example "
+              "LITERALLY, with no command-substitution error on stderr (#147)",
+              '"$(cat <file>)"' in ((dig(json_text(_dr.stdout), "hookSpecificOutput") or {})
+                                    .get("permissionDecisionReason") or "")
+              and "command substitution" not in _dr.stderr)
         check("...and one nested inside an interpreter argument still counts, since it executes "
               "just the same",
               _dep('bash -c "' + _D + ' x"'))
@@ -18089,6 +18099,54 @@ def main():
           (not _have) or any(20 > len(v) for k, v in _killers.items()
                              if k.endswith("::pinned_sha")))
 
+    print("every shipped shell file parses under every bash this machine has (#147):")
+    # A PARSER DIFFERENCE IS A GUARD THAT FAILS OPEN. guard-writes-impl.sh parsed under the macOS
+    # /bin/bash (3.2) the suite runs, and not under bash 5.3, so a user who ran `brew install bash`
+    # had every write unchecked. The suite can only use the bashes that exist here, so it names the
+    # versions it tried, and says so when none was newer than 3.x: a parse check run by one old bash
+    # is a check about that bash. GL_EXTRA_BASH (colon-separated paths) adds one, which is how a
+    # bash built from source in a scratch directory was used to reproduce #147.
+    def _bash_version(b):
+        try:
+            r = subprocess.run([b, "-c", "echo $BASH_VERSION"], capture_output=True, text=True,
+                               timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+    _cands = ["/bin/bash", shutil.which("bash") or "", "/opt/homebrew/bin/bash",
+              "/usr/local/bin/bash"] + [x for x in os.environ.get("GL_EXTRA_BASH", "").split(":")]
+    _bashes, _seen_real = [], set()
+    for _b in _cands:
+        if not _b or not os.path.isfile(_b) or os.path.realpath(_b) in _seen_real:
+            continue
+        _v = _bash_version(_b)
+        if _v:
+            _seen_real.add(os.path.realpath(_b))
+            _bashes.append((_b, _v))
+    _sh_files = sorted(f for f in subprocess.run(["git", "ls-files", "*.sh"], cwd=REPO,
+                                                  capture_output=True, text=True).stdout.split()
+                       if f)
+    check("there ARE shell files and at least one bash to parse them with, so the result below has "
+          "a subject: %d file(s), bash %s" % (len(_sh_files), ", ".join(v for _, v in _bashes)),
+          len(_sh_files) >= 5 and ".game_loop/bin/guard-writes-impl.sh" in _sh_files
+          and _bashes)
+    _unparsed_by = []
+    for _b, _v in _bashes:
+        for _f in _sh_files:
+            _r = subprocess.run([_b, "-n", os.path.join(REPO, _f)], capture_output=True, text=True)
+            if _r.returncode != 0:
+                _unparsed_by.append("%s under %s: %s" % (_f, _v, (_r.stderr.strip().splitlines()
+                                                                    or ["?"])[0][:120]))
+    check("every tracked .sh file PARSES under each of those bashes — a guard that does not parse "
+          "fails open, so a parser difference is an unchecked session: "
+          + ("; ".join(_unparsed_by[:3]) or "none"),
+          not _unparsed_by)
+    if not any(not v.startswith(("3.", "2.")) for _, v in _bashes):
+        print("    NOT RUN under a bash newer than 3.x: none was found (tried %s). Set GL_EXTRA_BASH "
+              "to a bash 5 to cover the parser #147 was reported against." % ", ".join(
+                  c for c in _cands if c))
+
     print("the central-install shims, which run in somebody else's repo:")
     _shim_dir = os.path.join(REPO, "templates", "central-shims")
     _shims = sorted(os.listdir(_shim_dir)) if os.path.isdir(_shim_dir) else []
@@ -21288,6 +21346,36 @@ def main():
               "recursive+force" in _ask("rm -rf /tmp/gl-throwaway") and _uses() == [1, 1])
     finally:
         shutil.rmtree(_pp, ignore_errors=True)
+
+    # A NAMED GRANT SAYS IT IS ONE (#148). `authorize --path rm-rf`, run exactly as the rm guard
+    # prints it, was confirmed as "one mutation outside this repo" with a path under the cwd, and a
+    # Crawler read that as a file grant and armed it again on every retry.
+    print("a named grant is confirmed as a name, not a path (#148):")
+    _ng = make_sandbox()
+    try:
+        _ngr = gl(_ng, "authorize", "--path", "rm-rf", "--reason", "Jonah: yes, delete it",
+                  sid="sess-named")
+        _ngp = gl(_ng, "authorize", "--path", os.path.join(_ng, "out", "x.txt"), "--reason",
+                  "Jonah: write it", sid="sess-named")
+        check("#148: `authorize --path rm-rf` says it is a NAMED grant and what it buys, and does "
+              "not call it a mutation outside this repo",
+              _ngr.returncode == 0 and "NAMED grant" in _ngr.stdout
+              and "recursive+force" in _ngr.stdout and "outside this repo" not in _ngr.stdout)
+        check("#148: ...while an ordinary path grant reads exactly as it did",
+              _ngp.returncode == 0 and "one mutation outside this repo" in _ngp.stdout
+              and "NAMED grant" not in _ngp.stdout)
+    finally:
+        shutil.rmtree(_ng, ignore_errors=True)
+    # THE TWO LISTS AGREE. The guard spends named grants by family; `authorize` announces them from
+    # its own list. A family the guard spends that the list lacks is announced as a path again.
+    _gw_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "guard-writes-impl.sh"))
+    _spent_families = set(re.findall(r'consume_named_hatch "[^"]*" "([^"]+)"', _gw_src))
+    _gl_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+    _named_block = _gl_src.split("_NAMED_HATCHES = (", 1)[-1].split("\n)\n", 1)[0]
+    _announced = set(re.findall(r'^\s*\("([^"]+)",', _named_block, re.M))
+    check("#148: every family the guard spends a named grant for is one `authorize` announces "
+          "as named (guard: %s; authorize: %s)" % (sorted(_spent_families), sorted(_announced)),
+          _spent_families and _spent_families <= _announced)
 
     # ---- remote_has_ref itself, against a REAL remote. The sweep found it UNPROTECTED at 0. ----
     # I tested mark_publication_state with remote_has_ref STUBBED, which exercises the reporter and

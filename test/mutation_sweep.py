@@ -667,6 +667,13 @@ MUTANTS = [
      "with a flutter run listed as in flight. The five honest endings, the in-flight waits and the "
      "override pass BY CONSTRUCTION under this neuter, which is why each is paired with a block. "
      "MEASURED 2026-11-09 at cf8a31f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 7.", 7),
+    ("named_hatch -> no grant is ever a named one",
+     ".game_loop/bin/_gl_impl.py::named_hatch", "    return None\n",
+     ["says it is a NAMED grant and what it buys"],
+     "NEVER NAMED IS THE REPORTED WORLD (#148): `authorize --path rm-rf` confirmed as a mutation "
+     "outside this repo, which a Crawler read as a file grant and re-armed on every retry. The "
+     "path-grant arm passes BY CONSTRUCTION under this neuter, which is why it is paired with the "
+     "named one. MEASURED 2026-11-10 at aceeed4 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 1.", 1),
     ("leftovers_verdict -> no closing message ever leaves work undone",
      ".game_loop/bin/_gl_impl.py::leftovers_verdict", "    return False, 'neutered', None\n",
      ["a closing 'Not done yet:' list", "EACH ITEM ANSWERS FOR ITSELF",
@@ -2418,6 +2425,9 @@ NOT_SWEPT = {
                            "exit-code assertions that read it go red, which is the safe direction",
     "test/run.py::_hslog": "_hwlog's twin for the background-subagent sandbox: neutered to False it "
                            "reddens the assertions that wait on it, which is the safe direction",
+    "test/run.py::_bash_version": "the #147 parse check's probe for which bashes exist: neutered to "
+                                  "None it finds none, and the 'at least one bash to parse them with' "
+                                  "assertion goes red, which is the safe direction",
     "test/run.py::_hsend": "_hwend's twin for the background-subagent sandbox: neutered to None the "
                            "exit-code assertions that read it go red, which is the safe direction",
     "test/run.py::_cron_log": "a suite helper reading the #135 sandbox log: neutered to an empty "

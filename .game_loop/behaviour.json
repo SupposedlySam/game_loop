@@ -785,6 +785,15 @@
       "change": "The recursive+force rm refusal now counts a mandate as live only while it is active (and not parked); it used to read the mandate's text alone, which survives `mandate --clear`. And the remedy it has always printed, `authorize --path rm-rf --reason \"..\"`, now works: such a grant buys one recursive delete, announced as AUTHORIZATION SPENT and logged as authorized_rmrf with the command. The gh outward-write hatch and this one now share one named-hatch consumer; the gh hatch's behaviour and log line are unchanged.",
       "consequence": "a session whose state carries a cleared mandate no longer has rm -rf refused. One with a live mandate and an rm-rf grant has one delete allowed and the grant spent. A grant recorded before this change under that name is spendable now, so check `status` for one you no longer mean.",
       "why_it_qualifies": "refusals that used to fire now allow. Reported from showrunner (2026-11-10): a mandate cleared on 2026-09-03 still triggered 'while a MANDATE is live', and the printed authorize was recorded and never consulted, with the human present and approving the delete."
+    },
+    {
+      "seq": 84,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard: parses under bash 5.3; the deploy refusal's hint prints correctly",
+      "change": "The deploy/publish refusal's example `<verb> --<option> \"$(cat <file>)\"` had unescaped quotes that closed the message string, leaving a real command substitution. bash 5.3 could not parse guard-writes-impl.sh at all, so the write guard failed open (\"THE WRITE GUARD IS NOT RUNNING\") on every tool call for anyone whose bash on PATH is 5.3. bash 3.2 parsed it and ran the substitution, so every deploy refusal printed \"\" in place of the example and a syntax error on stderr. Both the quotes and the dollar are now escaped.",
+      "consequence": "a machine whose bash on PATH is 5.3 gets a working write guard again, so writes that were unchecked are now checked and refused where the rules say so. On bash 3.2 nothing changes except that the deploy refusal's hint now reads as written.",
+      "why_it_qualifies": "refusals that were not happening (the guard was failing open) now happen. Reported in #147 by the drops owner agent after `brew install bash` put 5.3.20 first on PATH; reproduced here against a bash 5.3 built from source."
     }
   ],
   "schema": 1

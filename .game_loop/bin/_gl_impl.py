@@ -5937,6 +5937,27 @@ def sessionless_grant_refusal(a):
     return "\n".join(lines)
 
 
+
+# NAMED GRANTS, said as what they are (#148). `authorize` realpaths whatever --path it is given, so
+# the rm-rf hatch the rm guard prints was confirmed as "one mutation outside this repo" with a path
+# under the cwd, which reads as a grant for a file that does not exist. A Crawler took it at its
+# word, saw the next delete still refused (on a release before the hatch was wired), and armed
+# another, and another. The guard spends these families by basename (guard-writes-impl.sh:
+# consume_named_hatch), and the suite checks that every family the guard spends is named here.
+_NAMED_HATCHES = (
+    ("rm-rf", "one `rm` with recursive+force, refused while a mandate is live"),
+    ("gh ", "one outward GitHub write from the shell (`gh issue`, `gh pr`, `gh api -X ..`)"),
+)
+
+
+def named_hatch(path):
+    """What a named grant buys, or None when `path` is an ordinary path grant. Pure."""
+    base = os.path.basename(os.path.realpath(os.path.expanduser(str(path or ""))))
+    for family, buys in _NAMED_HATCHES:
+        if base == family.strip() or (family.endswith(" ") and base.startswith(family)):
+            return buys
+    return None
+
 def cmd_authorize(s, a):
     """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
 
@@ -6013,8 +6034,13 @@ def cmd_authorize(s, a):
     save(s)
     logline({"kind": "authorize", "path": real, "reason": a.reason, "uses": auth["uses_left"],
              "asked_via_arm": auth["asked_via_arm"], "asked_spent": auth["asked_spent"]})
-    out("✓ AUTHORIZED — one mutation outside this repo.",
-        f"  path  : {real}",
+    _named = named_hatch(a.path)
+    out(*(["✓ AUTHORIZED — a NAMED grant, not a path: %r." % os.path.basename(real),
+           f"  buys  : {_named}",
+           f"  stored: {real} (the guard matches the name; no file is involved)"]
+          if _named else
+          ["✓ AUTHORIZED — one mutation outside this repo.",
+           f"  path  : {real}"]),
         f"  reason: {a.reason}",
         f"  uses  : {auth['uses_left']}",
         # SAID EITHER WAY. "no expiry" printed beside a grant is the one line that makes an

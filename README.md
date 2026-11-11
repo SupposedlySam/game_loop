@@ -205,7 +205,10 @@ rather than staying quiet and letting you assume you are covered.
 
 **If your sessions run in an editor**, the snapshot those gates read comes only from a terminal
 status line — so an editor-embedded session produces none, and `status` says the protection is
-INERT rather than implying cover it does not have.
+INERT rather than implying cover it does not have. The same holds for **SRCode**, which hosts
+Claude Code in print mode: measured, an active SRCode session never runs the status line, and
+`status` names it (keyed on `SRCODE_HOST=1`), including when an old snapshot from another host is
+still on disk, since nothing there will ever refresh it.
 
 It can still *consume* one. The snapshot is a file in the checkout (`.game_loop/limits.json`) and
 the limits are account-wide, so **one terminal session in that repo arms the gate for every other

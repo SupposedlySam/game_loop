@@ -2092,7 +2092,9 @@ def limits_status_lines(snap, lim, now_epoch):
                 "old one",
                 "    is an unknown, not a lower bound. Fresh readings come from a terminal statusline or "
                 "the",
-                "    probe (limits.probe.enabled); read the real figures in the app meanwhile."]
+                "    probe (limits.probe.enabled); read the real figures in the app meanwhile.",
+                *(["    This host never runs the statusline, so it will not refresh here (see the "
+                   "INERT note below)."] if host_without_statusline() else [])]
     over = binding_windows(snap, float(limits_cfg()["threshold_pct"]), now_epoch)
     return [line + ("  ⚠ HANDOFF DUE — the limitgate is closed" if over else "")]
 
@@ -8901,6 +8903,33 @@ def hooks_live_warning():
     return None
 
 
+
+def host_without_statusline():
+    """A phrase naming this session's host when it never runs the statusline command, else None.
+
+    The statusline is the ONLY source of usage limits (see limits_inert_warning), so on such a host
+    a snapshot can never refresh and limit protection is unavailable rather than pending.
+
+    SRCODE_HOST=1 IS CHECKED FIRST, and it is the supported marker (SRCode's docs/ARCHITECTURE.md).
+    SRCODE_HOST=1 WITHOUT SRCODE_STATUSLINE=1, so it clears on its own when SRCode starts feeding the
+    statusline. MEASURED 2026-11-10 in a session SRCode hosted (SRCODE_VERSION 0.1.0+1, Claude Code 2.1.322 run as
+    `claude -p --input-format stream-json`): the statusline is registered with refreshInterval 60, the
+    tap writes limits.json when handed a payload, and over four minutes of an active session, with the
+    Stop hook firing, neither limits.json nor probe/context-window.json was written. Not
+    CLAUDE_CODE_ENTRYPOINT=sdk-cli: any Agent SDK run sets that, and whether every one of them lacks a
+    statusline was not measured.
+    """
+    # SRCODE_STATUSLINE=1 means SRCode runs the session's statusLine command itself, from the
+    # rate_limit_event frames it receives (agreed with showrunner 2026-11-10, their leaf
+    # statusline-host). Then the tap is fed and this warning must clear by itself.
+    if os.environ.get("SRCODE_HOST") == "1" and os.environ.get("SRCODE_STATUSLINE") != "1":
+        return ("SRCode (SRCODE_HOST=1), which hosts Claude Code in print mode and runs no "
+                "statusline")
+    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-vscode":
+        return ("the VSCode extension (CLAUDE_CODE_ENTRYPOINT=claude-vscode), whose UI renders no "
+                "terminal statusline")
+    return None
+
 def limits_inert_warning(snap):
     """The usage-limit family has exactly ONE source of truth, and it can go missing in silence.
 
@@ -8919,16 +8948,22 @@ def limits_inert_warning(snap):
     Returns None only when a snapshot actually carries a window; both "no file" and "file with no
     windows" are inert and say so, because for the human waiting on a page they are the same thing.
     """
-    if snap and (snap.get("windows") or {}):
-        return None
     cost = ("  While this is true: no page at the threshold, no park at exhaustion, and no ring "
             "when the\n  window resets — a limit will stop the run silently.")
-    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-vscode":
-        return ("⚠ USAGE-LIMIT PROTECTION IS INERT — no limits snapshot, and this host is the "
-                "VSCode\n  extension (CLAUDE_CODE_ENTRYPOINT=claude-vscode), whose UI renders no "
-                "terminal statusline.\n" + cost + "\n"
+    host = host_without_statusline()
+    has_windows = bool(snap and (snap.get("windows") or {}))
+    # A STALE SNAPSHOT ON SUCH A HOST IS THE SAME SILENCE. Its windows used to end this function, so
+    # a session SRCode hosted, with an 18-day-old snapshot from another host, was told nothing here
+    # while the gates were ignoring that snapshot as stale. It cannot refresh, so it is said.
+    if has_windows and (fresh_snapshot(snap, time.time()) is not None or not host):
+        return None
+    if host:
+        what = ("the only snapshot is stale and cannot refresh here"
+                if has_windows else "no limits snapshot")
+        return ("⚠ USAGE-LIMIT PROTECTION IS INERT — %s: this host is\n  %s.\n" % (what, host)
+                + cost + "\n"
                 "  → Treat it as UNAVAILABLE here rather than pending. A session run from a "
-                "terminal\n    (`claude` in a shell) does fire the tap; in this window, hand off "
+                "terminal\n    (`claude` in a shell) does fire the tap; in this host, hand off "
                 "on your own clock.")
     if snap is None:
         return ("⚠ USAGE-LIMIT PROTECTION IS INERT — the statusline tap has never fired in this "

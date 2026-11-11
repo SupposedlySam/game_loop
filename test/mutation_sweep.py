@@ -667,6 +667,14 @@ MUTANTS = [
      "with a flutter run listed as in flight. The five honest endings, the in-flight waits and the "
      "override pass BY CONSTRUCTION under this neuter, which is why each is paired with a block. "
      "MEASURED 2026-11-09 at cf8a31f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 7.", 7),
+    ("host_without_statusline -> every host runs the statusline",
+     ".game_loop/bin/_gl_impl.py::host_without_statusline", "    return None\n",
+     ["under SRCode (SRCODE_HOST=1) it says UNAVAILABLE", "a STALE snapshot under SRCode",
+      "under the VSCode extension it says UNAVAILABLE"],
+     "EVERY HOST RUNS IT IS THE REPORTED WORLD (2026-11-10): a session SRCode hosted, an 18-day-old "
+     "snapshot from another host on disk, and status gave no inert warning while the gates ignored "
+     "the snapshot as stale. The ordinary-host arms pass BY CONSTRUCTION under this neuter, which is "
+     "why each is paired with a host that has none. MEASURED 2026-11-10 at a8b45d8 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 5 (a sixth, the env-gate source scan, fails only because neutering deletes the comparisons it counts, and is excluded as bookkeeping).", 5),
     ("named_hatch -> no grant is ever a named one",
      ".game_loop/bin/_gl_impl.py::named_hatch", "    return None\n",
      ["says it is a NAMED grant and what it buys"],

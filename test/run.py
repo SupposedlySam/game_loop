@@ -146,6 +146,12 @@ def _env(proj=None, sid=None, **extra):
     # entrypoint" silently gets this one instead — the arm never varies and passes for the wrong
     # reason. A test whose control is contaminated by the runner cannot fail.
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    # And SRCode's marker, for the same reason (2026-11-10): the suite now runs inside SRCode, whose
+    # SRCODE_HOST=1 decides the usage-limit warning, so a test asking about "any other host" would
+    # silently be asking about SRCode.
+    env.pop("SRCODE_HOST", None)
+    env.pop("SRCODE_VERSION", None)
+    env.pop("SRCODE_STATUSLINE", None)
     # Same reason again: this suite may itself be guarded by a PINNED harness, whose hooks export
     # GAME_LOOP_HOME. Letting it through would point every sandboxed script at the REAL repo's
     # .game_loop — the tests would write their state into it and every "unset" control would
@@ -7498,10 +7504,10 @@ def main():
         _limits = os.path.join(lp, ".game_loop", "limits.json")
         _bin = os.path.join(lp, ".game_loop", "bin", "game_loop")
 
-        def _status(entrypoint="cli"):
+        def _status(entrypoint="cli", **host):
             return subprocess.run([_bin, "status"], capture_output=True, text=True,
                                   env=_env(lp, sid="sess-lim",
-                                           CLAUDE_CODE_ENTRYPOINT=entrypoint)).stdout
+                                           CLAUDE_CODE_ENTRYPOINT=entrypoint, **host)).stdout
 
         # The keystone: the tap writes the snapshot even when the payload carries NO windows. That
         # is what makes "no file" mean "never ran" rather than "ran and had nothing to say" — the
@@ -7530,6 +7536,17 @@ def main():
               "`claude` in a shell" in _vs)
         check("under any other host the remedy is the wiring, not the host",
               "statusLine` is registered" in _none and "UNAVAILABLE here" not in _none)
+        # SRCODE IS SUCH A HOST TOO (measured 2026-11-10): it hosts Claude Code in print mode, and an
+        # active session there never ran the statusline. Keyed on SRCode's documented marker, not on
+        # sdk-cli, which any Agent SDK run sets.
+        _sr = _status("sdk-cli", SRCODE_HOST="1")
+        check("under SRCode (SRCODE_HOST=1) it says UNAVAILABLE and names SRCode, while a bare "
+              "sdk-cli entrypoint without the marker gets the ordinary wiring remedy",
+              "UNAVAILABLE here rather than pending" in _sr and "SRCode (SRCODE_HOST=1)" in _sr
+              and "UNAVAILABLE here" not in _status("sdk-cli"))
+        check("...and it CLEARS by itself once SRCode feeds the statusline (SRCODE_STATUSLINE=1), "
+              "so the fix on SRCode's side needs no release here",
+              "UNAVAILABLE here" not in _status("sdk-cli", SRCODE_HOST="1", SRCODE_STATUSLINE="1"))
 
         # A snapshot that exists but carries no windows is JUST AS INERT. For the human waiting on
         # a page the two are the same event, so they must not report differently.
@@ -7548,6 +7565,25 @@ def main():
         _live = _status()
         check("a snapshot carrying a real window silences the warning entirely",
               "USAGE-LIMIT PROTECTION IS INERT" not in _live)
+        check("...on SRCode too, while the snapshot is FRESH: a live window is a live window, "
+              "whatever the host",
+              "USAGE-LIMIT PROTECTION IS INERT" not in _status("sdk-cli", SRCODE_HOST="1"))
+        # A STALE SNAPSHOT ON A HOST THAT CANNOT REFRESH IT is the reported silence: an 18-day-old
+        # snapshot from another host, a session under SRCode, and nothing here said protection was
+        # off, because the windows in the old file ended the check.
+        with open(_limits, "w") as f:
+            json.dump({"captured_at": time.time() - 18 * 86400, "windows": {"five_hour": {
+                "used_percentage": 12.0, "resets_at": time.time() + 3600,
+                "crossed_at": None, "notified": False}}}, f)
+        _stale_sr = _status("sdk-cli", SRCODE_HOST="1")
+        check("a STALE snapshot under SRCode is called inert, because it cannot refresh there, and "
+              "the stale note says it will not refresh",
+              "USAGE-LIMIT PROTECTION IS INERT" in _stale_sr and "cannot refresh here" in _stale_sr
+              and "will not refresh here" in _stale_sr)
+        check("...while the same stale snapshot on an ordinary host keeps only the stale note, "
+              "since a terminal session there can still refresh it",
+              "USAGE-LIMIT PROTECTION IS INERT" not in _status()
+              and "will not refresh here" not in _status() and "STALE" in _status())
         check("...and the ordinary limits row is what appears instead",
               "limits: " in _live and "5h" in _live)
     finally:
@@ -15858,7 +15894,7 @@ def main():
     check("every environment variable a shipped program GATES on is one the suite controls — a "
           "condition whose value only production supplies runs green forever while never once "
           "being evaluated the way it will be in the field",
-          _gates == {"CLAUDE_CODE_ENTRYPOINT", "TERM_PROGRAM"}
+          _gates == {"CLAUDE_CODE_ENTRYPOINT", "TERM_PROGRAM", "SRCODE_HOST", "SRCODE_STATUSLINE"}
           and all(_sfile.count(v) >= 2 for v in _gates))
     check("...and the scan counts a COMPARISON, not a reading: `os.environ.get(X)` printed in a "
           "report is a fact being shown, while the same call inside an `if` decides what happens, "

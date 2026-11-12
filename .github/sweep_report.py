@@ -91,6 +91,9 @@ def render(kind, regressed, texts, missing, expected, run_url):
     return title, "\n".join(L)
 
 
+NOTHING_TO_FILE = 3
+
+
 def main():
     logs_dir = sys.argv[1]
     expected = int(sys.argv[2])
@@ -98,8 +101,11 @@ def main():
     run_url = sys.argv[4] if len(sys.argv) > 4 else "(no run url)"
     kind, regressed, texts, missing = classify(logs_dir, expected, job_ok)
     if kind == "GREEN":
+        # ITS OWN EXIT CODE, NOT 1 (2026-11-12). The workflow read any non-zero exit as "nothing
+        # to file", and its report job never checked the repo out, so this script was never there:
+        # python exited 2, and every red night from mid-September on was reported as clean.
         sys.stderr.write("sweep is clean and the job succeeded — nothing to file\n")
-        return 1
+        return NOTHING_TO_FILE
     title, body = render(kind, regressed, texts, missing, expected, run_url)
     with open("body.md", "w", encoding="utf-8") as f:
         f.write(body + "\n")

@@ -13137,6 +13137,35 @@ def main():
         check("...and matches the TARGET too, so the name in a MUTANTS entry and the name in a "
               "traceback both work without the reader knowing which one this wants",
               _one2 == [2])
+        # ONLY WHAT CHANGED (2026-11-12), the selector that makes the nightly affordable. Driven
+        # against a real two-commit repository, because what it compares is git history.
+        _cfr = _tmpdir("glcf-")
+        _cg = lambda *a: subprocess.run(["git", "-C", _cfr, *a], capture_output=True, text=True)
+        _cg("init", "-q")
+        _cg("config", "user.email", "t@t"); _cg("config", "user.name", "t")
+        with open(os.path.join(_cfr, "f.py"), "w") as f:
+            f.write("def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n")
+        with open(os.path.join(_cfr, "s.sh"), "w") as f:
+            f.write("delta() { echo d; }\n")
+        _cg("add", "-A"); _cg("commit", "-qm", "one")
+        _cf_base = _cg("rev-parse", "HEAD").stdout.strip()
+        with open(os.path.join(_cfr, "f.py"), "w") as f:
+            f.write("def alpha():\n    return 1\n\n\ndef beta():\n    return 22\n")
+        with open(os.path.join(_cfr, "g.py"), "w") as f:
+            f.write("def gamma():\n    return 3\n")
+        _cg("add", "-A"); _cg("commit", "-qm", "two")
+        _CMUT = [("alpha", "f.py::alpha", "", [], "", 1), ("beta", "f.py::beta", "", [], "", 1),
+                 ("gamma", "g.py::gamma", "", [], "", 1), ("delta", "s.sh::delta", "", [], "", 1)]
+        _cpick, _cref = _msm.changed_filter([0, 1, 2, 3], _CMUT, _cf_base, repo=_cfr)
+        check("CHANGED_SINCE selects only producers whose own code differs: a changed body and a new "
+              "producer are swept, an untouched function beside them and an untouched shell file "
+              "are not",
+              _cpick == [1, 2] and _cref is None)
+        check("...no base leaves the selection as it was, and an unresolvable base REFUSES and sweeps "
+              "nothing, because sweeping everything instead is the bill this exists to avoid",
+              _msm.changed_filter([0, 1], _CMUT, "", repo=_cfr) == ([0, 1], None)
+              and (lambda r: r[0] == [] and r[1] and "does not name a commit" in r[1])(
+                  _msm.changed_filter([0, 1], _CMUT, "no-such-ref", repo=_cfr)))
         _none, _ref2 = _msm.only_filter(_all, _MUT, "no-such-producer")
         check("a name matching NOTHING refuses and sweeps nothing — a typo that fell back to the "
               "whole list would spend the hour this exists to avoid and look identical to asking "
@@ -18277,6 +18306,14 @@ def main():
     _sh_files = sorted(f for f in subprocess.run(["git", "ls-files", "*.sh"], cwd=REPO,
                                                   capture_output=True, text=True).stdout.split()
                        if f)
+    if not _sh_files:
+        # THE SWEEP RUNS THIS SUITE IN A `git archive` EXTRACT, which has no .git, so ls-files
+        # answered nothing and the subject check failed in every nightly baseline. Walk instead.
+        _sh_files = sorted(os.path.relpath(os.path.join(d, f), REPO)
+                           for d, dirs, fs in os.walk(REPO)
+                           if not dirs.__setitem__(slice(None),
+                                                   [x for x in dirs if x != ".git"])
+                           for f in fs if f.endswith(".sh"))
     check("there ARE shell files and at least one bash to parse them with, so the result below has "
           "a subject: %d file(s), bash %s" % (len(_sh_files), ", ".join(v for _, v in _bashes)),
           len(_sh_files) >= 5 and ".game_loop/bin/guard-writes-impl.sh" in _sh_files
@@ -19887,28 +19924,41 @@ def main():
     check("the nightly sweep workflow is present and actually runs the sweep — a schedule that "
           "runs something else is a nightly nobody is getting",
           "mutation_sweep.py" in _wf and "schedule:" in _wf)
-    _matrix = re.search(r"^\s*shard:\s*\[([^\]]*)\]", _wf, re.M)
-    _shards = [s.strip() for s in (_matrix.group(1) if _matrix else "").split(",") if s.strip()]
-    _denoms = set(re.findall(r"GAME_LOOP_SWEEP_SHARD:\s*\"\$\{\{\s*matrix\.shard\s*\}\}/(\d+)\"", _wf))
-    check("the matrix and the shard DENOMINATOR agree — they are written in two places, and a "
-          "matrix trimmed without the denominator leaves producers nobody sweeps while every "
-          "shard that ran reports clean",
-          len(_shards) > 0 and len(_denoms) == 1
-          and int(next(iter(_denoms))) == len(_shards))
-    check("...and the matrix is exactly 1..N with no gaps or repeats, since the sweep selects by "
-          "`i % n` and a missing index is a slice of producers that is simply never swept",
-          sorted(int(s) for s in _shards) == list(range(1, len(_shards) + 1)))
+    # THE MATRIX IS PLANNED NOW (2026-11-12): a Linux job counts the changed producers and emits
+    # 1..n, and the shard spec reads its denominator from the same matrix, so the two can no longer
+    # be written in two places and drift.
+    check("the shard DENOMINATOR is the matrix's own size and the matrix comes from the planner, so "
+          "a trimmed matrix cannot leave a slice of producers nobody sweeps",
+          'GAME_LOOP_SWEEP_SHARD: "${{ matrix.shard }}/${{ strategy.job-total }}"' in _wf
+          and "fromJSON(needs.plan.outputs.shards)" in _wf
+          and "list(range(1, $n + 1))" in _wf)
     check("...and a shard is given a real time budget under the six-hour ceiling a hosted job "
           "gets — the default is 360 minutes, and a sweep cut off at the ceiling reports nothing",
           (lambda m: bool(m) and 0 < int(m.group(1)) < 360)(
               re.search(r"^\s*timeout-minutes:\s*(\d+)", _wf, re.M)))
-    check("the report job files at most ONE issue and only when a shard did not succeed — a "
-          "nightly that opens an issue every night is a nightly nobody reads",
-          "--state open" in _wf and "needs.sweep.result != 'success'" in _wf
-          and "issue create" in _wf)
-    check("...and it asks for no more than it needs: contents read, issues write, and nothing "
-          "that could push to this repo from a scheduled job",
-          re.search(r"permissions:\s*\n\s*contents:\s*read\s*\n\s*issues:\s*write", _wf))
+    # SURGICAL, because the full nightly spent the month's Actions budget in half a month: ~26 macOS
+    # runner-hours a night, the same commit swept six nights running.
+    check("a scheduled run sweeps ONLY producers changed since the last completed sweep, and starts "
+          "no macOS job at all when none changed",
+          "GAME_LOOP_SWEEP_CHANGED_SINCE" in _wf and "GAME_LOOP_SWEEP_LIST=1" in _wf
+          and "if: needs.plan.outputs.count != '0'" in _wf
+          and 'select(.conclusion == "success" or .conclusion == "failure")' in _wf)
+    check("...and a FULL sweep is on demand only (workflow_dispatch, full: true), never scheduled",
+          "workflow_dispatch:" in _wf and "full:" in _wf and 'if [ "$FULL" != "true" ]' in _wf)
+    check("the report job files at most ONE issue, from the shard logs — a nightly that opens an "
+          "issue every night is a nightly nobody reads",
+          "--state open" in _wf and "needs.sweep.result" in _wf and "issue create" in _wf)
+    # THE REPORT NEVER RAN (2026-11-12). The job had no checkout, so .github/sweep_report.py was not
+    # there, python exited 2, and `|| { echo "nothing to file" }` read that as clean: every red night
+    # from mid-September on went unreported.
+    _rep = _wf[_wf.index("  report:"):] if "  report:" in _wf else ""
+    check("...and the report job CHECKS OUT the repo its classifier lives in, and treats only exit 3 "
+          "as clean: any other failure of the classifier fails the step instead of reading as clean",
+          "actions/checkout@v4" in _rep and '"$rc" -eq 3' in _rep and 'exit "$rc"' in _rep)
+    check("...and it asks for no more than it needs: contents and actions read, issues write, and "
+          "nothing that could push to this repo from a scheduled job",
+          re.search(r"permissions:\s*\n\s*contents:\s*read\s*\n\s*actions:\s*read\s*\n"
+                    r"\s*issues:\s*write", _wf))
 
     print("the nightly sweep reports what it MEASURED, not what the job exited (#128):")
     # THE REPORT READ THE JOB'S EXIT AND CLAIMED A FACT ABOUT COVERAGE. It fired on
@@ -19928,6 +19978,9 @@ def main():
     _sr = _sru.module_from_spec(_sr_spec)
     _sr_spec.loader.exec_module(_sr)
     _CLEAN = "no producer is unprotected, and none is below its recorded floor."
+    check("the report script's 'nothing to file' is its own exit code (3), so the workflow can tell "
+          "it from the script crashing, which used to read as clean",
+          getattr(_sr, "NOTHING_TO_FILE", None) == 3)
 
     def _logs(n, extra=""):
         d = _tmpdir("glsr-")

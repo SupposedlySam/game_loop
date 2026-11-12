@@ -473,6 +473,18 @@ MUTANTS = [
      "after the entry landed reported BELOW FLOOR on it, which is the tripwire doing its job on the "
      "person who wrote it. 4 is the measured number; the reasoning that produced 5 was wrong and is "
      "left here rather than tidied away, because the wrong claim is the useful part.", 4),
+    ("changed_filter -> every producer reads as changed, and the nightly sweeps them all again",
+     "test/mutation_sweep.py::changed_filter", "    return idxs, None\n",
+     ["CHANGED_SINCE selects only producers whose own code differs",
+      "an unresolvable base REFUSES and sweeps nothing"],
+     "SWEEP EVERYTHING IS THE WORLD THAT SPENT THE MONTH'S ACTIONS BUDGET (2026-11-12): ~26 macOS "
+     "runner-hours a night, the same commit swept six nights running. MEASURED 2026-11-12 at cab48fc plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (eight more rows, the suite's own checks of this file, fail only because neutering this file breaks them, and are excluded as bookkeeping).", 2),
+    ("body (changed_filter's) -> no producer's code is ever found, so nothing reads as changed",
+     "test/mutation_sweep.py::body", "        return None\n",
+     ["CHANGED_SINCE selects only producers whose own code differs"],
+     "NOTHING CHANGED IS THE SILENT DIRECTION: a nightly that sweeps nothing and reports clean. "
+     "Only the new-producer arm survives it, since an absent file still counts. "
+     "MEASURED 2026-11-12 at cab48fc plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 1.", 1),
     ("only_filter -> a name that matches nothing silently sweeps the WHOLE list instead of refusing",
      "test/mutation_sweep.py::only_filter", "    return idxs, None\n",
      # NARROWED after the first run reported this set TOO BROAD TO DISCRIMINATE: 'ONLY ' is a
@@ -3705,6 +3717,62 @@ def only_filter(idxs, mutants, only):
     return picked, None
 
 
+
+def changed_filter(idxs, mutants, since, repo=None):
+    """(idxs, refusal) for GAME_LOOP_SWEEP_CHANGED_SINCE — only producers whose code changed.
+
+    THE NIGHTLY SWEPT CODE NOBODY HAD TOUCHED. On hosted macOS runners each full sweep cost about
+    26 runner-hours (twelve shards of ~2h), every night, and on 2026-11-12 the account ran out of its
+    month's Actions budget halfway through it: $987 of it on this repo. The record showed the same
+    commit swept six nights running. A producer whose own code is identical to the last swept
+    commit has nothing new to say about ITS mutant, so this selects the ones that differ.
+
+    "Changed" is the producer's own function source (found anywhere in the file, so a nested
+    helper counts), compared between `since` and HEAD. A file that does not parse as Python (the
+    shell guards, install.sh) is compared whole. A producer absent at `since` is new and counts.
+
+    WHAT THIS CANNOT SEE: a TEST that was weakened while the producer stayed the same. That moves
+    the kill count without changing the producer, so only a FULL sweep finds it; the workflow keeps
+    one on demand. An unresolvable `since` REFUSES rather than sweeping everything, for the same
+    reason only_filter refuses a miss: the fallback would spend the money this exists to save.
+    """
+    if not since:
+        return idxs, None
+    repo = repo or REPO
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", since + "^{commit}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return [], ("GAME_LOOP_SWEEP_CHANGED_SINCE=%r does not name a commit in this checkout.\n"
+                    "  Nothing was swept. An unreadable base refuses rather than sweeping every "
+                    "producer,\n  because that fallback costs the whole sweep this flag avoids." % since)
+    base = r.stdout.strip()
+    cache = {}
+
+    def at(rev, path):
+        if (rev, path) not in cache:
+            q = subprocess.run(["git", "-C", repo, "show", f"{rev}:{path}"],
+                               capture_output=True, text=True)
+            cache[(rev, path)] = q.stdout if q.returncode == 0 else None
+        return cache[(rev, path)]
+
+    def body(text, name):
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return text                    # not Python: the whole file is the unit
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
+                return ast.get_source_segment(text, n)
+        return None
+
+    picked = []
+    for i in idxs:
+        path, _, name = mutants[i][1].partition("::")
+        old, new = at(base, path), at("HEAD", path)
+        if old is None or new is None or body(old, name) != body(new, name):
+            picked.append(i)
+    return picked, None
+
 def main():
     # FAST WITH NO MAP IS A SLOW RUN THAT SAYS NOTHING. `SECTION_MAP` falls back to {} on any
     # unreadable or unparseable file, and in FAST mode every `SECTION_MAP.get(key)` then returns
@@ -3731,6 +3799,29 @@ def main():
           f"{len(MUTANTS)} swept, {len(NOT_SWEPT)} excluded with a reason, 0 undecided.")
     print("  " + " · ".join(f"{f} ({sum(1 for k in found if k.startswith(f + '::'))})"
                             for f in files) + "\n")
+
+    # SELECTION BEFORE THE BASELINE. The baseline is a full suite run, so a selection that
+    # leaves nothing to sweep, or a caller that only wants the list, must stop before paying it.
+    shard, shards = _shard_of()
+    idxs = [i for i in range(len(MUTANTS)) if i % shards == (shard - 1)]
+    idxs, _refusal = only_filter(idxs, MUTANTS, (os.environ.get("GAME_LOOP_SWEEP_ONLY") or "").strip())
+    _since = (os.environ.get("GAME_LOOP_SWEEP_CHANGED_SINCE") or "").strip()
+    if not _refusal:
+        idxs, _refusal = changed_filter(idxs, MUTANTS, _since)
+    if _refusal:
+        print(_refusal)
+        shutil.rmtree(base, ignore_errors=True)
+        return 1
+    if os.environ.get("GAME_LOOP_SWEEP_LIST"):
+        # One JSON object and nothing else on stdout's last line, for the workflow's planner.
+        print(json.dumps({"count": len(idxs), "since": _since or None,
+                          "producers": [MUTANTS[i][1] for i in idxs]}))
+        shutil.rmtree(base, ignore_errors=True)
+        return 0
+    if _since and not idxs:
+        print(f"nothing to sweep: no producer's code changed since {_since[:12]}.")
+        shutil.rmtree(base, ignore_errors=True)
+        return 0
 
     print("producer mutation sweep — assertions that SURVIVE a neutered producer")
     print(f"(the tree under test is HEAD, not the working copy; thin under {THIN_AT} kills, "
@@ -4024,13 +4115,6 @@ def main():
     # contiguous slicing would hand one shard every expensive neighbour and leave another idle.
     # Striding interleaves the groups, which is the cheap way to get shards that finish together
     # without measuring anything.
-    shard, shards = _shard_of()
-    idxs = [i for i in range(len(MUTANTS)) if i % shards == (shard - 1)]
-    idxs, _refusal = only_filter(idxs, MUTANTS, (os.environ.get("GAME_LOOP_SWEEP_ONLY") or "").strip())
-    if _refusal:
-        print(_refusal)
-        shutil.rmtree(base, ignore_errors=True)
-        return 1
     _swept = set(idxs)
     _where = f" [shard {shard}/{shards}]" if shards > 1 else ""
     print(f"running {len(idxs)} of {len(MUTANTS)} producers{_where}, {jobs} at a time "

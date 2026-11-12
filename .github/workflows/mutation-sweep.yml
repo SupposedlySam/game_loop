@@ -1,33 +1,45 @@
-# The producer mutation sweep, moved OFF the interactive path.
+# The producer mutation sweep, moved OFF the interactive path, and swept SURGICALLY.
 #
 # The sweep neuters one producer function at a time and re-runs the whole suite to see which
 # assertions actually notice. It is the only instrument this repo has for "does that test test
-# anything", and it costs one full suite run per producer -- about an hour locally, and far more
-# than that on a hosted runner. That price is worth paying periodically and is not worth paying
-# in front of a human waiting to commit, so it is a scheduled job that files an issue rather than
-# a gate that blocks anybody.
+# anything", and it costs one full suite run per producer.
 #
-# WHY IT IS SHARDED. Each producer is one full suite run and the sweep's own width is `cpu - 2`, so
-# a small hosted runner sweeps one or two at a time: 134 producers is roughly eleven hours, past
-# the six-hour ceiling a hosted job is allowed. Twelve shards of eleven producers each fit with
-# room to spare. The shards stride rather than slice, so producer cost is spread evenly.
+# WHAT IT COST (2026-11-12). Run nightly in full, it was twelve macOS shards of about two hours
+# each, ~26 runner-hours a night, and it spent this account's whole monthly Actions budget halfway
+# through November: $987 on this repo. The run history showed the same commit swept six nights
+# running. The old note here said public repos get these runners free; the bill says otherwise
+# for this account, so nothing below assumes it.
+#
+# SO EACH NIGHT SWEEPS ONLY WHAT CHANGED. A cheap Linux `plan` job finds the commit the last
+# completed sweep ran on and asks the sweep which producers' own code differs since then
+# (GAME_LOOP_SWEEP_CHANGED_SINCE, in list mode: no suite runs). Zero means no macOS job starts at
+# all. Otherwise it starts one shard per eight producers, up to twelve.
+#
+# WHAT A CHANGED-ONLY SWEEP CANNOT SEE: a test weakened while its producer stayed the same. Only a
+# FULL sweep finds that, so a full one runs on demand (Run workflow, full: true). It is not
+# scheduled, because a scheduled full sweep is what the budget went on.
 #
 # WHY macOS. This harness reads `ps -Ao pid,args`, shells out to `open`, and resolves paths the way
-# a Mac does. Every measurement behind these floors was taken on macOS, and a nightly that fails
-# for platform reasons rather than coverage reasons is a nightly people learn to ignore -- which
-# costs more than not having one. Public repos get these runners free.
+# a Mac does. Every measurement behind these floors was taken on macOS, and a sweep that fails for
+# platform reasons rather than coverage reasons is a sweep people learn to ignore.
 
-name: mutation sweep (nightly)
+name: mutation sweep (nightly, changed producers only)
 
 on:
   schedule:
-    # 08:00 UTC — roughly 1am Pacific / 3am Central, so a failure is waiting in the morning.
+    # 08:00 UTC — roughly 1am Pacific / 3am Central, so a finding is waiting in the morning.
     - cron: "0 8 * * *"
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Sweep EVERY producer (about 26 macOS runner-hours), not just the changed ones"
+        type: boolean
+        default: false
 
-# Least privilege: read the code, write one issue. Nothing here pushes.
+# Least privilege: read the code and the run history, write one issue. Nothing here pushes.
 permissions:
   contents: read
+  actions: read
   issues: write
 
 concurrency:
@@ -36,18 +48,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: which producers changed
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
+      since: ${{ steps.plan.outputs.since }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # the base commit has to be in the clone to diff against it
+
+      - name: count changed producers
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FULL: ${{ inputs.full || false }}
+        run: |
+          set -euo pipefail
+          since=""
+          if [ "$FULL" != "true" ]; then
+            # The newest run of this workflow that actually swept (success or failure, not
+            # cancelled or skipped) is the commit whose producers were last measured.
+            since=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mutation-sweep.yml \
+                      --branch main --status completed --limit 30 \
+                      --json headSha,conclusion \
+                      --jq '[.[] | select(.conclusion == "success" or .conclusion == "failure")][0].headSha // ""')
+            if [ -z "$since" ]; then
+              echo "no earlier sweep to diff against; run it once with full: true to set a base."
+              { echo "count=0"; echo "shards=[]"; echo "since="; } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          listing=$(GAME_LOOP_SWEEP_LIST=1 GAME_LOOP_SWEEP_CHANGED_SINCE="$since" \
+                    python3 test/mutation_sweep.py | tail -1)
+          count=$(printf '%s' "$listing" | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
+          n=$(( count == 0 ? 0 : (count + 7) / 8 ))
+          [ "$n" -gt 12 ] && n=12
+          shards=$(python3 -c "import json; print(json.dumps(list(range(1, $n + 1))))")
+          echo "since ${since:-'(full sweep)'}: $count producer(s) to sweep across $n shard(s)"
+          printf '%s' "$listing" | python3 -c 'import json,sys; [print("  ", p) for p in json.load(sys.stdin)["producers"]]'
+          { echo "count=$count"; echo "shards=$shards"; echo "since=$since"; } >> "$GITHUB_OUTPUT"
+
   sweep:
-    name: sweep ${{ matrix.shard }}/12
+    name: sweep ${{ matrix.shard }}/${{ strategy.job-total }}
+    needs: plan
+    if: needs.plan.outputs.count != '0'
     runs-on: macos-latest
     timeout-minutes: 330
     strategy:
       fail-fast: false        # one shard's coverage loss must not hide the others'
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # The sweep runs `git archive HEAD` and the suite makes real git calls of its own.
+          # The sweep runs `git archive HEAD`, diffs against the base commit, and the suite makes
+          # real git calls of its own.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -57,10 +115,9 @@ jobs:
       - name: run the sweep shard
         id: sweep
         env:
-          GAME_LOOP_SWEEP_SHARD: "${{ matrix.shard }}/12"
-          # These runners have 3 cores, and the `cpu - 2` default would sweep one at a time. Two
-          # roughly halves the wall clock; the default's reason for leaving headroom is that a
-          # developer's machine has to stay usable, which is not true of a runner.
+          GAME_LOOP_SWEEP_SHARD: "${{ matrix.shard }}/${{ strategy.job-total }}"
+          GAME_LOOP_SWEEP_CHANGED_SINCE: ${{ needs.plan.outputs.since }}
+          # These runners have 3 cores, and the `cpu - 2` default would sweep one at a time.
           GAME_LOOP_SWEEP_JOBS: "2"
         run: |
           set -o pipefail
@@ -76,22 +133,24 @@ jobs:
 
   report:
     name: file an issue if anything regressed
-    needs: sweep
-    if: always()
+    needs: [plan, sweep]
+    if: always() && needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
     steps:
+      # THE CLASSIFIER LIVES IN THE REPO, so the repo has to be here. This job had no checkout,
+      # python could not open .github/sweep_report.py, and the step read that failure as "nothing
+      # to file": every red night from mid-September to 2026-11-12 was reported as clean.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: logs
 
       - name: open ONE issue, and only if none is open
-        # A nightly that opens an issue every night is a nightly nobody reads. One open issue at a
-        # time: while it stands, later failures are visible in this workflow's own run history, and
-        # closing it is what re-arms the report.
-        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SHARDS: ${{ needs.plan.outputs.shards }}
         run: |
           set -euo pipefail
           # The label has to exist before it can be filtered on or applied, and a fresh clone of
@@ -108,21 +167,22 @@ jobs:
             exit 0
           fi
 
-          # WHAT HAPPENED IS DECIDED FROM THE SHARD LOGS, NOT FROM THE JOB'S EXIT (#128). This
-          # step used to fire on `needs.sweep.result != 'success'` and then assert a fact about
-          # COVERAGE. Measured on run 34227453406: eleven shards green, the twelfth ran a
-          # completely clean sweep and then died uploading its artifact with a 403 — and the issue
-          # it filed was titled "a producer is unprotected or has drifted". Nothing had drifted. It
-          # sat unread for eight days, which is what a report crying the wrong wolf buys you.
-          #
-          # The classifier separates three causes the way INV8 separates them one layer in:
-          # REGRESSED (a real verdict), INCOMPLETE (a shard log missing, so the set judged is
-          # SHORTER than the set that ran), INFRA (every log present and clean, job failed anyway).
-          # It writes body.md and prints the title; a non-zero exit means there is nothing to file.
-          title=$(python3 .github/sweep_report.py logs 12 "${{ needs.sweep.result }}" "$RUN_URL") || {
+          # WHAT HAPPENED IS DECIDED FROM THE SHARD LOGS, NOT FROM THE JOB'S EXIT (#128): REGRESSED,
+          # INCOMPLETE (a shard log missing) or INFRA (every log clean, job failed anyway). Exit 3
+          # alone means clean; ANY other non-zero exit is the classifier failing, and fails here.
+          expected=$(printf '%s' "$SHARDS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+          set +e
+          title=$(python3 .github/sweep_report.py logs "$expected" "${{ needs.sweep.result }}" "$RUN_URL")
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
             echo "nothing to file: every expected shard log is present and clean, and the job passed."
             exit 0
-          }
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "the classifier itself failed (exit $rc); not reporting a verdict it did not reach."
+            exit "$rc"
+          fi
 
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "$title" \

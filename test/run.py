@@ -18297,6 +18297,22 @@ def main():
               "to a bash 5 to cover the parser #147 was reported against." % ", ".join(
                   c for c in _cands if c))
 
+    print("the agent brief tells an agent with no install how to get one, in the README's words:")
+    # A NEW AGENT HAD NOTHING TO FOLLOW (SRCode, 2026-11-12): llms.txt opened at "First thing,
+    # every session", which assumes an install, and the install words lived only in the README,
+    # written for a human. The brief now carries them; this keeps the two from drifting apart.
+    _llms = read_or_empty(os.path.join(REPO, "llms.txt"))
+    _readme = read_or_empty(os.path.join(REPO, "README.md"))
+    _curl = "curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s --"
+    check("llms.txt has a 'Not installed yet' section BEFORE 'First thing, every session', using the "
+          "README's own installer line, with the channel exported on its own line and --local named",
+          "## Not installed yet?" in _llms
+          and _llms.index("## Not installed yet?") < _llms.index("## First thing, every session")
+          and _curl in _llms and _curl in _readme
+          and "\nexport GAME_LOOP_CHANNEL=stable\n" in _llms and "--local ." in _llms)
+    check("...and it sends a package-managed install to its own upgrade command, never the curl line",
+          "installed-by.json" in _llms and "upgrade" in _llms)
+
     print("the central-install shims, which run in somebody else's repo:")
     _shim_dir = os.path.join(REPO, "templates", "central-shims")
     _shims = sorted(os.listdir(_shim_dir)) if os.path.isdir(_shim_dir) else []

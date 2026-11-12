@@ -15,6 +15,31 @@ instructions.** Test any guard by asking — *if I ignored every instruction, wo
 keystone check is always the same shape: **name a real file that exists.** You cannot satisfy it by
 writing a plausible string, which is the one thing you are too good at.
 
+## Not installed yet? Getting game_loop into a repo
+
+If the repo has no `.game_loop/` directory, install it. Run this from the repo root, with the
+`export` on its own line (written inline, `VAR=x curl … | bash` hands the variable to `curl` only,
+and you silently get an unreleased `main`):
+
+```
+export GAME_LOOP_CHANNEL=stable
+curl -fsSL https://raw.githubusercontent.com/SupposedlySam/game_loop/main/install.sh | bash -s -- --local .
+```
+
+- **`--local` is the personal install:** hooks go in `.claude/settings.local.json` and `.game_loop/`
+  in `.git/info/exclude`, so nothing tracked changes. Without it, the install is the TEAM's: tracked
+  files everyone who clones will get. That is the human's call, so ask before dropping `--local`.
+- **Restart the session afterwards.** Claude Code reads hooks when a session starts, so nothing is
+  enforced in the session that ran the installer.
+- **Then confirm** with `./.game_loop/bin/game_loop status`, and read `.game_loop/llms.txt` (this
+  file, as installed).
+
+**Upgrading.** If `.game_loop/installed-by.json` exists, a package manager placed this install: run
+the command in its `upgrade` field, never the curl line, which would replace a stamped release with
+`main`. Otherwise re-run the two lines above without `--local`; a re-install keeps the repo's mode,
+local or shared, by itself. **Current or not:** `.game_loop/VERSION` holds the installed commit, and
+`git ls-remote https://github.com/SupposedlySam/game_loop.git refs/tags/stable` the latest release.
+
 ## First thing, every session
 
 ```

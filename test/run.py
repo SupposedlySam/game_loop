@@ -2136,15 +2136,17 @@ def main():
             f.write(json.dumps({"type": "assistant", "message": {"content": [
                 {"type": "text", "text": "Everything left is yours."}]}}) + "\n")
 
-        def _listen_case(listen):
+        def _listen_case(listen, rings=3, seen="100.000000"):
             with open(notify_f, "w") as f:
                 json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123", "api_base": api,
                                      "reply_poll_sec": 5, "listen": listen}}, f)
+            _st0 = {"mandate": {"active": True, "text": "run the desk", "at": "now"},
+                    "watchdog_rings": rings, "watchdog_exhausted_paged": rings >= 3,
+                    "watchdog_last_ring_size": os.path.getsize(_ltp)}
+            if seen:
+                _st0["slack_listen_seen"] = seen
             with open(os.path.join(_lsd, "state.json"), "w") as f:
-                json.dump({"mandate": {"active": True, "text": "run the desk", "at": "now"},
-                           "watchdog_rings": 3, "watchdog_exhausted_paged": True,
-                           "watchdog_last_ring_size": os.path.getsize(_ltp),
-                           "slack_listen_seen": "100.000000"}, f)
+                json.dump(_st0, f)
             r = run_watchdog(wd_bin, {"session_id": _lsid, "transcript_path": _ltp},
                              WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
             with open(os.path.join(_lsd, "state.json")) as f:
@@ -2166,6 +2168,20 @@ def main():
         check("...while WITHOUT the opt-in the same run stands down exactly as before: nothing read, "
               "nothing delivered",
               _lr0.returncode == 0 and "are you still on the Utah one?" not in _lr0.stderr)
+        # THE COUNTING WINDOW (wcs's retest, 2026-11-12): the ring count had been reset by work, the
+        # human posted while rings were counting, and #212 only listened after the stand-down, so
+        # the message was never read. Each idle check now reads the channel before ringing.
+        _lrc, _lstc = _listen_case(True, rings=0)
+        check("...and a message posted while rings are still COUNTING (not yet stood down) is "
+              "delivered at the next idle check, in place of a generic ring",
+              _lrc.returncode == 2 and "are you still on the Utah one?" in _lrc.stderr
+              and "messaged the run in Slack" in _lrc.stderr
+              and _lstc.get("slack_listen_seen") == "200.000000")
+        _lrn, _lstn = _listen_case(True, rings=0, seen=None)
+        check("...and the watermark STARTS the first time listening is seen, so older messages are "
+              "not delivered as news, while every later one is",
+              "are you still on the Utah one?" not in _lrn.stderr
+              and float(_lstn.get("slack_listen_seen") or 0) > 200.0)
         FakeSlack.channel_msgs = []
         with open(notify_f, "w") as f:
             json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123",

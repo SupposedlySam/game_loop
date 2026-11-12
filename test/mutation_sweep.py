@@ -1448,6 +1448,11 @@ MUTANTS = [
      # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
      # which is exactly what #49 was about.
      None, 19),
+    ("listen_watermark -> listening never starts, so the channel is never read",
+     ".game_loop/bin/watchdog::listen_watermark", "    return None\n",
+     ["while rings are still COUNTING", "the watermark STARTS"],
+     "NEVER STARTED IS THE RETEST'S WORLD (wcs, 2026-11-12): Jonah's \"Testing\" arrived while rings "
+     "were counting, the listener had not started, and nothing read it. MEASURED 2026-11-12 at d8aeaf3 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.", 4),
     ("notify.listens -> the opt-in is never seen, so a stood-down run hears nothing",
      ".game_loop/bin/notify.py::listens", "    return False\n",
      ["WAKES on the human's channel message"],

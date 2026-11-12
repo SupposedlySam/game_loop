@@ -905,6 +905,9 @@ def poll_slack_replies(state):
                 return "\n".join(f"    {r['text']}    (ts {r['ts']})" for r in ms)
             if answers:
                 st["t3_armed"] = None      # answered — the human no longer holds the ball
+                if others and st.get("slack_listen_seen"):
+                    st["slack_listen_seen"] = max([st["slack_listen_seen"]] + [r["ts"] for r in others],
+                                                  key=float)
                 save_state(st)
                 logline({"kind": "watchdog_slack_reply", "thread": ts,
                          "replies": [r["text"] for r in answers],
@@ -920,9 +923,12 @@ def poll_slack_replies(state):
                     f"  game_loop notify --thread {ts} --text \"..\"",
                     file=sys.stderr)
                 sys.exit(2)
-            # Channel messages only: deliver them, remember them, keep the question armed.
+            # Channel messages only: deliver them, remember them, keep the question armed. The
+            # listener's watermark moves too, or it would deliver them again once the arm ends.
             now_armed["slack_seen"] = max((r["ts"] for r in others), key=float)
             st["t3_armed"] = now_armed
+            if st.get("slack_listen_seen") and float(st["slack_listen_seen"]) < float(now_armed["slack_seen"]):
+                st["slack_listen_seen"] = now_armed["slack_seen"]
             save_state(st)
             logline({"kind": "watchdog_slack_channel_message", "thread": ts,
                      "messages": [r["text"] for r in others]})
@@ -954,48 +960,69 @@ def poll_slack_replies(state):
 
 
 
-def listen_for_human(tpath):
-    """While a mandated run sits idle with nothing armed, read the Slack channel for the human.
+def listen_watermark():
+    """The Slack ts after which a human message is news, or None when listening is off.
 
-    Returns at once unless the project opted in (notify "listen": true). Otherwise polls every
-    reply_poll_sec and, on a human message posted after the watermark, delivers it with its ts and
-    exits 2. Quiet when a newer watchdog supersedes this one, the session works again (its
-    transcript grows), an arm appears (poll_slack_replies covers that), or the mandate ends.
-
-    WHY AT THE RING CAP. A mandated session whose open work is all the human's is rung three times
-    and then stood down, which is right, and from then on nothing read the channel, so a message the
-    human sent the run from their phone reached nobody (wcs, 2026-11-12). The watermark starts when
-    listening starts, so an old backlog is not delivered as news; it persists in state, so a message
-    is delivered once.
+    STARTED THE FIRST TIME LISTENING IS SEEN, not at the stand-down, and persisted. #212 started it
+    at the stand-down, and wcs's test showed the cost the same evening: the upgrade's own commit
+    reset the ring count, Jonah posted "Testing" while rings were counting, and the listener had not
+    started, so nothing read it; when it did start, its watermark would have begun after the
+    message, and the message would never have been delivered at all.
     """
     if not (notify and getattr(notify, "listens", None) and notify.listens()):
+        return None
+    st = load_state()
+    seen = st.get("slack_listen_seen")
+    if not seen:
+        seen = f"{time.time():.6f}"
+        st["slack_listen_seen"] = seen
+        save_state(st)
+        logline({"kind": "watchdog_listen_start", "since": seen})
+    return seen
+
+
+def deliver_listened(msgs, why):
+    """Wake the session with the human's Slack messages: advance the watermark, reset the rings."""
+    st = load_state()
+    st["slack_listen_seen"] = max((m["ts"] for m in msgs), key=float)
+    st["watchdog_rings"] = 0
+    st["watchdog_exhausted_paged"] = False
+    save_state(st)
+    logline({"kind": "watchdog_slack_listen", "when": why, "messages": [m["text"] for m in msgs]})
+    body = "\n".join(f"    {m['text']}    (ts {m['ts']})" for m in msgs)
+    print("WATCHDOG: the human messaged the run in Slack.\n\n"
+          f"{body}\n\n"
+          "Read it and act on it. To answer in that message's thread:\n"
+          "  game_loop notify --thread <ts> --text \"..\"",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def listen_for_human(tpath):
+    """While a mandated run sits idle and stood down with nothing armed, keep reading the channel.
+
+    Returns at once unless the project opted in (notify "listen": true). Otherwise polls every
+    reply_poll_sec and, on a human message after the watermark, delivers it (exit 2). Quiet when a
+    newer watchdog supersedes this one, the session works again (its transcript grows), an arm
+    appears (poll_slack_replies covers that), or the mandate ends.
+
+    WHY THE STAND-DOWN NEEDS A LOOP: a mandated session whose open work is all the human's is rung
+    three times and stood down, and from then on no watchdog runs until the next turn-end, so a
+    message from the human's phone reached nobody (wcs, 2026-11-12). Before the stand-down, each
+    idle check reads the channel itself (see main), so no window is left unread.
+    """
+    seen = listen_watermark()
+    if seen is None:
         return
     if not claim_pidfile():
         quiet("cannot write pidfile")
-    st = load_state()
-    seen = st.get("slack_listen_seen") or f"{time.time():.6f}"
-    if st.get("slack_listen_seen") != seen:
-        st["slack_listen_seen"] = seen
-        save_state(st)
     logline({"kind": "watchdog_listening", "since": seen})
     start_size = transcript_size(tpath)
     poll = notify.reply_poll_sec()
     while True:
         msgs = notify.channel_messages(seen)
         if msgs:
-            st = load_state()
-            st["slack_listen_seen"] = max((m["ts"] for m in msgs), key=float)
-            st["watchdog_rings"] = 0
-            st["watchdog_exhausted_paged"] = False
-            save_state(st)
-            logline({"kind": "watchdog_slack_listen", "messages": [m["text"] for m in msgs]})
-            body = "\n".join(f"    {m['text']}    (ts {m['ts']})" for m in msgs)
-            print("WATCHDOG: the human messaged the run in Slack while it sat idle.\n\n"
-                  f"{body}\n\n"
-                  "Read it and act on it. To answer in that message's thread:\n"
-                  "  game_loop notify --thread <ts> --text \"..\"",
-                  file=sys.stderr)
-            sys.exit(2)
+            deliver_listened(msgs, "stood down")
         slept = 0
         while slept < poll:
             nap = min(CHUNK_SEC, poll - slept)
@@ -1011,6 +1038,7 @@ def listen_for_human(tpath):
         now_size = transcript_size(tpath)
         if start_size is not None and now_size is not None and now_size > start_size:
             quiet("transcript grew while listening — the session is working again")
+
 
 def session_env():
     """The session facts a project-supplied command needs to scope itself to THIS run.
@@ -1608,6 +1636,7 @@ def main():
     # a session that is not under a mandate.
     if not m.get("active"):
         quiet("no mandate bound")
+    listen_watermark()    # starts the watermark the first time listening is on; a no-op otherwise
 
     # A human-called break (`game_loop mandate --park`) means the run is stopped deliberately, by the
     # one authority this engine defers to. Idleness is EXPECTED, and ringing would drag the session
@@ -1785,6 +1814,13 @@ def main():
                  "note": "could not size the transcript; not ringing on an unmeasured guess"})
         quiet("cannot measure transcript growth")
 
+    # THE HUMAN'S MESSAGE BEFORE A NUDGE. Read the channel at every idle check, so a message that
+    # arrives while rings are counting is delivered here rather than missed until a stand-down.
+    _seen = listen_watermark()
+    if _seen is not None:
+        _msgs = notify.channel_messages(_seen)
+        if _msgs:
+            deliver_listened(_msgs, "idle check")
     ring(state, state.get("watchdog_rings", 0), probe_note(_why, held=_held), _harness_note)
 
 

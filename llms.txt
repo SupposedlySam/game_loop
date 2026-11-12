@@ -204,8 +204,8 @@ cleared — act on the answer and continue; do not re-ask or wait further.
 unconfigured; `--test` verifies the wiring; `--thread <ts>` replies in that message's thread, and
 every Slack message the watchdog delivers to you carries its ts). Only a reply in an armed
 question's thread is its answer; a top-level message wakes you labelled as not a reply. With
-`"listen": true` in notify.json, the human's channel messages also wake a mandated run that has
-stood down idle with nothing armed. The tools already page automatically on `arm`,
+`"listen": true` in notify.json, the human's channel messages also wake an idle mandated run with
+nothing armed, whether the watchdog is still ringing or has stood down. The tools already page automatically on `arm`,
 `mandate --clear`, watchdog stand-down, and limit events — reach for `notify` only when the human
 must see something none of those cover (e.g. "the deploy needs your physical presence at the TV").
 It does not license a turn-end: the Stop gate rules still apply.

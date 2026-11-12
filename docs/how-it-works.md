@@ -127,11 +127,14 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
   `notify.py`: a reply is taken as the human's words — anyone in the channel can answer, so scope the
   channel accordingly.
 - **Listening with nothing armed (opt-in).** With `"listen": true` under `slack` in notify.json, a
-  mandated run that the watchdog has stood down (three unproductive rings, typically because
-  everything left is the human's) keeps reading the channel instead of going silent. A human message
-  posted after listening started wakes it with that message and its ts. It stops when the session
-  works again, an arm appears, a newer watchdog takes over, or the mandate ends. Off by default: it
-  is a Slack read per poll, and any channel member's message wakes the run.
+  mandated run reads the channel at every idle check, before it would ring, and keeps reading after
+  the watchdog stands it down (three unproductive rings, typically because everything left is the
+  human's) instead of going silent. A human message posted after listening first started wakes it
+  with that message and its ts, in place of a ring, and is delivered once. The stand-down loop stops
+  when the session works again, an arm appears, a newer watchdog takes over, or the mandate ends.
+  Off by default: it is a Slack read per check, and any channel member's message wakes the run.
+  (The first release listened only after the stand-down; a message sent while rings were still
+  counting was never read.)
 - **A question asked at the desk waits for the human too.** With no Slack page, the Stop gate keeps the
   arm (spent, so it is still one interruption) with the transcript offset it was asked at, and the
   watchdog stays quiet until the human next **types**. A record the host marks with an `origin`

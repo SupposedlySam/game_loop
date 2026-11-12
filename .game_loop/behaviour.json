@@ -830,6 +830,15 @@
       "change": "With \"listen\": true under \"slack\" in notify.json, the watchdog no longer goes silent when it stands a mandated run down at the ring cap with nothing armed. It keeps reading the channel every reply_poll_sec, and a human top-level message posted after listening started wakes the session with the message and its ts, resets the ring count, and is marked seen (slack_listen_seen). It stops when the transcript grows, an arm appears, a newer watchdog supersedes it, or the mandate ends. Off by default.",
       "consequence": "a project that sets \"listen\": true can reach an idle mandated run from Slack after the watchdog has stood down; each poll is one Slack read, and any channel member's message wakes the run. Projects that do not set it see no change.",
       "why_it_qualifies": "a new way for a session to be woken. Requested from wholesale-command-station (wcs, 2026-11-12), where the human meant to use the channel overnight and nothing read it with no arm live; enabled opt-in per project by Jonah's decision the same day."
+    },
+    {
+      "seq": 89,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog (Slack listen): read the channel at every idle check, not only after the stand-down",
+      "change": "With \"listen\": true, the watchdog now reads the channel at every idle check of a mandated run with nothing armed, before it would ring, and a human message after the watermark is delivered in place of the ring. The watermark (slack_listen_seen) starts the first time the watchdog sees listening on, not at the stand-down. Channel messages the arm's poll delivers advance it too, so none is delivered twice.",
+      "consequence": "a human message sent while the ring count is still below the cap now reaches the run at the next idle check; under #212 it was not read until a stand-down, and its watermark began after the message, so it was never delivered.",
+      "why_it_qualifies": "a message that was dropped is now delivered. Found by wcs's end-to-end test of #212 (2026-11-12): Jonah posted \"Testing\" at 18:14:24 while rings were counting after the upgrade's own commit reset them, and nothing woke the run."
     }
   ],
   "schema": 1

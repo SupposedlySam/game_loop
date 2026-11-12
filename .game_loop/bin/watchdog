@@ -39,6 +39,7 @@ WHAT IT DOES NOT DO (state the scope of a guard, including what it misses):
 import datetime
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -326,13 +327,102 @@ def acted_since(path, offset):
     A tool call is the honest proxy for "the ring got the session moving": text alone is a reply,
     not work. PARSED, never grepped, because the agent's own prose can contain the words "tool_use"
     and a text search would count a paragraph about this very function as work.
+
+    GAME_LOOP'S OWN BOOKKEEPING IS NOT WORK EITHER (wcs, 2026-11-11). A session whose every open item
+    was the human's to do answered each ring the way the Stop gate demands, with `game_loop
+    checkpoint`, and that tool call re-armed the cap every time: nine paid rings in six minutes, and
+    the only exits left were busywork or a false `mandate --clear`. The gate asks for the checkpoint,
+    so counting it as work made the cap unreachable for exactly the session obeying the gate. A Bash
+    reply that records (checkpoint, status, trans, note, --help) and otherwise only LOOKS moves
+    nothing, so it does not count; see the three kinds below. Anything this cannot parse still
+    counts, which keeps the old behaviour rather than silencing a ring.
     """
+    # EACH TOOL CALL IS ONE OF THREE THINGS. "book": game_loop's own record (checkpoint, status,
+    # trans, note, --help). "look": reading (Read/Grep/Glob, or a shell made only of read-only
+    # commands with no file redirect). "act": anything else. A reply ACTED if any call acts. One
+    # that only looked is research and still counts as work, as it always has. One that recorded
+    # (a checkpoint) and otherwise only looked is the session saying, in effect, "no change": the
+    # reply that kept the cap from ever firing.
+    #
+    # THE WRAPPERS ARE THE MEASURED SHAPE, not tidiness. The ~220-turn loop in c9156a5d
+    # (2026-09-02) answered each ring with one call polling the running sweep and one writing the
+    # checkpoint as `cd ..; S=..; printf 'No change.' > $S/f; game_loop checkpoint --notes-file
+    # $S/f | head -1`. A rule that excused only a bare checkpoint would not have bounded it.
+    READERS = {"ls", "cat", "head", "tail", "wc", "grep", "egrep", "rg", "ps", "pgrep", "date",
+               "stat", "du", "test", "[", "sleep", "find", "jq", "sort", "uniq", "cut", "tr",
+               "basename", "dirname", "realpath", "pwd", "which", "file"}
+    NEUTRAL = {"cd", "export", "true", ":"}
+    BOOK_VERBS = ("checkpoint", "status", "trans", "note")
+    WRITE_FLAGS = ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls")
+
+    def segments(cmd):
+        # LINE BY LINE: shlex reads a newline as plain whitespace, so lexing the whole command would
+        # fuse "game_loop checkpoint" with whatever the next line runs into one segment.
+        toks = []
+        for line in cmd.splitlines():
+            lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lex.whitespace_split = True
+            toks += list(lex) + [";"]
+        seg, segs = [], []
+        for t in toks:
+            if t in ("&&", "||", ";", "|", "&"):
+                if seg:
+                    segs.append(seg)
+                seg = []
+            else:
+                seg.append(t)
+        return segs
+
+    def writes_a_file(sg):
+        for i, t in enumerate(sg):
+            if t in (">", ">>", ">|", "&>", "&>>"):
+                target = sg[i + 1] if i + 1 < len(sg) else ""
+                if target != "/dev/null":
+                    return True
+        return False
+
+    def classify(block):
+        name = block.get("name")
+        if name in ("Read", "Grep", "Glob", "ToolSearch", "TaskOutput"):
+            return "look"
+        if name != "Bash":
+            return "act"
+        cmd = str((block.get("input") or {}).get("command") or "")
+        try:
+            segs = segments(cmd)
+        except ValueError:
+            return "act"                  # cannot parse: keep the old behaviour, never excuse it
+        if not segs:
+            return "act"
+        kinds = set()
+        for sg in segs:
+            while sg and "=" in sg[0] and not sg[0].startswith(("-", ">", "<")):
+                sg = sg[1:]               # VAR=value prefixes, and bare assignments
+            if not sg:
+                continue
+            word = os.path.basename(sg[0])
+            if word == "game_loop":
+                rest = sg[1:]
+                if any(a in ("--help", "-h") for a in rest) or (rest and rest[0] in BOOK_VERBS):
+                    kinds.add("book")
+                    continue
+                return "act"              # mandate, arm, fix: a game_loop verb that changes the run
+            if word in NEUTRAL or word in ("printf", "echo"):
+                continue                  # printf/echo may write the checkpoint's notes file
+            if word in READERS and not writes_a_file(sg) and not any(
+                    f in sg for f in WRITE_FLAGS):
+                kinds.add("look")
+                continue
+            return "act"
+        return "book" if "book" in kinds else "look"
+
     try:
         with open(path, "rb") as f:
             f.seek(max(0, int(offset or 0)))
             tail = f.read()
     except (OSError, TypeError, ValueError):
         return None
+    kinds = set()
     for raw in tail.splitlines():
         try:
             rec = json.loads(raw)
@@ -340,10 +430,16 @@ def acted_since(path, offset):
             continue          # the offset can land mid-line; a partial first line is not a verdict
         msg = rec.get("message") if isinstance(rec, dict) else None
         content = msg.get("content") if isinstance(msg, dict) else None
-        if rec.get("type") == "assistant" and isinstance(content, list) and any(
-                isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
-            return True
-    return False
+        if rec.get("type") == "assistant" and isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    k = classify(b)
+                    if k == "act":
+                        return True
+                    kinds.add(k)
+    if "book" in kinds:
+        return False          # recorded and otherwise only looked: the "no change" reply
+    return bool(kinds)        # looked only: research, which counts as it always has
 
 
 def human_spoke_since(path, offset):

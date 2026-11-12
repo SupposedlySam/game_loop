@@ -612,6 +612,19 @@ MUTANTS = [
      "killer is the one proving the same authorization opens a GATED project. The #131 assertions "
      "about the refusal's authorization-state line SURVIVE this mutant, correctly: they read "
      "authorization_state, a different producer, and do not depend on a grant being spent.", 2),
+    ("classify -> every tool call after a ring counts as work again",
+     ".game_loop/bin/watchdog::classify", "        return \"act\"\n",
+     ["only tool calls are game_loop CHECKPOINT / STATUS / TRANS / --help does NOT re-arm",
+      "POLLS a running job and writes a WRAPPED checkpoint"],
+     "EVERYTHING IS WORK IS THE REPORTED WORLD, twice: wcs (2026-11-11), nine rings in six minutes "
+     "answered with checkpoints, and c9156a5d (2026-09-02), ~220 rings answered with a sweep poll and "
+     "a 'No change.' checkpoint. The arms that must still count as work pass BY CONSTRUCTION under "
+     "this neuter, which is why they are paired with the excused ones. MEASURED 2026-11-12 at bdd1f4f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (three reachability rows also fail, excluded as bookkeeping).", 2),
+    ("writes_a_file -> a redirect into a file is never seen as a write",
+     ".game_loop/bin/watchdog::writes_a_file", "        return False\n",
+     ["beside a file write, a find -delete or an Edit re-arms too"],
+     "NEVER A WRITE would excuse `cat a > b` beside a checkpoint as mere looking, so a ring answered "
+     "with real work would count against the cap. MEASURED 2026-11-12 at bdd1f4f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 1.", 1),
     ("acted_since -> any reply re-arms the ring cap again, so it can never fire",
      ".game_loop/bin/watchdog::acted_since", "    return None\n",
      ['TEXT-ONLY reply since the last ring does NOT re-arm', 'MENTIONS a tool_use block is not one'],

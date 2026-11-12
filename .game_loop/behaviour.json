@@ -794,6 +794,15 @@
       "change": "The deploy/publish refusal's example `<verb> --<option> \"$(cat <file>)\"` had unescaped quotes that closed the message string, leaving a real command substitution. bash 5.3 could not parse guard-writes-impl.sh at all, so the write guard failed open (\"THE WRITE GUARD IS NOT RUNNING\") on every tool call for anyone whose bash on PATH is 5.3. bash 3.2 parsed it and ran the substitution, so every deploy refusal printed \"\" in place of the example and a syntax error on stderr. Both the quotes and the dollar are now escaped.",
       "consequence": "a machine whose bash on PATH is 5.3 gets a working write guard again, so writes that were unchecked are now checked and refused where the rules say so. On bash 3.2 nothing changes except that the deploy refusal's hint now reads as written.",
       "why_it_qualifies": "refusals that were not happening (the guard was failing open) now happen. Reported in #147 by the drops owner agent after `brew install bash` put 5.3.20 first on PATH; reproduced here against a bash 5.3 built from source."
+    },
+    {
+      "seq": 85,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog: a reply that only records and looks no longer re-arms the ring cap",
+      "change": "The ring cap stands the watchdog down after 3 consecutive UNPRODUCTIVE rings, and any reply containing a tool call counted as productive. Now each tool call is classed as acting, bookkeeping (game_loop checkpoint, status, trans, note, --help, including through cd, assignments, a printf/echo notes file and pipes) or looking (Read/Grep/Glob, or read-only shell such as ls, cat, tail, wc, grep, ps, find without -delete/-exec, with no redirect into a file). A reply that acted counts as work; one that only looked is research and counts as work as before; one that did bookkeeping and otherwise only looked does not count. Any other game_loop verb (mandate, arm), any write, and any command that cannot be parsed still count as work.",
+      "consequence": "a mandated session whose open work is all the human's, answering each ring with the checkpoint the Stop gate asks for, is now rung at most 3 times and then stood down (and the human paged once, where notify is configured). It used to be rung indefinitely, each ring a paid turn.",
+      "why_it_qualifies": "fewer rings, and a stand-down and page where there was none. Reported from wholesale-command-station (wcs, session 3f1fb7df, 2026-11-11): nine rings in six minutes, each answered with a checkpoint. Then found in game_loop's own transcript c9156a5d (2026-09-02) by showrunner-code-owner's research: about 220 rings in one turn, each answered with a poll of a running sweep plus a 'No change.' checkpoint."
     }
   ],
   "schema": 1

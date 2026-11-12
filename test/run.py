@@ -7690,12 +7690,52 @@ def main():
         check("...and prose that merely MENTIONS a tool_use block is not one: the transcript is "
               "parsed, not grepped, or a paragraph about this check would count as the work",
               '"watchdog_rearm"' not in _cap_case([_talk]))
+        # GAME_LOOP'S OWN BOOKKEEPING IS NOT THE WORK (wcs, 2026-11-11). Every open item was the
+        # human's; the session answered each ring with the checkpoint the Stop gate demands, and that
+        # tool call re-armed the cap: nine paid rings in six minutes, with no honest exit.
+        def _bash(cmd):
+            return {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": cmd}}]}}
+        check("a reply whose only tool calls are game_loop CHECKPOINT / STATUS / TRANS / --help does "
+              "NOT re-arm the cap: the gate demands the checkpoint, so counting it as work made the "
+              "cap unreachable for the session obeying the gate",
+              '"watchdog_rearm"' not in _cap_case([
+                  _bash('./.game_loop/bin/game_loop checkpoint --notes "all items are Jonah\'s"'),
+                  _bash("game_loop status && game_loop watchdog --help"),
+                  _bash("GAME_LOOP_SESSION=a game_loop trans --doing waiting")]))
+        check("...while a checkpoint CHAINED with real work, or followed by it on the next line, "
+              "still re-arms: only a call made of nothing but bookkeeping is excused",
+              '"watchdog_rearm"' in _cap_case([_bash("game_loop checkpoint --notes x && git push")])
+              and '"watchdog_rearm"' in _cap_case([_bash("game_loop checkpoint --notes x\nrm -rf d")]))
+        check("...and a game_loop verb that CHANGES the run (mandate, arm) is not bookkeeping, nor "
+              "is a command this cannot parse, which keeps the old behaviour",
+              '"watchdog_rearm"' in _cap_case([_bash("game_loop mandate --clear")])
+              and '"watchdog_rearm"' in _cap_case([_bash('echo "unbalanced')]))
+        # THE MEASURED SHAPE (c9156a5d, 2026-09-02, ~220 turns): each ring was answered by one call
+        # polling the running sweep and one writing the checkpoint through cd, an assignment, a
+        # printf'd notes file and `| head`. Excusing only a bare checkpoint would not have bounded it.
+        _poll = _bash("wc -l /tmp/sweep.out; tail -3 /tmp/sweep.out; pgrep -f mutation_sweep")
+        _wrapped = _bash("cd /repo\nS=/tmp/s\nprintf 'No change.\\n' > $S/c.txt\n"
+                         "./.game_loop/bin/game_loop checkpoint --notes-file $S/c.txt 2>&1 | head -1")
+        check("a reply that POLLS a running job and writes a WRAPPED checkpoint ('No change.') does "
+              "not re-arm the cap either: the ~220-turn loop in c9156a5d was exactly that shape",
+              '"watchdog_rearm"' not in _cap_case([_poll, _wrapped]))
+        _read = {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/repo/x.py"}}]}}
+        check("...while reading WITHOUT a checkpoint is research and still re-arms, and a checkpoint "
+              "beside a file write, a find -delete or an Edit re-arms too: only recording plus "
+              "looking is excused",
+              '"watchdog_rearm"' in _cap_case([_read, _bash("grep -rn foo src | head")])
+              and '"watchdog_rearm"' in _cap_case([_bash("cat a > b"), _wrapped])
+              and '"watchdog_rearm"' in _cap_case([_bash("find . -name x -delete"), _wrapped])
+              and '"watchdog_rearm"' in _cap_case([{"type": "assistant", "message": {"content": [
+                  {"type": "tool_use", "name": "Edit", "input": {}}]}}, _wrapped]))
         _wsrc = open(os.path.join(REPO, ".game_loop", "bin", "watchdog")).read()
         _af = [n for n in ast.parse(_wsrc).body
                if isinstance(n, ast.FunctionDef) and n.name == "acted_since"]
         _am = ast.Module(body=_af, type_ignores=[])
         ast.fix_missing_locations(_am)
-        _ans = {"json": json}
+        _ans = {"json": json, "os": os, "shlex": shlex}
         exec(compile(_am, "watchdog", "exec"), _ans)  # noqa: S102
         check("...and an UNREADABLE transcript answers None, so the caller keeps the old growth "
               "rule rather than silencing or forcing anything on a read failure",

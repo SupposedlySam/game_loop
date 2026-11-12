@@ -3426,11 +3426,13 @@ def cmd_notify(s, a):
         return
     text = a.text or ("test page from game_loop. If you are reading this, the channel ACCEPTED and "
                       "DELIVERED it — which is the half sending cannot prove on its own.")
-    res = notify.send("manual", text)
+    # --thread (wcs, 2026-11-12): send() always took a thread ts, but the verb never passed one,
+    # so every reply landed top-level and the human could not tell which message it answered.
+    res = notify.send("manual", text, thread_ts=(a.thread or None))
     if res is None:
         out("✗ page FAILED — see the last notify_error line in .game_loop/log.jsonl.")
         return
-    logline({"kind": "notify_manual", "text": text})
+    logline({"kind": "notify_manual", "text": text, "thread": a.thread or None})
     out("✓ the channel ACCEPTED the page." + ("" if res is True else f" (thread ts {res})"))
     if a.test:
         # ACCEPTED IS NOT DELIVERED, and this verb used to say "the notify channel works" — in the
@@ -14516,6 +14518,7 @@ def main():
     nf = sub.add_parser("notify")  # page the configured Slack channel by hand
     nf.add_argument("--text", help="the message the run's human should see")
     nf.add_argument("--test", action="store_true", help="send a test page to verify the channel")
+    nf.add_argument("--thread", help="reply in the thread of this message ts, not at top level")
 
     ow = sub.add_parser("owned")  # the user-owned file set, published so nobody re-lists it (#30)
     ow.add_argument("--porcelain", action="store_true", help="emit the set as JSON, for tools")

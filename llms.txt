@@ -201,7 +201,11 @@ cleared — act on the answer and continue; do not re-ask or wait further.
 ## Paging the human's phone
 
 `./.game_loop/bin/game_loop notify --text ".."` pages the configured Slack channel (no-op when
-unconfigured; `--test` verifies the wiring). The tools already page automatically on `arm`,
+unconfigured; `--test` verifies the wiring; `--thread <ts>` replies in that message's thread, and
+every Slack message the watchdog delivers to you carries its ts). Only a reply in an armed
+question's thread is its answer; a top-level message wakes you labelled as not a reply. With
+`"listen": true` in notify.json, the human's channel messages also wake a mandated run that has
+stood down idle with nothing armed. The tools already page automatically on `arm`,
 `mandate --clear`, watchdog stand-down, and limit events — reach for `notify` only when the human
 must see something none of those cover (e.g. "the deploy needs your physical presence at the TV").
 It does not license a turn-end: the Stop gate rules still apply.

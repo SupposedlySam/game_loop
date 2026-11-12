@@ -2076,19 +2076,100 @@ def main():
         check("an unmandated session still forwards the slack reply (exit 2)",
               r.returncode == 2 and "yes deploy it" in r.stderr)
 
-        # A human who answers at the CHANNEL top level (not in-thread) must also be caught — the natural
-        # thing to do from a phone. replies() unions conversations.history with conversations.replies.
-        print("watchdog forwards a top-level channel reply (not just in-thread):")
+        # A TOP-LEVEL MESSAGE IS NOT THE ANSWER (wcs, 2026-11-12). It was forwarded "like a thread
+        # reply" and cleared the arm: the human posted "Testing" to check the channel reached the run,
+        # and the watchdog delivered it as the answer to "Did Tennessee approve...?". It still wakes
+        # the session, labelled, and the question stays armed for its real answer.
+        print("watchdog delivers a top-level channel message WITHOUT taking it as the answer:")
         FakeSlack.posts.clear()
         FakeSlack.thread_replies = [{"ts": "111.222", "text": "parent"}]   # NO in-thread human reply
-        FakeSlack.channel_msgs = [{"ts": "111.777", "user": "U1", "text": "answer in the channel"}]
-        gl(proj, "arm", "--question", "channel reply?", "--read", real, "--predict", "x", sid="sess-slk")
+        FakeSlack.channel_msgs = [{"ts": "111.777", "user": "U1", "text": "Testing"}]
+        gl(proj, "arm", "--question", "Did Tennessee approve?", "--read", real, "--predict", "x",
+           sid="sess-slk")
         r = run_watchdog(wd_bin, {"session_id": "sess-slk",
                                                        "transcript_path": tpath},
                          WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
-        check("a top-level channel message is forwarded like a thread reply (exit 2)",
-              r.returncode == 2 and "answer in the channel" in r.stderr)
+        _slk_sf = os.path.join(proj, ".game_loop", "sessions", "sess-slk", "state.json")
+        try:
+            with open(_slk_sf) as f:
+                _slk_arm = json.load(f).get("t3_armed") or {}
+        except (OSError, ValueError):
+            _slk_arm = {}
+        check("a top-level channel message WAKES the session (exit 2), labelled NOT the answer, with "
+              "its ts so it can be replied to in-thread",
+              r.returncode == 2 and "Testing" in r.stderr and "NOT in your question's thread" in r.stderr
+              and "ts 111.777" in r.stderr)
+        check("...and the question STAYS ARMED, with the message marked seen so it is not delivered "
+              "twice, so the real answer still reaches the run",
+              _slk_arm.get("question") == "Did Tennessee approve?"
+              and _slk_arm.get("slack_seen") == "111.777")
         FakeSlack.channel_msgs = []
+        FakeSlack.thread_replies = [{"ts": "111.222", "text": "parent"},
+                                    {"ts": "111.888", "user": "U1", "text": "yes, approved"}]
+        r = run_watchdog(wd_bin, {"session_id": "sess-slk", "transcript_path": tpath},
+                         WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+        try:
+            with open(_slk_sf) as f:
+                _slk_after = json.load(f).get("t3_armed")
+        except (OSError, ValueError):
+            _slk_after = "unreadable"
+        check("...while a reply IN THE THREAD is the answer: delivered as such, the arm cleared",
+              r.returncode == 2 and "yes, approved" in r.stderr
+              and "answered your T3 question in its Slack thread" in r.stderr and _slk_after is None)
+        FakeSlack.thread_replies = []
+        # A REPLY CAN GO IN-THREAD (wcs, 2026-11-12): send() took a thread ts and the verb never
+        # passed one, so every reply landed top-level.
+        FakeSlack.posts.clear()
+        gl(proj, "notify", "--thread", "111.777", "--text", "on it", sid="sess-slk")
+        _tp = [b for path, b in FakeSlack.posts if "chat.postMessage" in path]
+        check("`game_loop notify --thread <ts>` replies in that message's thread",
+              bool(_tp) and _tp[-1].get("thread_ts") == "111.777" and "on it" in _tp[-1].get("text", ""))
+        # LISTENING WITH NOTHING ARMED (opt-in; Jonah, 2026-11-12). A mandated run whose open work is
+        # all the human's is rung three times and stood down, and from then on nothing read the
+        # channel, so the human's message from their phone reached nobody (wcs).
+        print("a stood-down mandated run hears the human in Slack, when the project opted in:")
+        _lsid = "sess-lsn"
+        _lsd = os.path.join(proj, ".game_loop", "sessions", _lsid)
+        os.makedirs(_lsd, exist_ok=True)
+        _ltp = os.path.join(proj, "transcript-listen.jsonl")
+        with open(_ltp, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Everything left is yours."}]}}) + "\n")
+
+        def _listen_case(listen):
+            with open(notify_f, "w") as f:
+                json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123", "api_base": api,
+                                     "reply_poll_sec": 5, "listen": listen}}, f)
+            with open(os.path.join(_lsd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "run the desk", "at": "now"},
+                           "watchdog_rings": 3, "watchdog_exhausted_paged": True,
+                           "watchdog_last_ring_size": os.path.getsize(_ltp),
+                           "slack_listen_seen": "100.000000"}, f)
+            r = run_watchdog(wd_bin, {"session_id": _lsid, "transcript_path": _ltp},
+                             WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+            with open(os.path.join(_lsd, "state.json")) as f:
+                return r, json.load(f)
+
+        FakeSlack.thread_replies = []
+        FakeSlack.channel_msgs = [
+            {"ts": "200.000000", "user": "U1", "text": "are you still on the Utah one?"},
+            {"ts": "201.000000", "bot_id": "B1", "text": "our own page"}]
+        _lr, _lst = _listen_case(True)
+        check("with \"listen\": true, a run stood down at the ring cap WAKES on the human's channel "
+              "message (exit 2), delivered with its ts, and a bot's post is not delivered",
+              _lr.returncode == 2 and "are you still on the Utah one?" in _lr.stderr
+              and "ts 200.000000" in _lr.stderr and "our own page" not in _lr.stderr)
+        check("...and the message is marked seen and the ring count reset, so it is delivered once and "
+              "the woken session is rung again if it goes idle",
+              _lst.get("slack_listen_seen") == "200.000000" and _lst.get("watchdog_rings") == 0)
+        _lr0, _ = _listen_case(False)
+        check("...while WITHOUT the opt-in the same run stands down exactly as before: nothing read, "
+              "nothing delivered",
+              _lr0.returncode == 0 and "are you still on the Utah one?" not in _lr0.stderr)
+        FakeSlack.channel_msgs = []
+        with open(notify_f, "w") as f:
+            json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123",
+                                 "api_base": api, "reply_poll_sec": 5}}, f)
         # paging must never take down the verb that pages: point at a dead port and arm anyway
         with open(notify_f, "w") as f:
             json.dump({"slack": {"bot_token": "x", "channel": "C",
@@ -11856,6 +11937,8 @@ def main():
             # --revoke names a grant, matched against what `authorize` STORED. Like --path beside
             # it, a mangled value cannot pass quietly: it matches no grant and the verb refuses.
             "--revoke",
+            # --thread is a Slack message ts. Slack rejects a mangled one and the send fails loudly.
+            "--thread",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
             # a duration or a date, and parse_expires REFUSES anything else by name — a mangled

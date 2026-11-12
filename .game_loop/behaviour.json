@@ -812,6 +812,24 @@
       "change": "Both now use one classifier (_is_human_record, twinned in bin/watchdog). An origin decides when present; a user record WITHOUT one counts as the human's unless it is meta, a compaction summary, a tool result, a task-notification body or the \"[Request interrupted by user\" marker. A queued_command attachment with commandMode \"prompt\" (Send now) counts on its own origin and isMeta. The watchdog used to require origin.kind == \"human\", and treated a transcript with no origin marks at all as could-not-tell, which it read as answered.",
       "consequence": "under SRCode, a question asked at the desk now ends when Jonah types, and the watchdog resumes ringing an idle mandated session after that; before, the question held it quiet on that session indefinitely. A Send-now answer ends the wait too. require_read's \"since the last human message\" boundary now also moves on a Send-now message, and no longer on the interrupt marker.",
       "why_it_qualifies": "a wait that never ended now ends, and rings resume after it. Found 2026-11-12 from showrunner-code-owner's reading of an SRCode transcript: Jonah's typed messages carry no origin there, while peer wakes and task notifications do."
+    },
+    {
+      "seq": 87,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog (Slack): only a reply in the question's thread answers an armed question",
+      "change": "While a Slack-paged arm is live, the watchdog reads the question's thread and the channel. A reply in the thread is the answer, as before: the arm is cleared and the answer delivered. A top-level channel message used to count as the answer too; now it wakes the session labelled as not a reply, is marked seen (slack_seen) so it is not delivered twice, and the question stays armed. Delivered messages carry their ts, and `game_loop notify --thread <ts>` replies in that thread.",
+      "consequence": "a human who answers at the channel's top level, not in the thread, no longer clears the arm: the session sees the message and must decide whether it answers the question. An unrelated top-level message no longer silently ends a question.",
+      "why_it_qualifies": "an answer that used to clear an arm no longer does. Reported from wholesale-command-station (wcs, 2026-11-12): the human's top-level \"Testing\" was delivered as the answer to \"Did Tennessee approve the resubmitted registration before you signed?\" and cleared the arm."
+    },
+    {
+      "seq": 88,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog (Slack): an opt-in listener for a stood-down mandated run",
+      "change": "With \"listen\": true under \"slack\" in notify.json, the watchdog no longer goes silent when it stands a mandated run down at the ring cap with nothing armed. It keeps reading the channel every reply_poll_sec, and a human top-level message posted after listening started wakes the session with the message and its ts, resets the ring count, and is marked seen (slack_listen_seen). It stops when the transcript grows, an arm appears, a newer watchdog supersedes it, or the mandate ends. Off by default.",
+      "consequence": "a project that sets \"listen\": true can reach an idle mandated run from Slack after the watchdog has stood down; each poll is one Slack read, and any channel member's message wakes the run. Projects that do not set it see no change.",
+      "why_it_qualifies": "a new way for a session to be woken. Requested from wholesale-command-station (wcs, 2026-11-12), where the human meant to use the channel overnight and nothing read it with no arm live; enabled opt-in per project by Jonah's decision the same day."
     }
   ],
   "schema": 1

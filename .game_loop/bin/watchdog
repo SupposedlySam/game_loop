@@ -889,21 +889,50 @@ def poll_slack_replies(state):
     poll = notify.reply_poll_sec()
     while True:
         rs = notify.replies(ts, oldest=armed.get("slack_seen") or ts)
-        if rs:
+        # ONLY A REPLY IN THE QUESTION'S THREAD ANSWERS IT (wcs, 2026-11-12). A top-level message
+        # was taken as the answer too: the human posted "Testing" to check the channel reached the
+        # run, and the watchdog delivered "Q: Did Tennessee approve...? A: Testing" and cleared the
+        # arm. A top-level message still wakes the session, because the human sent it to the run,
+        # but labelled as what it is, and the question stays armed for its real answer.
+        answers = [r for r in rs if r.get("where", "thread") == "thread"]
+        others = [r for r in rs if r.get("where") == "channel"]
+        if answers or others:
             st = load_state()
             now_armed = st.get("t3_armed") or {}
             if now_armed.get("slack_ts") != ts:
                 quiet("arm changed while polling slack — not forwarding a stale reply")
-            st["t3_armed"] = None      # answered — the human no longer holds the ball
+            def lines(ms):
+                return "\n".join(f"    {r['text']}    (ts {r['ts']})" for r in ms)
+            if answers:
+                st["t3_armed"] = None      # answered — the human no longer holds the ball
+                save_state(st)
+                logline({"kind": "watchdog_slack_reply", "thread": ts,
+                         "replies": [r["text"] for r in answers],
+                         "channel_messages": [r["text"] for r in others]})
+                notify.send("arm", "🏃 got it — carrying your answer back into the run.",
+                            thread_ts=ts)
+                also = (f"\n\n  Also posted in the channel, outside the thread:\n{lines(others)}"
+                        if others else "")
+                print(
+                    "WATCHDOG: the human answered your T3 question in its Slack thread.\n\n"
+                    f"  Q: {armed.get('question')}\n  A:\n{lines(answers)}{also}\n\n"
+                    "The arm is cleared. Act on the answer and carry on. To reply in that thread:\n"
+                    f"  game_loop notify --thread {ts} --text \"..\"",
+                    file=sys.stderr)
+                sys.exit(2)
+            # Channel messages only: deliver them, remember them, keep the question armed.
+            now_armed["slack_seen"] = max((r["ts"] for r in others), key=float)
+            st["t3_armed"] = now_armed
             save_state(st)
-            logline({"kind": "watchdog_slack_reply", "thread": ts,
-                     "replies": [r["text"] for r in rs]})
-            notify.send("arm", "🏃 got it — carrying your answer back into the run.", thread_ts=ts)
-            answers = "\n".join(f"    {r['text']}" for r in rs)
+            logline({"kind": "watchdog_slack_channel_message", "thread": ts,
+                     "messages": [r["text"] for r in others]})
             print(
-                "WATCHDOG: the human answered your T3 question — on Slack, from wherever they are.\n\n"
-                f"  Q: {armed.get('question')}\n  A:\n{answers}\n\n"
-                "The arm is cleared. Act on the answer and carry on.",
+                "WATCHDOG: the human posted in the Slack channel, NOT in your question's thread,\n"
+                "so it is not taken as the answer and the question stays armed.\n\n"
+                f"  Q (still armed): {armed.get('question')}\n  In the channel:\n{lines(others)}\n\n"
+                "If it does answer the question, treat it as the answer and say so. To reply to one\n"
+                "of those messages in its own thread, or to the question's:\n"
+                f"  game_loop notify --thread <ts> --text \"..\"     (the question is ts {ts})",
                 file=sys.stderr)
             sys.exit(2)
         slept = 0
@@ -923,6 +952,65 @@ def poll_slack_replies(state):
         state = st
         armed = state.get("t3_armed") or {}
 
+
+
+def listen_for_human(tpath):
+    """While a mandated run sits idle with nothing armed, read the Slack channel for the human.
+
+    Returns at once unless the project opted in (notify "listen": true). Otherwise polls every
+    reply_poll_sec and, on a human message posted after the watermark, delivers it with its ts and
+    exits 2. Quiet when a newer watchdog supersedes this one, the session works again (its
+    transcript grows), an arm appears (poll_slack_replies covers that), or the mandate ends.
+
+    WHY AT THE RING CAP. A mandated session whose open work is all the human's is rung three times
+    and then stood down, which is right, and from then on nothing read the channel, so a message the
+    human sent the run from their phone reached nobody (wcs, 2026-11-12). The watermark starts when
+    listening starts, so an old backlog is not delivered as news; it persists in state, so a message
+    is delivered once.
+    """
+    if not (notify and getattr(notify, "listens", None) and notify.listens()):
+        return
+    if not claim_pidfile():
+        quiet("cannot write pidfile")
+    st = load_state()
+    seen = st.get("slack_listen_seen") or f"{time.time():.6f}"
+    if st.get("slack_listen_seen") != seen:
+        st["slack_listen_seen"] = seen
+        save_state(st)
+    logline({"kind": "watchdog_listening", "since": seen})
+    start_size = transcript_size(tpath)
+    poll = notify.reply_poll_sec()
+    while True:
+        msgs = notify.channel_messages(seen)
+        if msgs:
+            st = load_state()
+            st["slack_listen_seen"] = max((m["ts"] for m in msgs), key=float)
+            st["watchdog_rings"] = 0
+            st["watchdog_exhausted_paged"] = False
+            save_state(st)
+            logline({"kind": "watchdog_slack_listen", "messages": [m["text"] for m in msgs]})
+            body = "\n".join(f"    {m['text']}    (ts {m['ts']})" for m in msgs)
+            print("WATCHDOG: the human messaged the run in Slack while it sat idle.\n\n"
+                  f"{body}\n\n"
+                  "Read it and act on it. To answer in that message's thread:\n"
+                  "  game_loop notify --thread <ts> --text \"..\"",
+                  file=sys.stderr)
+            sys.exit(2)
+        slept = 0
+        while slept < poll:
+            nap = min(CHUNK_SEC, poll - slept)
+            time.sleep(nap)
+            slept += nap
+            if superseded():
+                quiet("superseded while listening for the human")
+        st = load_state()
+        if not (st.get("mandate") or {}).get("active"):
+            quiet("mandate released while listening for the human")
+        if st.get("t3_armed"):
+            quiet("T3 armed while listening; the arm's own poll takes over")
+        now_size = transcript_size(tpath)
+        if start_size is not None and now_size is not None and now_size > start_size:
+            quiet("transcript grew while listening — the session is working again")
 
 def session_env():
     """The session facts a project-supplied command needs to scope itself to THIS run.
@@ -1602,6 +1690,7 @@ def main():
                             f"mandate: {m0.get('text')}\nphase: {ph0.get('milestone')} · "
                             f"{ph0.get('doing')}"
                             + (f"\nwaiting probe: {probe_note(_why)}" if probe_note(_why) else ""))
+        listen_for_human(tpath)    # returns at once unless the project opted in
         quiet("ring cap reached")
 
     # newest watchdog wins: supersede any previously armed one.

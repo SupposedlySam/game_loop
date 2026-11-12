@@ -119,9 +119,19 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
   rate-limited *session*; if the human quit Claude Code there is no process left to wake.
 - **Slack reply forwarding.** A T3 arm normally means "the human holds the ball — stay quiet". But when
   the arm was paged to Slack with a thread ts (bot-token setups), the ball can come back from a phone:
-  the watchdog polls the thread while the arm is live, and on a human reply it clears the arm and rings
-  the answer into the run. The trust scope is stated in `notify.py`: a reply is taken as the human's
-  words — anyone in the channel can answer, so scope the channel accordingly.
+  the watchdog polls while the arm is live. A reply **in the question's thread** is the answer: it
+  clears the arm and rings the answer into the run. A **top-level** message in the channel also wakes
+  the session, labelled as not a reply, and the question stays armed (it was once taken as the answer:
+  a "Testing" cleared a real question). Each delivered message carries its `ts`, and
+  `game_loop notify --thread <ts> --text ".."` replies in that thread. The trust scope is stated in
+  `notify.py`: a reply is taken as the human's words — anyone in the channel can answer, so scope the
+  channel accordingly.
+- **Listening with nothing armed (opt-in).** With `"listen": true` under `slack` in notify.json, a
+  mandated run that the watchdog has stood down (three unproductive rings, typically because
+  everything left is the human's) keeps reading the channel instead of going silent. A human message
+  posted after listening started wakes it with that message and its ts. It stops when the session
+  works again, an arm appears, a newer watchdog takes over, or the mandate ends. Off by default: it
+  is a Slack read per poll, and any channel member's message wakes the run.
 - **A question asked at the desk waits for the human too.** With no Slack page, the Stop gate keeps the
   arm (spent, so it is still one interruption) with the transcript offset it was asked at, and the
   watchdog stays quiet until the human next **types**. A record the host marks with an `origin`

@@ -1448,6 +1448,22 @@ MUTANTS = [
      # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
      # which is exactly what #49 was about.
      None, 19),
+    ("notify.listens -> the opt-in is never seen, so a stood-down run hears nothing",
+     ".game_loop/bin/notify.py::listens", "    return False\n",
+     ["WAKES on the human's channel message"],
+     "NEVER LISTENING IS THE REPORTED WORLD (wcs, 2026-11-12): with nothing armed, a human's "
+     "message to a stood-down run reached nobody. The without-opt-in arm passes BY CONSTRUCTION. "
+     "MEASURED 2026-11-12 at 9d8516d plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2.", 2),
+    ("notify.channel_messages -> the channel is never read",
+     ".game_loop/bin/notify.py::channel_messages", "    return []\n",
+     ["WAKES on the human's channel message"],
+     "NOTHING READ is the same silence by the other road: opted in, and still deaf. MEASURED: "
+     "MEASURED 2026-11-12 at 9d8516d plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2.", 2),
+    ("notify._read -> every Slack read comes back empty",
+     ".game_loop/bin/notify.py::_read", "    return []\n",
+     ["a human thread reply rings", "WAKES on the human's channel message"],
+     "THE ONE READER both the arm's reply poll and the listener use: emptied, no answer and no "
+     "message ever arrives. MEASURED 2026-11-12 at 9d8516d plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 8.", 8),
     ("notify.replies -> the human's answer never arrives", ".game_loop/bin/notify.py::replies",
      "    return []\n", ['human thread', 'a top-level', 'an unmandated', 'every executable', 'the forwarded'],
      # 4, and it took a fix to get a number at all. Neutered, this used to HANG the suite rather
@@ -1455,7 +1471,7 @@ MUTANTS = [
      # so a producer that never produces spun forever and no assertion finished. Bounding the
      # SUITE's watchdog runs (never the product loop, where waiting on the human is correct) turned
      # an un-measurable producer into a measured one. See #50.
-     None, 4),
+     "RE-MEASURED 2026-11-12 at 9d8516d plus the thread-only change, in a CLONE: 6 (the thread/channel split added two).", 6),
     ("_hooks_stale_warning -> a dead Stop hook is never noticed",
      ".game_loop/bin/_gl_impl.py::_hooks_stale_warning", "    return None\n",
      ['says both',

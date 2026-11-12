@@ -7818,13 +7818,31 @@ def main():
               "on the record, so the next idle turn-end rings as it always did",
               _left is None and '"watchdog_desk_answer"' in _log
               and "the human typed" in _log)
+        # UNDER SRCODE A TYPED ANSWER CARRIES NO ORIGIN (2026-11-12), while peer wakes still do. The
+        # old test required origin.kind == "human", so an answer typed there was never seen and the
+        # watchdog stayed quiet on that session for good.
+        _arm0 = {"question": "q", "spent": True, "asked_at": "x", "asked_size": 0}
         with open(_dtp, "w") as f:
             f.write(json.dumps(_asked) + "\n")
-        _log, _left = _desk_case([_tool], arm={"question": "q", "spent": True, "asked_at": "x",
-                                              "asked_size": 0})
-        check("...and a transcript with NO origin marks at all (an older harness) is COULD NOT "
-              "TELL, treated as answered, never as a silence that might last forever",
-              _left is None and "could not tell" in _log)
+        _srpeer = {"type": "user", "isMeta": True, "origin": {"kind": "peer"},
+                   "message": {"content": "Another Claude session sent a message"}}
+        _log, _left = _desk_case([_tool, _srpeer], arm=dict(_arm0))
+        check("...a transcript with no origin on its typed lines and only a tool result and a peer "
+              "wake since the question still HOLDS: neither is an answer",
+              "holds the ball" in _log and (_left or {}).get("spent") is True)
+        _srtyped = {"type": "user", "message": {"content": "staging"}}
+        _log, _left = _desk_case([_srtyped], arm=dict(_arm0))
+        check("...and an answer typed under SRCODE (a plain user line with NO origin) ends the "
+              "wait, which the origin-only test never saw",
+              _left is None and '"watchdog_desk_answer"' in _log)
+        with open(_dtp, "w") as f:
+            f.write(json.dumps(_asked) + "\n")
+        _sendnow = {"type": "attachment", "attachment": {
+            "type": "queued_command", "commandMode": "prompt", "prompt": "prod, actually"}}
+        _log, _left = _desk_case([_sendnow], arm=dict(_arm0))
+        check("...and so does one sent with SEND NOW mid-turn, which is a queued_command attachment "
+              "rather than a user line",
+              _left is None and '"watchdog_desk_answer"' in _log)
     finally:
         shutil.rmtree(dk_, ignore_errors=True)
 
@@ -17398,6 +17416,62 @@ def main():
               "message is the boundary and a task notification is not",
               denied(_w("lib/timer.dart", _tx(_read(_doc), _old_human)))
               and not denied(_w("lib/timer.dart", _tx(_old_human, _read(_doc), _old_note))))
+        # ONE CLASSIFIER, TWO COPIES, ONE FIXTURE SET. require_read and the watchdog ask the same
+        # question; they drifted once already (the watchdog required an origin, this one did not).
+        # Each fixture is a real shape: the VS Code and SRCode typed lines, a message with an image
+        # attachment, Send now, the interrupt marker, a peer wake both as a user line and as a
+        # queued_command (read on this machine, harbor-owner 2026-10-15), and the harness's own.
+        _fx = [
+            ({"type": "user", "origin": {"kind": "human"}, "message": {"content": [
+                {"type": "text", "text": "go"}]}}, True, "VS Code typed line"),
+            ({"type": "user", "message": {"content": "go"}}, True, "SRCode typed line, no origin"),
+            ({"type": "user", "message": {"content": [{"type": "image", "source": {}},
+                                                       {"type": "text", "text": "this one"}]}},
+             True, "typed with an image attached"),
+            ({"type": "attachment", "attachment": {"type": "queued_command", "commandMode": "prompt",
+                                                   "prompt": "prod"}}, True, "Send now"),
+            ({"type": "user", "message": {"content": [
+                {"type": "text", "text": "[Request interrupted by user for tool use]"}]}},
+             False, "interrupt marker"),
+            ({"type": "attachment", "attachment": {"type": "queued_command", "commandMode": "prompt",
+                                                   "prompt": "New llm_chat messages",
+                                                   "origin": {"kind": "peer"}, "isMeta": True}},
+             False, "peer wake as a queued_command"),
+            ({"type": "attachment", "attachment": {"type": "queued_command",
+                                                   "commandMode": "task-notification",
+                                                   "prompt": "<task-notification>"}},
+             False, "queued task notification"),
+            ({"type": "user", "isMeta": True, "origin": {"kind": "peer"},
+              "message": {"content": "Another Claude session"}}, False, "peer wake"),
+            ({"type": "user", "origin": {"kind": "task-notification"},
+              "message": {"content": "<task-notification>"}}, False, "task notification"),
+            ({"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+             False, "tool result"),
+            ({"type": "user", "isCompactSummary": True, "message": {"content": "summary"}},
+             False, "compaction summary"),
+            ({"type": "attachment", "attachment": {"type": "hook_success"}}, False, "hook record"),
+        ]
+        _impl_src = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "_gl_impl.py"))
+        _wd_src2 = read_or_empty(os.path.join(SRC_GAME_LOOP, "bin", "watchdog"))
+
+        def _load_fn(src, name):
+            fns = [n for n in ast.parse(src).body
+                   if isinstance(n, ast.FunctionDef) and n.name == name]
+            if len(fns) != 1:
+                return None
+            mod = ast.Module(body=fns, type_ignores=[])
+            ast.fix_missing_locations(mod)
+            ns = {}
+            exec(compile(mod, name, "exec"), ns)  # noqa: S102
+            return ns[name]
+
+        _hi, _hw = _load_fn(_impl_src, "_is_human_record"), _load_fn(_wd_src2, "_is_human_record")
+        _wrong = [why for rec, want, why in _fx
+                  if _hi is None or _hw is None or _hi(rec) is not want or _hw(rec) is not want]
+        check("the human-message classifier gets every real record shape right, IN BOTH COPIES "
+              "(require_read's and the watchdog's), driven over one fixture set: "
+              + (", ".join(_wrong) or "%d shapes" % len(_fx)),
+              _hi is not None and _hw is not None and not _wrong)
     finally:
         shutil.rmtree(rq, ignore_errors=True)
 

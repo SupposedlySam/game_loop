@@ -803,6 +803,15 @@
       "change": "The ring cap stands the watchdog down after 3 consecutive UNPRODUCTIVE rings, and any reply containing a tool call counted as productive. Now each tool call is classed as acting, bookkeeping (game_loop checkpoint, status, trans, note, --help, including through cd, assignments, a printf/echo notes file and pipes) or looking (Read/Grep/Glob, or read-only shell such as ls, cat, tail, wc, grep, ps, find without -delete/-exec, with no redirect into a file). A reply that acted counts as work; one that only looked is research and counts as work as before; one that did bookkeeping and otherwise only looked does not count. Any other game_loop verb (mandate, arm), any write, and any command that cannot be parsed still count as work.",
       "consequence": "a mandated session whose open work is all the human's, answering each ring with the checkpoint the Stop gate asks for, is now rung at most 3 times and then stood down (and the human paged once, where notify is configured). It used to be rung indefinitely, each ring a paid turn.",
       "why_it_qualifies": "fewer rings, and a stand-down and page where there was none. Reported from wholesale-command-station (wcs, session 3f1fb7df, 2026-11-11): nine rings in six minutes, each answered with a checkpoint. Then found in game_loop's own transcript c9156a5d (2026-09-02) by showrunner-code-owner's research: about 220 rings in one turn, each answered with a poll of a running sweep plus a 'No change.' checkpoint."
+    },
+    {
+      "seq": 86,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog and require_read: a typed message is recognised under SRCode and when sent mid-turn",
+      "change": "Both now use one classifier (_is_human_record, twinned in bin/watchdog). An origin decides when present; a user record WITHOUT one counts as the human's unless it is meta, a compaction summary, a tool result, a task-notification body or the \"[Request interrupted by user\" marker. A queued_command attachment with commandMode \"prompt\" (Send now) counts on its own origin and isMeta. The watchdog used to require origin.kind == \"human\", and treated a transcript with no origin marks at all as could-not-tell, which it read as answered.",
+      "consequence": "under SRCode, a question asked at the desk now ends when Jonah types, and the watchdog resumes ringing an idle mandated session after that; before, the question held it quiet on that session indefinitely. A Send-now answer ends the wait too. require_read's \"since the last human message\" boundary now also moves on a Send-now message, and no longer on the interrupt marker.",
+      "why_it_qualifies": "a wait that never ended now ends, and rings resume after it. Found 2026-11-12 from showrunner-code-owner's reading of an SRCode transcript: Jonah's typed messages carry no origin there, while peer wakes and task notifications do."
     }
   ],
   "schema": 1

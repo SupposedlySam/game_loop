@@ -3097,14 +3097,41 @@ _REQUIRE_READ_SCAN_BYTES = 64 * 1024 * 1024   # how far back a boundary is searc
 
 
 def _is_human_record(rec):
-    """True for a user record a HUMAN typed; False for tool results and anything the harness injected.
+    """True for a transcript record the HUMAN typed; False for anything the harness injected.
 
-    THE DISCRIMINATOR IS `origin.kind`, read off a real transcript on 2026-11-09 (Claude Code
-    2.1.318): a typed message carries {"kind": "human"}, while task notifications, Stop-hook
-    feedback and peer-session messages carry their own kinds. A record with NO origin is from a host
-    older than the field; it counts as human unless it is meta, a compaction summary, a tool result,
-    or opens with a task-notification tag, which is the only fallback that does not need the field.
+    TWO HOSTS, TWO SHAPES, MEASURED. Under the VS Code extension (Claude Code 2.1.318, read
+    2026-11-09) a typed message carries origin {"kind": "human"}, and task notifications, Stop-hook
+    feedback and peer messages carry their own kinds. Under SRCode (2.1.322, read 2026-11-12 by
+    showrunner-code-owner over 10 of Jonah's messages) a typed message carries NO origin, while peer
+    wakes and task notifications still do. So an origin decides when present, and a record without
+    one is human unless it is meta, a compaction summary, a tool result, a task-notification body,
+    or the "[Request interrupted by user" marker, which is a marker and not something said.
+
+    SEND-NOW IS A QUEUED_COMMAND ATTACHMENT, not a user line: a message typed while a turn runs is
+    written as {"type": "attachment", "attachment": {"type": "queued_command", "commandMode":
+    "prompt", "prompt": ..}}. It counts only on the attachment's OWN marks, because the same shape
+    carries llm_chat peer wakes too: one read on this machine (harbor-owner, 2026-10-15) has an
+    attachment origin {"kind": "peer"} and isMeta true.
+
+    TWIN: bin/watchdog carries an identical copy, because it imports nothing from this file. The
+    suite drives both over one fixture set and requires them to agree.
     """
+    def typed(text):
+        t = str(text or "").lstrip()
+        return not (t.startswith("<task-notification>")
+                    or t.startswith("[Request interrupted by user"))
+
+    if not isinstance(rec, dict):
+        return False
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        if not isinstance(att, dict) or att.get("type") != "queued_command" \
+                or att.get("commandMode") != "prompt" or att.get("isMeta"):
+            return False
+        origin = att.get("origin")
+        if isinstance(origin, dict):
+            return origin.get("kind") == "human"
+        return typed(att.get("prompt"))
     if rec.get("type") != "user":
         return False
     origin = rec.get("origin")
@@ -3117,8 +3144,7 @@ def _is_human_record(rec):
         if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
             return False
         content = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
-    return not str(content or "").lstrip().startswith("<task-notification>")
-
+    return typed(content)
 
 def _records_backwards(path, max_bytes=_REQUIRE_READ_SCAN_BYTES):
     """Yield decoded transcript records from the END, without reading the whole file first."""

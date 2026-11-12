@@ -124,11 +124,15 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
   words — anyone in the channel can answer, so scope the channel accordingly.
 - **A question asked at the desk waits for the human too.** With no Slack page, the Stop gate keeps the
   arm (spent, so it is still one interruption) with the transcript offset it was asked at, and the
-  watchdog stays quiet until the human next **types** — an entry the harness marks
-  `origin.kind == "human"`. Hook feedback, task notifications and peer messages are not an answer. If
-  the transcript carries no origin marks at all, the watchdog cannot tell and treats the question as
-  answered, which rings as before. Until 10-08 the arm was dropped at the asking turn-end, so a
-  mandated session that asked was woken every turn-end until someone answered.
+  watchdog stays quiet until the human next **types**. A record the host marks with an `origin`
+  counts only if that is `"human"` (the VS Code extension marks typed messages so). One with no
+  origin counts unless it is meta, a tool result, a compaction summary, a task-notification body or
+  the "request interrupted" marker; that is how a typed message looks under SRCode. A message sent
+  with Send now mid-turn arrives as a `queued_command` attachment and counts on its own marks, since
+  peer wakes use the same shape. Hook feedback, task notifications and peer messages are not an
+  answer. require_read uses the same test (one function, twinned in the watchdog and pinned by one
+  fixture set). Until 10-08 the arm was dropped at the asking turn-end, so a mandated session that
+  asked was woken every turn-end until someone answered.
 
 ### The wake path — `mandate --wake-path`, `note --woke`, `doorbell`
 

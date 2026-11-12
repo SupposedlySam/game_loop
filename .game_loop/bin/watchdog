@@ -220,7 +220,6 @@ IDLE_SEC = int(os.environ.get("WATCHDOG_IDLE_SEC") or _WD["idle_sec"])
 # would conclude "working, not parked" every time — settle first, THEN measure.
 SETTLE_SEC = int(os.environ.get("WATCHDOG_SETTLE_SEC") or _WD["settle_sec"])
 CHUNK_SEC = 10          # bounds supersede latency
-ORIGIN_LOOKBACK = 4 * 1024 * 1024   # bytes human_spoke_since reads back to learn the harness marks origins
 RING_CAP = int(_WD["ring_cap"])  # consecutive unproductive rings before standing down
 # The probe's budget, settable beside the probe. Env override for the same reason as the others.
 PROBE_TIMEOUT_SEC = int(os.environ.get("WATCHDOG_PROBE_TIMEOUT_SEC")
@@ -442,17 +441,69 @@ def acted_since(path, offset):
     return bool(kinds)        # looked only: research, which counts as it always has
 
 
+def _is_human_record(rec):
+    """True for a transcript record the HUMAN typed; False for anything the harness injected.
+
+    TWO HOSTS, TWO SHAPES, MEASURED. Under the VS Code extension (Claude Code 2.1.318, read
+    2026-11-09) a typed message carries origin {"kind": "human"}, and task notifications, Stop-hook
+    feedback and peer messages carry their own kinds. Under SRCode (2.1.322, read 2026-11-12 by
+    showrunner-code-owner over 10 of Jonah's messages) a typed message carries NO origin, while peer
+    wakes and task notifications still do. So an origin decides when present, and a record without
+    one is human unless it is meta, a compaction summary, a tool result, a task-notification body,
+    or the "[Request interrupted by user" marker, which is a marker and not something said.
+
+    SEND-NOW IS A QUEUED_COMMAND ATTACHMENT, not a user line: a message typed while a turn runs is
+    written as {"type": "attachment", "attachment": {"type": "queued_command", "commandMode":
+    "prompt", "prompt": ..}}. It counts only on the attachment's OWN marks, because the same shape
+    carries llm_chat peer wakes too: one read on this machine (harbor-owner, 2026-10-15) has an
+    attachment origin {"kind": "peer"} and isMeta true.
+
+    TWIN: bin/watchdog carries an identical copy, because it imports nothing from this file. The
+    suite drives both over one fixture set and requires them to agree.
+    """
+    def typed(text):
+        t = str(text or "").lstrip()
+        return not (t.startswith("<task-notification>")
+                    or t.startswith("[Request interrupted by user"))
+
+    if not isinstance(rec, dict):
+        return False
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        if not isinstance(att, dict) or att.get("type") != "queued_command" \
+                or att.get("commandMode") != "prompt" or att.get("isMeta"):
+            return False
+        origin = att.get("origin")
+        if isinstance(origin, dict):
+            return origin.get("kind") == "human"
+        return typed(att.get("prompt"))
+    if rec.get("type") != "user":
+        return False
+    origin = rec.get("origin")
+    if isinstance(origin, dict):
+        return origin.get("kind") == "human"
+    if rec.get("isMeta") or rec.get("isCompactSummary"):
+        return False
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return False
+        content = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
+    return typed(content)
+
+
 def human_spoke_since(path, offset):
     """Did the HUMAN type anything since byte `offset` of the transcript? True / False / None.
 
     The answer to a question asked at the desk. A Slack-paged arm has its reply read back from the
     thread; an arm with no page has only this, so it is what ends the wait (harbor-owner, 10-08).
+    None only when the tail cannot be read, and the caller treats that as answered (the ringing
+    behaviour), never as a silence that might last forever.
 
-    Only an entry the harness marks `origin.kind == "human"` counts. Hook feedback, task
-    notifications and peer messages are user-role entries too, and every one of them would read as
-    an answer that nobody gave. None when the tail cannot be read, or when the transcript carries
-    no origin marks at all (an older harness): the caller treats COULD NOT TELL as answered, which
-    is the ringing behaviour from before this existed, never as a silence that might last forever.
+    IT USED TO REQUIRE origin.kind == "human", and under SRCode a typed message carries no origin
+    while peer wakes do, so an answer typed there was never seen and the watchdog stayed quiet on
+    that session for good (found 2026-11-12 from showrunner-code-owner's transcript reading). The
+    test is now _is_human_record, shared with require_read through the twin above.
     """
     try:
         with open(path, "rb") as f:
@@ -460,32 +511,14 @@ def human_spoke_since(path, offset):
             tail = f.read()
     except (OSError, TypeError, ValueError):
         return None
-    marked = False
     for raw in tail.splitlines():
         try:
             rec = json.loads(raw)
         except ValueError:
             continue          # the offset can land mid-line; a partial first line is not a verdict
-        if not isinstance(rec, dict) or rec.get("type") != "user":
-            continue
-        origin = rec.get("origin")
-        if isinstance(origin, dict):
-            marked = True
-            if origin.get("kind") == "human":
-                return True
-    if not marked:
-        # A tail of nothing but tool results carries no marks either, and that is not an older
-        # harness. Look back a bounded window for ANY mark; a transcript can run to hundreds of MB,
-        # so the whole file is never read on a turn-end.
-        try:
-            with open(path, "rb") as f:
-                start = max(0, int(offset or 0) - ORIGIN_LOOKBACK)
-                f.seek(start)
-                marked = b'"origin":{"kind"' in f.read(int(offset or 0) - start)
-        except (OSError, TypeError, ValueError):
-            return None
-    return False if marked else None
-
+        if _is_human_record(rec):
+            return True
+    return False
 
 def quiet(why):
     """Exit 0: no wake-up — and SAY WHY.

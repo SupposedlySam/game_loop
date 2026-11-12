@@ -640,8 +640,9 @@ MUTANTS = [
      "desk: the caller reads COULD NOT TELL as answered, so the arm is cleared at the next "
      "turn-end and the watchdog rings while the human still holds an unanswered question — "
      "harbor-owner's six wakes in ninety minutes. Its killer is the case where nothing but hook "
-     "feedback, a tool result and a peer message follow the question. The human-typed and "
-     "no-origin-marks cases clear the arm either way and are correctly not listed.", 0),
+     "feedback, a tool result and a peer message follow the question, now also with no origin on "
+     "the typed lines (the SRCode shape). The typed, SRCode and Send-now answers clear the arm "
+     "either way and are correctly not listed. MEASURED 2026-11-12 at cee7eb0 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 3.", 3),
     ("embedded_python ->the guards' heredoc producers drop out of the denominator again",
      "test/mutation_sweep.py::embedded_python", "    return []\n",
      ['heredoc producers are IN the denominator', 'every excluded name is a producer the repo still HAS'],
@@ -650,12 +651,19 @@ MUTANTS = [
      "a denominator that excludes consume_authorization. It cannot do so SILENTLY any more, "
      "because the sixteen NOT_SWEPT entries naming them then point at nothing, and the "
      "stale-exclusion check refuses that.", 0),
+    ("_is_human_record (watchdog twin) -> no message is ever a human's",
+     ".game_loop/bin/watchdog::_is_human_record", "    return False\n",
+     ["an answer typed under SRCODE", "SEND NOW mid-turn", "IN BOTH COPIES"],
+     "NEVER HUMAN IS THE SRCODE WORLD BEFORE THE FIX (2026-11-12): a typed answer carried no origin, "
+     "the origin-only test never saw it, and a desk question held the watchdog quiet on that "
+     "session for good. The holding arms pass BY CONSTRUCTION under this neuter, which is why each "
+     "is paired with an answer. MEASURED 2026-11-12 at cee7eb0 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.", 4),
     ("_is_human_record -> no message is ever a human's",
      ".game_loop/bin/_gl_impl.py::_is_human_record", "    return False\n",
      ["is REFUSED, naming the file to read", "a Read from BEFORE", "a SHELL write is checked too"],
      "NO BOUNDARY IS FOUND, so every write falls to could-not-tell and FAILS OPEN: the gate goes "
-     "silent everywhere while looking like a project whose agents always read first. MEASURED 2026-11-09 at b015bcb plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 4.",
-     4),
+     "silent everywhere while looking like a project whose agents always read first. MEASURED 2026-11-09 at b015bcb: 4; RE-MEASURED 2026-11-12 at cee7eb0 plus the shared-classifier change, in a CLONE: 5 (the new both-copies fixture check is the fifth).",
+     5),
     ("reads_since_last_human -> the transcript can never be read",
      ".game_loop/bin/_gl_impl.py::reads_since_last_human", "    return None, 'neutered'\n",
      ["is REFUSED, naming the file to read", "a Read from BEFORE", "a SHELL write is checked too"],
@@ -2449,6 +2457,9 @@ NOT_SWEPT = {
     "test/run.py::_bash_version": "the #147 parse check's probe for which bashes exist: neutered to "
                                   "None it finds none, and the 'at least one bash to parse them with' "
                                   "assertion goes red, which is the safe direction",
+    "test/run.py::_load_fn": "loads one function out of a shipped file for the classifier fixture "
+                             "check: neutered to None it loads nothing, and that check requires both "
+                             "copies to load, so it goes red, which is the safe direction",
     "test/run.py::_hsend": "_hwend's twin for the background-subagent sandbox: neutered to None the "
                            "exit-code assertions that read it go red, which is the safe direction",
     "test/run.py::_cron_log": "a suite helper reading the #135 sandbox log: neutered to an empty "

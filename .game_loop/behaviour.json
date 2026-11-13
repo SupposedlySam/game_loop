@@ -839,6 +839,15 @@
       "change": "With \"listen\": true, the watchdog now reads the channel at every idle check of a mandated run with nothing armed, before it would ring, and a human message after the watermark is delivered in place of the ring. The watermark (slack_listen_seen) starts the first time the watchdog sees listening on, not at the stand-down. Channel messages the arm's poll delivers advance it too, so none is delivered twice.",
       "consequence": "a human message sent while the ring count is still below the cap now reaches the run at the next idle check; under #212 it was not read until a stand-down, and its watermark began after the message, so it was never delivered.",
       "why_it_qualifies": "a message that was dropped is now delivered. Found by wcs's end-to-end test of #212 (2026-11-12): Jonah posted \"Testing\" at 18:14:24 while rings were counting after the upgrade's own commit reset them, and nothing woke the run."
+    },
+    {
+      "seq": 90,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog (Slack listen): the stand-down listener stops only when the session takes a turn",
+      "change": "The listener that keeps reading the channel after a stand-down used to stop as soon as the transcript grew at all. It now settles first (as the ring path does) and stops only when an assistant record or a message the human typed appears after the point it started; turn-duration, api-request, hook and queue records do not count.",
+      "consequence": "after a stand-down, a human Slack message reaches the idle run within one reply_poll_sec instead of waiting for the next turn-end. Under #213 the listener quit about 20 s after starting, on the idle turn's own tail records.",
+      "why_it_qualifies": "a wake that arrived ~55 minutes late now arrives on time. Reported by wcs (2026-11-12): after stand-downs at 18:50 and 19:03 the listener quit on 'transcript grew', and Jonah's 19:51 message was delivered only at the next turn-end."
     }
   ],
   "schema": 1

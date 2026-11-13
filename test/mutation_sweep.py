@@ -1448,6 +1448,12 @@ MUTANTS = [
      # which is the honest fallback -- so what dies is the ability to tell the three answers apart,
      # which is exactly what #49 was about.
      None, 19),
+    ("session_resumed_since -> every harness write reads as the session taking a turn",
+     ".game_loop/bin/watchdog::session_resumed_since", "    return True\n",
+     ["does NOT quit on records the harness writes"],
+     "ALWAYS RESUMED IS THE REPORTED WORLD (wcs, 2026-11-12): the stand-down listener quit 20 s after "
+     "starting, twice, on the idle turn's own bookkeeping records, and a message waited 55 minutes. "
+     "MEASURED 2026-11-12 at c74c252 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (two more failed only from a banned word in that run's tree, since fixed).", 2),
     ("listen_watermark -> listening never starts, so the channel is never read",
      ".game_loop/bin/watchdog::listen_watermark", "    return None\n",
      ["while rings are still COUNTING", "the watermark STARTS"],

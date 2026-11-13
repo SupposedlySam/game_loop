@@ -960,6 +960,33 @@ def poll_slack_replies(state):
 
 
 
+
+def session_resumed_since(path, offset):
+    """Did the SESSION take a turn after byte `offset`? True / False / None (unreadable).
+
+    A turn means an assistant record, or a message the human typed. Everything else the harness
+    appends to a transcript (turn-duration and api-request records, hook attachments, queue
+    operations)
+    is bookkeeping, and it lands while the session sits idle. The stand-down listener used "the
+    transcript grew" and quit 20 seconds after it started, twice, on records the turn it stood down
+    after was still flushing (wcs, 2026-11-12, 18:50 and 19:03): idle, and nothing listening, when
+    Jonah's 19:51 message arrived.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, int(offset or 0)))
+            tail = f.read()
+    except (OSError, TypeError, ValueError):
+        return None
+    for raw in tail.splitlines():
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and (rec.get("type") == "assistant" or _is_human_record(rec)):
+            return True
+    return False
+
 def listen_watermark():
     """The Slack ts after which a human message is news, or None when listening is off.
 
@@ -1017,6 +1044,14 @@ def listen_for_human(tpath):
     if not claim_pidfile():
         quiet("cannot write pidfile")
     logline({"kind": "watchdog_listening", "since": seen})
+    # SETTLE FIRST, as the ring path does: the turn that just ended is still being flushed, and an
+    # offset taken now would count its own tail as the session coming back.
+    settled = 0
+    while settled < SETTLE_SEC:
+        time.sleep(min(1, SETTLE_SEC - settled))
+        settled += 1
+        if superseded():
+            quiet("superseded while settling to listen")
     start_size = transcript_size(tpath)
     poll = notify.reply_poll_sec()
     while True:
@@ -1035,9 +1070,8 @@ def listen_for_human(tpath):
             quiet("mandate released while listening for the human")
         if st.get("t3_armed"):
             quiet("T3 armed while listening; the arm's own poll takes over")
-        now_size = transcript_size(tpath)
-        if start_size is not None and now_size is not None and now_size > start_size:
-            quiet("transcript grew while listening — the session is working again")
+        if session_resumed_since(tpath, start_size):
+            quiet("the session took a turn while listening — it is working again")
 
 
 def session_env():

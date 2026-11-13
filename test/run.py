@@ -2182,6 +2182,52 @@ def main():
               "not delivered as news, while every later one is",
               "are you still on the Utah one?" not in _lrn.stderr
               and float(_lstn.get("slack_listen_seen") or 0) > 200.0)
+        # THE LISTENER QUIT ON THE HARNESS'S OWN WRITES (wcs, 2026-11-12): twice it started at a
+        # stand-down and quit 20 s later on "transcript grew", from bookkeeping records the idle turn was
+        # still flushing, and Jonah's 19:51 message reached nobody. Driven live: listening starts,
+        # a turn-duration record lands mid-poll, then the human's message arrives.
+        FakeSlack.channel_msgs = []
+        with open(notify_f, "w") as f:
+            json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123", "api_base": api,
+                                 "reply_poll_sec": 5, "listen": True}}, f)
+        with open(os.path.join(_lsd, "state.json"), "w") as f:
+            json.dump({"mandate": {"active": True, "text": "run the desk", "at": "now"},
+                       "watchdog_rings": 3, "watchdog_exhausted_paged": True,
+                       "watchdog_last_ring_size": os.path.getsize(_ltp),
+                       "slack_listen_seen": "300.000000"}, f)
+        _lp = subprocess.Popen([wd_bin], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True,
+                               env=_env(sid=_lsid, WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0",
+                                        WATCHDOG_HOLD_MAX_SEC="0"))
+        _lp.stdin.write(json.dumps({"session_id": _lsid, "transcript_path": _ltp}))
+        _lp.stdin.close()
+        time.sleep(2)
+        with open(_ltp, "a") as f:
+            f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")  # theme-word-ok: the real record type
+            f.write(json.dumps({"type": "attachment", "attachment": {"type": "hook_success"}}) + "\n")
+        FakeSlack.channel_msgs = [{"ts": "400.000000", "user": "U1", "text": "still there?"}]
+        try:
+            _lout, _lerr = _lp.communicate(timeout=25)
+        except subprocess.TimeoutExpired:
+            _lp.kill()
+            _lout, _lerr = _lp.communicate()
+        check("a stand-down listener does NOT quit on records the harness writes while the session "
+              "is idle (turn-duration, hook attachments), and still delivers the human's next message",
+              _lp.returncode == 2 and "still there?" in _lerr)
+        _wsrc_l = read_or_empty(os.path.join(REPO, ".game_loop", "bin", "watchdog"))
+        _srf = [n for n in ast.parse(_wsrc_l).body
+                if isinstance(n, ast.FunctionDef) and n.name in ("session_resumed_since", "_is_human_record")]
+        _srm = ast.Module(body=_srf, type_ignores=[]); ast.fix_missing_locations(_srm)
+        _srns = {"json": json}
+        exec(compile(_srm, "watchdog", "exec"), _srns)  # noqa: S102
+        _srp = os.path.join(_tmpdir("glsr-"), "t.jsonl")
+        with open(_srp, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text",
+                                                                           "text": "hi"}]}}) + "\n")
+        check("...while a real turn (an assistant record) after the offset does end the listen, so a "
+              "working session is not listened over",
+              _srns["session_resumed_since"](_srp, 0) is True
+              and _srns["session_resumed_since"](_srp, os.path.getsize(_srp)) is False)
         FakeSlack.channel_msgs = []
         with open(notify_f, "w") as f:
             json.dump({"slack": {"bot_token": "xoxb-test", "channel": "C123",

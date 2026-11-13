@@ -5994,6 +5994,34 @@ def named_hatch(path):
             return buys.format(name=base)
     return None
 
+
+def _grant_family(real):
+    """What a grant is FOR, for spotting the same thing granted twice: the MCP tool or named hatch
+    (rm-rf, a gh verb) by its name, and anything else by its path. Pure."""
+    base = os.path.basename(str(real or ""))
+    if base.startswith("mcp__") or named_hatch(real):
+        return base
+    return str(real or "")
+
+
+def _standing_remedy(real):
+    """The config that would make this grant unnecessary, as lines to print."""
+    base = os.path.basename(str(real or ""))
+    if base.startswith("mcp__"):
+        server = "__".join(base.split("__")[:2]) + "__"
+        return ['  .game_loop/config.local.json → "mcp_trusted_servers": ["%s"]   (the whole server)'
+                % server,
+                '  or                           → "mcp_standing_writes": ["%s"]   (this tool only)' % base,
+                "  That file is site wiring, so it takes the human's words once:",
+                "    game_loop authorize --path .game_loop/config.local.json --reason \"<their words>\""]
+    if named_hatch(real):
+        return ["  There is no standing allowance for %r. If the human authorized several at once, ask"
+                " for one" % base,
+                "  grant that says so: `--uses N`. For GitHub writes, the MCP door has one: trust",
+                '  the server with "mcp_trusted_servers" in .game_loop/config.local.json.']
+    return ['  ~/.game_loop/config.json → "allow_write_roots": ["%s"]   (machine-wide)' % _tilde(real),
+            "  It is the human's file, so it takes their words once."]
+
 def cmd_authorize(s, a):
     """Record ONE human-authorized mutation outside this repo. Consumed on use, logged forever.
 
@@ -6047,6 +6075,31 @@ def cmd_authorize(s, a):
     except ValueError as e:
         die("REFUSED — %s" % e)
     real = os.path.realpath(os.path.expanduser(a.path))
+    # THE SECOND GRANT FOR THE SAME THING IS A DECISION, NOT A NOTICE (showrunner-code-owner and
+    # Jonah, 2026-11-13). Eight grants in one session for gh writes, each printing "the config
+    # entry is the remedy", and the remedy was raised with the human only after about five. His
+    # words: "I built that in so you could make the decision on the first one you did, not N
+    # number." A notice beside a call that succeeded reads as background, so the repeat is refused
+    # until the agent decides: put the standing remedy to the human, or say why not with --again,
+    # which is logged. KEYED ON WHAT THE GRANT IS FOR (path, MCP tool, named hatch), never on the
+    # reason's wording, which a rephrase walks past; the reason-match notice below stays a notice.
+    # NOT A BLOCK ON THE FIX (INV5): --again gets through, so this hatch can always still be spent.
+    _fam = _grant_family(real)
+    _same = [g for g in (s.get("authorized") or [])
+             if isinstance(g, dict) and _grant_family(g.get("path")) == _fam]
+    if _same and not (getattr(a, "again", None) or "").strip():
+        die("REFUSED — this session has already been granted %r %d time(s). A second one is a "
+            "decision, not a formality:\n\n"
+            "  1. put the STANDING remedy to the human now, so they decide it once:\n%s\n"
+            "  2. or, if a standing allowance is wrong here, say why and grant once more:\n"
+            "       game_loop authorize --path %s --reason \"..\" --again \"<why not standing>\"\n\n"
+            "Jonah, 2026-11-13: \"I built that in so you could make the decision on the first one "
+            "you did, not N number.\""
+            % (os.path.basename(_fam) or _fam, len(_same), "\n".join(_standing_remedy(real)),
+               a.path))
+    if (getattr(a, "again", None) or "").strip():
+        logline({"kind": "authorize_again", "path": real, "family": _fam,
+                 "prior_in_session": len(_same), "why_not_standing": a.again})
     # BEFORE the append and the logline below, or this grant counts itself as its own precedent.
     recur = recurrence_lines(a.reason, real, a.path)
     # PROVENANCE THE AGENT DID NOT TYPE. `arm` is the T3 mechanism and it writes state; an
@@ -14230,6 +14283,8 @@ PROSE_OPTS = ("--assert", "--learning", "--mechanism", "--general", "--reason", 
               "--notes", "--text", "--because", "--confidence", "--promises", "--doing",
               # the autonomy loop's own prose, and the most expensive to corrupt
               "--set", "--question", "--predict", "--next",
+              # why a repeated grant is not a standing allowance: read later by whoever audits it
+              "--again",
               # the evidence family's descriptive halves — what a thing MEANS, not where it lives
               "--known-state", "--measures", "--connects", "--recheck",
               # a recovery path is read by a session that has ALREADY lost the context to spot a
@@ -14418,6 +14473,9 @@ def main():
     az.add_argument("--uses", help="how many mutations (default 1)")
     az.add_argument("--expires", metavar="WHEN",
                     help="when this grant lapses: 30m / 2h / 7d / 1w / 2026-09-30 / never")
+    az.add_argument("--again", metavar="WHY",
+                    help="grant the same thing a second time this session, saying why a standing "
+                         "allowance is wrong here (logged)")
     az.add_argument("--revoke", metavar="PATH",
                     help="withdraw live grants on PATH: uses_left to 0, kept in the record")
 

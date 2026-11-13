@@ -848,6 +848,15 @@
       "change": "The listener that keeps reading the channel after a stand-down used to stop as soon as the transcript grew at all. It now settles first (as the ring path does) and stops only when an assistant record or a message the human typed appears after the point it started; turn-duration, api-request, hook and queue records do not count.",
       "consequence": "after a stand-down, a human Slack message reaches the idle run within one reply_poll_sec instead of waiting for the next turn-end. Under #213 the listener quit about 20 s after starting, on the idle turn's own tail records.",
       "why_it_qualifies": "a wake that arrived ~55 minutes late now arrives on time. Reported by wcs (2026-11-12): after stand-downs at 18:50 and 19:03 the listener quit on 'transcript grew', and Jonah's 19:51 message was delivered only at the next turn-end."
+    },
+    {
+      "seq": 91,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "authorize: a second grant for the same thing in one session is refused without --again",
+      "change": "authorize now refuses a grant when this session already holds one for the same thing (the same MCP tool, the same named grant such as rm-rf or a gh verb, or the same path), unless it carries --again \"<why a standing allowance is wrong here>\". The refusal names that family's standing remedy (mcp_trusted_servers or mcp_standing_writes, allow_write_roots, or --uses N where none exists). --again is logged as authorize_again with the why. The existing reason-match notice still prints, as a notice.",
+      "consequence": "an agent that used to buy the same per-use grant over and over is stopped at the second one and must either put the standing remedy to the human or record why not. A first grant, a different tool, and the same tool in another session behave as before.",
+      "why_it_qualifies": "a new refusal. Proposed by showrunner-code-owner (2026-11-13) after eight identical gh grants in one session; Jonah: \"I built that in so you could make the decision on the first one you did, not N number.\""
     }
   ],
   "schema": 1

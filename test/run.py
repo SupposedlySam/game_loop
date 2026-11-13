@@ -1522,6 +1522,35 @@ def main():
         r4 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
                 "--reason", "a different sentence entirely")
         check("an unrelated reason does not trip it", "BOUGHT A HATCH BEFORE" not in r4.stdout)
+        # THE SECOND GRANT FOR THE SAME THING IS A DECISION (showrunner-code-owner and Jonah,
+        # 2026-11-13): eight gh grants in one session, each printing "the config entry is the
+        # remedy", and Jonah: "I built that in so you could make the decision on the first one you
+        # did, not N number." Keyed on what the grant is FOR, not on the reason's wording.
+        print("a second grant for the same thing in one session is refused until decided:")
+        _ag = lambda *x, sid="sess-again": gl(arproj, "authorize", *x, sid=sid)
+        _a1 = _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment")
+        _a2 = _ag("--path", "mcp__github__addIssueComment", "--reason", "a different wording")
+        check("the FIRST grant for a tool passes; a SECOND in the same session is REFUSED whatever "
+              "its wording, naming the standing remedy and quoting why",
+              _a1.returncode == 0 and _a2.returncode != 0
+              and "mcp_trusted_servers" in (_a2.stdout + _a2.stderr)
+              and "not N number" in (_a2.stdout + _a2.stderr))
+        _a3 = _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment",
+                  "--again", "a one-off on somebody else's repo")
+        try:
+            with open(os.path.join(arproj, ".game_loop", "log.jsonl")) as f:
+                _agl = [json.loads(l) for l in f if '"authorize_again"' in l]
+        except (OSError, ValueError):
+            _agl = []
+        check("...and --again \"<why>\" lets it through, with the why on the record, so the hatch "
+              "never blocks its own fix (INV5)",
+              _a3.returncode == 0 and _agl
+              and _agl[-1].get("why_not_standing") == "a one-off on somebody else's repo")
+        check("...while a DIFFERENT tool in the same session, and the same tool in ANOTHER session, "
+              "are first grants and pass",
+              _ag("--path", "mcp__github__mergePullRequest", "--reason", "Jonah: merge").returncode == 0
+              and _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment",
+                      sid="sess-again-2").returncode == 0)
         # AND THE THIRD ANSWER. `authorize_recurrence` returned [] when the log could not be OPENED,
         # which is the same value as "this reason has never bought a hatch" — so a reason being
         # spent for the fifth time would read exactly like a first grant and the loud block would
@@ -1544,12 +1573,14 @@ def main():
               "the first grant into a warning",
               _recm.recurrence_lines("some reason", "/tmp/p", "/tmp/p") == [])
         # ONE path re-granted once is an ordinary retry and must stay silent; the third says config.
+        # --again: since 2026-11-13 the same path a second time in one session is refused without
+        # it, and these two exercise the reason-match NOTICE, not that refusal.
         r5 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
-                "--reason", "a different sentence entirely")
+                "--reason", "a different sentence entirely", "--again", "test: the notice arm")
         check("re-granting ONE path once is a retry, not a pattern",
               "BOUGHT A HATCH BEFORE" not in r5.stdout)
         r6 = gl(arproj, "authorize", "--path", os.path.expanduser("~/recur-d"),
-                "--reason", "a different sentence entirely")
+                "--reason", "a different sentence entirely", "--again", "test: the notice arm")
         check("the same path bought a third time IS a pattern",
               "BOUGHT A HATCH BEFORE" in r6.stdout)
         # An MCP grant has a different remedy, and pointing at allow_write_roots would be wrong.
@@ -13470,7 +13501,8 @@ def main():
               denied(_cron(_ping)))
 
         _az2 = subprocess.run([os.path.join(cgp, ".game_loop", "bin", "game_loop"), "authorize",
-                               "--path", "CronCreate", "--reason", "every morning, please"],
+                               "--path", "CronCreate", "--reason", "every morning, please",
+                               "--again", "test: a second grant to revoke"],
                               cwd=_elsewhere, capture_output=True, text=True,
                               env=_env(sid="sess-cron"))
         _rv = gl(cgp, "authorize", "--revoke", "CronCreate", "--reason", "changed my mind",

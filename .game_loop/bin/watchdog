@@ -337,16 +337,17 @@ def acted_since(path, offset):
     counts, which keeps the old behaviour rather than silencing a ring.
     """
     # EACH TOOL CALL IS ONE OF THREE THINGS. "book": game_loop's own record (checkpoint, status,
-    # trans, note, --help). "look": reading (Read/Grep/Glob, or a shell made only of read-only
-    # commands with no file redirect). "act": anything else. A reply ACTED if any call acts. One
-    # that only looked is research and still counts as work, as it always has. One that recorded
-    # (a checkpoint) and otherwise only looked is the session saying, in effect, "no change": the
-    # reply that kept the cap from ever firing.
+    # trans, note, --help). "look": reading (Read/Grep/Glob, an MCP read, or a shell made only of
+    # read-only commands with no file redirect). "act": anything else. A reply that ACTED counts as
+    # work; one that only looked, recorded or spoke does not.
     #
     # THE WRAPPERS ARE THE MEASURED SHAPE, not tidiness. The ~220-turn loop in c9156a5d
     # (2026-09-02) answered each ring with one call polling the running sweep and one writing the
     # checkpoint as `cd ..; S=..; printf 'No change.' > $S/f; game_loop checkpoint --notes-file
     # $S/f | head -1`. A rule that excused only a bare checkpoint would not have bounded it.
+    MCP_READ_VERBS = ("read", "get", "list", "search", "owed", "who", "channels", "doctor",
+                      "pending", "peek", "fingerprint", "query", "fetch", "check", "show", "view",
+                      "find", "describe", "status")
     READERS = {"ls", "cat", "head", "tail", "wc", "grep", "egrep", "rg", "ps", "pgrep", "date",
                "stat", "du", "test", "[", "sleep", "find", "jq", "sort", "uniq", "cut", "tr",
                "basename", "dirname", "realpath", "pwd", "which", "file"}
@@ -384,6 +385,12 @@ def acted_since(path, offset):
         name = block.get("name")
         if name in ("Read", "Grep", "Glob", "ToolSearch", "TaskOutput"):
             return "look"
+        # AN MCP READ IS LOOKING TOO (wcs, 2026-11-12): a session polling its inbox with
+        # mcp__llm_chat__read after each ring was counted as acting, so the cap never fired.
+        # Judged by the tool's own verb, the name after the server: read, get, list, search...
+        if str(name).startswith("mcp__"):
+            verb = str(name).split("__")[-1].lower()
+            return "look" if verb.startswith(MCP_READ_VERBS) else "act"
         if name != "Bash":
             return "act"
         cmd = str((block.get("input") or {}).get("command") or "")
@@ -436,9 +443,12 @@ def acted_since(path, offset):
                     if k == "act":
                         return True
                     kinds.add(k)
-    if "book" in kinds:
-        return False          # recorded and otherwise only looked: the "no change" reply
-    return bool(kinds)        # looked only: research, which counts as it always has
+    # ONLY ACTING IS WORK. #208 counted a reply that only looked as research, and so as work. That
+    # left the cap unreachable for exactly the sessions that wait on others: wcs answered each ring
+    # by reading its inbox (2026-11-12), showrunner-code-owner by checking for new PRs (2026-11-13),
+    # and every look re-armed it. A ring answered by reading and stopping again is a session that
+    # is still idle; a session genuinely researching does not stop between reads.
+    return False              # looked, recorded, or said something: none of it moved the work
 
 
 def _is_human_record(rec):

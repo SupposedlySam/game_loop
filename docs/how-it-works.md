@@ -80,8 +80,10 @@ Guardrails on the watchdog itself:
 - **Settle before measuring** — it waits `settle_sec` for the harness to finish flushing the turn
   before taking a transcript baseline, so it doesn't mistake a just-ended turn for activity.
 - **Ring cap** — after `ring_cap` *consecutive unproductive* rings it stands down (a nag that never
-  quits gets ignored). The moment the transcript grows after a ring, the budget resets: the ring
-  worked.
+  quits gets ignored). The budget resets only when a reply after a ring ACTS: an edit, a write, a
+  commit, a message sent, a run-changing verb such as `mandate`. A reply that only reads (files, a
+  grep, an MCP read such as an inbox check), only records a checkpoint, or only speaks does not
+  reset it, so a session waiting on others is rung at most `ring_cap` times per idle stretch.
 - **The session's own background subagents are a wait** — the Stop payload lists in-flight work,
   and a running subagent or workflow holds the watchdog without any probe, for as long as the
   subagent's own transcript keeps being written. Shell tasks and monitors do not count, since a

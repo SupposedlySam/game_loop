@@ -627,11 +627,12 @@ MUTANTS = [
     ("classify -> every tool call after a ring counts as work again",
      ".game_loop/bin/watchdog::classify", "        return \"act\"\n",
      ["only tool calls are game_loop CHECKPOINT / STATUS / TRANS / --help does NOT re-arm",
-      "POLLS a running job and writes a WRAPPED checkpoint"],
+      "POLLS a running job and writes a WRAPPED checkpoint",
+      "a reply that only READS after a ring"],
      "EVERYTHING IS WORK IS THE REPORTED WORLD, twice: wcs (2026-11-11), nine rings in six minutes "
      "answered with checkpoints, and c9156a5d (2026-09-02), ~220 rings answered with a sweep poll and "
      "a 'No change.' checkpoint. The arms that must still count as work pass BY CONSTRUCTION under "
-     "this neuter, which is why they are paired with the excused ones. MEASURED 2026-11-12 at bdd1f4f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (three reachability rows also fail, excluded as bookkeeping).", 2),
+     "this neuter, which is why they are paired with the excused ones. MEASURED 2026-11-12 at bdd1f4f plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2. RE-MEASURED 2026-11-13 at 45117f7 plus the look-only change, in a CLONE: 3 (three reachability rows also fail, excluded as bookkeeping).", 3),
     ("writes_a_file -> a redirect into a file is never seen as a write",
      ".game_loop/bin/watchdog::writes_a_file", "        return False\n",
      ["beside a file write, a find -delete or an Edit re-arms too"],

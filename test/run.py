@@ -7896,11 +7896,21 @@ def main():
               '"watchdog_rearm"' not in _cap_case([_poll, _wrapped]))
         _read = {"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "Read", "input": {"file_path": "/repo/x.py"}}]}}
-        check("...while reading WITHOUT a checkpoint is research and still re-arms, and a checkpoint "
-              "beside a file write, a find -delete or an Edit re-arms too: only recording plus "
-              "looking is excused",
-              '"watchdog_rearm"' in _cap_case([_read, _bash("grep -rn foo src | head")])
-              and '"watchdog_rearm"' in _cap_case([_bash("cat a > b"), _wrapped])
+        # ONLY ACTING IS WORK (2026-11-13), reversing #208's "reading is research": a session waiting
+        # on others answered each ring by reading its inbox, and every read re-armed the cap (wcs,
+        # showrunner-code-owner).
+        _mcpread = {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "mcp__llm_chat__read", "input": {"channel": "x"}}]}}
+        _mcpsay = {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "mcp__llm_chat__say", "input": {"text": "x"}}]}}
+        check("a reply that only READS after a ring (Read, grep, or an MCP read such as "
+              "mcp__llm_chat__read) does NOT re-arm the cap: a session polling its inbox is still idle",
+              '"watchdog_rearm"' not in _cap_case([_read, _bash("grep -rn foo src | head")])
+              and '"watchdog_rearm"' not in _cap_case([_mcpread]))
+        check("...while an MCP call that ACTS (mcp__llm_chat__say) re-arms it, as any other act does",
+              '"watchdog_rearm"' in _cap_case([_mcpsay]))
+        check("...and a checkpoint beside a file write, a find -delete or an Edit re-arms: those act",
+              '"watchdog_rearm"' in _cap_case([_bash("cat a > b"), _wrapped])
               and '"watchdog_rearm"' in _cap_case([_bash("find . -name x -delete"), _wrapped])
               and '"watchdog_rearm"' in _cap_case([{"type": "assistant", "message": {"content": [
                   {"type": "tool_use", "name": "Edit", "input": {}}]}}, _wrapped]))

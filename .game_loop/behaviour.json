@@ -857,6 +857,15 @@
       "change": "authorize now refuses a grant when this session already holds one for the same thing (the same MCP tool, the same named grant such as rm-rf or a gh verb, or the same path), unless it carries --again \"<why a standing allowance is wrong here>\". The refusal names that family's standing remedy (mcp_trusted_servers or mcp_standing_writes, allow_write_roots, or --uses N where none exists). --again is logged as authorize_again with the why. The existing reason-match notice still prints, as a notice.",
       "consequence": "an agent that used to buy the same per-use grant over and over is stopped at the second one and must either put the standing remedy to the human or record why not. A first grant, a different tool, and the same tool in another session behave as before.",
       "why_it_qualifies": "a new refusal. Proposed by showrunner-code-owner (2026-11-13) after eight identical gh grants in one session; Jonah: \"I built that in so you could make the decision on the first one you did, not N number.\""
+    },
+    {
+      "seq": 92,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "watchdog: a reply that only reads (including an MCP read) no longer re-arms the ring cap",
+      "change": "After a ring, only a tool call that ACTS counts as work. A reply that only reads (Read, Grep, read-only shell, or an MCP tool whose verb is a read: read, get, list, search, owed, check, status...) now counts as unproductive, as a text-only or checkpoint-only reply already did. An MCP call that acts (say, add, create, merge...) still counts as work. #208 had counted a look-only reply as research.",
+      "consequence": "a mandated session that answers its rings by checking an inbox, PRs or a log is now stood down after 3 rings (and the human paged once, where notify is configured) instead of being rung every idle check. A session that actually does something after a ring is unaffected.",
+      "why_it_qualifies": "fewer rings, and a stand-down where there was none. Reported twice: wcs (2026-11-12) polling with mcp__llm_chat__read, and showrunner-code-owner (2026-11-13), an event-driven owner mandate whose replies checked for new PRs."
     }
   ],
   "schema": 1

@@ -198,6 +198,12 @@ the next reader), and carry on with the mandate.
 If you are woken with **"the human answered your T3 question on Slack"**, the arm was already
 cleared — act on the answer and continue; do not re-ask or wait further.
 
+**Arming a watchdog for work that arrives by event?** Say what wakes you, when you set the mandate:
+`./.game_loop/bin/game_loop mandate --set ".." --wake-check pid:.llm_chat/wake.pid` (or a waker's
+own pid file, or `slack`). While those are alive and nothing is owed in chat, you are not rung while
+idle; a dead waker or an owed reply still rings. Set it up this way so you are woken only when there
+is something to do.
+
 ## Paging the human's phone
 
 `./.game_loop/bin/game_loop notify --text ".."` pages the configured Slack channel (no-op when

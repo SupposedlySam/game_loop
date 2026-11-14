@@ -151,6 +151,17 @@ The watchdog carries two more jobs, both riding the same asyncRewake wake mechan
 
 ### The wake path — `mandate --wake-path`, `note --woke`, `doorbell`
 
+**A wake path the watchdog can check — `mandate --wake-check`.** An agent arming a watchdog for work
+that arrives by event (PRs from a bot, chat, mail) declares what will wake it:
+`--wake-check pid:<file>` for a waker's pid file (llm_chat's `.llm_chat/wake.pid`, showrunner's
+`.showrunner/waker-owner`), or `--wake-check slack` for notify's listener. Repeatable; `none` clears.
+While every declared path is alive and `llm_chat owed` lists nothing, an idle session is *waiting*:
+the watchdog holds instead of ringing, re-checking every `idle_sec`, and rings the moment a waker dies
+or a reply comes due, naming which on a `wake path` line. Jonah, 2026-11-14: the agent should set a
+watchdog up "in a way that it is only getting woken up when it actually needs something." What it
+cannot see: whether a live waker will actually deliver, and, for a pid file every session in a
+checkout shares, whose waker it is.
+
 Every gate above fires from **inside** the session, which is the thing that stops working when a run
 goes quiet. A consumer's run sat inert for six hours with the Stop gate, the watchdog and the limit
 gate all reporting healthy, while their chat transport's own doctor said no wake had landed in that

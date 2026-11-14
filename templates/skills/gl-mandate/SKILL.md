@@ -112,6 +112,22 @@ it is worth nothing.
 If the honest answer is "a human who checks", write that. It is the common case, and a run that says
 so is more use to a successor than one that leaves the field blank.
 
+### When the work arrives by event, make the wake path checkable
+
+If what wakes you is a waker process (llm_chat's, showrunner's GitHub waker, any Stop-hook waker that
+writes a pid file) or Slack listening, declare it so the watchdog can check it:
+
+```bash
+./.game_loop/bin/game_loop mandate --wake-check pid:.llm_chat/wake.pid      # repeatable
+./.game_loop/bin/game_loop mandate --wake-check slack                       # notify "listen": true
+./.game_loop/bin/game_loop mandate --wake-check none                        # clear them
+```
+
+While every declared path is alive and `llm_chat owed` lists nothing, you are WAITING: the idle
+watchdog holds instead of ringing, so you are woken only when there is something to do. A waker that
+dies, or a reply that comes due, rings you, with a `wake path` line naming which. Set the watchdog up
+this way whenever your next input will come from a waker: a ring between events only spends a turn.
+
 ### What a wake path CAN prove, once something arrives
 
 The declaration is one half. The other half is observable, and only from in here:

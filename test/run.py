@@ -7927,6 +7927,73 @@ def main():
     finally:
         shutil.rmtree(cp_, ignore_errors=True)
 
+    # A DECLARED WAKE PATH THAT IS ALIVE IS A WAIT (Jonah, 2026-11-14): "it's knowing that when it
+    # sets up a watchdog that it needs to do so in a way that it is only getting woken up when it
+    # actually needs something." showrunner_code's owner session was rung every idle check between
+    # the work bot's PRs, with its GitHub waker alive and nothing owed.
+    print("an idle mandated session is not rung while its declared wake paths are alive:")
+    wk_ = make_sandbox()
+    try:
+        _wsid = "sess-wake"
+        _wsd = os.path.join(wk_, ".game_loop", "sessions", _wsid)
+        os.makedirs(_wsd, exist_ok=True)
+        _wlog = os.path.join(wk_, ".game_loop", "log.jsonl")
+        _wtp = os.path.join(wk_, "transcript.jsonl")
+        with open(_wtp, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Waiting on the next PR."}]}}) + "\n")
+        _pidf = os.path.join(wk_, "waker.pid")
+        # A stub llm_chat, so the owed check reads this sandbox and never the real rooms.
+        _chatd = os.path.join(wk_, ".lamp", "llm_chat", "bin")
+        os.makedirs(_chatd, exist_ok=True)
+        _chat = os.path.join(_chatd, "llm_chat")
+        _owedf = os.path.join(wk_, "owed.json")
+
+        def _set_owed(owed):
+            with open(_owedf, "w") as f:
+                json.dump({"owed": owed, "unreachable": []}, f)
+        with open(_chat, "w") as f:
+            f.write("#!/bin/sh\ncat " + shlex.quote(_owedf) + "\n")
+        os.chmod(_chat, 0o755)
+
+        def _wake_case(pid, owed=()):
+            with open(_pidf, "w") as f:
+                f.write(str(pid))
+            _set_owed(list(owed))
+            with open(os.path.join(_wsd, "state.json"), "w") as f:
+                json.dump({"mandate": {"active": True, "text": "review PRs as they arrive", "at": "now",
+                                       "wake_checks": ["pid:" + _pidf]},
+                           "watchdog_rings": 0}, f)
+            open(_wlog, "w").close()
+            r = run_watchdog(os.path.join(wk_, ".game_loop", "bin", "watchdog"),
+                             {"session_id": _wsid, "transcript_path": _wtp},
+                             WATCHDOG_IDLE_SEC="1", WATCHDOG_SETTLE_SEC="0")
+            return r, read_or_empty(_wlog)
+
+        _r, _l = _wake_case(os.getpid())
+        check("with a live waker (pid:<file>) and nothing owed, the idle session is HELD, not rung",
+              _r.returncode == 0 and '"watchdog_wake_wait"' in _l and '"watchdog_ring"' not in _l)
+        _r, _l = _wake_case(2 ** 22 + 12345)
+        check("...while a DEAD waker rings: nothing would wake the session, so it is not waiting",
+              _r.returncode == 2 and '"watchdog_wake_wait"' not in _l
+              and "wake path     :" in _r.stderr and "not alive" in _r.stderr)
+        _r, _l = _wake_case(os.getpid(), owed=[{"room": "r", "from": "x", "seq": 1}])
+        check("...and a chat reply OWED rings too, waker alive or not: owed is work",
+              _r.returncode == 2 and '"watchdog_wake_wait"' not in _l)
+        _mw = gl(wk_, "mandate", "--set", "review PRs", "--wake-check", "pid:.llm_chat/wake.pid",
+                 sid="sess-wake-cli")
+        _mws = gl(wk_, "status", sid="sess-wake-cli")
+        check("`mandate --set .. --wake-check pid:<file>` records it, and status shows it",
+              _mw.returncode == 0 and "wake checks: pid:.llm_chat/wake.pid" in _mws.stdout)
+        _mbad = gl(wk_, "mandate", "--wake-check", "cron-every-5m", sid="sess-wake-cli")
+        _mnone = gl(wk_, "mandate", "--wake-check", "none", sid="sess-wake-cli")
+        check("...a check the watchdog cannot run is REFUSED by name, and `none` clears them",
+              _mbad.returncode != 0 and "not a check the watchdog can run" in (_mbad.stdout + _mbad.stderr)
+              and _mnone.returncode == 0
+              and "wake checks:" not in gl(wk_, "status", sid="sess-wake-cli").stdout)
+    finally:
+        shutil.rmtree(wk_, ignore_errors=True)
+
     # A QUESTION ASKED AT THE DESK WAS FORGOTTEN AT THE TURN-END THAT ASKED IT (harbor-owner,
     # 2026-10-08). An arm with no Slack page was NULLED by the Stop gate, so ~30s later the watchdog
     # read "nobody is waiting on you (no T3 armed)" while the human held an unanswered question, and
@@ -12042,6 +12109,8 @@ def main():
             "--revoke",
             # --thread is a Slack message ts. Slack rejects a mangled one and the send fails loudly.
             "--thread",
+            # --wake-check is pid:<file>, slack or none; anything else is refused by name.
+            "--wake-check",
             # names, enums, refs, counts and durations — a backtick in one cannot mean anything
             "--after", "--aggregate", "--aim", "--at", "--before", "--effector", "--events",
             # a duration or a date, and parse_expires REFUSES anything else by name — a mangled

@@ -1394,6 +1394,29 @@ def authorizations_report(s):
     return L
 
 
+
+def wake_checks_from(values):
+    """Validate --wake-check values: pid:<file> or slack, or `none` to clear. Dies on a bad one."""
+    out_ = []
+    for v in values or []:
+        v = str(v).strip()
+        if v == "none":
+            return []
+        if v == "slack":
+            if not (notify and notify.listens()):
+                die('--wake-check slack needs Slack listening on: "listen": true under "slack" in '
+                    "notify.json, with a bot token that can read the channel.")
+            out_.append(v)
+        elif v.startswith("pid:") and v[4:].strip():
+            out_.append("pid:" + v[4:].strip())
+        else:
+            die(f"--wake-check {v!r} is not a check the watchdog can run.\n"
+                "  pid:<file>   a waker's pid file, e.g. pid:.llm_chat/wake.pid or "
+                "pid:.showrunner/waker-owner\n"
+                "  slack        notify's channel listener\n"
+                "  none         clear the checks")
+    return out_
+
 def wake_path_report(s):
     """Say when a mandate is armed and NOBODY HAS SAID how an external signal reaches this run (#95).
 
@@ -1409,10 +1432,15 @@ def wake_path_report(s):
     m = s.get("mandate") or {}
     if not m.get("active") or m.get("parked"):
         return []
+    _wc = m.get("wake_checks") or []
+    _wcl = (["  wake checks: " + ", ".join(_wc) + " — while all are alive and nothing is owed, an "
+             "idle session is waiting and is not rung"] if _wc else [])
     if m.get("wake_path"):
         return ["", f"wake path (declared): {m['wake_path']}",
                 "  A DECLARATION, not a probe — nothing here has verified a signal actually lands."
-                ] + wake_landed_lines(s)
+                ] + _wcl + wake_landed_lines(s)
+    if _wc:
+        return ["", "wake path: none described in words"] + _wcl
     return ["", "⚠ MANDATE ARMED, AND NO EXTERNAL WAKE PATH IS RECORDED.",
             "  Every gate here fires from INSIDE this session — which is the thing that stops",
             "  working when the run goes quiet. If nothing outside can reach you, an inert run and",
@@ -4094,6 +4122,18 @@ def cmd_mandate(s, a):
         # needs --set" usage text — the right refusal reached by the wrong road, telling the caller
         # nothing about the flag they actually typed. Same shape as `--fault ""` and the misspelt
         # `expect`: a verdict that is correct while its reason sends you somewhere else.
+        if getattr(a, "wake_checks", None) and not a.set:
+            _wc = wake_checks_from(a.wake_checks)
+            if not m.get("active"):
+                die("no mandate is bound here, so there is nothing to set wake checks for.")
+            m["wake_checks"] = _wc
+            save(s)
+            logline({"kind": "mandate_wake_checks", "checks": _wc})
+            out("✓ wake checks " + ("set: " + ", ".join(_wc) if _wc else "cleared") + ".",
+                "  While every one is alive and nothing is owed in chat, an idle session is WAITING",
+                "  and the watchdog does not ring it. A dead waker or an owed reply rings as before.")
+            if not getattr(a, "wake_path", None):
+                return
         if getattr(a, "wake_path", None) == "":
             die("--wake-path was given but is EMPTY.\n\n"
                 "The field answers 'how does a signal reach this session while it is idle', and an\n"
@@ -4177,6 +4217,8 @@ def cmd_mandate(s, a):
             "    game_loop mandate --clear --notes \"superseded by: ..\"\n\n"
             "Re-setting the SAME words is allowed, so a retry or a re-bind after compaction costs\n"
             "nothing. What is refused is losing a live mandate without a decision.")
+    if getattr(a, "wake_checks", None):
+        m["wake_checks"] = wake_checks_from(a.wake_checks)
     if getattr(a, "wake_path", None):
         m["wake_path"] = a.wake_path
         if getattr(a, "wake_every", None):
@@ -14493,6 +14535,10 @@ def main():
                     help="minutes between expected wakes on that path. With it, a path that has "
                          "STOPPED delivering becomes visible from inside: one missed wake proves "
                          "nothing, a cadence gone silent proves the path is dead")
+    md.add_argument("--wake-check", dest="wake_checks", action="append",
+                    help="a wake path the watchdog can CHECK: pid:<file> (a waker's pid file) or "
+                         "slack. While all are alive and nothing is owed in chat, an idle session "
+                         "is waiting and is not rung. Repeatable; `none` clears them")
     md.add_argument("--set", help="the mandate, in the human's words")
     md.add_argument("--because", metavar="QUOTE",
                     help="the instruction that PROMPTED this mandate, verbatim. Optional, "

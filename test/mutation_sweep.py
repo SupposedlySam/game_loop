@@ -1455,6 +1455,18 @@ MUTANTS = [
      "ALWAYS RESUMED IS THE REPORTED WORLD (wcs, 2026-11-12): the stand-down listener quit 20 s after "
      "starting, twice, on the idle turn's own bookkeeping records, and a message waited 55 minutes. "
      "MEASURED 2026-11-12 at c74c252 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (two more failed only from a banned word in that run's tree, since fixed).", 2),
+    ("wake_checks_wait -> a declared wake path never verifies, so every idle check rings",
+     ".game_loop/bin/watchdog::wake_checks_wait", "    return False, 'neutered'\n",
+     ["the idle session is HELD, not rung"],
+     "NEVER WAITING IS THE REPORTED WORLD (showrunner_code's owner, 2026-11-14): an event-driven "
+     "session rung every idle check with its waker alive and nothing owed. The dead-waker and "
+     "owed arms ring BY CONSTRUCTION under this neuter, which is why they are paired with the hold. "
+     "MEASURED 2026-11-14 at ab20e05 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (the gl-mandate skill rows that failed in every run of that tree, since fixed, are excluded).", 2),
+    ("wake_checks_from -> no wake check is ever recorded",
+     ".game_loop/bin/_gl_impl.py::wake_checks_from", "    return []\n",
+     ["records it, and status shows it"],
+     "NOTHING RECORDED leaves the watchdog with nothing to check, so the hold never starts. "
+     "MEASURED 2026-11-14 at ab20e05 plus this change, in a CLONE, by neutering by hand and listing the suite's FAIL rows: 2 (the gl-mandate skill rows that failed in every run of that tree, since fixed, are excluded).", 2),
     ("listen_watermark -> listening never starts, so the channel is never read",
      ".game_loop/bin/watchdog::listen_watermark", "    return None\n",
      ["while rings are still COUNTING", "the watermark STARTS"],

@@ -40,6 +40,7 @@ import datetime
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -997,6 +998,62 @@ def session_resumed_since(path, offset):
             return True
     return False
 
+
+def wake_checks_wait(checks):
+    """(waiting, why) for the mandate's declared --wake-check paths. Never raises.
+
+    WAITING means every declared wake path is alive AND nothing is owed in chat: the session has
+    nothing to do until one of those paths fires, so a ring would only spend a turn. Jonah,
+    2026-11-14: "it's knowing that when it sets up a watchdog that it needs to do so in a way that it
+    is only getting woken up when it actually needs something." showrunner_code's owner probe is the
+    model: a dead wake path or a reply owed means NOT waiting, so a broken waker still rings.
+
+      pid:<file>  the file's first field (before any ':') is a pid, and that process is alive. Covers
+                  llm_chat's .llm_chat/wake.pid and showrunner's .showrunner/waker-owner.
+      slack       notify's opt-in listener is on ("listen": true), so a human message is read.
+
+    WHAT IT CANNOT SEE: whether a live waker will actually deliver (a pid alive is not a wake that
+    lands), and, for a pid file shared by every session in a checkout (llm_chat's is), WHOSE waker it
+    is. It turns "nothing would wake this" into a ring and nothing more.
+    """
+    alive = []
+    for c in checks or []:
+        c = str(c)
+        if c == "slack":
+            if not (notify and getattr(notify, "listens", None) and notify.listens()):
+                return False, 'declared wake path "slack" is not listening (notify "listen" is off)'
+            alive.append("slack listening")
+            continue
+        if c.startswith("pid:"):
+            f = c[4:]
+            path = f if os.path.isabs(f) else os.path.join(REPO_ROOT, f)
+            try:
+                with open(path) as fh:
+                    pid = int(fh.read().strip().split(":", 1)[0])
+                os.kill(pid, 0)
+            except (OSError, ValueError):
+                return False, f"declared wake path {c} is not alive, so nothing would wake this session"
+            alive.append(f"{f} pid {pid}")
+            continue
+        return False, f"declared wake check {c!r} is not one this watchdog knows"
+    if not alive:
+        return False, "no wake check declared"
+    chat = os.path.join(REPO_ROOT, ".lamp", "llm_chat", "bin", "llm_chat")
+    if not os.access(chat, os.X_OK):
+        chat = shutil.which("llm_chat") or ""
+    if chat:
+        try:
+            r = subprocess.run([chat, "owed", "--json"], capture_output=True, text=True, timeout=15,
+                               cwd=REPO_ROOT)
+            d = json.loads(r.stdout or "{}")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return False, "llm_chat owed could not answer, so a reply may be owed"
+        if d.get("unreachable"):
+            return False, "llm_chat could not check every room, so a reply may be owed"
+        if d.get("owed"):
+            return False, f"{len(d['owed'])} chat reply(ies) owed"
+    return True, "waiting on " + ", ".join(alive) + ("; nothing owed in chat" if chat else "")
+
 def listen_watermark():
     """The Slack ts after which a human message is news, or None when listening is off.
 
@@ -1431,7 +1488,7 @@ def hold_for_harness_work(payload, tpath, base):
     return "the wait on background subagents this watchdog was holding has ended — " + ended
 
 
-def ring(state, rings, probe_note="", harness_note=""):
+def ring(state, rings, probe_note="", harness_note="", wake_note=""):
     ph = state.get("phase") or {}
     m = state.get("mandate") or {}
     logline({"kind": "watchdog_ring", "mandate": m.get("text"),
@@ -1486,6 +1543,7 @@ def ring(state, rings, probe_note="", harness_note=""):
         + f"  game_loop says: nobody is waiting on you (no T3 armed)\n"
         + (f"  waiting probe : {probe_note}\n" if probe_note else "")
         + (f"  subagents     : {harness_note}\n" if harness_note else "")
+        + (f"  wake path     : {wake_note}\n" if wake_note else "")
         + f"  harness says  : the transcript has not grown in {IDLE_SEC}s — you are parked\n\n"
         "Both cannot be true. You are under an autonomy mandate with work outstanding and you are\n"
         "doing nothing. The Stop gate can stop you SAYING the wrong thing, but it cannot press go for\n"
@@ -1858,6 +1916,28 @@ def main():
                  "note": "could not size the transcript; not ringing on an unmeasured guess"})
         quiet("cannot measure transcript growth")
 
+    # A DECLARED WAKE PATH THAT IS ALIVE IS A WAIT (2026-11-14). The mandate named what will wake
+    # this session (--wake-check); while all of it is alive and nothing is owed, a ring would only
+    # spend a turn. Held, not quit: re-checked every idle_sec, and the moment a waker dies or a reply
+    # comes due, this rings.
+    _wake_note = ""
+    _checks = (state.get("mandate") or {}).get("wake_checks") or []
+    if _checks:
+        _ww, _wwhy = wake_checks_wait(_checks)
+        if _ww:
+            logline({"kind": "watchdog_wake_wait", "why": _wwhy})
+            _why = hold_while_waiting(tpath, _wwhy, before,
+                                      verdict=lambda due: wake_checks_wait(_checks),
+                                      ended="a declared wake path stopped verifying")
+            _held = True
+            _wake_note = "the wait it was holding ended — " + str(_why or "a wake path stopped verifying")
+            state = load_state()
+            state["_tpath"] = tpath
+        else:
+            # SAID, so the ring that follows carries its cause: the session declared a wake path and
+            # it is not working, which is the one thing a woken session should fix first.
+            logline({"kind": "watchdog_wake_dead", "why": _wwhy})
+            _wake_note = _wwhy
     # THE HUMAN'S MESSAGE BEFORE A NUDGE. Read the channel at every idle check, so a message that
     # arrives while rings are counting is delivered here rather than missed until a stand-down.
     _seen = listen_watermark()
@@ -1865,7 +1945,8 @@ def main():
         _msgs = notify.channel_messages(_seen)
         if _msgs:
             deliver_listened(_msgs, "idle check")
-    ring(state, state.get("watchdog_rings", 0), probe_note(_why, held=_held), _harness_note)
+    ring(state, state.get("watchdog_rings", 0), probe_note(_why, held=_held), _harness_note,
+         _wake_note)
 
 
 if __name__ == "__main__":

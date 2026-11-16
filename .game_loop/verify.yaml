@@ -224,6 +224,15 @@
   - "python3 test/run.py --section 'house voice' --section 'claim about the HOST'"
 ".game_loop/LEDGER.md":
   - "python3 test/run.py --section 'house voice' --section 'claim about the HOST'"
+# THE REACH RULES ARE SHIPPED DATA, read by another tool's matcher (showrunner's reach gate). A
+# rule whose pattern stops matching its own fires_on example, or starts matching a silent_on one,
+# gives advice at the wrong moment in every repo that installs it, and nothing here would notice:
+# the file matched no rule. The section runs every example through showrunner's matcher when it can
+# find one and prints NOT RUN when it cannot.
+# WHAT THIS SKIPS: the examples are the whole of what is checked, so a rule that matches a shape
+# no example names is not caught. Decided under Jonah's delegation, 2026-11-16.
+".game_loop/reach.json":
+  - "python3 test/run.py --section 'house voice' --section 'the reach rules'"
 # THE MANIFEST GATES ITSELF. The coverage section is the one that reads THIS file and asserts about
 # it: no path declared twice, and the write guard's impl still owing both of its commands. It sits
 # deep in the shared-fixture block, so selecting it costs that block's whole prefix — 479 of 1605

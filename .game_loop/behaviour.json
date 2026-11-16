@@ -875,6 +875,15 @@
       "change": "New: `mandate --wake-check pid:<file>|slack` (repeatable; `none` clears). While every declared path is alive (the pid in the file is a running process; notify's listener is on) and `llm_chat owed` lists nothing, the watchdog holds an idle mandated session instead of ringing it, re-checking every idle_sec. A dead waker or an owed reply ends the hold and rings, with a new 'wake path' line naming why. Without --wake-check nothing changes.",
       "consequence": "an agent whose mandate's work arrives by event (PRs, chat, mail) and that declares its waker is no longer rung between events. One that declares a waker which then dies is rung, with the reason.",
       "why_it_qualifies": "fewer rings for sessions that opt in, and a new ring reason. Asked by showrunner-code-owner (2026-11-13/14) for an event-driven owner mandate; Jonah, 2026-11-14: the agent should set its watchdog up \"in a way that it is only getting woken up when it actually needs something\"."
+    },
+    {
+      "seq": 94,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "limits probe: read the usage windows from a headless run's rate_limit_event",
+      "change": "The opt-in limit probe (limits.probe.enabled) no longer renders a status line in a pty. It runs one headless `claude -p` turn with hooks off and no MCP servers, and reads the usage windows from the stream-json rate_limit_event (utilization becomes used_percentage, resetsAt becomes resets_at). context_window is now null in a probe reading. A run that returns no rate_limit_event exits 1; a missing binary, a failure or a timeout (GAME_LOOP_PROBE_WAIT_SEC, default 90) exits 2.",
+      "consequence": "a probe costs about 26k input tokens instead of about 64k, measured 2026-11-16. A probe reading no longer carries a context-window figure; the live status line still does.",
+      "why_it_qualifies": "a cheaper probe and a changed reading shape for projects that opted in. #146; the owner decided under Jonah's delegation (2026-11-16): \"make the decisions that are best for our users\"."
     }
   ],
   "schema": 1

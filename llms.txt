@@ -469,10 +469,12 @@ never silent — a hook whose verdict came back truncated has judged, and only t
 #   never opened cannot be reported as identical.
 ./.game_loop/bin/game_loop limitprobe [--force] [--interval-only]                    # read the usage
 #   windows by SPAWNING a short session, on a host that renders no statusline (so limits.json never
-#   arrives on its own). Off unless the project enabled it — it costs ~24k input tokens per run —
+#   arrives on its own), reading the rate_limit_event a headless run prints. Off unless the project
+#   enabled it — it costs ~26k input tokens per run, mostly cache —
 #   and the watchdog fires it automatically on an interval the reading implies. You do not normally
 #   run this: if `status` says usage protection is INERT, that is a config question for the human.
-#   A probe run also records what its FRESH session's render carried under `context_window` —
+#   A headless run renders no statusline, so the probe now records `context_window` as null. It used
+#   to record what its FRESH session's render carried under `context_window` —
 #   total_input_tokens, context_window_size and a current_usage breakdown — into
 #   .game_loop/probe/context-window.json. CAPTURED, NOT INTERPRETED: nothing computes a token floor
 #   from it or decides anything with it. The probe already buys a fresh session for the usage

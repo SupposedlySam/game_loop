@@ -225,6 +225,18 @@
         "verified_on": "2026-11-10",
         "verified_against": "2.1.319",
         "verified_how": "gravity_brew's session launched six background subagents at 2026-11-10T05:26Z; each Agent result carried an agentId (e.g. a2ddc6c0814b4fda0) and the session directory holds subagents/agent-a2ddc6c0814b4fda0.jsonl with a .meta.json beside it. The binary's orphan-agent restore emits task_id: agentId with task_type local_agent. That session ran 2.1.312; the binary read is 2.1.319."
+      },
+      {
+        "id": "headless-rate-limit-event",
+        "says": "a headless `claude -p --output-format stream-json --verbose` run prints a rate_limit_event whose rate_limit_info.unifiedWindows maps each usage window to {utilization (0-1), resetsAt (epoch seconds), status}",
+        "source": "game_loop#146 (drops owner agent, 2.1.319) and a run on this machine's 2.1.322 binary",
+        "breaks": "limit-probe.sh reads its windows from that event. If it moved or changed shape, the probe exits 1 (\"no rate_limit_event\") and the limit gates stay inert, which status already reports as INERT: a missing reading, never a false one",
+        "ledger": "A headless run prints the usage windows as a rate_limit_event",
+        "exercisable": "yes",
+        "exercisable_why": "any subscriber session can run the probe: `./.game_loop/bin/limit-probe.sh` prints what it read",
+        "verified_on": "2026-11-16",
+        "verified_against": "2.1.322",
+        "verified_how": "ran the probe's exact command on the 2.1.322 binary (CLAUDE_CODE_EXECPATH) with hooks disabled and --strict-mcp-config: one rate_limit_event, unifiedWindows {seven_day: {utilization 0.03, resetsAt 1795438800, status allowed}}; usage 2 input, 14,396 cache-creation, 11,382 cache-read. Then the new probe end to end: {seven_day: {used_percentage 4.0, resets_at 1795438800}}."
       }
     ],
     "//note": "verified_on/verified_against now live on each CLAIM. The block values are the original reading and remain as the default for entries nobody has revisited; a claim carrying its own is the one that has actually been re-read."

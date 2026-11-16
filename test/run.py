@@ -18606,6 +18606,56 @@ def main():
     check("...and it sends a package-managed install to its own upgrade command, never the curl line",
           "installed-by.json" in _llms and "upgrade" in _llms)
 
+    print("the limit probe reads the usage windows from a headless run's rate_limit_event (#146):")
+    # IT DROVE A TUI THROUGH A PTY to make the statusline render, because a headless run never runs
+    # the statusline. A headless run prints the windows as a rate_limit_event instead: cheaper (~26k
+    # input-side against ~64k), seconds instead of most of a minute, and server-side. Driven here
+    # through a stub binary that replays a recorded stream, so the real parser is exercised.
+    _pd = _tmpdir("glprobe-")
+    _probe = os.path.join(SRC_GAME_LOOP, "bin", "limit-probe.sh")
+
+    def _stub(lines, code=0):
+        b = os.path.join(_pd, "claude-%d" % len(os.listdir(_pd)))
+        with open(b, "w") as f:
+            f.write("#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shlex.quote(b + ".argv") + "\n")
+            for ln in lines:
+                f.write("printf '%s\\n' " + shlex.quote(ln) + "\n")
+            f.write("exit %d\n" % code)
+        os.chmod(b, 0o755)
+        return b
+
+    def _run_probe(b):
+        return subprocess.run(["bash", _probe], capture_output=True, text=True,
+                              env=dict(_env(), GAME_LOOP_PROBE_BIN=b, GAME_LOOP_PROBE_WAIT_SEC="20"))
+
+    _rle = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
+        "five_hour": {"utilization": 0.22, "resetsAt": 1794258600, "status": "allowed"},
+        "seven_day": {"utilization": 0.4, "resetsAt": 1794492000, "status": "allowed"}}}})
+    _init = json.dumps({"type": "system", "subtype": "init"})  # theme-word-ok: the real event type
+    _b1 = _stub([_init, _rle, json.dumps({"type": "result", "usage": {}})])
+    _p1 = _run_probe(_b1)
+    try:
+        _p1j = json.loads(_p1.stdout)
+    except ValueError:
+        _p1j = {}
+    check("a rate_limit_event is read and converted to the statusline's shape (utilization 0.22 -> "
+          "used_percentage 22.0, resetsAt -> resets_at), exit 0",
+          _p1.returncode == 0
+          and (_p1j.get("rate_limits") or {}).get("five_hour") == {"used_percentage": 22.0,
+                                                                     "resets_at": 1794258600.0}
+          and (_p1j.get("rate_limits") or {}).get("seven_day", {}).get("used_percentage") == 40.0
+          and _p1j.get("context_window", "absent") is None)
+    _argv = read_or_empty(_b1 + ".argv").split("\n")
+    check("...and the run is the cheap one: headless, hooks disabled, no MCP servers",
+          "-p" in _argv and "stream-json" in _argv and "--strict-mcp-config" in _argv
+          and '{"disableAllHooks":true}' in _argv)
+    _p2 = _run_probe(_stub([json.dumps({"type": "result", "usage": {}})]))
+    _p3 = _run_probe(_stub([], code=3))
+    check("...while a run with NO rate_limit_event exits 1 (a real answer), and a run that FAILED "
+          "exits 2 (could not tell): never the same bytes",
+          _p2.returncode == 1 and "no rate_limit_event" in _p2.stderr
+          and _p3.returncode == 2 and "failed" in _p3.stderr)
+
     print("the central-install shims, which run in somebody else's repo:")
     _shim_dir = os.path.join(REPO, "templates", "central-shims")
     _shims = sorted(os.listdir(_shim_dir)) if os.path.isdir(_shim_dir) else []

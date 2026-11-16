@@ -66,6 +66,13 @@ _Things we read at the pinned version, by hand, and confirmed. Each with a sourc
   session, which launched six. The watchdog uses the file's last write as proof the subagent is still
   alive. What it does NOT establish: that a subagent waiting on one long tool call writes anything
   meanwhile, which is why the silence bound is 30 minutes and not less.
+- **A headless run prints the usage windows as a rate_limit_event**: `claude -p --output-format
+  stream-json --verbose` emits `{"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows":
+  {"<window>": {"utilization": 0.03, "resetsAt": 1795438800, "status": "allowed"}}}}`, utilization a
+  0-1 fraction. Reported in game_loop#146 at 2.1.319, read here at 2.1.322 on 2026-11-16, and the
+  limit probe now reads it instead of driving a TUI through a pty. What it does NOT establish: that
+  every window an account has appears (this account showed seven_day only), or that the fraction
+  never becomes a percentage in a later build.
 
 ## RULED-OUT
 

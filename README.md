@@ -227,8 +227,10 @@ spawn a short session purely to read the windows and write the snapshot:
 "limits": { "probe": { "enabled": true, "min_interval_sec": 900, "max_interval_sec": 3600 } }
 ```
 
-**Off by default, and it is not free**: a spawn costs about 24k input tokens (measured, and it is
-the host's floor rather than ours). The reason to pay it is that the alternative is not zero — an
+**Off by default, and it is not free**: each reading is one short headless session, about 26k
+input tokens, mostly cache (measured 2026-11-16 with hooks disabled and no MCP servers; it is the
+host's floor rather than ours). It reads the windows from the `rate_limit_event` that run prints,
+which is the server's own figure. The reason to pay it is that the alternative is not zero — an
 unattended run that hits its limit at 1am dies mid-action and is still dead at 7am, because nothing
 could see the wall coming. The whole limit family already works; it was only ever missing the
 snapshot.

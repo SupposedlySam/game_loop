@@ -1,111 +1,89 @@
 #!/usr/bin/env bash
 # Ask the HOST what your usage windows look like, when this host cannot tell you itself.
 #
-# WHY THIS EXISTS. `rate_limits` rides the statusline payload and nothing else, and a statusline is
-# a TUI element: an editor-embedded session renders none, so limitgate, the watchdog's park and the
-# wake-on-reset are all inert there. Measured: a headless `claude -p` never invokes the statusline
-# at all, so the cheap version of this cannot work. A TUI session does — driven through a pty, with
-# one tiny message to force an API response, it renders a payload carrying five_hour and seven_day.
+# WHY THIS EXISTS. `rate_limits` rides the statusline payload, and a statusline is a TUI element: an
+# editor-embedded session renders none, so limitgate, the watchdog's park and the wake-on-reset are
+# all inert there. This spends ONE short headless session to read the windows instead.
 #
-# WHAT IT COSTS, and the number MOVED: measured at 2.1.223 as ~24k input tokens stripped to the
-# bone (~31.5k with MCP and all tools) for a four-token reply. RE-MEASURED 2026-08-24 at 2.1.241,
-# from this probe's own recorded render (probe/context-window.json): 63,943 input tokens — 2 fresh,
-# 3,162 cache-creation, 60,779 cache-read. Roughly double the older figure, in a spawn of the same
-# shape (--settings overrides the statusline only; tools and MCP come along).
+# HOW, SINCE 2026-11-16: a headless `claude -p --output-format stream-json --verbose` run prints a
+# `rate_limit_event` whose `rate_limit_info.unifiedWindows` carries each window's SERVER-SIDE
+# utilization (a 0-1 fraction) and resetsAt (epoch seconds). Reported in game_loop#146 by the drops
+# owner agent (2.1.319) and measured here on 2.1.322 before switching. The probe used to drive the
+# full TUI through a pty with a statusline tap, because a headless run never invokes the statusline;
+# this event is why it no longer has to.
 #
-# WHAT THAT ONE READING CANNOT SAY: the older number decomposes as ~24k base preamble + ~6k tool
-# definitions + ~1k MCP schemas. A single total cannot apportion the growth between the host's
-# preamble and THIS machine's MCP surface, which has also grown. So the headline is stale and the
-# breakdown is unknown — do not read 63,943 as "the host's floor doubled". It is what a spawn costs
-# HERE, today, which is the number you actually pay.
+# WHAT IT COSTS, MEASURED 2026-11-16 on 2.1.322 with hooks disabled and no MCP servers: 2 input,
+# 14,396 cache-creation and 11,382 cache-read, ~25.8k input-side, in a few seconds. The pty render
+# measured ~64k (2026-08-24), and ran for most of a minute. The number is this machine's preamble at
+# that moment, not a constant; it is still one spawned session per reading, which is why the probe
+# is off unless a project enables it.
 #
-# That is the host's floor plus your surface, not ours, and nothing amortises across spawns.
+# CONTRACT (unchanged): prints {"rate_limits": {...}, "context_window": null} on stdout and exits 0,
+# with each window as {"used_percentage": <0-100>, "resets_at": <epoch seconds>}, the statusline's
+# own shape, so every consumer reads it unchanged. Exit 1 means it ran and the host sent no
+# rate_limit_event (a real answer: an unsubscribed or API-key account has none). Exit 2 means it
+# could not tell: no binary, the run failed or timed out. "Could not look" and "looked and there is
+# nothing" must never be the same bytes.
 #
-# WHY IT IS WORTH IT ANYWAY, which is the argument I had backwards at first: the alternative is not
-# zero. Without a snapshot an unattended run hits the limit, dies mid-action, and nothing wakes it —
-# so a session that stops at 1am is stopped until somebody notices. 24k tokens to convert six dead
-# hours into a park-and-resume is not a cost, it is the cheapest thing in the loop. The whole limit
-# family already exists and is tested; the only missing piece was ever the snapshot.
-#
-# CONTRACT: prints the rate_limits object as JSON on stdout and exits 0. Exit 1 means it ran and the
-# host produced no rate_limits (a real answer: unsubscribed accounts have none). Exit 2 means it
-# could not tell — no binary, no pty, timed out. Three outcomes, because "could not look" and
-# "looked and there is nothing" must never be the same bytes (this repo has paid for that lesson
-# four times).
+# context_window is null: a headless run renders no statusline payload to read it from. The consumer
+# records that as an explicit null, which is what it already did when a render lacked one.
 set -uo pipefail
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/gl-limitprobe-XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
-
-# The running binary, not whatever is on PATH. These genuinely differ: on this machine PATH held
-# 2.1.145 against a running 2.1.223 when this shipped, and 2.1.231 against the same running 2.1.223
-# three days later — so WHICH IS NEWER FLIPS, and the reason to prefer EXECPATH is not newness. It is
-# that the running binary is the one whose account and session this probe is asking about. A probe
-# that asks the wrong binary reports the wrong account, whichever version that binary happens to be.
-CB="${CLAUDE_CODE_EXECPATH:-}"
+# The running binary, not whatever is on PATH: the running one is the account this probe asks about.
+# GAME_LOOP_PROBE_BIN is for the suite only, to drive this parser against a recorded stream.
+CB="${GAME_LOOP_PROBE_BIN:-${CLAUDE_CODE_EXECPATH:-}}"
 [ -n "$CB" ] && [ -x "$CB" ] || CB="$(command -v claude 2>/dev/null || true)"
 if [ -z "$CB" ]; then
   echo "no claude binary (CLAUDE_CODE_EXECPATH unset and none on PATH)" >&2; exit 2
 fi
-command -v script >/dev/null 2>&1 || { echo "no \`script\` to allocate a pty" >&2; exit 2; }
 
-cat > "$WORK/tap.sh" <<TAP
-#!/usr/bin/env bash
-cat >> "$WORK/renders.jsonl"; printf '\n' >> "$WORK/renders.jsonl"
-echo probing
-TAP
-chmod +x "$WORK/tap.sh"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/gl-limitprobe-XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 
-# --settings, so nothing global is touched. The probe must never edit the human's configuration to
-# read a number.
-printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$WORK/tap.sh" > "$WORK/settings.json"
+CB="$CB" WORK="$WORK" TIMEOUT="${GAME_LOOP_PROBE_WAIT_SEC:-90}" python3 <<'PY'
+import json, os, subprocess, sys
 
-# Drive it: settle, clear any trust prompt, send one token of work, wait for the response to land.
-# The message matters — rate_limits appears only AFTER an API response, so a session that merely
-# starts renders a payload without them and would read as "no limits data" (this is exactly how the
-# first attempt at this fooled me).
-SETTLE="${GAME_LOOP_PROBE_SETTLE_SEC:-8}"
-WAIT="${GAME_LOOP_PROBE_WAIT_SEC:-40}"
-( { sleep "$SETTLE"; printf '\r'; sleep "$SETTLE"; printf 'ok\r'; sleep "$WAIT"; } \
-  | script -q /dev/null "$CB" --settings "$WORK/settings.json" >"$WORK/tui.log" 2>&1 ) &
-DRIVER=$!
-( sleep $(( SETTLE * 2 + WAIT + 15 )); kill "$DRIVER" 2>/dev/null ) &
-REAPER=$!
-wait "$DRIVER" 2>/dev/null
-kill "$REAPER" 2>/dev/null
-pkill -f "$WORK/settings.json" 2>/dev/null
+# --strict-mcp-config with no MCP config and every hook disabled: the cheapest session the host
+# allows, and one that cannot register with the chat waker or this harness's own hooks. Run from the
+# probe's scratch directory so no project settings are read.
+cmd = [os.environ["CB"], "-p", "reply with the single word: ok", "--output-format", "stream-json",
+       "--verbose", "--strict-mcp-config", "--settings", '{"disableAllHooks":true}']
+try:
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ["TIMEOUT"]),
+                       cwd=os.environ["WORK"])
+except subprocess.TimeoutExpired:
+    print("the headless run did not finish within %ss" % os.environ["TIMEOUT"], file=sys.stderr)
+    sys.exit(2)
+except OSError as e:
+    print("could not run %s: %s" % (os.environ["CB"], e), file=sys.stderr)
+    sys.exit(2)
 
-[ -s "$WORK/renders.jsonl" ] || { echo "the statusline never rendered — nothing to read" >&2; exit 2; }
-
-RENDERS="$WORK/renders.jsonl" python3 <<'PY'
-import json, os, sys
-
-found = None
-ctx = None
-for line in open(os.environ["RENDERS"]):
-    line = line.strip()
-    if not line:
-        continue
+windows = None
+for line in (r.stdout or "").splitlines():
     try:
         d = json.loads(line)
     except ValueError:
-        continue                      # a partial write is not a verdict
-    if d.get("rate_limits"):
-        found = d["rate_limits"]      # keep the LAST, which is the freshest
-    if isinstance(d.get("context_window"), dict):
-        # RIDES ALONG, and is never a reason to succeed or fail. This session is FRESH, so its
-        # render is the cheapest place a fresh-session token count can be observed — but the probe's
-        # job is the usage windows, and a context_window that is missing, null or unexpected must
-        # not change any exit code below.
-        ctx = d["context_window"]
+        continue                                   # a partial line is not a verdict
+    if not isinstance(d, dict) or d.get("type") != "rate_limit_event":
+        continue
+    uw = ((d.get("rate_limit_info") or {}).get("unifiedWindows")) or {}
+    got = {}
+    for name, w in uw.items():
+        try:
+            got[name] = {"used_percentage": round(float(w["utilization"]) * 100, 2),
+                         "resets_at": float(w["resetsAt"])}
+        except (KeyError, TypeError, ValueError):
+            continue
+    if got:
+        windows = got                              # keep the LAST, which is the freshest
 
-if found is None:
-    # Ran, rendered, and the host carried no rate_limits. A real answer, not a failure: the field is
-    # subscriber-only. Distinct exit from "could not look", because a caller that folds them together
-    # would treat an unsubscribed account as a broken probe forever.
-    print("rendered, but the host carried no rate_limits (subscriber-only field)", file=sys.stderr)
+if windows is None:
+    if r.returncode != 0:
+        print("the headless run failed (exit %d) before any rate_limit_event: %s"
+              % (r.returncode, (r.stderr or "").strip()[-200:]), file=sys.stderr)
+        sys.exit(2)
+    print("ran, but the host sent no rate_limit_event (an unsubscribed or API-key account has none)",
+          file=sys.stderr)
     sys.exit(1)
-# AN ENVELOPE, so a second reading can ride the same spawn. The consumer accepts the older bare
-# shape too, because a pin can pair an old probe script with new code.
-print(json.dumps({"rate_limits": found, "context_window": ctx}))
+print(json.dumps({"rate_limits": windows, "context_window": None}))
 PY

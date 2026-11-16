@@ -36,20 +36,11 @@ NEXT_SESSION.md
 # macOS
 .DS_Store
 
-# showrunner: per-Crawler git worktrees (local only)
-.worktrees/
-
 # machine-local hook config (absolute paths)
 .claude/settings.local.json
 
-# llm_chat identity for this project
-.llm_chat/
+# game_loop's upstream-contribution ledger (local only)
 .game_loop/UPSTREAM_LEDGER.md
-
-# Added by saggar — local files that shouldn't be committed
-.saggar/**/*.local.*
-.saggar/scratchpad.md
-.saggar/jobs/
 
 # per-machine section wall times, written by test/prun.py --time. A balance hint,
 # not a fact about the code: it is measured on ONE box and is wrong on every other.

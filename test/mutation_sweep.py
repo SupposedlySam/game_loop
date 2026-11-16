@@ -2429,6 +2429,52 @@ MUTANTS += [
      "for the crash case kill 2 of 3, which is the same ratio and the same reason.", 5),
 ]
 
+# THE config.local.json KEY DIFF (showrunner, 2026-11-16). Measured by neutering each producer in a
+# clone of the working tree and running the WHOLE parallel suite once; a kill is a distinct FAIL
+# name that is not one of this file's own coverage-gate checks (which fail in every such clone,
+# because the entries below are what decides these names). Each name printed twice, because the
+# worktree section runs under two hosts; counted once, as the sweep's set difference does.
+MUTANTS += [
+    ("_local_key_diff -> no config.local.json key is ever named as differing",
+     ".game_loop/bin/_gl_impl.py::_local_key_diff", "    return {}\n",
+     ['names each differing', 'says the same, entry by entry', 'named as unparsed'],
+     "raw 3, floor 3, every one about this producer. `{}` is the exact shape of the bug the "
+     "unparsed arm exists to prevent -- 'the bytes differ but no key does' -- so the not-JSON "
+     "assertion killing it is the discrimination, not collateral.", 3),
+    ("_local_keys_sentence -> the human-facing detail stops naming the keys",
+     ".game_loop/bin/_gl_impl.py::_local_keys_sentence", '    return ""\n',
+     ['says the same, entry by entry', 'named as unparsed', 'effective policy matches'],
+     "raw 3, floor 3. A renderer over _local_key_diff, and the porcelain `keys` field is asserted "
+     "against that producer, so only the assertions that read the DETAIL can see this one -- one "
+     "per arm: keys named, keys unparsed, and keys equal ('formatting or order'). The third was "
+     "written when the first measurement read 2 and showed that arm unasserted.", 3),
+    # Not a new producer: it became a CANDIDATE here, because its `local_override` dict is now built
+    # and then returned (_accumulates_then_returns), and until then nothing had a position on it.
+    # The body keeps the WHOLE return shape and answers clean with nothing compared. The first
+    # measurement used a body missing `code`, and every caller died of KeyError at the first read,
+    # which aborted the section and counted 3: a crash scoring as coverage it did not measure.
+    ("worktree_drift -> every linked worktree is clean, and nothing was compared",
+     ".game_loop/bin/_gl_impl.py::worktree_drift",
+     '    empty = {"matched": [], "drifted": [], "unreadable": []}\n'
+     '    return {"tree": REPO_ROOT, "main_checkout": main_checkout(),\n'
+     '            "owned": [dict(o) for o in OWNED_FILES],\n'
+     '            "rule_files": list(RULE_FILES), "notes_files": list(NOTES_FILES),\n'
+     '            "rules": dict(empty), "owned_files": dict(empty), "code": dict(empty),\n'
+     '            "harness": dict(empty), "local_override": {**empty, "keys": {}},\n'
+     '            "compares": {"rules": [], "owned_files": [], "code": [], "local_override": []},\n'
+     '            "pinned": {"this_tree": False, "this_sha": None, "main_checkout": False,\n'
+     '                       "main_sha": None},\n'
+     '            "status": "clean", "pin_note": "", "detail": "neutered"}\n',
+     ['WHICH files drifted', 'adopted worktree reports clean', 'drifted harness SCRIPT',
+      'not-a-worktree', 'notes-drifted', 'UNDETERMINED', 'called THIS tree clean'],
+     "raw 31, floor 26. 23 in the linked-worktree section (every status arm, both exit codes, "
+     "the key diff, the ordering that keeps notes from hiding a script) and 3 in the porcelain "
+     "consumer's. Held out: the 3 orphan-reachability checks, which fire because this body is the "
+     "only caller of _compare_code and pin_status's second use -- true, and about the scan, not "
+     "this producer -- and this file's 2 coverage-gate checks, which fail in every unrecorded "
+     "clone.", 26),
+]
+
 
 _HEREDOC_GAP = (
     "KNOWN GAP, NAMED 2026-09-23: embedded in a bash heredoc, so it was outside this sweep's "

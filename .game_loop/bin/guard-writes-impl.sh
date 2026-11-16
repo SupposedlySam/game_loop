@@ -1042,6 +1042,17 @@ while i < len(lines):
         if not is_data and head and os.path.basename(head[0]) == "git" and "commit" in head \
                 and re.search(r"(?:^|\s)(?:-F\s*-|--file(?:=|\s+)-)(?:\s|$)", tail_cmd):
             is_data = True
+        # A SHOWRUNNER PROSE FLAG READ FROM STDIN IS PROSE (showrunner, 2026-11-16). Its
+        # `--<prose>-file -` reads stdin into that option's text and never runs it (read in
+        # showrunner's lib/showrunner/cli.py, _resolve_prose, for the six PROSE_OPTS). A Crawler's
+        # `showrunner close <leaf> --reason-file -` whose report named <tree>/.game_loop/config.local.json
+        # was refused as a redirect to that path. Never `showrunner` as a whole, only these flags
+        # with the dash: `add --body-file` does not take one, and a verb this list does not name
+        # stays scanned, which is the safe direction.
+        if not is_data and head and os.path.basename(head[0]) == "showrunner" \
+                and re.search(r"(?:^|\s)--(?:reason|title|who|stale-proof-reason|note|prompt)-file"
+                              r"(?:=|\s+)-(?:\s|$)", tail_cmd):
+            is_data = True
         delims = [d for _q, d in found]
         i += 1
         di = 0
@@ -2969,6 +2980,14 @@ import os, re
 cmd, off = os.environ["CMD"], os.environ["OFF"]
 HD = chr(60) + chr(60)                       # no literal here-doc operator in this file
 NON_SHELL = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "osascript", "awk"}
+# Programs that RUN their stdin as shell. A body fed to one of these is code, the refusal is real, and
+# no hint is owed. Every OTHER consumer whose body reached the scan is one the guard does not know:
+# the data readers (cat, tee, llm_chat, gh, jq, git commit -F -) were stripped before scanning, so
+# only an unlisted program is left. showrunner, 2026-11-16: a showrunner verb fed a heredoc whose
+# prose named <tree>/.game_loop/config.local.json was refused as a write to that path, and the
+# refusal pointed at authorize, which is the wrong way out of a write nobody was making.
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs", "sudo",
+          "env", "exec", "command", "nohup", "time"}
 opener = re.compile(re.escape(HD) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 lines, i, hit = cmd.split("\n"), 0, ""
 while i < len(lines):
@@ -2990,8 +3009,9 @@ while i < len(lines):
             # the BASENAME: the offender is the RESOLVED path and the body holds what was written,
             # so `~/x.txt` in the body never contains `/Users/me/x.txt` and an exact test fired
             # never, silently, on the one case that prompted this.
-            elif who in NON_SHELL and off and os.path.basename(off.rstrip("/")) in lines[i]:
-                hit = who
+            elif who and who not in SHELLS and off \
+                    and os.path.basename(off.rstrip("/")) in lines[i]:
+                hit = ("nonshell " if who in NON_SHELL else "unknown ") + who
             i += 1
         continue
     i += 1
@@ -3004,7 +3024,25 @@ PY
                   "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
                   "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
       fi
-      if [ -n "$hd_hint" ]; then
+      hd_kind=${hd_hint%% *}; hd_who=${hd_hint#* }
+      if [ "$hd_kind" = "unknown" ]; then
+        hd_note="
+
+READ THIS FIRST — THE TEXT ABOVE CAME OUT OF A HERE-DOC BODY READ BY \`$hd_who\`, A PROGRAM THIS GUARD
+DOES NOT KNOW. Bodies fed to a known data reader (cat, tee, llm_chat, gh, jq, git commit -F -) are
+skipped as text. A body fed to anything else is scanned as SHELL, in case the program runs it, so
+an unquoted \`<\` or \`>\` in prose (a placeholder like <tree>/path is the usual one) reads as a
+redirect to that path. If \`$hd_who\` only reads its input as text, this is a FALSE REFUSAL: nothing
+was going to be written there, and \`authorize\` below is the wrong way out.
+
+The way through: write the text to a file first (\`cat > <file> <<'EOF'\` is read as data), then
+hand the program the file's path; or quote the token. If \`$hd_who\` is a program that never runs
+its input, tell game_loop's owner, who can list it as a data reader.
+
+The refusal itself stays. An unknown reader is treated as one that might run what it is given,
+which costs a refusal you can clear rather than a write nobody sees."
+      elif [ -n "$hd_hint" ]; then
+        hd_hint=$hd_who
         hd_note="
 
 READ THIS FIRST — THE TEXT ABOVE CAME OUT OF A \`$hd_hint\` HERE-DOC BODY, WHICH THIS GUARD SCANNED

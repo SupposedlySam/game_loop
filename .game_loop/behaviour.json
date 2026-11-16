@@ -902,6 +902,24 @@
       "change": "`verify` stamps each rule it ran with the time the run started, not the time it finished. A file in scope edited while the checks ran is now newer than its evidence, so `verify --check` and the commit gate refuse it until it is checked again.",
       "consequence": "editing a gated file during its own verify (a long suite, a second session) now owes another run where it used to pass. Nothing that was refused before is allowed now.",
       "why_it_qualifies": "a refusal now fires where the gate used to pass silently. Found 2026-11-16: test/run.py was edited during its own six-minute verify, and the old stamp would have let the commit carry content no check had seen."
+    },
+    {
+      "seq": 97,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "worktree: a differing LEDGER.md no longer hides a drifted script",
+      "change": "`worktree --porcelain` checks every rule, could-not-tell and harness-script finding before any notes finding. A tree whose LEDGER.md differs and whose script differs now answers code-drifted (exit 1) instead of notes-drifted (exit 3). The notes detail names the files that differ and mentions config.local.json only when it does, and for config.local.json `local_override.keys` names each differing key (lists as only_here / only_there entries; an unreadable copy as unparsed).",
+      "consequence": "an orchestrator that blocks on exit 1 now blocks a tree whose script drifted while its ledger also differed, which it used to integrate. A ledger-only difference is unchanged: notes-drifted, exit 3.",
+      "why_it_qualifies": "a verdict that used to warn now blocks. Found 2026-11-16 by reproducing it while adding the key diff showrunner asked for; ledgers differ between trees as a matter of course, so it was the usual case."
+    },
+    {
+      "seq": 98,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard: showrunner's --<prose>-file - heredoc is text, and an unknown reader's refusal says so",
+      "change": "A heredoc fed to `showrunner ... --reason-file -` (or --title, --who, --stale-proof-reason, --note, --prompt) is treated as data, like `git commit -F -`. A refusal caused by a heredoc read by any other program the guard does not know now says so, and names `cat > <file>` as the way through instead of leaving `authorize` as the only route shown.",
+      "consequence": "a Crawler's close report that names a path with a placeholder like <tree>/... is no longer refused. A heredoc fed to an unknown program is still refused; only its sentence changed.",
+      "why_it_qualifies": "a command that was refused is now allowed. Reported by showrunner 2026-11-16; showrunner's cli.py _resolve_prose read to confirm those flags only read stdin as text."
     }
   ],
   "schema": 1

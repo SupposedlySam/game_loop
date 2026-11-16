@@ -883,6 +883,39 @@ def main():
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "notasink <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
 
+        # AN UNKNOWN READER'S REFUSAL SAYS IT IS ONE (showrunner, 2026-11-16). A Crawler's
+        # `showrunner close --reason-file -` carried a report naming <tree>/.game_loop/config.local.json;
+        # the `>` in the placeholder read as a redirect, and the refusal called it a write and
+        # pointed at authorize. The default stays a refusal; only its sentence changes, and it
+        # changes only for a reader that is neither a data reader nor a shell.
+        _UNK = "A PROGRAM THIS GUARD"
+        _unk = guard(wgproj, {"tool_name": "Bash", "tool_input": {
+            "command": "notasink <<'EOF'\nsee <tree>/.game_loop/config.local.json\nEOF"}})
+        check("an unknown reader's heredoc refusal says the token came from a body it does not know",
+              denied(_unk) and _UNK in _unk.stdout and "`notasink`" in _unk.stdout
+              and "cat > <file>" in _unk.stdout)
+        check("...and a shell reader gets no such note, because that body really runs",
+              not _UNK in guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash -s <<'EOF'\necho q > ~/outside.txt\nEOF"}}).stdout)
+        check("...and a python body keeps the interpreter note, not the unknown-reader one",
+              _UNK not in guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "python3 - <<'PY'\nx = 1  # echo q > ~/outside.txt\nPY"}}).stdout)
+
+        # SHOWRUNNER'S PROSE FLAGS READ STDIN AS TEXT (its cli.py, _resolve_prose), so their body is
+        # data, exactly as `git commit -F -` is. Only those flags with the dash: a showrunner verb
+        # the list does not name, and `add --body-file -` (no dash support there), stay scanned.
+        for _flag in ("--reason-file -", "--reason-file=-", "--note-file -", "--prompt-file -"):
+            check("a showrunner %s body is prose, not code" % _flag,
+                  allowed(wgproj, {"tool_name": "Bash", "tool_input": {
+                      "command": "showrunner close L1 %s <<'EOF'\nsee <tree>/.game_loop/config.local.json\nEOF"
+                                 % _flag}}))
+        check("...but showrunner add --body-file - is still scanned, since that flag takes no dash",
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "showrunner add T --body-file - <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+        check("...and a shell cannot borrow the flag: bash ... --reason-file - is still code",
+              denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "bash -s --reason-file - <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
         # Drift guard: the fallback that CAUSED the bypass must not come back. Keeping `words[-1]`
         # as an OR beside the head test reads like belt-and-braces and is in fact the whole hole —
         # it re-admits every masquerade above. (I wrote it that way first; the test caught it.)
@@ -7431,6 +7464,64 @@ def main():
                   and dig(d, "harness", "drifted") == ["LEDGER.md"])
             check("...and it gets its own exit code, so a spawn can warn where it would not block",
                   r.returncode == 3)
+            # A NOTES DIFFERENCE MUST NOT SPEAK FOR, OR HIDE, ANYTHING ELSE (2026-11-16). The owned
+            # branch sat above the code checks and carried the config.local.json sentence, so a
+            # ledger difference was reported as a POLICY difference, and a ledger plus a drifted
+            # script answered notes-drifted (exit 3, warn) where code-drifted (exit 1, block) was
+            # owed. Ledgers differ between trees as a matter of course, so that was the usual case.
+            check("...and its detail names LEDGER.md and does not claim config.local.json differs",
+                  "LEDGER.md" in dig(d, "detail") and "config.local.json" not in dig(d, "detail"))
+            with open(_script, "a") as f:
+                f.write("\n# drifted\n")
+            r = gl(wt, "worktree", "--porcelain")
+            d = json_text(r.stdout)
+            check("a drifted SCRIPT beside a differing LEDGER.md is still code-drifted, exit 1 — "
+                  "per-tree notes must not downgrade a harness difference to a warning",
+                  r.returncode == 1 and dig(d, "status") == "code-drifted"
+                  and "flair.py" in dig(d, "code", "drifted")
+                  and "notes match" not in dig(d, "detail"))
+            with open(_script, "w") as f:
+                f.write(_restored)
+
+            # WHICH config.local.json KEYS DIFFER (showrunner, 2026-11-16): showrunner writes one
+            # allow_write_roots entry into a Crawler's tree and had to recompute it to excuse only
+            # that, because the verdict named the file and not the key.
+            _lc_main = os.path.join(mainco, ".game_loop", "config.local.json")
+            _lc_wt = os.path.join(wt, ".game_loop", "config.local.json")
+            with open(_lc_main, "w") as f:
+                json.dump({"allow_write_roots": ["/shared"], "deploy_verbs": ["x"]}, f)
+            with open(_lc_wt, "w") as f:
+                json.dump({"allow_write_roots": ["/shared", "/crawler/scratch"],
+                           "deploy_verbs": ["x"], "read_roots": ["/r"]}, f)
+            d = json_text(gl(wt, "worktree", "--porcelain").stdout)
+            _keys = dig(d, "local_override", "keys") or {}
+            check("worktree --porcelain names each differing config.local.json key and the entries "
+                  "on each side, and leaves out the keys that match",
+                  _keys.get("allow_write_roots") == {"only_here": ["/crawler/scratch"], "only_there": []}
+                  and _keys.get("read_roots", {}).get("present") == "here"
+                  and "deploy_verbs" not in _keys)
+            check("...and the human-facing detail says the same, entry by entry",
+                  '"/crawler/scratch"' in dig(d, "detail") and "read_roots" in dig(d, "detail"))
+            with open(_lc_wt, "w") as f:
+                f.write("{not json")
+            d = json_text(gl(wt, "worktree", "--porcelain").stdout)
+            check("...and a copy that is not JSON is named as unparsed, never as no differing keys",
+                  dig(d, "local_override", "keys") == {"unparsed": ["here"]}
+                  and "not a readable JSON object" in dig(d, "detail"))
+            # The third arm: the bytes differ and no key does. `{}` is then the TRUE answer, so the
+            # detail has to say the effective policy matches rather than list nothing in silence.
+            with open(_lc_main, "w") as f:
+                f.write('{"deploy_verbs": ["x"], "read_roots": ["/r"]}')
+            with open(_lc_wt, "w") as f:
+                f.write('{\n  "read_roots": ["/r"],\n  "deploy_verbs": ["x"]\n}\n')
+            d = json_text(gl(wt, "worktree", "--porcelain").stdout)
+            check("...and copies that differ only in formatting report no differing key, and say "
+                  "the effective policy matches rather than listing nothing",
+                  dig(d, "local_override", "keys") == {}
+                  and dig(d, "local_override", "drifted") == ["config.local.json"]
+                  and "effective policy matches" in dig(d, "detail"))
+            os.remove(_lc_main)
+            os.remove(_lc_wt)
             r = gl(wt, "status")
             check("...and status says so as a note rather than as a finding",
                   "notes differ" in r.stdout and "RULES MATCH" in r.stdout

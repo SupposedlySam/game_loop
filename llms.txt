@@ -277,6 +277,11 @@ reduces the damage, it does not remove the class.
   rule holds and the enforcement does not, which is INV3 asking you to keep it rather than the gate
   making you. Until 2026-08-26 that list quietly omitted `>|`, `>!`, `>>!`, `>&`, `>>&`, `curl -o`,
   `tar -C` and six other ordinary forms, all of which wrote outside the repo for weeks.
+  **A heredoc body is text only for a reader it knows:** `cat`, `tee`, `llm_chat`, `gh`, `jq`,
+  `git commit -F -`, and showrunner's `--<prose>-file -` flags (`--reason-file -`, `--note-file -`,
+  …). A body fed to anything else is scanned as shell, so a `<placeholder>/path` in prose reads as
+  a redirect. The refusal says when that happened; the way through is `cat > <file> <<'EOF'`, then
+  pass the file, not `authorize`.
   Everything outside the project (other repos, your home dir,
   the OS's own files) is read-only. Reading elsewhere is fine; copying *into* the repo (`cp <there> <here>`)
   is fine. If a HUMAN has explicitly authorized one write outside the repo, quote them and retry —
@@ -468,6 +473,9 @@ never silent — a hook whose verdict came back truncated has judged, and only t
 #   and harness SCRIPTS against the main checkout. Exit 0 ONLY for clean; 1 drifted; 3 notes; 2
 #   could-not-tell — and a script it could not READ is a 2, never a 0, because a file this verb
 #   never opened cannot be reported as identical.
+#   A notes difference (LEDGER.md, config.local.json) never hides a drifted script: that is still 1.
+#   For config.local.json, `local_override.keys` names each differing key and, for a list, the
+#   entries only_here / only_there, so a tool can excuse exactly the entry it wrote.
 ./.game_loop/bin/game_loop limitprobe [--force] [--interval-only]                    # read the usage
 #   windows by SPAWNING a short session, on a host that renders no statusline (so limits.json never
 #   arrives on its own), reading the rate_limit_event a headless run prints. Off unless the project

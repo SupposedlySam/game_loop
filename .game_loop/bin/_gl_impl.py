@@ -12474,6 +12474,69 @@ def _same_bytes(a, b):
         return None
 
 
+def _local_key_diff(here, there):
+    """Which config.local.json keys differ between two trees, and how (showrunner, 2026-11-16).
+
+    showrunner writes one allow_write_roots entry into a Crawler's tree, and `notes-drifted` told it
+    only that the FILE differed, so it recomputed its own entry to excuse exactly that. This names
+    the keys. A list value is compared as a set of entries: {"only_here": [...], "only_there": [...]}.
+    Anything else is {"here": v, "there": v}, with a key absent on one side given as null and
+    "present" naming the side that has it. A file that is not a JSON object gives
+    {"unparsed": [the side(s)]}: the bytes differ and the keys cannot be told, which is never {}.
+    """
+    sides = {}
+    for name, path in (("here", here), ("there", there)):
+        try:
+            with open(path) as fh:
+                d = json.load(fh)
+            sides[name] = d if isinstance(d, dict) else None
+        except (OSError, ValueError):
+            sides[name] = None
+    bad = [n for n in ("here", "there") if sides[n] is None]
+    if bad:
+        return {"unparsed": bad}
+    h, t = sides["here"], sides["there"]
+    out = {}
+    for k in sorted(set(h) | set(t)):
+        a, b = h.get(k), t.get(k)
+        if a == b and (k in h) == (k in t):
+            continue
+        if isinstance(a, list) and isinstance(b, list):
+            ja = [json.dumps(x, sort_keys=True) for x in a]
+            jb = [json.dumps(x, sort_keys=True) for x in b]
+            out[k] = {"only_here": [x for x, j in zip(a, ja) if j not in jb],
+                      "only_there": [x for x, j in zip(b, jb) if j not in ja]}
+        else:
+            ent = {"here": a, "there": b}
+            if (k in h) != (k in t):
+                ent["present"] = "here" if k in h else "there"
+            out[k] = ent
+    return out
+
+
+def _local_keys_sentence(keys):
+    """One sentence over _local_key_diff's answer, for the human-facing detail."""
+    if not keys:
+        return ("The keys could not be told apart: the bytes differ but every key holds the same "
+                "value (formatting or order), so the effective policy matches.")
+    if "unparsed" in keys:
+        return ("Its keys could not be compared: the copy " + " and ".join(
+            "in this tree" if n == "here" else "in the main checkout" for n in keys["unparsed"])
+            + " is not a readable JSON object.")
+    parts = []
+    for k, v in keys.items():
+        if "only_here" in v:
+            bits = []
+            if v["only_here"]:
+                bits.append("only here: " + ", ".join(json.dumps(x) for x in v["only_here"]))
+            if v["only_there"]:
+                bits.append("only in the main checkout: " + ", ".join(json.dumps(x) for x in v["only_there"]))
+            parts.append("%s (%s)" % (k, "; ".join(bits) or "same entries, different order"))
+        else:
+            parts.append("%s (here %s, main checkout %s)" % (k, json.dumps(v["here"]), json.dumps(v["there"])))
+    return "Keys that differ: " + "; ".join(parts) + "."
+
+
 # `worktree --porcelain` verdicts, and what each is FOR. Only "clean" means compared-and-matching,
 # and it is the only 0 — the ways of not knowing are deliberately NOT folded in with it, because a
 # caller that reads "cannot determine" as "clean" is the exact silent-and-wrong failure this exists
@@ -12601,24 +12664,19 @@ def worktree_drift():
         return {**base, "status": "unreadable",
                 "detail": "rule file(s) could not be read, so they are NOT known to match: "
                           + ", ".join(rules["unreadable"])}
-    # These two ask about the OWNED files specifically. Testing `harness` here once `harness`
-    # included code meant a drifted SCRIPT returned "notes-drifted" and never reached its own
-    # branch -- the widening silently swallowing the finding it was added to surface.
+    # EVERY "COULD NOT TELL" AND EVERY ENFORCING FINDING COMES BEFORE ANY NOTES FINDING (2026-11-16).
+    # The owned-file branch used to sit here, above the code checks, and it returned notes-drifted
+    # (exit 3, warn) for ANY owned difference. LEDGER.md is owned and differs between trees as a
+    # matter of course, so a tree whose ledger had notes in it and whose SCRIPT differed answered
+    # notes-drifted, and an orchestrator that blocks on exit 1 integrated a drifted harness. Its
+    # detail sentence was also the config.local.json one, so a ledger difference was reported as a
+    # policy difference. Found by reproducing both while adding the key diff showrunner asked for.
+    # The order is now: rules, then the ways of not knowing, then code, then notes.
     _local = _compare(["config.local.json"], pdir)
-    base["local_override"] = _local
+    base["local_override"] = {**_local, "keys": (_local_key_diff(
+        os.path.join(ROOT, "config.local.json"), os.path.join(pdir, "config.local.json"))
+        if _local["drifted"] else {})}
     base["compares"]["local_override"] = ["config.local.json"]
-    if owned["drifted"]:
-        return {**base, "status": "notes-drifted",
-                    "detail": "config.local.json differs between these trees. It is not a rule file, "
-                              "but its keys MERGE WITH UNION semantics — allow_write_roots, "
-                              "deploy_verbs, read_roots and every mcp_* grant — so the two trees can "
-                              "enforce different EFFECTIVE policy while every rule file is "
-                              "byte-identical."
-                              + (" Owned files also differ: " + ", ".join(owned["drifted"])
-                                 if owned["drifted"] else "")}
-        return {**base, "status": "notes-drifted",
-                "detail": "the rules match; these owned-but-not-rule file(s) differ, which is "
-                          "ordinary for per-tree notes: " + ", ".join(owned["drifted"])}
     if owned["unreadable"]:
         return {**base, "status": "unreadable",
                 "detail": "owned file(s) could not be read: " + ", ".join(owned["unreadable"])}
@@ -12646,7 +12704,7 @@ def worktree_drift():
                           + ". A game_loop before this fix reported THIS tree as clean, exit 0."}
     if code["drifted"]:
         return {**base, "status": "code-drifted",
-                "detail": "the rules and notes match, but these harness SCRIPTS differ, so the two "
+                "detail": "the rules match, but these harness SCRIPTS differ, so the two "
                           "trees do not enforce them the same way: " + ", ".join(code["drifted"])}
     # LAST, BELOW EVERY DETERMINED FINDING ABOUT THE HARNESS ITSELF. config.local.json changes
     # EFFECTIVE policy — its keys merge with UNION semantics, so allow_write_roots and every mcp_*
@@ -12664,12 +12722,19 @@ def worktree_drift():
     # would keep. The attack path (a session authoring one) is closed at the WRITE by #65; this
     # comparison exists so that two trees which BOTH carry local wiring and disagree stop looking
     # byte-identical to the layer above.
+    notes = []
+    if owned["drifted"]:
+        notes.append("these owned-but-not-rule file(s) differ, which is ordinary for per-tree "
+                     "notes: " + ", ".join(owned["drifted"]))
     if _local["drifted"]:
+        notes.append("config.local.json differs between these trees. Not a rule file, but its "
+                     "keys MERGE WITH UNION semantics — allow_write_roots, deploy_verbs, "
+                     "read_roots and every mcp_* grant — so these trees can enforce different "
+                     "EFFECTIVE policy while every rule file is byte-identical. "
+                     + _local_keys_sentence(base["local_override"]["keys"]))
+    if notes:
         return {**base, "status": "notes-drifted",
-                "detail": "config.local.json differs between these trees. Not a rule file, but its "
-                          "keys MERGE WITH UNION semantics — allow_write_roots, deploy_verbs, "
-                          "read_roots and every mcp_* grant — so these trees can enforce different "
-                          "EFFECTIVE policy while every rule file is byte-identical."}
+                "detail": "the rules and harness scripts match; " + " Also, ".join(notes)}
     pin_note = ""
     if there_pinned and not here_pinned:
         # STATED, NOT AUTO-FIXED (#38). A pin is deliberately not carried into a worktree: a

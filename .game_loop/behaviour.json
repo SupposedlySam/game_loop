@@ -884,6 +884,24 @@
       "change": "The opt-in limit probe (limits.probe.enabled) no longer renders a status line in a pty. It runs one headless `claude -p` turn with hooks off and no MCP servers, and reads the usage windows from the stream-json rate_limit_event (utilization becomes used_percentage, resetsAt becomes resets_at). context_window is now null in a probe reading. A run that returns no rate_limit_event exits 1; a missing binary, a failure or a timeout (GAME_LOOP_PROBE_WAIT_SEC, default 90) exits 2.",
       "consequence": "a probe costs about 26k input tokens instead of about 64k, measured 2026-11-16. A probe reading no longer carries a context-window figure; the live status line still does.",
       "why_it_qualifies": "a cheaper probe and a changed reading shape for projects that opted in. #146; the owner decided under Jonah's delegation (2026-11-16): \"make the decisions that are best for our users\"."
+    },
+    {
+      "seq": 95,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "commit gate: a --no-verify commit is recorded with what it still owed; status counts them",
+      "change": "A `git commit --no-verify` into this project, through the Bash tool, is still allowed. The write guard now asks `verify --check` about the set that commit carries and appends commit_gate_bypassed to log.jsonl: verdict owed / nothing-owed / undetermined, the stale rules, the scope and the session. `status` has a new `bypass` line in COVERAGE: the count over the last 7 days, how many still owed a check, and the latest one's rules. It says 'none recorded' when there were none, and UNKNOWN when the log cannot be read.",
+      "consequence": "nothing is refused that was not refused before. A --no-verify commit costs one `verify --check` (timestamps only, no checks run), and how often the gate is walked past now shows in every status.",
+      "why_it_qualifies": "the refusal has always offered --no-verify \"to skip it on the record\", and no record was kept. Agreed with showrunner (2026-11-09), who measured 6 of 102 bypasses straight after a refusal and 48 pre-emptive. Not seen: a commit from a terminal or a script, or one whose target a variable builds."
+    },
+    {
+      "seq": 96,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "verify: evidence is dated from when its checks STARTED",
+      "change": "`verify` stamps each rule it ran with the time the run started, not the time it finished. A file in scope edited while the checks ran is now newer than its evidence, so `verify --check` and the commit gate refuse it until it is checked again.",
+      "consequence": "editing a gated file during its own verify (a long suite, a second session) now owes another run where it used to pass. Nothing that was refused before is allowed now.",
+      "why_it_qualifies": "a refusal now fires where the gate used to pass silently. Found 2026-11-16: test/run.py was edited during its own six-minute verify, and the old stamp would have let the commit carry content no check had seen."
     }
   ],
   "schema": 1

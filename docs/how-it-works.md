@@ -940,7 +940,17 @@ Two things it still does not do. The commands themselves run over the *working t
 stashes — so the evidence for a partial commit was never isolated from the unstaged work around it
 and is not isolated now; this narrows which rules are consulted and which stamps must be fresh.
 And staleness compares the working-tree mtime of a file in scope, so staging and then editing further
-refuses. Both err toward refusing.
+refuses. Evidence is dated from when its run STARTED, so a file edited while its checks ran owes
+another run. All three err toward refusing.
+
+**A `--no-verify` commit is recorded, never refused.** It is the gate's own documented way out, and
+the refusal says to use it "on the record", so the write guard keeps that record. It asks
+`verify --check` the question the gate would have asked, about the same set the commit carries,
+and logs `commit_gate_bypassed` with the verdict (`owed`, `nothing-owed` or `undetermined`) and the
+stale rules. `status` counts the last week's bypasses in its COVERAGE block, and how many of them
+still owed a check. It sees only commits made through the Bash tool into this project, at a target
+it can name. A terminal commit, a script that commits once it runs, and a target built from a
+variable are not recorded.
 
 **What a map of listed paths cannot say.** It answers "is anything listed here stale?", never "is
 anything unverified?" — a path matching no glob owes nothing and passes `--check` in silence. That is

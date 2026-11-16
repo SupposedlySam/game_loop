@@ -12174,6 +12174,53 @@ def _short(p):
 COVERAGE_SHOWN = 5
 
 
+BYPASS_WINDOW_DAYS = 7
+
+
+def bypass_lines(now=None):
+    """The `bypass` line of the COVERAGE block: --no-verify commits recorded in the last week.
+
+    The commit gate's refusal offers --no-verify "to skip it on the record", and the write guard now
+    keeps that record (commit_gate_bypassed). A gate walked past is the other half of what it covers:
+    a rule nobody can see being skipped is a rule whose reach nobody can argue about. showrunner
+    measured 6 of 102 --no-verify commits coming straight after a refusal, and 48 pre-emptive where
+    the gate was armed (2026-11-09), so this counts the ones that still OWED a check separately.
+
+    Always one line, never silent: "none recorded" is a reading, and an unreadable log says so
+    rather than reading as none.
+    """
+    now = now or datetime.datetime.now()
+    since = now - datetime.timedelta(days=BYPASS_WINDOW_DAYS)
+    recs = []
+    try:
+        with open(LOG_F) as f:
+            for line in f:
+                if '"commit_gate_bypassed"' not in line:
+                    continue
+                try:
+                    r = json.loads(line)
+                    t = datetime.datetime.fromisoformat(r.get("t") or "")
+                except ValueError:
+                    continue
+                if r.get("kind") == "commit_gate_bypassed" and t >= since:
+                    recs.append(r)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        return [f"  bypass : UNKNOWN — .game_loop/log.jsonl could not be read ({e.strerror}), so "
+                "--no-verify commits cannot be counted."]
+    if not recs:
+        return [f"  bypass : no --no-verify commit recorded in the last {BYPASS_WINDOW_DAYS} days."]
+    owed = [r for r in recs if r.get("verdict") == "owed"]
+    out = [f"  bypass : {len(recs)} --no-verify commit(s) in the last {BYPASS_WINDOW_DAYS} days, "
+           f"{len(owed)} of them with checks still OWED"]
+    if owed:
+        last = owed[-1]
+        names = ", ".join(last.get("owed") or []) or (last.get("report") or "see the log")
+        out.append(f"           latest {last.get('t', '?')}: {names[:150]}")
+    return out
+
+
 def coverage_report(s):
     """The COVERAGE block for `status` — what these rails are NOT looking at (issue #25).
 
@@ -12231,6 +12278,7 @@ def coverage_report(s):
         if unchecked:
             lines.append('           → add a rule, or list it under "unchecked-ok" in '
                          ".game_loop/verify.yaml")
+    lines.extend(bypass_lines())
     lines.append("  writes : ALLOWLIST — only this repo, the temp dir, agent memory and "
                  f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
     lines.append("           written. Everything else is denied WITHOUT being named, so nothing "

@@ -1222,7 +1222,7 @@ prompt surface is not knowable from inside a hook."
     # read by a verify started afterwards, and this repo routinely has twenty sessions committing
     # into one checkout. Two of them sharing a scope file would gate each other's commits.
     SCOPE_OUT="/tmp/.game_loop_scope.${SLUG:-default}.${SID:-nosid}"
-    rm -f "$SCOPE_OUT" "$SCOPE_OUT.inband" "$SCOPE_OUT.writes"
+    rm -f "$SCOPE_OUT" "$SCOPE_OUT.inband" "$SCOPE_OUT.writes" "$SCOPE_OUT.bypass" "$SCOPE_OUT.bypass.scope"
     commit_scan=$(REPO_REAL="$REPO_REAL" GAMELOOP_DIR="$GAMELOOP_DIR" SCAN_CMD="$scan_cmd" SCOPE_OUT="$SCOPE_OUT" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 payload = json.loads(sys.argv[1])
@@ -1240,6 +1240,8 @@ unresolved = ""            # the raw fragment that made a COMMIT's target unread
 inband_seg = ""            # the FIRST such segment, so the note can name it
 index_touched = False      # an in-band segment that RESTAGES — see _INDEX_VERBS below
 writes_in_band = False    # an in-band segment not PROVABLY read-only — see reads_only
+bypass_target = None      # the tree a `--no-verify` commit lands in, when it is this project's
+bypass_args = None        # ...and that commit's argv, so the record reads what it CARRIES
 
 # The git verbs that can change WHAT IS STAGED. Only these invalidate an index read; `git status &&
 # git commit` is left narrow, because over-gating a clean bundle is the cost #28 was written to
@@ -1473,6 +1475,26 @@ def strip_redirections(args):
 # reported as the segment that "WRITES BEFORE IT COMMITS".
 _HD_CLOSERS = {d for _q, d in re.findall(
     re.escape(chr(60) * 2) + r"-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", cmd)}
+def commit_target(args, cwd, cwd_dynamic, cwd_raw):
+    """(tree, dynamic, raw) for a commit segment: where it lands, whether a variable decides that, and
+    the fragment that does. `git -C <dir>` beats the tracked cwd."""
+    tgt, dyn, raw = cwd, cwd_dynamic, (cwd_raw if cwd_dynamic else "")
+    if "-C" in args and args.index("-C") + 1 < len(args):
+        raw_c = args[args.index("-C") + 1]
+        if _DYNAMIC.search(raw_c.replace("$HOME", "")):
+            dyn, raw = True, raw_c
+        c = os.path.expanduser(raw_c.replace("$HOME", home))
+        tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
+    return tgt, dyn, raw
+
+
+def in_project(tgt):
+    root = os.path.realpath(repo).rstrip(os.sep)
+    real = os.path.realpath(tgt)
+    return real == root or real.startswith(root + os.sep)
+
+
+cwd_raw = ""
 for seg in shell_segments(cmd):
     seg = seg.strip()
     if not seg:
@@ -1506,6 +1528,16 @@ for seg in shell_segments(cmd):
         # NARROW, so the gate falls back to the whole tree -- the same fallback every other
         # unreadable command already takes, costing speed and never the gate.
         index_touched = True
+    if verb == "git" and "commit" in args and "--no-verify" in args and bypass_target is None:
+        # A BYPASS IS RECORDED, NEVER REFUSED. --no-verify is the gate's own documented way out, and
+        # its refusal says "skip it on the record" -- which was untrue until this: nothing wrote it
+        # down, so how often the gate was walked past, and with what still owed, was unanswerable.
+        # showrunner measured it (2026-11-09): 6 of 102 --no-verify commits came right after a
+        # refusal, 48 were pre-emptive in repos where the gate was armed. A target a variable
+        # decides is not recorded: the commit lands somewhere this cannot name.
+        _t, _dyn, _raw = commit_target(args, cwd, cwd_dynamic, cwd_raw)
+        if not _dyn and in_project(_t):
+            bypass_target, bypass_args = _t, strip_redirections(args)
     if verb == "git" and "commit" in args and "--no-verify" not in args:
         # #40: FAIL CLOSED when the target cannot be READ, not merely when it is elsewhere.
         # A variable resolves to nothing this scan can match against the repo, so the commit used to
@@ -1519,20 +1551,13 @@ for seg in shell_segments(cmd):
         # two legitimate messages in one afternoon — prose ABOUT a commit is not a commit, and the
         # agents most likely to write such prose are the ones reporting guard defects. A guard that
         # refuses too much is the one that gets switched off (INV5).
-        tgt, dyn, raw = cwd, cwd_dynamic, (cwd_raw if cwd_dynamic else "")
-        if "-C" in args and args.index("-C") + 1 < len(args):
-            raw_c = args[args.index("-C") + 1]
-            if _DYNAMIC.search(raw_c.replace("$HOME", "")):
-                dyn, raw = True, raw_c
-            c = os.path.expanduser(raw_c.replace("$HOME", home))
-            tgt = c if os.path.isabs(c) else os.path.join(cwd, c)
+        tgt, dyn, raw = commit_target(args, cwd, cwd_dynamic, cwd_raw)
         if dyn:
             found = True
             if not unresolved:
                 unresolved = raw
             continue
-        if os.path.realpath(tgt).startswith(os.path.realpath(repo).rstrip(os.sep) + os.sep) \
-                or os.path.realpath(tgt) == os.path.realpath(repo):
+        if in_project(tgt):
             found = True
             commit_count += 1
             if target is None:
@@ -1673,21 +1698,24 @@ def resolve_scope(mode, paths, tree):
     return None
 
 
-answerable = ""
-if unresolved:
-    answerable = "unresolvable:" + unresolved
-elif found:
-    own = "root:" + os.environ["GAMELOOP_DIR"]
+def answerable_for(tgt):
+    """root:<.game_loop> whose record this commit answers to, or undetermined:<tree>."""
     root = os.path.realpath(repo).rstrip(os.sep)
-    top = tree_of(target)
+    top = tree_of(tgt)
     if top and top != root and top.startswith(root + os.sep):
         # A DIFFERENT tree, nested inside the project: a worktree, or a repo of its own. Its files
         # are the ones being committed, so its record is the only evidence that describes them.
         gl = os.path.join(top, ".game_loop")
-        answerable = ("root:" + gl if os.path.exists(os.path.join(gl, "bin", "verify"))
-                      else "undetermined:" + top)
-    else:
-        answerable = own
+        return ("root:" + gl if os.path.exists(os.path.join(gl, "bin", "verify"))
+                else "undetermined:" + top)
+    return "root:" + os.environ["GAMELOOP_DIR"]
+
+
+answerable = ""
+if unresolved:
+    answerable = "unresolvable:" + unresolved
+elif found:
+    answerable = answerable_for(target)
 scope_mode = ""
 if commit_args is not None and commit_count == 1 and answerable.startswith("root:"):
     _mode, _paths = read_scope_mode(commit_args)
@@ -1714,6 +1742,29 @@ if writes_in_band and commit_count:
             _f.write(inband_seg + "\n")
     except OSError:
         pass                     # cannot mark it -> no note, which is the behaviour before this
+if bypass_target is not None:
+    # Line 1 the record to read, line 2 the scope mode ("tree" = everything dirty). The scope file
+    # beside it lists what the commit carries, the same set a gated commit would be checked on.
+    _b = answerable_for(bypass_target)
+    _bmode = "tree"
+    if _b.startswith("root:"):
+        _mode, _paths = read_scope_mode(bypass_args)
+        if index_touched and _mode in ("index", "all", "include"):
+            _mode = "tree"
+        if _mode != "tree":
+            _files = resolve_scope(_mode, _paths, os.path.dirname(_b[len("root:"):]))
+            if _files is not None:
+                try:
+                    with open(os.environ["SCOPE_OUT"] + ".bypass.scope", "w") as _f:
+                        _f.write("\n".join(_files) + ("\n" if _files else ""))
+                    _bmode = _mode
+                except OSError:
+                    pass
+    try:
+        with open(os.environ["SCOPE_OUT"] + ".bypass", "w") as _f:
+            _f.write(_b + "\n" + _bmode + "\n")
+    except OSError:
+        pass                     # cannot mark it -> not recorded, which is the behaviour before this
 print("yes" if found else "")
 print(answerable)
 print(scope_mode)
@@ -1727,6 +1778,55 @@ PY
     # what this gate did for its whole life before the line existed. Chained segments start at 4.
     commit_scope=$(printf '%s\n' "$commit_scan" | sed -n '3p')
     chained_segs=$(printf '%s\n' "$commit_scan" | tail -n +4 | grep -v '^$' || true)
+    # A --no-verify COMMIT IS WRITTEN DOWN, never refused (see bypass_target in the scan). The
+    # refusal below has always said "commit with --no-verify to skip it on the record", and until
+    # this nothing kept that record: how often the gate is walked past, and with what still owed,
+    # had no answer. `verify --check` is asked the same question the gate would have asked, about
+    # the same set the commit carries, and the answer is logged as commit_gate_bypassed; `status`
+    # counts them. It reads timestamps and runs no check, so the bypass stays cheap.
+    # WHAT THIS DOES NOT SEE: a commit made outside this harness's Bash tool (a terminal, a script
+    # that commits once run), and one whose target a variable decides.
+    if [ -s "$SCOPE_OUT.bypass" ]; then
+      _bp_root=$(sed -n 1p "$SCOPE_OUT.bypass")
+      _bp_mode=$(sed -n 2p "$SCOPE_OUT.bypass")
+      _bp_verdict="undetermined"
+      _bp_report=""
+      case "$_bp_root" in
+        root:*)
+          _BP_ARGS=()
+          [ "$_bp_mode" != "tree" ] && [ -f "$SCOPE_OUT.bypass.scope" ] \
+            && _BP_ARGS=(--scope-from "$SCOPE_OUT.bypass.scope")
+          if _bp_report=$(run_verify "${_bp_root#root:}" --check ${_BP_ARGS[@]+"${_BP_ARGS[@]}"} 2>&1); then
+            _bp_verdict="nothing-owed"
+          else
+            _bp_verdict="owed"
+          fi
+          ;;
+      esac
+      [ -d "$GAMELOOP_DIR" ] && python3 - "$GAMELOOP_DIR/log.jsonl" "$_bp_root" "$_bp_mode" \
+          "$_bp_verdict" "$_bp_report" "$SID" <<'PYLOG' 2>/dev/null || true
+import datetime, json, re, sys
+log, root, mode, verdict, report, sid = sys.argv[1:7]
+owed = []
+if verdict == "owed":
+    # The stale RULES, read off verify's own refusal: each is a two-space-indented pattern under
+    # its header. A refusal of another shape (an unreadable manifest) leaves this empty and the
+    # verdict still says owed, with the report's first line kept beside it.
+    body = report.split("VERIFY REFUSED", 1)
+    if len(body) == 2:
+        owed = [m.group(1) for m in re.finditer(r"(?m)^  (\S[^\n]*?)(?:   \(.*)?$", body[1])]
+rec = {"t": datetime.datetime.now().isoformat(timespec="seconds"), "kind": "commit_gate_bypassed",
+       "session": sid, "tree": root.split(":", 1)[-1], "scope": mode, "verdict": verdict,
+       "owed": owed}
+if verdict == "owed" and not owed:
+    rec["report"] = (report.strip().splitlines() or [""])[0][:200]
+try:
+    with open(log, "a") as f:
+        f.write(json.dumps(rec) + "\n")
+except OSError:
+    pass
+PYLOG
+    fi
     if [ "$commit_here" = "yes" ]; then
       case "$commit_root" in
         unresolvable:*)

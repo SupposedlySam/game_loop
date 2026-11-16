@@ -863,6 +863,12 @@ def main():
             if cmd not in order:
                 order.append(cmd)
 
+    # THE STAMP IS WHEN THE CHECKS STARTED, not when they finished. A run takes minutes (this repo's
+    # suite takes six), and a file edited while it ran was checked in its OLD form. Stamped at the end,
+    # that edit read as older than its evidence, so `--check` passed a change no command ever saw.
+    # Found 2026-11-16 by editing test/run.py during its own verify. Stamped at the start, an edit
+    # made mid-run is newer than the evidence and owes a run, which is the truth.
+    started = time.time()
     failed = False
     for cmd in order:
         owed_by = [p for p, _, _, _, _ in stale if cmd in mapping[p]]
@@ -882,7 +888,7 @@ def main():
     # commands is stamped, which is what the old for/else did too.
     for pattern, _, _, _, _ in stale:
         if all(ran.get(c) == 0 for c in mapping[pattern]):
-            rec.setdefault(pattern, {})["at"] = time.time()
+            rec.setdefault(pattern, {})["at"] = started
             rec[pattern]["cmds"] = mapping[pattern]
 
     with open(REC_F, "w") as f:

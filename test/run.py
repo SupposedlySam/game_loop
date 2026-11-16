@@ -15483,6 +15483,101 @@ def main():
           and any(json.loads(l).get("kind") == "commit_gate_unharnessed_tree"
                   for l in read_or_empty(_log).splitlines() if l.strip()))
 
+    print("a --no-verify commit is written down with what it still owed, and status counts them:")
+    # The commit gate's refusal has always said "commit with --no-verify to skip it on the record",
+    # and nothing kept the record: how often the gate was walked past, and with what still owed,
+    # had no answer. showrunner measured the split (2026-11-09: 6 of 102 came right after a
+    # refusal, 48 were pre-emptive where the gate was armed); the guard now logs each one.
+    nv = make_sandbox()
+    try:
+        subprocess.run(["git", "init", "-q", nv], capture_output=True)
+        with open(os.path.join(nv, ".game_loop", "verify.yaml"), "w") as f:
+            f.write('"*.txt":\n  - "false"\n')
+        with open(os.path.join(nv, "note.txt"), "w") as f:
+            f.write("x\n")
+        with open(os.path.join(nv, "readme.md"), "w") as f:
+            f.write("x\n")
+        subprocess.run(["git", "add", "--", "note.txt"], cwd=nv, capture_output=True)
+        _nvlog = os.path.join(nv, ".game_loop", "log.jsonl")
+
+        def _bypasses():
+            return [json.loads(l) for l in read_or_empty(_nvlog).splitlines()
+                    if '"commit_gate_bypassed"' in l]
+
+        _plain = {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}, "cwd": nv}
+        check("the control: the same commit WITHOUT --no-verify is refused, so the checks really "
+              "are owed here", denied(guard(nv, _plain)))
+        check("...and a refusal is not a bypass: nothing is recorded for it", _bypasses() == [])
+        _nvp = {"tool_name": "Bash", "tool_input": {"command": "git commit --no-verify -m x"},
+                "cwd": nv}
+        check("a --no-verify commit is still ALLOWED: it is the gate's own documented way out, so "
+              "it is recorded, never refused", allowed(nv, _nvp))
+        _b = _bypasses()
+        check("...and it is recorded as commit_gate_bypassed, verdict owed, naming the stale rule "
+              "the commit carries",
+              len(_b) == 1 and _b[0].get("verdict") == "owed" and _b[0].get("owed") == ["*.txt"]
+              and _b[0].get("scope") == "index")
+        subprocess.run(["git", "reset", "-q", "--", "note.txt"], cwd=nv, capture_output=True)
+        subprocess.run(["git", "add", "--", "readme.md"], cwd=nv, capture_output=True)
+        guard(nv, _nvp)
+        _b = _bypasses()
+        check("...a --no-verify commit that owed nothing is recorded too, as nothing-owed: the "
+              "count is of bypasses, and what they cost is a separate column",
+              len(_b) == 2 and _b[1].get("verdict") == "nothing-owed" and _b[1].get("owed") == [])
+        _else = tempfile.mkdtemp(prefix="gameloop-other-")
+        try:
+            guard(nv, {"tool_name": "Bash", "cwd": _else,
+                       "tool_input": {"command": "git commit --no-verify -m x"}})
+        finally:
+            shutil.rmtree(_else, ignore_errors=True)
+        check("...and a --no-verify commit into a DIFFERENT repo is not this project's bypass",
+              len(_bypasses()) == 2)
+        _st = gl(nv, "status").stdout
+        check("status counts them in the COVERAGE block, with how many still owed a check and the "
+              "latest one's rules",
+              "bypass : 2 --no-verify commit(s) in the last 7 days, 1 of them with checks still "
+              "OWED" in _st and "*.txt" in _st.split("bypass :", 1)[-1][:400])
+        _quiet = make_sandbox()
+        try:
+            check("...and a project with none says so in one line, rather than going silent",
+                  "bypass : no --no-verify commit recorded in the last 7 days." in
+                  gl(_quiet, "status").stdout)
+        finally:
+            shutil.rmtree(_quiet, ignore_errors=True)
+    finally:
+        shutil.rmtree(nv, ignore_errors=True)
+
+    print("verify stamps when its checks STARTED, so an edit made while they ran still owes a run:")
+    # Stamped at the END, a file edited mid-run read as older than its evidence and `--check`
+    # passed a change no command had seen. Found 2026-11-16: test/run.py edited during its own
+    # six-minute verify, and the commit gate would have let it through.
+    vs = make_sandbox()
+    try:
+        subprocess.run(["git", "init", "-q", vs], capture_output=True)
+        with open(os.path.join(vs, "note.txt"), "w") as f:
+            f.write("x\n")
+        subprocess.run(["git", "add", "--", "note.txt"], cwd=vs, capture_output=True)
+
+        def _vs(*a):
+            return subprocess.run([os.path.join(vs, ".game_loop", "bin", "verify"), *a], cwd=vs,
+                                  capture_output=True, text=True, env=_env(vs))
+
+        with open(os.path.join(vs, ".game_loop", "verify.yaml"), "w") as f:
+            f.write('"*.txt":\n  - "true"\n')
+        _vs()
+        check("the control: a run that edits nothing leaves --check green", _vs("--check").returncode == 0)
+        with open(os.path.join(vs, ".game_loop", "verify.yaml"), "w") as f:
+            f.write('"*.txt":\n  - "sleep 1 && echo y >> note.txt"\n')
+        _r = _vs()
+        check("...the run that edits the gated file while it runs still PASSES (its command exited 0)",
+              _r.returncode == 0)
+        _c = _vs("--check")
+        check("...and --check then REFUSES: the edit is newer than the evidence, because the evidence "
+              "is dated from when the command started",
+              _c.returncode == 1 and "VERIFY REFUSED" in _c.stdout and "*.txt" in _c.stdout)
+    finally:
+        shutil.rmtree(vs, ignore_errors=True)
+
     print("a revert-proof the TOOL performs, because a reported one reads the same either way (#71):")
     # "Reverted the fix, watched it fail, restored" is ONE SENTENCE whether or not it happened. A
     # consumer fanned out eight leaves that each reported exactly that; an independent reviewer

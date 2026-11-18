@@ -2473,6 +2473,48 @@ MUTANTS += [
      "only caller of _compare_code and pin_status's second use -- true, and about the scan, not "
      "this producer -- and this file's 2 coverage-gate checks, which fail in every unrecorded "
      "clone.", 26),
+    ("harden_rung -> --rung takes any text again, as a string",
+     ".game_loop/bin/_gl_impl.py::harden_rung", '    return text\n',
+     ['rung is the INT 3', 'log record carries the same int', 'cost ladder (T0) is refused',
+      'number off the ladder', 'neither refusal wrote a record'],
+     "PROVISIONAL floor 1, awaiting measurement. Every killer is the triggers section's payload "
+     "shape block, written with this producer.", 1),
+    ("artifact_relative -> the payload's relative twin becomes the absolute paths",
+     ".game_loop/bin/_gl_impl.py::artifact_relative",
+     '    return [os.path.realpath(p) for p in paths]\n',
+     ['artifact_relative is the repo-relative twin'],
+     "PROVISIONAL floor 1, awaiting measurement. The body returns the shape the defect had: "
+     "this machine's layout, which a sharing trigger would post.", 1),
+    ("piped_verdict_reason -> never refuses: `pytest | tail` reads green again",
+     ".game_loop/bin/_gl_impl.py::piped_verdict_reason", '    return None\n',
+     ['a runner whose status is lost', 'the refusal names the filter', 'a heredoc body is not shell',
+      'only Bash is judged', 'the first run is DENIED', 'IDENTICAL command again passes',
+      'override is SPENT', 'DIFFERENT command is its own', 'status counts refusals'],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+    ("shell_code_only -> quoted text and heredocs are read as code again",
+     ".game_loop/bin/_gl_impl.py::shell_code_only", '    return command or ""\n',
+     ['the shapes that keep the status'],
+     "PROVISIONAL floor 1, awaiting measurement. The quiet half's commit-message and heredoc cases "
+     "are the only ones that see it.", 1),
+    ("shell_gate -> no retry: every repeat is refused, the opt-out is gone",
+     ".game_loop/bin/_gl_impl.py::shell_gate",
+     '    name, reason = shell_verdict(payload)\n'
+     '    if not name:\n'
+     '        return None\n'
+     '    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+     '"permissionDecision": "deny", "permissionDecisionReason": reason}}\n',
+     ['IDENTICAL command again passes', 'status counts refusals'],
+     "PROVISIONAL floor 1, awaiting measurement. The body still denies, so only the retry and "
+     "log assertions can see it.", 1),
+    ("shell_verdict -> no shell check is ever consulted",
+     ".game_loop/bin/_gl_impl.py::shell_verdict", '    return None, None\n',
+     ['only Bash is judged', 'the first run is DENIED', 'status counts refusals'],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+    ("recent_log_records -> the log always reads as empty",
+     ".game_loop/bin/_gl_impl.py::recent_log_records", '    return []\n',
+     ['status counts refusals'],
+     "PROVISIONAL floor 1, awaiting measurement. Also the reader under bypass_lines, so the "
+     "--no-verify count checks may kill it too.", 1),
 ]
 
 
@@ -2484,6 +2526,8 @@ _HEREDOC_GAP = (
 
 
 NOT_SWEPT = {
+    "test/run.py::_pv_kinds": "a suite helper: it reads the sandbox log's record kinds for the "
+        "shell-gate section, and neutering it would test the test rather than the gate.",
     ".game_loop/bin/watchdog::_g": "a CLOSURE inside phase_head_facts, not a module-level producer: it cannot be neutered independently of its only caller, and sweeping that caller sweeps it. Named here rather than left silent, which is what this file refuses.",
     # A TEST STUB IS NOT A PRODUCER. `_fake_git` exists inside test/run.py to feed
     # `release_distance` canned git output, so the two parsing decisions that broke there can be

@@ -920,6 +920,24 @@
       "change": "A heredoc fed to `showrunner ... --reason-file -` (or --title, --who, --stale-proof-reason, --note, --prompt) is treated as data, like `git commit -F -`. A refusal caused by a heredoc read by any other program the guard does not know now says so, and names `cat > <file>` as the way through instead of leaving `authorize` as the only route shown.",
       "consequence": "a Crawler's close report that names a path with a placeholder like <tree>/... is no longer refused. A heredoc fed to an unknown program is still refused; only its sentence changed.",
       "why_it_qualifies": "a command that was refused is now allowed. Reported by showrunner 2026-11-16; showrunner's cli.py _resolve_prose read to confirm those flags only read stdin as text."
+    },
+    {
+      "seq": 99,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "harden --rung / the harden trigger payload",
+      "change": "`harden --rung` takes only 1-6 and records it as an int, in the log and in the harden trigger payload (it was a free string: \"3\"). Anything else is refused before a record is written, and a cost-ladder value like T0 is refused with a line saying which ladder is which. The payload gains `artifact_relative`: the artifact paths relative to the repo, null for a path outside it, beside the absolute `artifact` list, which is unchanged.",
+      "consequence": "a harden trigger that compared rung to a string (`rung == \"3\"`) now sees an int; one that formats it or calls int() is unaffected. `--rung T0`, `--rung two` or `--rung 7` now fail with exit 2 and record nothing. Log records written before this keep their strings.",
+      "why_it_qualifies": "a value type in a payload consumers read changes, and input that was accepted is refused. Reported by llm_chat and wcs in the 2026-11-18 hardened-learnings harvest (each found the string rung and absolute paths from a captured payload); wcs's log holds two rung \"T0\" records."
+    },
+    {
+      "seq": 100,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "limitgate hook (Bash): the shell gate, first check piped-verdict",
+      "change": "The limitgate PreToolUse hook now refuses a Bash command that pipes a test/check/build runner (pytest, test/run.py, npm test, cargo test, flutter analyze, make, ...) into tail, head or grep, because the pipeline then exits with the filter's status and a failing run reads green. It is quiet when pipefail or PIPESTATUS is used, when the output goes to a file first, and when the runner only appears in quoted text, a heredoc body, or as an argument. Running the IDENTICAL command again within 10 minutes passes with a notice; that override is logged (shell_gate_override) and each refusal is logged (shell_gate_block). status COVERAGE gains a `shell` line counting both per check.",
+      "consequence": "`pytest | tail -5` and its kin are refused once, with the reason and two rewrites (`> file; echo $?; tail file`, or `set -o pipefail`). An agent that means it repeats the command and it runs. No settings change or reload: the hook was already registered. A project's own piped-verdict trigger now duplicates this check.",
+      "why_it_qualifies": "a Bash call that ran before is now refused on its first attempt. Reported by three projects in the 2026-11-18 hardened-learnings harvest (llm_chat's piped-verdict trigger, lamp, wcs), each with a private guard for it."
     }
   ],
   "schema": 1

@@ -2662,7 +2662,14 @@ def unbound_mandate_notice(s, payload):
 
 def cmd_limitgate(s, a, payload):
     """PreToolUse entrypoint for the limit gate. Same output protocol as guard-writes.sh: a deny is
-    JSON on stdout with permissionDecision=deny, always exit 0."""
+    JSON on stdout with permissionDecision=deny, always exit 0.
+
+    The shell checks run first (see shell_gate): they judge the command itself, and a refusal there
+    is the more specific answer for the agent to read."""
+    _shell = shell_gate(s, payload, time.time())
+    if _shell is not None:
+        print(json.dumps(_shell))
+        sys.exit(0)
     allow, reason = _limitgate_verdict(s, payload, time.time())
     if allow:
         # THE NOTICE RIDES THE ALLOW PATH ONLY. A call that is being refused already has the
@@ -2776,6 +2783,161 @@ def cmd_crongate(s, a, payload):
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
         "permissionDecisionReason": reason}}))
     sys.exit(0)
+
+
+# ── shell gate: what a Bash command will report, judged before it runs ───────────────────────────
+#
+# HOSTED BY THE LIMITGATE HOOK, NOT A NEW ONE. limitgate already runs on every Bash call and already
+# carries a check that has nothing to do with limits (unbound_mandate_notice). A new hook entry would
+# reach a consumer only after they edited settings.json and reloaded; this reaches them on upgrade.
+# The checks are pure functions over the command text, so they stay separable from the limit logic.
+#
+# THE OPT-OUT IS THE SAME COMMAND, AGAIN. A check here judges text, and text can be misread. So a
+# refusal is spent by running the IDENTICAL command a second time within SHELL_RETRY_SEC: the agent
+# has read the reason and decided. The pattern is llm_chat's authority-gate (fires once per distinct
+# message), asked for by Jonah on 2026-11-18 so that a bug in game_loop never strands a session. An
+# override is logged (shell_gate_override) and counted in status, so a check that is wrong shows up
+# as a pile of overrides instead of being quietly worked around.
+SHELL_RETRY_SEC = 600
+
+# A COMMAND WHOSE EXIT CODE IS THE ANSWER: test runners, checkers, builds. Kept as a list of words
+# rather than one regex so a new runner is one line.
+_VERDICT_WORDS = (
+    r"pytest", r"py\.test", r"unittest", r"tox", r"nox", r"test/run\.py", r"test/\w+\.py",
+    r"(?:bin/|\.game_loop/bin/)verify", r"game_loop\s+verify", r"make\b",
+    r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|lint|check)", r"npx\s+(?:jest|vitest|tsc|eslint)",
+    r"jest", r"vitest", r"tsc", r"eslint", r"ruff", r"mypy", r"pyright",
+    r"cargo\s+(?:test|build|check|clippy)", r"go\s+(?:test|build|vet)",
+    r"(?:dart|flutter)\s+(?:test|analyze)", r"sip\s+test", r"swift\s+(?:test|build)",
+    r"xcodebuild", r"(?:\./)?gradlew?\s", r"mvn\s", r"bazel\s+(?:test|build)", r"ctest",
+    r"rspec", r"phpunit", r"bash\s+-n", r"shellcheck",
+)
+# A runner counts only in COMMAND POSITION of a pipeline stage: `grep -n make notes | head` names
+# make as an argument and must stay quiet (a false positive measured while writing this). What may
+# stand in front of it: a subshell paren, env assignments, a wrapper (time/env/nice/timeout N), a
+# launcher (python3 [-m], uv/poetry run, npx/bunx, bash/sh) and a leading path (./, .venv/bin/).
+_VERDICT_PREFIX = (r"^[\s(]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
+                   r"(?:(?:time|env|nice|command|exec|timeout\s+\S+)\s+)*"
+                   r"(?:(?:python3?|uv\s+run|poetry\s+run|npx|bunx|bash|sh)(?:\s+-m)?\s+)?"
+                   r"(?:[\w.~-]*/)*")
+_VERDICT_PAT = re.compile(_VERDICT_PREFIX + r"(?:" + "|".join(_VERDICT_WORDS) + r")")
+# The filters that become the pipeline's exit status. grep is included: `cmd | grep ok` reports
+# grep's verdict on the text, never cmd's (lamp's harvest entry 8).
+_INTO_FILTER_PAT = re.compile(r"\|&?\s*(?:tail|head|grep)\b")
+# Either of these keeps the runner's status readable, so the pipe is fine.
+_KEEPS_STATUS_PAT = re.compile(r"\bpipefail\b|\bPIPESTATUS\b")
+_HEREDOC_OPEN_PAT = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
+def shell_code_only(command):
+    """The parts of a Bash command the shell will EXECUTE, with quoted text and heredoc bodies
+    blanked. Pure. The quote half is `_blank_quoted`, the mention-versus-use fix the unbound-mandate
+    notice already uses; this adds heredoc bodies, which that notice never needed.
+
+    A commit message that says "never pipe pytest into tail" must not be read as doing it, and the
+    body of `python3 - <<'PY'` is Python, not shell. Quoted spans keep their length; heredoc body
+    lines are emptied. NOT SEEN, and each is a miss rather than a false refusal: a command inside
+    `bash -c "..."` or `eval` (its code is a quoted string here), and anything after a `<<` that
+    sits inside quotes on its own line, which this reads as opening a heredoc."""
+    out, marker = [], None
+    for line in (command or "").splitlines():
+        if marker is not None:
+            if line.strip() == marker:
+                marker = None
+            out.append("")
+            continue
+        m = _HEREDOC_OPEN_PAT.search(line)
+        if m:
+            marker = m.group(1)
+        out.append(line)
+    # Heredocs FIRST: a body line saying "don't" would otherwise open a quote that _blank_quoted
+    # pairs with the next apostrophe in the real command, blanking code and showing prose.
+    return _blank_quoted("\n".join(out))
+
+
+PIPED_VERDICT_REFUSAL = """BLOCKED: a test/check result read through `| %s`, which replaces its exit
+code with %s's (piped-verdict).
+
+  %s
+
+A pipeline reports the exit status of its LAST command. So this reads green whether `%s` passed or
+failed, and the lines %s keeps are not the failure detail when the failure printed earlier.
+
+Keep the status and still read a short tail:
+    <cmd> > /tmp/out.txt 2>&1; echo "exit $?"; tail -40 /tmp/out.txt
+or say which status you want:
+    set -o pipefail; <cmd> | %s ...        (or read ${PIPESTATUS[0]})
+
+If the exit code genuinely does not matter here, run the identical command again: a repeat within
+10 minutes passes, and is logged as an override."""
+
+
+def piped_verdict_reason(command):
+    """The refusal text when a verdict command's exit status is lost into tail/head/grep, else None.
+    Pure. Reported by three projects in the 2026-11-18 harvest (llm_chat's piped-verdict trigger,
+    lamp entries 8-9, wcs entry 1)."""
+    code = shell_code_only(command)
+    if _KEEPS_STATUS_PAT.search(code):
+        return None
+    # Per sequential segment: `pytest > f; tail f` pipes nothing, `cd x && pytest | tail` does.
+    for seg in re.split(r"&&|\|\||;|\n", code):
+        f = _INTO_FILTER_PAT.search(seg)
+        if not f:
+            continue
+        stages = re.split(r"\|&?", seg[:f.start()])
+        v = next((m for m in map(_VERDICT_PAT.match, stages) if m), None)
+        if v:
+            filt = re.search(r"tail|head|grep", f.group(0)).group(0)
+            runner = v.group(0).strip(" (")
+            shown = " ".join((command or "").split())
+            return PIPED_VERDICT_REFUSAL % (filt, filt, shown[:200] + ("…" if len(shown) > 200 else ""),
+                                            runner, filt, filt)
+    return None
+
+
+SHELL_CHECKS = (("piped-verdict", piped_verdict_reason),)
+
+
+def shell_verdict(payload):
+    """(check name, refusal) for the first shell check that refuses this Bash call, else
+    (None, None). Pure; the retry and the log belong to shell_gate."""
+    if payload.get("tool_name") != "Bash":
+        return None, None
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    for name, check in SHELL_CHECKS:
+        reason = check(command)
+        if reason:
+            return name, reason
+    return None, None
+
+
+def shell_gate(s, payload, t_now):
+    """Run the shell checks for one PreToolUse payload. Returns the JSON to print, or None to let
+    the call through untouched. Writes state (the retry memory) and the log; the judging is
+    shell_verdict's."""
+    name, reason = shell_verdict(payload)
+    if not name:
+        return None
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    key = hashlib.sha256(command.encode()).hexdigest()[:16]
+    seen = {k: v for k, v in (s.get("shell_gate_refused") or {}).items()
+            if isinstance(v, (int, float)) and t_now - v < SHELL_RETRY_SEC}
+    if key in seen:
+        seen.pop(key)
+        s["shell_gate_refused"] = seen
+        save(s)
+        logline({"kind": "shell_gate_override", "check": name, "command": command[:200]})
+        return {"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "additionalContext":
+                "game_loop: %s was OVERRIDDEN by repeating the command, and that is logged. "
+                "Read the exit status some other way before reporting a result." % name}}
+    seen[key] = t_now
+    s["shell_gate_refused"] = seen
+    save(s)
+    logline({"kind": "shell_gate_block", "check": name, "command": command[:200]})
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": reason}}
 
 
 # ── shipped stop attachments ────────────────────────────────────────────────────────────────────
@@ -12177,6 +12339,32 @@ COVERAGE_SHOWN = 5
 BYPASS_WINDOW_DAYS = 7
 
 
+def recent_log_records(kinds, now=None, days=BYPASS_WINDOW_DAYS):
+    """The log records of these kinds from the last `days` days, oldest first. Raises OSError when
+    the log exists and cannot be read: the caller must say UNKNOWN, never "none". A missing log is
+    a fresh install and reads as no records."""
+    now = now or datetime.datetime.now()
+    since = now - datetime.timedelta(days=days)
+    kinds = set(kinds)
+    needles = ['"%s"' % k for k in kinds]
+    recs = []
+    try:
+        with open(LOG_F) as f:
+            for line in f:
+                if not any(n in line for n in needles):
+                    continue
+                try:
+                    r = json.loads(line)
+                    t = datetime.datetime.fromisoformat(r.get("t") or "")
+                except ValueError:
+                    continue
+                if r.get("kind") in kinds and t >= since:
+                    recs.append(r)
+    except FileNotFoundError:
+        pass
+    return recs
+
+
 def bypass_lines(now=None):
     """The `bypass` line of the COVERAGE block: --no-verify commits recorded in the last week.
 
@@ -12189,23 +12377,8 @@ def bypass_lines(now=None):
     Always one line, never silent: "none recorded" is a reading, and an unreadable log says so
     rather than reading as none.
     """
-    now = now or datetime.datetime.now()
-    since = now - datetime.timedelta(days=BYPASS_WINDOW_DAYS)
-    recs = []
     try:
-        with open(LOG_F) as f:
-            for line in f:
-                if '"commit_gate_bypassed"' not in line:
-                    continue
-                try:
-                    r = json.loads(line)
-                    t = datetime.datetime.fromisoformat(r.get("t") or "")
-                except ValueError:
-                    continue
-                if r.get("kind") == "commit_gate_bypassed" and t >= since:
-                    recs.append(r)
-    except FileNotFoundError:
-        pass
+        recs = recent_log_records(["commit_gate_bypassed"], now)
     except OSError as e:
         return [f"  bypass : UNKNOWN — .game_loop/log.jsonl could not be read ({e.strerror}), so "
                 "--no-verify commits cannot be counted."]
@@ -12219,6 +12392,29 @@ def bypass_lines(now=None):
         names = ", ".join(last.get("owed") or []) or (last.get("report") or "see the log")
         out.append(f"           latest {last.get('t', '?')}: {names[:150]}")
     return out
+
+
+def shell_gate_lines(now=None):
+    """The `shell` line of the COVERAGE block: shell-gate refusals and overrides in the last week.
+
+    The shell gate's opt-out is repeating the command, so a check that misreads commands does not
+    strand anyone; it shows up HERE instead, as overrides piling up against one check. The ratio is
+    the reading: a refusal followed by a rewritten command is the gate working, an override is the
+    agent saying the gate was wrong. Always one line, and an unreadable log is UNKNOWN.
+    """
+    try:
+        recs = recent_log_records(["shell_gate_block", "shell_gate_override"], now)
+    except OSError as e:
+        return [f"  shell  : UNKNOWN — .game_loop/log.jsonl could not be read ({e.strerror}), so "
+                "shell-gate refusals and overrides cannot be counted."]
+    if not recs:
+        return [f"  shell  : no shell-gate refusal recorded in the last {BYPASS_WINDOW_DAYS} days."]
+    by = {}
+    for r in recs:
+        b = by.setdefault(r.get("check") or "?", [0, 0])
+        b[r.get("kind") == "shell_gate_override"] += 1
+    parts = ", ".join("%s refused %d, overridden %d" % (k, v[0], v[1]) for k, v in sorted(by.items()))
+    return [f"  shell  : last {BYPASS_WINDOW_DAYS} days — {parts}"]
 
 
 def coverage_report(s):
@@ -12279,6 +12475,7 @@ def coverage_report(s):
             lines.append('           → add a rule, or list it under "unchecked-ok" in '
                          ".game_loop/verify.yaml")
     lines.extend(bypass_lines())
+    lines.extend(shell_gate_lines())
     lines.append("  writes : ALLOWLIST — only this repo, the temp dir, agent memory and "
                  f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
     lines.append("           written. Everything else is denied WITHOUT being named, so nothing "
@@ -14159,6 +14356,41 @@ HARDEN_LADDER = [
 ]
 
 
+def harden_rung(text):
+    """argparse type for `harden --rung`: a ladder rung 1..6, returned as an int.
+
+    It was a free string, so the record and the trigger payload carried "3", and two consumers'
+    harden triggers (llm_chat's learnings-broadcast, wcs's broadcast-learning) each found that out
+    from a captured payload after shaping code to an int. Free text also let the wrong ladder in:
+    wcs's log holds two hardens at rung "T0", which is the COST ladder (T0-T3), not this one. A rung
+    nobody can read as a number is not a rung, so it is refused where it is typed (rung 2, LOUD).
+    Records written before this keep their strings; anything reading the log must take both."""
+    t = (text or "").strip()
+    if t in {"1", "2", "3", "4", "5", "6"}:
+        return int(t)
+    hint = ("  (T0-T3 is the cost ladder for spending effort; --rung is the HARDEN ladder)"
+            if re.fullmatch(r"[Tt]\d", t) else "")
+    raise argparse.ArgumentTypeError(
+        "%r is not a harden rung. Take one of:\n  %s%s"
+        % (text, "\n  ".join(HARDEN_LADDER), ("\n" + hint) if hint else ""))
+
+
+def artifact_relative(paths):
+    """Each resolved artifact path relative to this repo, or None for one outside it.
+
+    The payload's `artifact` holds ABSOLUTE paths, which is right for a trigger that opens the file
+    and wrong for one that shares the learning: a room or an issue would see this machine's
+    layout. wcs's broadcast-learning reduced them by hand. This is that reduction, done once,
+    beside the absolute list rather than instead of it, so no existing trigger changes."""
+    repo = os.path.realpath(REPO_ROOT)
+    out = []
+    for p in paths:
+        rp = os.path.realpath(p)
+        out.append(os.path.relpath(rp, repo)
+                   if rp == repo or rp.startswith(repo + os.sep) else None)
+    return out
+
+
 def cmd_harden(s, a):
     """Record a learning converted into an artifact the harness enforces.
 
@@ -14217,7 +14449,9 @@ def cmd_harden(s, a):
         out("", n)
     out(*fire_triggers(s, "harden", {
         "event": "harden", "learning": a.learning, "general": general or None,
-        "artifact": list(resolved.values()), "mechanism": a.mechanism, "rung": a.rung,
+        "artifact": list(resolved.values()),
+        "artifact_relative": artifact_relative(resolved.values()),
+        "mechanism": a.mechanism, "rung": a.rung,
         "project": config().get("project_name"), "session": SESSION}))
     flair_out(s, "harden")
 
@@ -14593,7 +14827,8 @@ def main():
     hd.add_argument("--learning", help="the one-line rule you'd otherwise have to REMEMBER")
     hd.add_argument("--artifact", help="real path[,path] to the code/assert/check/tool that enforces it")
     hd.add_argument("--mechanism", help="how it now fails loudly / becomes impossible")
-    hd.add_argument("--rung", help="ladder rung 1..6 (1 IMPOSSIBLE .. 6 doc-last-resort)")
+    hd.add_argument("--rung", type=harden_rung,
+                    help="ladder rung 1..6 (1 IMPOSSIBLE .. 6 doc-last-resort)")
     hd.add_argument("--general", help="the TRANSFERABLE form — what another agent could use without "
                                       "knowing this codebase (fed to any `harden` trigger)")
 

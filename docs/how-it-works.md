@@ -445,6 +445,34 @@ effects downstream of a call it allowed, a mutation hidden in an opaque blob or 
 handle, and any MCP call made where this hook is not installed. Silence from it is not evidence of
 safety.
 
+### The shell gate — checks on a Bash command, hosted by `limitgate`
+
+Some Bash commands are wrong in a way their text shows before they run. The shell gate holds those
+checks. It runs first inside the `limitgate` hook, which is already registered on every Bash call, so
+a new check reaches every consumer on upgrade with no settings edit and no reload. Each check is a
+pure function of the command text (`SHELL_CHECKS` in `_gl_impl.py`), and the gate owns the retry
+and the log.
+
+**The first check, `piped-verdict`.** A test runner, checker or build piped into `tail`, `head` or
+`grep` exits with the filter's status, so a failing suite reads green, and the lines `tail` keeps are
+often not where the failure printed. Three projects built a private guard for it before this one
+(llm_chat, lamp, wcs). It refuses when a runner stands in COMMAND POSITION of a stage before the
+filter, and is quiet when `pipefail` or `PIPESTATUS` appears, when the output goes to a file first,
+and when the runner appears only inside quotes, a heredoc body, or as an argument. Command position
+matters: `grep -n make notes | head` was a false positive until it was required.
+
+**The opt-out is the same command, again.** A check that reads text will misread some, and a gate
+with a bug must not strand a session. So the refusal is spent by running the IDENTICAL command a
+second time within 10 minutes (`SHELL_RETRY_SEC`): the agent has read the reason and decided. A
+retry is single-use, and a different command is its own first refusal. Both outcomes are logged
+(`shell_gate_block`, `shell_gate_override`), and `status` COVERAGE prints a `shell` line counting
+each per check over the last week. A pile of overrides against one check is the signal that the
+check is wrong.
+
+What it does not see: a command inside `bash -c "..."` or `eval` (its code is a quoted string), a
+runner wrapped in a script or alias, and anything after a `<<` that sits inside quotes on its own
+line, which it reads as a heredoc. Each of these is a miss, never a false refusal.
+
 ### The limit gate — `game_loop limitgate`
 
 A second `PreToolUse` hook, watching `.game_loop/limits.json`. When a rate-limit window crosses

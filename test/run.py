@@ -9868,6 +9868,85 @@ def main():
           "edit settings.json — a new hook would be the same delivery failure one layer out",
           "unbound_mandate_notice" in _lg and "hookEventName" in _lg)
 
+    print("a test result piped into tail/head/grep is refused before it runs (piped-verdict):")
+    # THREE PROJECTS REPORTED IT in the 2026-11-18 harvest (llm_chat's piped-verdict trigger, lamp
+    # entries 8-9, wcs entry 1): `pytest | tail -5` exits with TAIL's status, so a failing suite
+    # reads green and the lines kept are not the failure. Each built a private guard; this is one.
+    _pv = _um.piped_verdict_reason
+    _pv_fire = ("python3 test/run.py 2>&1 | tail -5", "cd x && pytest -q | tail",
+                "npm test | grep passed", "(cd a && cargo test) | head -20",
+                "flutter analyze | tail -3", "python3 -m pytest | tail",
+                "FOO=1 ./gradlew test | tail", "uv run pytest |& tail",
+                "./.game_loop/bin/game_loop verify | tail", "pytest | tee log | tail")
+    check("a runner whose status is lost into tail/head/grep is refused — bare, after `cd &&`, "
+          "in a subshell, behind a launcher, an env assignment, a path, `|&` and a tee (%d shapes)"
+          % len(_pv_fire),
+          all(_pv(c) for c in _pv_fire))
+    _pv_quiet = ("python3 test/run.py > o.txt 2>&1; tail o.txt", "set -o pipefail; pytest | tail",
+                 "pytest | tail; echo ${PIPESTATUS[0]}", "git log | head",
+                 'git commit -m "never pytest | tail"', "git commit -m 'pytest | tail is bad'",
+                 "python3 - <<'PY'\nprint('pytest | tail')\nPY", "ls | grep test",
+                 "cat makefile | head", "grep -n make foo.txt | head", "echo make | tail",
+                 "git diff test/run.py | head", "pytest -q")
+    check("...and the shapes that keep the status, or never had a runner, are quiet: a file then "
+          "tail, pipefail, PIPESTATUS, a runner named in a commit message or a heredoc body, and a "
+          "runner word that is an ARGUMENT (`grep -n make notes | head` was a measured false "
+          "positive before the command-position rule) — %d shapes" % len(_pv_quiet),
+          not any(_pv(c) for c in _pv_quiet))
+    _pv_txt = _pv("python3 test/run.py 2>&1 | tail -5") or ""
+    check("the refusal names the filter and the runner, and offers BOTH ways through: a file read "
+          "after the status, and pipefail — a refusal that says only 'no' gets routed around",
+          "`| tail`" in _pv_txt and "python3 test/run.py" in _pv_txt
+          and 'echo "exit $?"' in _pv_txt and "pipefail" in _pv_txt
+          and "run the identical command again" in _pv_txt)
+    check("a heredoc body is not shell, and a body line with an apostrophe does not open a quote "
+          "that hides the real pipe after the heredoc ends",
+          _pv("python3 - <<'PY'\nprint(\"don't\")\nPY\npytest | tail") is not None)
+    check("only Bash is judged: a Write whose content says `pytest | tail` is not a command",
+          _um.shell_verdict({"tool_name": "Write", "tool_input": {
+              "file_path": "/x/a.md", "content": "pytest | tail"}}) == (None, None)
+          and _um.shell_verdict(_bash("pytest | tail"))[0] == "piped-verdict")
+
+    _pvp = make_sandbox()
+    _pv_log = os.path.join(_pvp, ".game_loop", "log.jsonl")
+
+    def _pv_kinds():
+        try:
+            with open(_pv_log) as f:
+                return [json.loads(x).get("kind") for x in f if x.strip()]
+        except FileNotFoundError:
+            return []
+
+    _pv_call = dict(_bash("python3 test/run.py 2>&1 | tail -3"), session_id="sess-pv")
+    r1 = gl(_pvp, "limitgate", stdin=json.dumps(_pv_call))
+    check("end to end through the limitgate hook: the first run is DENIED with the reason, and "
+          "the refusal is logged",
+          denied(r1) and "piped-verdict" in r1.stdout and "shell_gate_block" in _pv_kinds())
+    r2 = gl(_pvp, "limitgate", stdin=json.dumps(_pv_call))
+    check("...and the IDENTICAL command again passes, with a notice and an override record — the "
+          "opt-out Jonah asked for, so a misreading gate never strands a session",
+          not denied(r2) and "OVERRIDDEN" in r2.stdout
+          and "shell_gate_override" in _pv_kinds())
+    r3 = gl(_pvp, "limitgate", stdin=json.dumps(_pv_call))
+    check("...and the override is SPENT: a third run is refused again, so one retry is not a "
+          "standing exemption for that command",
+          denied(r3))
+    r4 = gl(_pvp, "limitgate", stdin=json.dumps(dict(_pv_call, tool_input={
+        "command": "python3 test/run.py 2>&1 | tail -4"})))
+    check("...and a DIFFERENT command is its own first refusal, not covered by another's retry",
+          denied(r4))
+    r5 = gl(_pvp, "limitgate", stdin=json.dumps(dict(_pv_call, tool_input={
+        "command": "python3 test/run.py > /tmp/o.txt 2>&1; echo $?"})))
+    check("...and the rewritten form the refusal suggests goes straight through",
+          not denied(r5) and "OVERRIDDEN" not in r5.stdout)
+    _pv_st = gl(_pvp, "status").stdout
+    check("status counts refusals and overrides per check in COVERAGE — a check that misreads "
+          "commands shows up as overrides piling up, instead of being quietly worked around",
+          "piped-verdict refused 3, overridden 1" in _pv_st)
+    _pv_fresh = make_sandbox()
+    check("...and a log with none says so in one line, rather than the line going missing",
+          "no shell-gate refusal recorded" in gl(_pv_fresh, "status").stdout)
+
     print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
     # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.
     # Their turn ended with "Next I'm rebuilding the artifact on the county's 51 parcels" and
@@ -13017,6 +13096,44 @@ def main():
         check("...and the payload arrives as JSON on stdin, carrying the GENERAL form",
               '"general": "the transferable form"' in _fired.stdout
               and '"event": "harden"' in _fired.stdout)
+
+        # THE PAYLOAD'S SHAPE, as two consumers' triggers met it: `rung` arrived as the string "3"
+        # and `artifact` only as absolute paths. Read back as JSON, not grepped, because the
+        # defect was a TYPE and '"rung": 3' vs '"rung": "3"' is one quote character apart.
+        _tp_write({"harden": [{"name": "tp-shape", "command": "cat"}]})
+        _shape_out = _harden("--general", "G").stdout
+        _shape = None
+        for _ln in _shape_out.splitlines():
+            _ln = _ln.strip()
+            if _ln.startswith("{") and '"event": "harden"' in _ln:
+                try:
+                    _shape = json.loads(_ln)
+                except ValueError:
+                    pass
+        check("the harden payload was found and parsed (the population for the two checks below)",
+              isinstance(_shape, dict))
+        _shape = _shape or {}
+        check("...its rung is the INT 3, not the string \"3\"",
+              _shape.get("rung") == 3 and type(_shape.get("rung")) is int)
+        check("...artifact stays the absolute list, and artifact_relative is the repo-relative twin",
+              _shape.get("artifact_relative") == [".game_loop/config.json"]
+              and all(os.path.isabs(x) for x in _shape.get("artifact") or [None]))
+        _rec = [json.loads(l) for l in open(os.path.join(tpp, ".game_loop", "log.jsonl"))
+                if '"kind": "harden"' in l]
+        check("...and the log record carries the same int", bool(_rec) and _rec[-1].get("rung") == 3)
+        _wrong = _run("harden", "--learning", "L", "--artifact", ".game_loop/config.json",
+                      "--mechanism", "M", "--rung", "T0")
+        check("a rung from the COST ladder (T0) is refused, and the refusal says which ladder is which",
+              _wrong.returncode != 0 and "cost ladder" in _wrong.stderr
+              and "IMPOSSIBLE" in _wrong.stderr)
+        _seven = _run("harden", "--learning", "L", "--artifact", ".game_loop/config.json",
+                      "--mechanism", "M", "--rung", "7")
+        check("...and so is a number off the ladder, with no cost-ladder hint it does not need",
+              _seven.returncode != 0 and "not a harden rung" in _seven.stderr
+              and "cost ladder" not in _seven.stderr)
+        check("...and neither refusal wrote a record",
+              len([l for l in open(os.path.join(tpp, ".game_loop", "log.jsonl"))
+                   if '"kind": "harden"' in l]) == len(_rec))
 
         # A trigger must never be able to veto the work it is only reporting on (INV5).
         _tp_write({"harden": [{"name": "tp-bad", "command": "echo nope >&2; exit 3"}]})

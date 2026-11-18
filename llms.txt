@@ -335,8 +335,16 @@ reduces the damage, it does not remove the class.
   where your hooks read it, in the main checkout, and says so on stderr. A Crawler whose hooks run in
   that worktree keeps its record there. Only the record (session state and the log) moves: a
   question about the tree itself, such as `worktree --porcelain`, still answers for the worktree.
+- **A test, check or build result read through `| tail`, `| head` or `| grep` is refused ONCE.**
+  A pipeline exits with its LAST command's status, so `pytest | tail -5` reads green when the suite
+  failed. Keep the status: `<cmd> > /tmp/out.txt 2>&1; echo "exit $?"; tail -40 /tmp/out.txt`, or
+  `set -o pipefail`. It judges the command text: a runner named inside quotes, in a heredoc body, or
+  as an argument (`grep make notes | head`) is not refused. **This one's escape is NOT a human:** run
+  the identical command again within 10 minutes and it passes, because a check that reads text can
+  misread it. The override is logged and `status` counts it per check, so a wrong check shows up.
 
-None of these have an env-var override, by design. The only escape hatch is a human.
+None of these have an env-var override, by design. Apart from the shell gate's retry above, the
+only escape hatch is a human.
 
 ## Your state is yours alone
 

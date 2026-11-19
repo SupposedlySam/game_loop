@@ -756,6 +756,25 @@ human can judge. Every allow is logged with its reason and the start of the text
 `stop` trigger it gets
 the bounds below for free, including the consecutive count, which counts only its own blocks.
 
+**A second shipped `stop` check: `stopcheck reflexive-ask`.** An owner agent steered live tends to
+end a turn on a question it could have answered itself ("Do you want to go with that?"). Attach
+
+```json
+{"stop": [{"name": "reflexive-ask",
+           "command": "\"$GAME_LOOP_ROOT/bin/game_loop\" stopcheck reflexive-ask"}]}
+```
+
+and a turn-end whose last 3 lines ask the human something is **challenged once**: the block quotes
+the question and asks whether it is genuinely the human's call. End the turn again with the same
+ask and it passes, because the attachment's own consecutive count (`consecutive_blocks` in the
+payload) says it already challenged. That is the price, not a wall: one re-read of the question.
+It reads only the closing lines, so a question further up, or one inside quotes, is not judged. It
+stands aside while a mandate is bound, since the Stop gate covers that turn-end. Each outcome is
+logged (`ask_challenge`, `ask_challenge_repeat`, `ask_challenge_dropped`) and `status` COVERAGE
+prints an `asks` line counting them, so you can see whether the challenge changes anything. It
+composes with `announced-work`: a question is a hand-back there, and this check then asks whether
+the question was needed.
+
 | Event | Fires when | Typically used for |
 |---|---|---|
 | `harden` | a learning was just encoded into an artifact | share the transferable form with other agents |

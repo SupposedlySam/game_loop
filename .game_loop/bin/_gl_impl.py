@@ -3228,6 +3228,93 @@ needs the human does not excuse the others beside it.%s
 
 This check is game_loop's `stopcheck announced-work`, attached by this project as a `stop` trigger."""
 
+
+# ── REFLEXIVE ASK: a closing question that was the agent's own call ─────────────────────────────
+#
+# Observed here, 2026-11-18, and the human named it in three words: "Reflexive ask? Harden if so."
+# An owner turn ended on "Do you want to go with that?" about a counter-proposal the human had
+# already been shown and had not answered, in a role whose standing instruction is "make the
+# decisions that are best for users". The Stop gate's _asked_the_user matched the sentence ("do you
+# want") and never ran: with no mandate bound the gate returns inert before any detector, which is
+# right for it (it must not sit between the human and a conversation) and is most of an owner's day.
+#
+# CHALLENGE ONCE, AND THE REPEAT PASSES. The shell gate's pricing, which the human proposed for
+# interpreter writes: a check that can be wrong must not be able to strand anyone, and the cost of
+# a genuine question is one more turn-end. Refusing every ask would be the nag `_stop_verdict`'s
+# docstring warns about; asking nothing at all would make this a reminder. The repeat is read from
+# the runner's own per-attachment streak (`consecutive_blocks`), not from state this subprocess
+# writes, because the Stop gate saves state AFTER its attachments run and would overwrite it.
+#
+# THREE OUTCOMES ARE LOGGED, because the ratio is the reading: `ask_challenge` (refused),
+# `ask_challenge_repeat` (the agent said it really is the human's), `ask_challenge_dropped` (the
+# next turn-end asked nothing: it acted instead). Mostly repeats means the check is noise here.
+#
+# WHAT IT CANNOT SEE: whether the question really is the human's. It converts an unexamined ask
+# into an examined one, and the examination is the agent's. Under a mandate it stands aside: the
+# Stop gate already prices asking there (`arm --question --read --predict`).
+# THE LAST THREE LINES, not announced-work's twelve. A hand-back is where the turn ENDS, and the
+# markers match anywhere in what they are given: across twelve lines, "if you want the detail, it
+# is in the log" in the middle of a report would read as the question. Three is the window
+# _asked_the_user already uses for a trailing "?".
+_ASK_TAIL_LINES = 3
+
+
+def reflexive_ask_verdict(payload, mandate_active=False):
+    """(block, why, judged, outcome) for one Stop payload. Pure, so the suite can drive every branch.
+
+    outcome is None when nothing was judged as an ask, else "challenge", "repeat" or "dropped"
+    ("dropped" is an allow: the turn-end after a challenge asked nothing)."""
+    if mandate_active:
+        return (False, "a mandate is bound; the Stop gate prices asking there (`arm`)", None, None)
+    lines, judged, why_not = _closing_lines(payload)
+    if lines is None:
+        return (False, "the closing message could not be read (%s)" % why_not, None, None)
+    try:
+        prior = int(payload.get("consecutive_blocks") or 0)
+    except (TypeError, ValueError):
+        prior = 0
+    tail = lines[-_ASK_TAIL_LINES:]
+    if not _asked_the_user("\n".join(tail)):
+        if prior:
+            return (False, "challenged last turn-end, and this one asks nothing", judged, "dropped")
+        return (False, "no ask in the closing lines", judged, None)
+    if prior:
+        return (False, "asked again after a challenge, so it is the human's", judged, "repeat")
+    asked = next((ln.strip() for ln in reversed(tail) if ln.strip().endswith("?")), tail[-1].strip())
+    return (True, asked[:200], judged, "challenge")
+
+
+REFLEXIVE_ASK_BLOCK = """reflexive-ask: your closing message hands a question to the human.
+
+    you asked: %s
+
+Before it goes, check that it is theirs. If the request, the code, a standing instruction or a
+sensible default answers it, act on that and say what you chose. If you already asked it and they
+moved on without answering, they have seen it: decide, or get on with the other work. Only a
+decision that really belongs to them should end the turn.
+
+If it does, end the turn again with the question. The next turn-end passes, and the repeat is
+logged, so a check that is wrong here shows up as repeats rather than as a session it stranded.
+
+This check is game_loop's `stopcheck reflexive-ask`, attached by this project as a `stop` trigger."""
+
+_STOPCHECK_KIND = {"challenge": "ask_challenge", "repeat": "ask_challenge_repeat",
+                   "dropped": "ask_challenge_dropped"}
+
+
+def _stopcheck_reflexive_ask(s, payload):
+    """(block, stderr text or allow reason, judged) for `stopcheck reflexive-ask`, logging the outcome."""
+    block, why, judged, outcome = reflexive_ask_verdict(
+        payload, bool((s.get("mandate") or {}).get("active")))
+    if outcome:
+        try:
+            logline({"kind": _STOPCHECK_KIND[outcome], "check": "reflexive-ask",
+                     "asked": (why if block else (judged or ""))[:200]})
+        except OSError:
+            pass   # an unwritable log must not turn a verdict into a crash, which reads as a block
+    return block, (REFLEXIVE_ASK_BLOCK % why if block else why), judged
+
+
 def cmd_stopcheck(s, a, payload):
     """`stop` trigger entrypoint. exit 0 = no objection; exit 2 = block, stderr is the reason.
 
@@ -3238,6 +3325,18 @@ def cmd_stopcheck(s, a, payload):
 
     FAILS OPEN ON ITS OWN ERROR, and says so: a non-zero exit from a trigger is read as a block, so
     a crash here would refuse every turn-end for a reason nobody wrote."""
+    if getattr(a, "check", None) == "reflexive-ask":
+        try:
+            block, text, judged = _stopcheck_reflexive_ask(s, payload)
+        except Exception as exc:  # noqa: BLE001 — a crash would read as a block nobody wrote
+            print("stopcheck reflexive-ask could not decide (%s); not objecting" % exc,
+                  file=sys.stderr)
+            sys.exit(0)
+        if not block:
+            print("allowed: %s%s" % (text, " | judged: %s" % judged if judged else ""))
+            sys.exit(0)
+        print(text, file=sys.stderr)
+        sys.exit(2)
     try:
         block, why, judged = announced_work_verdict(
             payload, bool((s.get("mandate") or {}).get("active")))
@@ -8360,7 +8459,13 @@ def _stop_verdict(s, payload):
         if m.get("cleared_at") and s.get("stops_since_clear", 0) < 3:
             _t, _ = _last_assistant_text(payload)
             if _promised_to_continue(_t):
-                return False, "cleared-then-announced", (
+                # (allow, REASON, LOG RECORD), in that order. This branch shipped with the tag in
+                # the reason slot and the explanation in the record slot, so cmd_stopgate passed a
+                # STRING to logline and died on `{**stamp, **rec}`: exit 1, which Claude Code reads
+                # as a non-blocking hook error. Every time it fired, the turn ended anyway. The
+                # suite drove this function directly and asserted on slot [2], so it encoded the
+                # bug; it now also runs the branch end to end through `stopgate`.
+                return False, (
                     "STOP GATE — you cleared the mandate and then said you were carrying on.\n\n"
                     "  cleared: %s\n\n"
                     "Those two cannot both be true at a turn-end. Clearing says the work is done;\n"
@@ -8368,7 +8473,9 @@ def _stop_verdict(s, payload):
                     "gate stays armed for — three turn-ends after a clear and no longer.\n\n"
                     "Either DO the thing you just named, or end with what is actually true:\n"
                     "the work is finished and you are waiting for them."
-                    % (m.get("cleared_at") or "?"))
+                    % (m.get("cleared_at") or "?")), {
+                    "kind": "stop_cleared_then_announced", "cleared_at": m.get("cleared_at"),
+                    "stops_since_clear": s.get("stops_since_clear", 0)}
         # With no mandate bound, this gate is otherwise INERT. It must never sit between the human
         # and a normal conversation, or it earns its own removal.
         return True, "no mandate bound — gate inert", None
@@ -8705,6 +8812,13 @@ def stop_trigger_block(s, payload, notices, allowed_by=None):
         # otherwise cost N turns to surface — and a skipped attachment can neither increment nor
         # reset its own count, so its bound would stop being measured in turn-ends and could sit on
         # a stale streak indefinitely. The latency is the sum of the timeouts either way.
+        # ITS OWN STREAK, so an attachment can price a repeat. `reflexive-ask` challenges a
+        # closing question once and lets the next turn-end through, and it cannot keep that fact
+        # itself: it runs as a subprocess, and this process saves `s` after every attachment has
+        # run, so anything it wrote to state.json would be overwritten. The count lives here
+        # already; this hands each attachment ITS count, never another one's.
+        tp["consecutive_blocks"] = int(
+            (seen.get(str(t.get("name") or "(unnamed)")) or {}).get("consecutive", 0) or 0)
         name, ran, code, body, err = _run_trigger(s, t, "stop", tp, default_timeout=10.0,
                                                   max_timeout=left)
         rec = seen.setdefault(name, {})
@@ -12417,6 +12531,36 @@ def shell_gate_lines(now=None):
     return [f"  shell  : last {BYPASS_WINDOW_DAYS} days — {parts}"]
 
 
+def ask_challenge_lines(now=None):
+    """The `asks` line of the COVERAGE block: `stopcheck reflexive-ask` outcomes in the last week.
+
+    Silent only when the check is not attached and has no record, because it is an attachment a
+    project opts into and most do not. Attached with nothing recorded says so, since that silence
+    and "never wired" must not read the same. Repeats against challenges is the reading:
+    mostly repeats means the check is noise for this project, and mostly dropped means it is
+    catching asks that were the agent's own call."""
+    kinds = list(_STOPCHECK_KIND.values())
+    try:
+        recs = recent_log_records(kinds, now)
+    except OSError as e:
+        return [f"  asks   : UNKNOWN — .game_loop/log.jsonl could not be read ({e.strerror}), so "
+                "reflexive-ask outcomes cannot be counted."]
+    if not recs:
+        try:
+            attached = any("reflexive-ask" in str(x.get("command") or "")
+                           for x in triggers_for("stop"))
+        except Exception:  # noqa: BLE001 — a status line must not take `status` down
+            attached = None
+        if attached is False:
+            return []
+        return [f"  asks   : reflexive-ask {'is attached' if attached else 'may be attached'}; "
+                f"no closing question challenged in the last {BYPASS_WINDOW_DAYS} days."]
+    n = {k: sum(1 for r in recs if r.get("kind") == k) for k in kinds}
+    return [f"  asks   : last {BYPASS_WINDOW_DAYS} days — reflexive-ask challenged "
+            f"{n['ask_challenge']}, then acted {n['ask_challenge_dropped']}, "
+            f"asked again {n['ask_challenge_repeat']}"]
+
+
 def coverage_report(s):
     """The COVERAGE block for `status` — what these rails are NOT looking at (issue #25).
 
@@ -12476,6 +12620,7 @@ def coverage_report(s):
                          ".game_loop/verify.yaml")
     lines.extend(bypass_lines())
     lines.extend(shell_gate_lines())
+    lines.extend(ask_challenge_lines())
     lines.append("  writes : ALLOWLIST — only this repo, the temp dir, agent memory and "
                  f"{len(cfg.get('allow_write_roots') or [])} configured allow_write_roots may be")
     lines.append("           written. Everything else is denied WITHOUT being named, so nothing "
@@ -15007,9 +15152,10 @@ def main():
     sub.add_parser("sessionstart")  # SessionStart entrypoint (also after compaction); not for humans
     sub.add_parser("readcheck")   # the write guard's require_read check; not for humans
     stc = sub.add_parser("stopcheck")  # a `stop` trigger game_loop ships; attach it, do not run it
-    stc.add_argument("check", choices=["announced-work"],
+    stc.add_argument("check", choices=["announced-work", "reflexive-ask"],
                      help="announced-work: refuse a turn-end whose closing lines announce work "
-                          "with nothing after them handing the turn back")
+                          "with nothing after them handing the turn back. reflexive-ask: "
+                          "challenge a closing question once; the next turn-end passes")
     md = sub.add_parser("model")
     md.add_argument("--json", action="store_true",
                     help="emit the verdict as JSON — the form a PARENT reads, since the session "

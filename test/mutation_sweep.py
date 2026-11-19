@@ -2515,6 +2515,19 @@ MUTANTS += [
      ['status counts refusals'],
      "MEASURED 2026-11-18 at 030ff0d with GAME_LOOP_SWEEP_ONLY: 4. Also the reader under bypass_lines, so the "
      "--no-verify count checks may kill it too.", 4),
+    ("reflexive_ask_verdict -> no closing question is ever challenged",
+     ".game_loop/bin/_gl_impl.py::reflexive_ask_verdict", "    return (False, 'neutered', None, None)\n",
+     ['is CHALLENGED, and the block quotes', 'the pass is SPENT', 'LOGGED by its own kind',
+      'counts them on its COVERAGE', 'under a MANDATE it stands aside'],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+    ("_stopcheck_reflexive_ask -> the verdict is never acted on or logged",
+     ".game_loop/bin/_gl_impl.py::_stopcheck_reflexive_ask", "    return False, 'neutered', None\n",
+     ['is CHALLENGED, and the block quotes', 'LOGGED by its own kind'],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+    ("ask_challenge_lines -> status never reports reflexive-ask",
+     ".game_loop/bin/_gl_impl.py::ask_challenge_lines", "    return []\n",
+     ['ATTACHED with nothing challenged', 'counts them on its COVERAGE'],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
 ]
 
 

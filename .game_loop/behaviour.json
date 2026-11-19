@@ -938,6 +938,15 @@
       "change": "The limitgate PreToolUse hook now refuses a Bash command that pipes a test/check/build runner (pytest, test/run.py, npm test, cargo test, flutter analyze, make, ...) into tail, head or grep, because the pipeline then exits with the filter's status and a failing run reads green. It is quiet when pipefail or PIPESTATUS is used, when the output goes to a file first, and when the runner only appears in quoted text, a heredoc body, or as an argument. Running the IDENTICAL command again within 10 minutes passes with a notice; that override is logged (shell_gate_override) and each refusal is logged (shell_gate_block). status COVERAGE gains a `shell` line counting both per check.",
       "consequence": "`pytest | tail -5` and its kin are refused once, with the reason and two rewrites (`> file; echo $?; tail file`, or `set -o pipefail`). An agent that means it repeats the command and it runs. No settings change or reload: the hook was already registered. A project's own piped-verdict trigger now duplicates this check.",
       "why_it_qualifies": "a Bash call that ran before is now refused on its first attempt. Reported by three projects in the 2026-11-18 hardened-learnings harvest (llm_chat's piped-verdict trigger, lamp, wcs), each with a private guard for it."
+    },
+    {
+      "seq": 101,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "Stop gate: the cleared-then-announced check",
+      "change": "The Stop gate's check for a turn-end that clears the mandate and then announces more work crashed instead of refusing: it returned its explanation and its log record in swapped positions, the hook raised a TypeError and exited 1, and Claude Code treats exit 1 as non-blocking. It now refuses (exit 2) with the explanation, and logs stop_cleared_then_announced.",
+      "consequence": "Clearing a mandate and ending on \"I'll start on that now\" is now refused, where before it silently passed with a traceback in the hook log. Do the announced work or hand the turn back. A session that relied on the pass was relying on a crash.",
+      "why_it_qualifies": "a turn-end that went through before is now refused. Found while testing the reflexive-ask stop check, 2026-11-18."
     }
   ],
   "schema": 1

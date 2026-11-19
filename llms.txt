@@ -110,6 +110,11 @@ item gives no reason that needs anyone else. Each item answers for itself: do it
 own line what blocks it ("blocked on <fact>", "needs your call on <x>", "waiting on <who>"), or
 that it is out of scope.
 
+The second is `stopcheck reflexive-ask`. If it challenges you, your last 3 lines handed the human a
+question. Ask yourself whether it is genuinely theirs: a call you can make from the request, the
+code or a sensible default is yours, so make it and keep working. If it really is theirs, end the
+turn again with the same question and it passes; the challenge happens once per run of asks.
+
 It stands down after 3 **consecutive** blocks — which bounds an attachment that keeps refusing, and
 does **not** bound a single refusal. A block you never retry never increments again, so the
 stand-down is never reached: a Crawler was refused once, correctly, and then sat inert for 44

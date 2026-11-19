@@ -664,7 +664,22 @@ def main():
               _sv(_CLEARED, "Cleared it. I'll start on that now.")[0] is False)
         check("...and the refusal NAMES the clear it is about, so the reader is not left guessing "
               "which of the two statements the gate disbelieved",
-              "cleared the mandate" in (_sv(_CLEARED, "I'll start on that now.")[2] or ""))
+              "cleared the mandate" in (_sv(_CLEARED, "I'll start on that now.")[1] or ""))
+        check("...and its LOG RECORD is a record, not the explanation: the branch shipped with the "
+              "two swapped, and cmd_stopgate died passing a string to logline",
+              (_sv(_CLEARED, "I'll start on that now.")[2] or {}).get("kind")
+              == "stop_cleared_then_announced")
+        # END TO END, because driving the function is what let the swap ship: every assertion above
+        # passed while the real hook exited 1 (a non-blocking hook error) on each firing.
+        _cs_proj = make_sandbox()
+        gl(_cs_proj, "mandate", "--set", "do the work", sid="sess-cs")
+        gl(_cs_proj, "mandate", "--clear", "--notes", "done", sid="sess-cs")
+        _cs_r = gl(_cs_proj, "stopgate", sid="sess-cs", stdin=json.dumps(
+            {"session_id": "sess-cs", "last_assistant_message": "Cleared it. I'll start on that now."}))
+        check("...and through the real Stop hook it BLOCKS (exit 2) with the explanation on stderr, "
+              "rather than crashing into a non-blocking exit 1",
+              _cs_r.returncode == 2 and "cleared the mandate" in _cs_r.stderr
+              and "Traceback" not in _cs_r.stderr)
         check("...while an honest report after the same clear passes — the gate is about the "
               "contradiction, not about having cleared",
               _sv(_CLEARED, "Cleared it. 2937 passed, 0 failed.")[0] is True)
@@ -14034,6 +14049,70 @@ def main():
               and "announced-work:" in _both.stderr)
         os.remove(_shf)
         os.remove(_stf)
+
+        # REFLEXIVE ASK (2026-11-18, the human's words: "Reflexive ask? Harden if so."). An owner
+        # turn ended on "Do you want to go with that?" about a proposal the human had already seen,
+        # in a role told to make the calls best for users. The Stop gate's own ask detector matched
+        # it and never ran, because with no mandate the gate is inert before any detector. Priced
+        # like the shell gate: challenged ONCE, and the next turn-end passes, so a wrong check costs
+        # a turn rather than stranding a session.
+        with open(_shf, "w") as f:
+            json.dump({"stop": [{"name": "reflexive-ask", "command":
+                                 '"$GAME_LOOP_ROOT/bin/game_loop" stopcheck reflexive-ask'}]}, f)
+        _ask_msg = "Shipped the floors.\n\nDo you want to go with that?"
+        _ask_pre = gl(stp, "status", sid="sess-ask").stdout
+        check("attached and not yet fired, `status` says it is ATTACHED with nothing challenged — "
+              "that silence and 'never wired' must not read the same",
+              "asks   : reflexive-ask is attached; no closing question challenged" in _ask_pre)
+        _a1 = _end(sid="sess-ask", msg=_ask_msg)
+        check("a closing question with no mandate bound is CHALLENGED, and the block quotes the "
+              "question it is about",
+              _a1.returncode == 2 and "reflexive-ask:" in _a1.stderr
+              and "you asked: Do you want to go with that?" in _a1.stderr)
+        _a2 = _end(sid="sess-ask", msg=_ask_msg)
+        check("...and ASKING AGAIN on the next turn-end passes: the repeat is the agent saying it "
+              "really is the human's call, read from the runner's own streak for this attachment "
+              "(`consecutive_blocks`), since a subprocess cannot keep state the gate saves over",
+              _a2.returncode == 0 and "reflexive-ask" not in _a2.stderr)
+        _a3 = _end(sid="sess-ask", msg=_ask_msg)
+        check("...and the pass is SPENT: the turn-end after it is challenged afresh, so one repeat "
+              "does not excuse every later question",
+              _a3.returncode == 2 and "you asked:" in _a3.stderr)
+        _a4 = _end(sid="sess-ask", msg="Pushed both commits; the suite passed.")
+        check("...and a turn-end that, after a challenge, asks nothing (it acted) simply ends",
+              _a4.returncode == 0)
+        _ask_ok = ["Shipped the floors. 2724 passed, 0 failed.",
+                   'His comment said "want me to push?" and I answered it in the thread.',
+                   "Should the floor be 2? I measured it: yes.\n\n- killed 3\n- both named "
+                   "checks among them\n\nPushed as a3e8448."]
+        check("...and it does NOT challenge a report, a QUOTED question, or one asked and answered "
+              "further up than the closing three lines (3 shapes)",
+              all(_end(sid="sess-ask-ok", msg=m).returncode == 0 for m in _ask_ok))
+        try:
+            with open(os.path.join(stp, ".game_loop", "log.jsonl")) as f:
+                _ask_kinds = [json.loads(l).get("kind") for l in f if '"reflexive-ask"' in l
+                              and '"ask_challenge' in l]
+        except (OSError, ValueError):
+            _ask_kinds = []
+        check("each outcome is LOGGED by its own kind — challenged twice, asked again once, acted "
+              "once — because the ratio is how anyone tells a useful check from noise",
+              sorted(_ask_kinds) == ["ask_challenge", "ask_challenge", "ask_challenge_dropped",
+                                     "ask_challenge_repeat"])
+        check("...and `status` counts them on its COVERAGE `asks` line",
+              "reflexive-ask challenged 2, then acted 1, asked again 1"
+              in gl(stp, "status", sid="sess-ask").stdout)
+        _ask_spec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_reflexive_ask", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _ask_mod = __import__("importlib.util", fromlist=["util"]).module_from_spec(_ask_spec)
+        _ask_spec.loader.exec_module(_ask_mod)
+        check("...and under a MANDATE it stands aside: the Stop gate already prices asking there "
+              "(`arm --question --read --predict`), and two checks on one sentence block it twice",
+              _ask_mod.reflexive_ask_verdict({"last_assistant_message": _ask_msg}, True)[0] is False
+              and _ask_mod.reflexive_ask_verdict({"last_assistant_message": _ask_msg}, False)[0])
+        os.remove(_shf)
+        _ask_fresh = make_sandbox()
+        check("...and a project that never attached it shows NO `asks` line at all",
+              "asks   :" not in gl(_ask_fresh, "status").stdout)
 
         # #134: AN ATTACHMENT WHOSE OWN ADVICE IS `arm` COULD NOT SEE THE ARM. It blocked, the arm
         # stays unspent while anything blocks, and the next turn-end was the same arm and the same

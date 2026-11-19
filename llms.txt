@@ -436,6 +436,10 @@ never silent — a hook whose verdict came back truncated has judged, and only t
 
 ## Other verbs
 
+Forgot a verb's name or its flags? `game_loop guide` lists every verb with what it is for, when to
+reach for it and an example; `game_loop guide <verb>` narrows to one, and `--json` is the form a tool
+reads.
+
 ```
 ./.game_loop/bin/game_loop trans --tier T0|T1|T2|T3 --milestone ".." --doing ".."   # record a phase transition
 ./.game_loop/bin/game_loop stepback --notes ".."                                     # retro; re-injects invariants,

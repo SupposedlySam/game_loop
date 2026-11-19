@@ -4,6 +4,7 @@
 Drives the REAL scripts through their real interfaces (CLI args, stdin JSON) inside a throwaway copy
 of .game_loop, so a regression in any gate fails here instead of in production. No dependencies.
 """
+import argparse
 import ast
 import atexit
 import contextlib
@@ -1574,6 +1575,59 @@ def main():
         # 2026-11-13): eight gh grants in one session, each printing "the config entry is the
         # remedy", and Jonah: "I built that in so you could make the decision on the first one you
         # did, not N number." Keyed on what the grant is FOR, not on the reason's wording.
+        # THE VERB GUIDE (showrunner-code-owner, 2026-11-18, SupposedlySam/showrunner_code#138).
+        # SRCode reads `guide --json` to remind an agent of a verb it has forgotten; what keeps it
+        # honest is that purpose and flags come out of the parser, and that every verb has an entry
+        # whose example parses. Each half below fails if the other is neutered.
+        print("guide --json describes every verb, from the parser that parses:")
+        _gd = gl(arproj, "guide", "--json")
+        try:
+            _gj = json.loads(_gd.stdout)
+        except ValueError:
+            _gj = {}
+        _gverbs = {v.get("verb"): v for v in (_gj.get("verbs") or [])}
+        _gspec = __import__("importlib.util", fromlist=["util"]).spec_from_file_location(
+            "_gl_guide", os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py"))
+        _gm = __import__("importlib.util", fromlist=["util"]).module_from_spec(_gspec)
+        _gspec.loader.exec_module(_gm)
+        _gp = _gm.build_parser()
+        _gsub = next(x for x in _gp._actions if isinstance(x, _gm.argparse._SubParsersAction))
+        check("it is schema 1 with a version key (null when the commit is unknown, never a guess), and lists EXACTLY the parser's verbs — the population "
+              "(%d), so a verb added without an entry, or an entry for a verb that is gone, fails"
+              % len(_gsub.choices),
+              _gd.returncode == 0 and _gj.get("schema") == 1 and "version" in _gj
+              and set(_gverbs) == set(_gsub.choices) == set(_gm.VERB_GUIDE)
+              and len(_gverbs) >= 39)
+        check("...every verb has a purpose, a when and an example, and the example names its verb",
+              all(v.get("purpose") and v.get("when")
+                  and (v.get("example") or "").split()[:2] == ["game_loop", k]
+                  for k, v in _gverbs.items()))
+        _bad = []
+        for _k, _v in _gverbs.items():
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    _gp.parse_args(shlex.split(_v["example"])[1:])
+            except SystemExit:
+                _bad.append(_k)
+        check("...and every example PARSES against the real parser (none of %d refused: %s)"
+              % (len(_gverbs), _bad or "-"), not _bad and _gverbs)
+        _ga = (_gverbs.get("authorize") or {}).get("flags") or []
+        check("...flags come FROM the parser: authorize lists --expires with its help text, and a "
+              "store_true flag reports default null rather than false",
+              any(f.get("flag") == "--expires" and "lapses" in (f.get("help") or "") for f in _ga)
+              and all(f.get("default") is None for f in
+                      (_gverbs.get("owned") or {}).get("flags") or [{"default": 1}]))
+        _gh = gl(arproj, "--help")
+        check("...and `game_loop --help` carries each verb's one-line purpose, which is what SRCode "
+              "falls back to on an older pin",
+              _gm.VERB_GUIDE["authorize"][0][:40] in " ".join(_gh.stdout.split())
+              and _gm.VERB_GUIDE["kinds"][0][:30] in " ".join(_gh.stdout.split()))
+        _g1 = gl(arproj, "guide", "--json", "stopcheck")
+        _g0 = gl(arproj, "guide", "no-such-verb")
+        check("...one verb narrows to one entry; an unknown verb is REFUSED, not an empty list",
+              [v.get("verb") for v in (json.loads(_g1.stdout or "{}").get("verbs") or [])]
+              == ["stopcheck"] and _g0.returncode != 0 and "no verb named" in _g0.stdout)
         print("a second grant for the same thing in one session is refused until decided:")
         _ag = lambda *x, sid="sess-again": gl(arproj, "authorize", *x, sid=sid)
         _a1 = _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment")
@@ -1583,6 +1637,13 @@ def main():
               _a1.returncode == 0 and _a2.returncode != 0
               and "mcp_trusted_servers" in (_a2.stdout + _a2.stderr)
               and "not N number" in (_a2.stdout + _a2.stderr))
+        # showrunner-code-owner, 2026-11-18: an agent forgot over a long run that ONE grant can
+        # carry several uses for a bounded time. The refusal names both flags, together, because
+        # --expires alone still spends a use per call.
+        check("...and the refusal names the in-tool form, --uses with --expires together, and says "
+              "--expires alone is not it",
+              "--uses 20 --expires 7d" in (_a2.stdout + _a2.stderr)
+              and "--expires alone does not do it" in (_a2.stdout + _a2.stderr))
         _a3 = _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment",
                   "--again", "a one-off on somebody else's repo")
         try:
@@ -12232,12 +12293,11 @@ def main():
         # resolve_prose computes differently and skips — help text agreeing with a resolver that
         # never runs.
         _psrc = open(os.path.join(REPO, ".game_loop", "bin", "_gl_impl.py")).read()
-        _pbody = _psrc[_psrc.index("def main():"):]
-        _pcut = _pbody.index("add_prose_file_options(sub)") + len("add_prose_file_options(sub)")
-        _pstub = "def _build_parser():\n" + _pbody[_pbody.index("\n") + 1:_pcut] + "\n    return sub\n"
-        _pns = dict(vars(_um))
-        exec(compile(_pstub, "parser-slice", "exec"), _pns)      # noqa: S102
-        _psub = _pns["_build_parser"]()
+        # The parser is built by build_parser() now (it exists so `guide` reads the parser that
+        # parses), so this walks the REAL one rather than a slice of main()'s source text, which
+        # broke the moment main() stopped containing the parser.
+        _psub = next(x for x in _um.build_parser()._actions
+                     if isinstance(x, argparse._SubParsersAction))
         _bad, _seen = [], 0
         for _verb, _parser in sorted(_psub.choices.items()):
             _dests = {a.dest for a in _parser._actions}

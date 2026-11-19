@@ -2519,11 +2519,11 @@ MUTANTS += [
      ".game_loop/bin/_gl_impl.py::reflexive_ask_verdict", "    return (False, 'neutered', None, None)\n",
      ['is CHALLENGED, and the block quotes', 'the pass is SPENT', 'LOGGED by its own kind',
       'counts them on its COVERAGE', 'under a MANDATE it stands aside'],
-     "PROVISIONAL floor 1, awaiting measurement.", 1),
+     "Measured at 4eed8c5: killed 7.", 7),
     ("_stopcheck_reflexive_ask -> the verdict is never acted on or logged",
      ".game_loop/bin/_gl_impl.py::_stopcheck_reflexive_ask", "    return False, 'neutered', None\n",
      ['is CHALLENGED, and the block quotes', 'LOGGED by its own kind'],
-     "PROVISIONAL floor 1, awaiting measurement.", 1),
+     "Measured at 4eed8c5: killed 8.", 8),
     ("ask_challenge_lines -> status never reports reflexive-ask",
      ".game_loop/bin/_gl_impl.py::ask_challenge_lines", "    return []\n",
      ['ATTACHED with nothing challenged', 'counts them on its COVERAGE'],
@@ -2536,6 +2536,18 @@ _HEREDOC_GAP = (
     "denominator ENTIRELY until embedded_python() taught source_files() to read heredocs. It SHOULD "
     "be swept, and it now CAN be: consume_authorization was swept on a bash host the same day and "
     "was killed by 8. What remains is the run for each of these, not a missing capability.")
+
+
+MUTANTS += [
+    ("guide_entries -> the guide lists no verbs",
+     ".game_loop/bin/_gl_impl.py::guide_entries", "    return []\n",
+     ["lists EXACTLY the parser's verbs", "every example PARSES", "one verb narrows to one entry"],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+    ("_verb_flags -> every verb reports no flags",
+     ".game_loop/bin/_gl_impl.py::_verb_flags", "    return []\n",
+     ["flags come FROM the parser"],
+     "PROVISIONAL floor 1, awaiting measurement.", 1),
+]
 
 
 NOT_SWEPT = {

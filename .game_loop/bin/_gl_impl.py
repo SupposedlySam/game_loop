@@ -6390,16 +6390,24 @@ def cmd_authorize(s, a):
     _fam = _grant_family(real)
     _same = [g for g in (s.get("authorized") or [])
              if isinstance(g, dict) and _grant_family(g.get("path")) == _fam]
+    # THE IN-TOOL FORM IS NAMED HERE TOO (showrunner-code-owner, 2026-11-18): Jonah had to remind
+    # an agent, over a long run, that one grant can carry several uses for a bounded time. The
+    # remedies above are config files, and a human who would say "yes for this week" to the hatch
+    # is not always one who wants machine-wide config changed. `--expires` ALONE does not make a
+    # grant standing — uses still deplete (grant_live) — so the line names both flags together.
     if _same and not (getattr(a, "again", None) or "").strip():
         die("REFUSED — this session has already been granted %r %d time(s). A second one is a "
             "decision, not a formality:\n\n"
             "  1. put the STANDING remedy to the human now, so they decide it once:\n%s\n"
+            "     or, without config, ONE grant that covers the run, if that is what they said:\n"
+            "       game_loop authorize --path %s --reason \"..\" --again \"<why>\" --uses 20 --expires 7d\n"
+            "     (--expires alone does not do it: each use still spends one of --uses)\n"
             "  2. or, if a standing allowance is wrong here, say why and grant once more:\n"
             "       game_loop authorize --path %s --reason \"..\" --again \"<why not standing>\"\n\n"
             "Jonah, 2026-11-13: \"I built that in so you could make the decision on the first one "
             "you did, not N number.\""
             % (os.path.basename(_fam) or _fam, len(_same), "\n".join(_standing_remedy(real)),
-               a.path))
+               a.path, a.path))
     if (getattr(a, "again", None) or "").strip():
         logline({"kind": "authorize_again", "path": real, "family": _fam,
                  "prior_in_session": len(_same), "why_not_standing": a.again})
@@ -14917,10 +14925,251 @@ def resolve_prose(p, a):
                 "bounds the exposure, it does not remove it.")
 
 
-def main():
-    p = _Parser(prog="game_loop")
+# ── the verb guide ───────────────────────────────────────────────────────────────────────────────
+#
+# ONE ENTRY PER VERB: purpose, when to reach for it, and an example that parses. Asked for by
+# showrunner-code-owner (2026-11-18, SupposedlySam/showrunner_code#138): SRCode builds a searchable
+# Tools guide that reminds an agent of a verb it has forgotten — the incident behind it was an agent
+# that, over a long run, stopped remembering `authorize --expires` existed. It read `--help`, and 36
+# of the 38 verbs printed no one-line summary there.
+#
+# THIS TABLE IS THE ONE SOURCE. `build_parser` hands `purpose` to every sub-parser as its help and
+# description, so `game_loop --help` and `game_loop <verb> --help` print it, and `guide --json` reads
+# purpose and flags back OUT of the built parser rather than from here — so a flag added to the
+# parser shows up in the guide with no second edit, and nothing here can describe a flag that is
+# gone. The suite refuses a verb with no entry, an entry with no verb, and an example that does not
+# parse, which is the whole of what keeps prose next to code from drifting.
+#
+# The JSON shape is showrunner's `guide --json` on purpose, field for field, so SRCode needs one
+# reader for both tools: {"schema": 1, "version", "verbs": [{"verb", "purpose", "when", "example",
+# "flags": [{"flag", "help", "default"}]}]}. Bump GUIDE_SCHEMA only when a field is renamed or
+# removed; adding one is safe.
+#
+# HOOK VERBS ARE LISTED TOO, with a `when` that says not to run them. A guide that left them out
+# would leave an agent who meets `stopgate` in a hook line with nothing to look it up in.
+GUIDE_SCHEMA = 1
+VERB_GUIDE = {
+    "status": ("Orientation: mandate, tier, claims, gates armed, coverage, what is owed.",
+               "First thing every session and after every compaction; again whenever unsure what "
+               "the harness thinks is going on.",
+               "game_loop status"),
+    "claim": ("Assert something about external reality, backed by a real file you read.",
+              "Before telling the human anything about a dependency, a harness or another repo. A "
+              "claim about a SET (\"only X\") needs --scope and two --probe members.",
+              'game_loop claim --assert "lamp pins by sha" --read ../lamp/README.md'),
+    "note": ("Write a line to the log; --recovery carries a remedy to a session that will wake later.",
+             "To record something a later reader needs that is not a claim or a learning, or with "
+             "--woke when an external wake landed.",
+             'game_loop note --text "suite slow on this machine: 9 min, not 6"'),
+    "doorbell": ("Print the wake-up prompt for this run, filled from live state.",
+                 "When wiring or checking what a wake (cron, waker, human) will hand the session.",
+                 "game_loop doorbell"),
+    "guardtest": ("Run your own hook script against recorded payloads and assert the exits.",
+                  "When a project writes its own hook or trigger script and wants it tested like "
+                  "game_loop's gates are.",
+                  "game_loop guardtest --fixture test/hooks.json"),
+    "harden": ("Record a learning as ENFORCED: the artifact that now checks it and how it fails.",
+               "After turning something you would have had to remember into a test, a guard or a "
+               "check. --general is the transferable form and is published to other agents.",
+               'game_loop harden --learning "pipe test output to a file" --artifact test/run.py '
+               '--mechanism "the shell gate refuses the pipe" --rung 2'),
+    "mutate": ("Prove a test is load-bearing: the tool breaks the code and the test must go red.",
+               "Before claiming a test pins a behaviour; a test that stays green with the code "
+               "broken was decoration.",
+               'game_loop mutate --prove "rejects empty input" --test "python3 -m pytest tests/" '
+               '--file src/parse.py --replace "if not text:" --with "if False:"'),
+    "kinds": ("Print the log record kinds this code writes, with their fields.",
+              "When writing a trigger or a report that reads log.jsonl, instead of guessing a kind.",
+              "game_loop kinds"),
+    "contribute": ("Record an upstream review of your learnings: what was filed, and a judgement.",
+                   "When status says learnings are due for review: ask of each whether it named a "
+                   "tool's behaviour (file it upstream) or this repo's.",
+                   'game_loop contribute --reviewed --filed none --note "all three were repo-local"'),
+    "stepback": ("Open a retro: what was learned, what was hardened, what is still remembered.",
+                 "At a milestone or when stuck. --show previews without recording; "
+                 "--nothing-to-harden --reason makes an empty retro a decision.",
+                 "game_loop stepback --show"),
+    "trans": ("Move along the cost ladder: set the tier, milestone and what you are doing now.",
+              "When the kind of work changes, e.g. from reading source (T0) to building (T2) or to "
+              "spending the human's attention (T3).",
+              'game_loop trans --tier T2 --doing "running the suite"'),
+    "authorize": ("Record a human-authorized bypass of a guard, in their words; consumed on use.",
+                  "When a guard refuses something the human said yes to. For a standing yes, ONE "
+                  "grant with --uses N --expires 7d, not a grant per call; --expires alone still "
+                  "spends a use each time.",
+                  'game_loop authorize --path ~/other-repo --reason "yes, edit that repo" '
+                  '--uses 10 --expires 7d'),
+    "attribute": ("Declare that a commit lands work another session produced, by git ref.",
+                  "When the commit gate flags files this session never edited because you are "
+                  "merging a sibling's branch.",
+                  'game_loop attribute --merge feature/x --reason "landing the sibling session\'s fix"'),
+    "mandate": ("Bind an autonomy mandate: while bound, the Stop gate refuses stopping early.",
+                "When the human hands over a task to run without them. --clear when it is done; "
+                "--park when they call a break.",
+                'game_loop mandate --set "fix the flaky suite, release when green" '
+                '--wake-path "llm_chat waker"'),
+    "arm": ("Arm ONE spend of the human's attention: the question, what you read, what you predict.",
+            "Before asking the human something under a mandate. If you can predict the answer, "
+            "do not ask.",
+            'game_loop arm --question "ship to prod tonight?" --read docs/release.md '
+            '--predict "probably tomorrow"'),
+    "checkpoint": ("Report and hand back under a mandate, without asking anything.",
+                   "When work reaches a natural stop under a mandate and nothing needs the human's "
+                   "decision.",
+                   'game_loop checkpoint --notes "suite green, released stable-abc123; next: docs"'),
+    "pin": ("Carry a load-bearing environment fact, with its reason, across sessions.",
+            "When local state the work depends on (a pinned dep, an SDK path) would be tidied away "
+            "by someone who did not know. --expect makes it a check.",
+            'game_loop pin --fact "flutter 3.22 at ~/sdk" --reason "3.24 breaks the build" '
+            '--path ~/sdk/flutter'),
+    "effector": ("Prove an action verb (click, scroll, type) really acts, before a finding leans on it.",
+                 "Before reporting what a UI does after an automated input; an exit code is not "
+                 "proof the input landed.",
+                 'game_loop effector --prove scroll --known-state "list overflows" '
+                 '--before before.png --observed after.png'),
+    "instrument": ("Admit a metric as evidence: the harm it stands for, plus a null and a positive control.",
+                   "Before a claim cites a number (latency, memory, a count) as proof.",
+                   'game_loop instrument --register rss --measures "app memory a user feels" '
+                   '--connects "ps rss of the app pid" --null 100,100 --positive 100,180'),
+    "fix": ("Prove a fix holds by exercising what it produces, not the repro of the bug.",
+            "Before reporting a fix done: a verified diagnosis is not a verified fix.",
+            'game_loop fix --prove "export keeps unicode" --promises "names survive export" '
+            '--produces out/export.csv --before before.txt --observed after.txt'),
+    "measure": ("One reading of an admitted instrument: before and after, delta computed here.",
+                "Each time you read a registered instrument across an interaction.",
+                'game_loop measure --instrument rss --before 100 --after 140 --notes "opened 50 tabs"'),
+    "notify": ("Page the configured Slack channel by hand.",
+               "When the human must see something now and is not watching the session. --test "
+               "checks the channel.",
+               "game_loop notify --test"),
+    "owned": ("Print the user-owned file set (the harness's own files), for tools.",
+              "When a tool needs to know which files are game_loop's rather than the project's.",
+              "game_loop owned --porcelain"),
+    "watchdog": ("Is the waiting seam armed, and what did the watchdog last say?",
+                 "When a session should be woken while idle and you need to know whether anything "
+                 "will ring.",
+                 "game_loop watchdog --porcelain"),
+    "worktree": ("Does this tree carry the project's rules, or its own drifted copy?",
+                 "In a git worktree or a copy, before trusting that the gates here are the project's.",
+                 "game_loop worktree --porcelain"),
+    "self": ("Run the harness from a pinned checkout of itself, so editing it cannot break the hooks.",
+             "In game_loop's own repo, after a commit you want the hooks to run: --pin <sha>.",
+             "game_loop self --pin HEAD"),
+    "stopgate": ("Stop-hook entrypoint: the turn-end gate.",
+                 "Never by hand; the Stop hook runs it with the payload on stdin.",
+                 "game_loop stopgate"),
+    "limitgate": ("PreToolUse entrypoint: the usage-limit handoff gate and the shell gate.",
+                  "Never by hand; the PreToolUse hook runs it with the payload on stdin.",
+                  "game_loop limitgate"),
+    "crongate": ("PreToolUse entrypoint: refuses a recurring CronCreate.",
+                 "Never by hand; the PreToolUse hook runs it with the payload on stdin.",
+                 "game_loop crongate"),
+    "statusline": ("Statusline entrypoint: taps usage limits and renders one row.",
+                   "Never by hand; Claude Code's statusLine runs it.",
+                   "game_loop statusline"),
+    "sessionstart": ("SessionStart entrypoint: orientation at start and after compaction.",
+                     "Never by hand; the SessionStart hook runs it.",
+                     "game_loop sessionstart"),
+    "readcheck": ("The write guard's require-read check.",
+                  "Never by hand; the write guard calls it.",
+                  "game_loop readcheck"),
+    "stopcheck": ("A stop check game_loop ships (announced-work, reflexive-ask), to attach as a trigger.",
+                  "Attach it as a `stop` trigger in .game_loop/triggers.json; it reads the Stop "
+                  "payload on stdin, so it is not run by hand.",
+                  "game_loop stopcheck reflexive-ask"),
+    "model": ("Report the models this session has run on.",
+              "When a parent or human needs to know whether the session ran on the model it was "
+              "meant to.",
+              "game_loop model --json"),
+    "limitprobe": ("Fetch a usage reading by spawning a session, where no statusline can report it.",
+                   "Only on a host with no statusline; it costs about 24k input tokens a run.",
+                   "game_loop limitprobe --interval-only"),
+    "threads": ("Which handover chain is which: every handoff hop, joined into chains.",
+                "When several handoffs exist and you need the one for this task.",
+                "game_loop threads --json"),
+    "successor": ("Start the session that takes over from this one, from its handoff.",
+                  "When this session must end (limits, context) and the work should continue in a "
+                  "new one. --dry-run shows what it would start.",
+                  'game_loop successor --task "finish the release" --dry-run'),
+    "confidence": ("Report or mark what this project will say about a commit: beta or stable.",
+                   "After a commit is verified: --mark stable releases it (and fires confidence "
+                   "triggers such as lamp-publish). With no --mark it reports.",
+                   'game_loop confidence --mark stable --notes "what landed"'),
+    "guide": ("Every verb with its purpose, when to use it, an example and its flags.",
+              "When you remember a verb exists but not its name or flags. --json is the form a tool "
+              "reads.",
+              "game_loop guide --json"),
+}
+
+
+def _verb_flags(vp):
+    """A sub-parser's own arguments as guide entries. Read from argparse, so they cannot drift."""
+    flags = []
+    for act in vp._actions:
+        if isinstance(act, argparse._HelpAction):
+            continue
+        d = act.default
+        if d is argparse.SUPPRESS or isinstance(d, bool) and not d and act.nargs == 0:
+            d = None
+        if d is not None and not isinstance(d, (str, int, float, bool, list)):
+            d = str(d)
+        flags.append({"flag": ", ".join(act.option_strings) or act.dest,
+                      "help": act.help if act.help not in (None, argparse.SUPPRESS) else "",
+                      "default": d})
+    return flags
+
+
+def guide_entries(p, only=None):
+    """[{verb, purpose, when, example, flags}] for every verb of parser `p`, in parser order."""
+    sp = next(x for x in p._actions if isinstance(x, argparse._SubParsersAction))
+    rows = []
+    for verb, vp in sp.choices.items():
+        if only and verb != only:
+            continue
+        purpose, when, example = VERB_GUIDE.get(verb, (vp.description or "", "", ""))
+        rows.append({"verb": verb, "purpose": purpose, "when": when, "example": example,
+                     "flags": _verb_flags(vp)})
+    return rows
+
+
+def cmd_guide(p, a):
+    """`game_loop guide [--json] [verb]`. Pure: reads no state and writes none."""
+    rows = guide_entries(p, a.verb)
+    if a.verb and not rows:
+        die("guide: no verb named %r. `game_loop guide` lists them all." % a.verb)
+    if a.json:
+        print(json.dumps({"schema": GUIDE_SCHEMA, "version": running_version(), "verbs": rows},
+                         indent=2, ensure_ascii=False))
+        return
+    for r in rows:
+        out("%s — %s" % (r["verb"], r["purpose"]), "    when: " + r["when"],
+            "    e.g.: " + r["example"], "")
+
+
+def build_parser():
+    """The whole CLI, built once, so `guide` can read the same parser that parses."""
+    p = _Parser(prog="game_loop",
+                description="game_loop: gates for an AI Crawler. `game_loop guide` explains every verb.")
     sub = p.add_subparsers(dest="cmd", required=True)
+    # EVERY SUB-PARSER TAKES ITS ONE-LINE HELP FROM VERB_GUIDE. Wrapped here rather than passed at
+    # each call so a new verb cannot be added without it showing up: the suite refuses a verb with
+    # no entry, and this is what makes the entry reach `--help`.
+    _raw_add = sub.add_parser
+
+    def _add_parser(name, **kw):
+        g = VERB_GUIDE.get(name)
+        if g:
+            kw.setdefault("help", g[0])
+            kw.setdefault("description", g[0] + "\n\nwhen: " + g[1] + "\ne.g.: " + g[2])
+            kw.setdefault("formatter_class", argparse.RawDescriptionHelpFormatter)
+        return _raw_add(name, **kw)
+    sub.add_parser = _add_parser
+
     sub.add_parser("status")
+    gd = sub.add_parser("guide")
+    gd.add_argument("verb", nargs="?", help="one verb only")
+    gd.add_argument("--json", action="store_true",
+                    help="emit {schema, version, verbs: [{verb, purpose, when, example, flags}]}")
 
     cl = sub.add_parser("claim")  # THE gate: assert external reality only with sourced evidence
     cl.add_argument("--assert", dest="assert_", help="what you're about to tell the human")
@@ -14950,10 +15199,9 @@ def main():
                    help="record that an external wake LANDED — the half of a wake path that can be "
                         "observed from inside the run")
 
-    sub.add_parser("doorbell", help="print the wake-up prompt for THIS run, filled from live state")
+    sub.add_parser("doorbell")
 
-    gt = sub.add_parser("guardtest", help="run a consumer's own hook script against recorded "
-                                          "payloads and assert the exits")
+    gt = sub.add_parser("guardtest")
     gt.add_argument("--fixture", help="JSON file: the script, and the cases with their payloads")
     gt.add_argument("--script", help="the hook script to run (overrides the fixture's own key)")
     gt.add_argument("--timeout", type=int, help="seconds per case (default 30)")
@@ -15200,8 +15448,18 @@ def main():
                     help="do not trust the tag: run the gate the level claims")
 
     add_prose_file_options(sub)
+    return p
+
+
+def main():
+    p = build_parser()
     a = p.parse_args()
     resolve_prose(p, a)
+    if a.cmd == "guide":
+        # BEFORE set_session and load: a guide reads no state, so it must not create any, and it
+        # must answer in a tree whose state is unreadable.
+        cmd_guide(p, a)
+        return
     if a.cmd in ("stopgate", "limitgate", "crongate", "statusline", "sessionstart",
                  "stopcheck", "readcheck"):
         # The hook payload is the authoritative session source — the env is a fallback for harnesses

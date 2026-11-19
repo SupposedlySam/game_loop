@@ -9891,16 +9891,20 @@ def main():
           "| head` was a measured false positive before the command-position rule) — %d shapes"
           % len(_pv_quiet),
           not any(_pv(c) for c in _pv_quiet))
-    # Their own checks, so blanking quoted text and heredocs is seen BY NAME: bundled into the
-    # list above, removing shell_code_only killed exactly one assertion (measured THIN, 1).
+    # Their own checks, so blanking quoted text and heredocs is seen BY NAME. The shapes must put
+    # the runner at COMMAND POSITION inside the quoted or heredoc text: `-m "never pytest | tail"`
+    # is quiet with or without blanking (its stage starts with `git`), and a sweep at 53c5cbb
+    # proved it — removing shell_code_only left both checks green. Each shape below fires on
+    # the raw text and is quiet only because blanking ran.
     check("a runner named inside a QUOTED argument is text, not a pipeline — a commit message that "
-          "says never to pipe pytest into tail must not be refused for saying it",
-          not any(_pv(c) for c in ('git commit -m "never pytest | tail"',
-                                   "git commit -m 'pytest | tail is bad'")))
-    check("...and a HEREDOC body is the reader's language, not shell — `python3 - <<'PY'` holding "
-          "the words `pytest | tail` is Python",
-          not _pv("python3 - <<'PY'\nprint('pytest | tail')\nPY")
-          and not _pv("cat > notes.md <<'EOF'\nrun pytest | tail -3 to see it\nEOF"))
+          "says `wip; pytest | tail hid the failure` must not be refused for saying it",
+          not any(_pv(c) for c in ('git commit -m "wip; pytest | tail hid the failure"',
+                                   "git commit -m 'wip; pytest | tail hid it'",
+                                   'echo "a && make test | grep ok"')))
+    check("...and a HEREDOC body is the reader's language, not shell — a notes file or a "
+          "`python3 - <<'PY'` body with a line starting `pytest | tail` is not a pipeline",
+          not _pv("cat > notes.md <<'EOF'\npytest | tail -3\nEOF")
+          and not _pv("python3 - <<'PY'\nprint('x')\npytest | tail\nPY"))
     _pv_txt = _pv("python3 test/run.py 2>&1 | tail -5") or ""
     check("the refusal names the filter and the runner, and offers BOTH ways through: a file read "
           "after the status, and pipefail — a refusal that says only 'no' gets routed around",

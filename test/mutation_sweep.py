@@ -2494,7 +2494,7 @@ MUTANTS += [
     ("shell_code_only -> quoted text and heredocs are read as code again",
      ".game_loop/bin/_gl_impl.py::shell_code_only", '    return command or ""\n',
      ['a runner named inside a QUOTED argument', 'a HEREDOC body is the reader'],
-     "MEASURED 2026-11-18 at 030ff0d: 1, THIN, because one bundled quiet-shapes check held every quoted and heredoc case; split into two named checks in the next commit, floor 2. The quiet half's commit-message and heredoc cases "
+     "MEASURED 2026-11-18 at 030ff0d: 1, THIN. Splitting the quoted/heredoc cases into named checks did NOT help (53c5cbb swept: both survived), because those shapes were quiet by the command-position rule alone. The checks now use shapes with the runner at command position INSIDE the quoted/heredoc text, each verified to fire without blanking; floor 2. The quiet half's commit-message and heredoc cases "
      "are the only ones that see it.", 2),
     ("shell_gate -> no retry: every repeat is refused, the opt-out is gone",
      ".game_loop/bin/_gl_impl.py::shell_gate",

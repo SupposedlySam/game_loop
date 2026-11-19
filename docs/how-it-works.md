@@ -289,8 +289,13 @@ That distinction was not free. Until 2026-08-26 both this paragraph and the file
 `rm/mv/cp/…`, and the ellipsis is what a reader takes for "and the other obvious ones": five redirect
 forms (`>|`, `>!`, `>>!`, `>&`, `>>&`) and nine verbs including `curl -o` and `tar -C` wrote outside
 the repo unchecked, for weeks, while this page said the guard states its limits. It also blocks configured
-deploy/publish verbs anywhere. It states what it does *not* catch (interpreter one-liners, paths built
-from shell variables) right in the file — a guard that overstates its reach is worse than one that
+deploy/publish verbs anywhere. An inline interpreter program (`python3 -c`, a `python3 -` here-doc,
+`node -e`, `ruby -e`, `perl -e`) is read in its own grammar — Python by `ast`, the rest by a table of
+write calls — and a literal path its write calls name is judged like any other target; that refusal
+can be cleared by repeating the identical command within 10 minutes, which is logged, because a
+reader of four languages can misjudge one. It states what it does *not* catch (a write an
+interpreter shells out for, a program in a script file, paths built from shell variables) right in
+the file — a guard that overstates its reach is worse than one that
 states its limits.
 
 The only way past it is the human, single-use and logged: `game_loop authorize --path <prefix> --reason
@@ -786,10 +791,10 @@ because the first was overclaimed once already:
   is refused *whether or not it exists*, so there is no provisioning arm to slip through. A session that wants
   the bypass must therefore spend `authorize`, which writes a human's own words into `log.jsonl` permanently.
   What that is worth is precise: the grant cannot happen **without leaving the record of who granted it**.
-- **What it is not.** It is not an unpickable lock, and the guard says so in its own refusal text: a `python3 -c`
-  that writes the file, a path built from a shell variable, and any MCP tool are all outside what it reads
-  (INV6). No choice of config *layer* closes those — `~/.game_loop/config.json` falls to the identical
-  one-liner. So the honest claim is a **refused-by-default, logged-when-granted door**, not prevention. The
+- **What it is not.** It is not an unpickable lock, and the guard says so in its own refusal text: a write an
+  interpreter's program makes through `subprocess` or another shell-out, a program in a script file, a path built
+  from a shell variable, and any MCP tool are all outside what it reads (INV6). No choice of config *layer*
+  closes those — `~/.game_loop/config.json` falls to the identical script. So the honest claim is a **refused-by-default, logged-when-granted door**, not prevention. The
   earlier wording here said "only the human … may", which is a conclusion the check underneath it could not
   support.
 - **It cannot travel.** `config.json` is tracked and is the seed a fresh install copies from (`install.sh:339`),

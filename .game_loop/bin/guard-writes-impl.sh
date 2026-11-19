@@ -36,11 +36,19 @@
 #         resolved target is outside the allow roots. Paths resolved by realpath, `cd` tracked across
 #         segments, every offending path collected (not just the first).
 #   DOES: Bash invoking a configured deploy/publish verb, anywhere (config.json -> deploy_verbs).
-#   DOES NOT: catch mutations made via MCP tools, an interpreter one-liner (`python3 -c 'os.remove(..)'`),
-#             an interpreter fed a heredoc (`python3 -` reading a here-doc body that calls
-#             open('/abs/x','w'), and node/ruby/perl the same), a path built from a shell variable (`rm $TARGET/x`), or a
-#             script that mutates without naming the path on the command line. Those need tool-level matching this does not do.
-#             Do not read silence here as safety.
+#   DOES: read the program an inline interpreter is handed (`python3 -c`, `python3 -` fed a
+#         here-doc, `node -e`, `ruby -e`, `perl -e`) in that program's grammar, and judge the paths
+#         its write calls name by the rules above (_gl_impl.interpreter_writes). Python is parsed
+#         with ast; node, ruby and perl are matched against a table of their write calls. Such a
+#         write outside the allow roots is refused once, and the identical command repeated within
+#         10 minutes passes and is logged; a policy file still needs authorize. A write whose path
+#         is built at runtime, and a program that does not parse, are WARNED about, never judged.
+#         A Python here-doc body that parses is no longer scanned as shell (#114).
+#   DOES NOT: catch mutations made via MCP tools; a write an interpreter makes through a shelled-out
+#             command (subprocess, os.popen), eval/exec, `bash -c` or a substitution; a program
+#             read from a FILE (`python3 x.py`); a node/ruby/perl write call missing from the table;
+#             a path built from a shell variable (`rm $TARGET/x`); or a script that mutates without
+#             naming the path on the command line. Do not read silence here as safety.
 #   DOES: at `git commit`, NAME the staged files this session never wrote — a warning about a
 #         commit widened past the work (a directory-wide formatter, a codemod, `git add -A`). It is
 #         STATED, NEVER BLOCKED: sweeping edits are sometimes the intent.
@@ -2387,7 +2395,7 @@ prose quoting the command is not affected, and neither is a --body-file whose CO
     fi
 
     # 2. Mutation aimed OUTSIDE the allow roots, decided by RESOLVING PATHS — not matching names.
-    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" SCAN_CMD="$scan_cmd" GAMELOOP_DIR="$GAMELOOP_DIR" python3 - "$payload" <<'PY'
+    offender=$(REPO_REAL="$REPO_REAL" SLUG="$SLUG" CONFIG_F="$CONFIG_F" CONFIG_MERGED="$CONFIG_MERGED" SCAN_CMD="$scan_cmd" GAMELOOP_DIR="$GAMELOOP_DIR" CODE_DIR="$CODE_DIR" python3 - "$payload" <<'PY'
 import io, json, os, re, shlex, subprocess, sys
 
 payload = json.loads(sys.argv[1])
@@ -2395,6 +2403,22 @@ cmd = os.environ.get("SCAN_CMD", "")          # here-doc DATA bodies already str
 cwd = payload.get("cwd") or os.environ["REPO_REAL"]
 home = os.path.expanduser("~")
 repo = os.path.realpath(os.environ["REPO_REAL"])
+
+# INLINE INTERPRETER PROGRAMS ARE READ IN THEIR OWN GRAMMAR (_gl_impl.interpreter_writes). Their
+# write calls are judged below by the same rules as every other target, and a Python here-doc body
+# that PARSED is taken out of the shell scan, which used to refuse it for text like i < len(x)
+# (#114). Imported only when an interpreter is named, so most commands never pay for the import.
+# A failure here is reported as a warning and the shell scan runs as before: never a silent pass.
+interp = {"targets": [], "unresolved": [], "unparsed": []}
+if re.search(r"(?:^|[^A-Za-z0-9_.-])(?:python[0-9.]*|node(?:js)?|ruby|perl)(?:[^A-Za-z0-9_.-]|$)", cmd):
+    try:
+        sys.path.insert(0, os.path.join(os.environ["CODE_DIR"], "bin"))
+        import _gl_impl
+        interp = _gl_impl.interpreter_writes(cmd, cwd)
+        cmd = interp["shell_text"]
+    except Exception as e:
+        interp = {"targets": [], "unresolved": [], "unparsed": [
+            {"lang": "guard", "why": "the interpreter reader failed (%s: %s)" % (type(e).__name__, e)}]}
 
 allow = [os.environ["REPO_REAL"], "/tmp", "/private/tmp", "/var/folders",
          os.path.join(home, ".claude", "projects", os.environ["SLUG"]),
@@ -2802,6 +2826,47 @@ def shell_segments(cmd):
     return segs
 
 
+def judge(raw, cwd, via=None):
+    """Sort one mutation target into the lists printed below. VIA is set for a target the
+    interpreter reader found, as lang TAB call TAB line, so its refusal can say where it came from."""
+    bad = offends(raw, cwd)
+    if bad:
+        # Only when it would have been REFUSED anyway. A variable that resolves lexically to
+        # somewhere inside the repo is allowed today, and turning those into refusals would
+        # break ordinary work (`> $TMP/x`) on a guess. The gap that leaves -- a variable whose
+        # real value points outside -- is the one already named under "WHAT THIS CANNOT SEE".
+        # A literal from an interpreter's program is not shell text: a dollar sign in it is a
+        # character, not a variable, so it is never sent to the unexpandable branch.
+        fab = None if via else unexpandable(raw, cwd)
+        if fab:
+            unresolved.append(raw + chr(9) + fab)
+        elif via:
+            interp_hits.append(bad + chr(9) + via)
+        else:
+            offenders.append(bad)
+    # A WRITE INTO A TEMP ROOT (#132) is allowed, and cleared on reboot; bash decides whether it
+    # was already noted this session. A variable or substitution is skipped: unexpandable here.
+    if "$" not in raw and chr(96) not in raw:   # chr(96): a lone backquote breaks bash 3.2 here
+        _tp = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
+        if any(_tp == r or _tp.startswith(r + os.sep) for r in _TEMP_ROOTS):
+            temp_hits.append(_tp)
+    # THE POLICY FILES, ON THE BASH PATH TOO (#86). Registered on Write/Edit only, the gate that
+    # bounds the session was a suggestion against `>>` — and because nothing was refused,
+    # nothing was logged either, which removes the very evidence #65 exists to preserve.
+    # Same resolved paths as the rule above, so redirects, sed -i, tee and cp/mv are covered by
+    # construction rather than by a second list of verbs to keep in step.
+    pol = policy_name(raw, cwd)
+    if pol:
+        policy_hits.append(pol)
+    # IN-REPO TARGETS, for require_read. Only a target that resolves without expansion: a variable
+    # is unknown here, and guessing its value would refuse or allow on a guess.
+    if not bad and "$" not in raw and chr(96) not in raw:
+        _ir = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
+        if _ir == repo or _ir.startswith(repo + os.sep):
+            inrepo_hits.append(_ir)
+
+
+interp_hits = []
 for seg in shell_segments(cmd):
     try:
         argv = shlex.split(seg)
@@ -2863,37 +2928,11 @@ for seg in shell_segments(cmd):
     check.extend(redirect_targets(seg))            # redirects mutate regardless of the verb
 
     for raw in check:
-        bad = offends(raw, cwd)
-        if bad:
-            # Only when it would have been REFUSED anyway. A variable that resolves lexically to
-            # somewhere inside the repo is allowed today, and turning those into refusals would
-            # break ordinary work (`> $TMP/x`) on a guess. The gap that leaves -- a variable whose
-            # real value points outside -- is the one already named under "WHAT THIS CANNOT SEE".
-            fab = unexpandable(raw, cwd)
-            if fab:
-                unresolved.append(raw + chr(9) + fab)
-            else:
-                offenders.append(bad)
-        # A WRITE INTO A TEMP ROOT (#132) is allowed, and cleared on reboot; bash decides whether it
-        # was already noted this session. A variable or substitution is skipped: unexpandable here.
-        if "$" not in raw and chr(96) not in raw:   # chr(96): a lone backquote breaks bash 3.2 here
-            _tp = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
-            if any(_tp == r or _tp.startswith(r + os.sep) for r in _TEMP_ROOTS):
-                temp_hits.append(_tp)
-        # THE POLICY FILES, ON THE BASH PATH TOO (#86). Registered on Write/Edit only, the gate that
-        # bounds the session was a suggestion against `>>` — and because nothing was refused,
-        # nothing was logged either, which removes the very evidence #65 exists to preserve.
-        # Same resolved paths as the rule above, so redirects, sed -i, tee and cp/mv are covered by
-        # construction rather than by a second list of verbs to keep in step.
-        pol = policy_name(raw, cwd)
-        if pol:
-            policy_hits.append(pol)
-        # IN-REPO TARGETS, for require_read. Only a target that resolves without expansion: a variable
-        # is unknown here, and guessing its value would refuse or allow on a guess.
-        if not bad and "$" not in raw and chr(96) not in raw:
-            _ir = os.path.realpath(os.path.join(cwd, os.path.expanduser(raw)))
-            if _ir == repo or _ir.startswith(repo + os.sep):
-                inrepo_hits.append(_ir)
+        judge(raw, cwd)
+
+
+for t in interp["targets"]:
+    judge(t["path"], cwd, chr(9).join([t["lang"], t["call"], str(t["line"])]))
 
 for o in dict.fromkeys(offenders):
     print(o)
@@ -2905,6 +2944,13 @@ for t_ in dict.fromkeys(temp_hits):
     print("TEMP\t" + t_)
 for i_ in dict.fromkeys(inrepo_hits):
     print("INREPO\t" + i_)
+for h_ in dict.fromkeys(interp_hits):
+    print("INTERP\t" + h_)
+for w_ in interp["unresolved"]:
+    print("INTERP_WARN\t%s: %s, line %s of that program, writes a path not written as a literal"
+          % (w_["lang"], w_["call"], w_["line"]))
+for w_ in interp["unparsed"]:
+    print("INTERP_WARN\t%s: not read for writes, because %s" % (w_["lang"], w_["why"]))
 PY
 )
 
@@ -2912,8 +2958,10 @@ PY
     unres_line=$(printf '%s' "$offender" | grep '^UNRESOLVED\t' | head -1)
     temp_lines=$(printf '%s' "$offender" | grep '^TEMP\t' | cut -f2)
     inrepo_lines=$(printf '%s' "$offender" | grep '^INREPO\t' | cut -f2)
+    interp_line=$(printf '%s' "$offender" | grep '^INTERP\t' | head -1)
+    interp_warn=$(printf '%s' "$offender" | grep '^INTERP_WARN\t' | cut -f2-)
     offender=$(printf '%s' "$offender" | grep -v '^POLICY\t' | grep -v '^UNRESOLVED\t' \
-               | grep -v '^TEMP\t' | grep -v '^INREPO\t' | head -1)
+               | grep -v '^TEMP\t' | grep -v '^INREPO\t' | grep -v '^INTERP' | head -1)
     require_read_gate "$inrepo_lines"
     if [ -n "$pol_line" ]; then
       pol_name=$(printf '%s' "$pol_line" | cut -f2)
@@ -2957,8 +3005,9 @@ preserve.
 If a HUMAN approved this change, quote them and it goes on the record:
   \$GAMELOOP_DIR/bin/game_loop authorize --path $pol_real --reason \"<their exact words>\"
 
-WHAT THIS STILL CANNOT SEE (INV6): a \`python3 -c\` that writes the file, a path built from a shell
-variable, or any MCP tool. It reads the command string. Prevention where it is cheap; the file's
+WHAT THIS STILL CANNOT SEE (INV6): a write through subprocess or another shell-out inside an interpreter's
+program such as python3 -c or node -e (the program's own write calls ARE read), a path built from a shell variable, or any MCP
+tool. It reads the command string. Prevention where it is cheap; the file's
 own hash is the detection this does not yet do."
     fi
 
@@ -3096,6 +3145,70 @@ outside this repo — and COULD NOT TELL is not NOTHING TO REPORT. If the write 
 this repo, run it with the variable expanded and the guard can check what you actually mean. If it
 is meant to land outside and a HUMAN authorized that, quote them against the RESOLVED path:
   \$GAMELOOP_DIR/bin/game_loop authorize --path <the real prefix> --reason \"<their exact words>\""
+    fi
+
+    # A WRITE FOUND BY READING AN INTERPRETER'S PROGRAM (_gl_impl.interpreter_writes). Refused ONCE,
+    # and the identical command repeated within the shell gate's window passes and is logged
+    # (kind shell_gate_override, check interpreter-write, so status counts it on the shell line).
+    # Why a repeat and not authorize alone, as for a shell write: this reading is new, and a table
+    # of calls can misjudge a program, so its refusal must be one the Crawler can clear on its own
+    # judgement. The repeat is on the record either way. A POLICY file found this way took the
+    # POLICY branch above, which only authorize clears: the repeat is not offered there.
+    interp_note=""
+    if [ -n "${interp_line:-}" ]; then
+      interp_path=$(printf '%s' "$interp_line" | cut -f2)
+      interp_lang=$(printf '%s' "$interp_line" | cut -f3)
+      interp_call=$(printf '%s' "$interp_line" | cut -f4)
+      interp_at=$(printf '%s' "$interp_line" | cut -f5)
+      consumed_raw=$(consume_authorization "$interp_path")
+      if [ "$(printf '%s\n' "$consumed_raw" | sed -n '1p')" = "yes" ]; then
+        note "$(consumed_note "$interp_path" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '2p')" \
+                  "$(printf '%s\n' "$consumed_raw" | sed -n '3p')")"
+      fi
+      interp_verdict=$(CODE_DIR="$CODE_DIR" STATE_DIR="$(dirname "$STATE_F")" \
+          LOG_F="$GAMELOOP_DIR/log.jsonl" CMD="$cmd" GL_SID="${SID:-}" python3 -c '
+import os, sys, time
+sys.path.insert(0, os.path.join(os.environ["CODE_DIR"], "bin"))
+import _gl_impl
+print(_gl_impl.guard_retry(os.environ["STATE_DIR"], os.environ["LOG_F"], "interpreter-write",
+                           os.environ["CMD"], time.time(), os.environ.get("GL_SID", "")))
+' 2>/dev/null)
+      if [ "$interp_verdict" = "override" ]; then
+        interp_note="game_loop: an interpreter-write refusal was OVERRIDDEN by repeating the command, and that
+is logged. The $interp_lang program writes $interp_path ($interp_call, line $interp_at of that program)."
+      else
+        deny "BLOCKED: the $interp_lang program in this command writes outside this repo → $interp_path
+
+    the call : $interp_call, line $interp_at of that program
+
+This came from PARSING the program, not from shell grammar: the guard read the $interp_lang code this
+command hands its interpreter and found a write call whose path is a literal outside the allow
+roots. Everything outside this project is READ-ONLY by default, and a refused Write routed through
+an interpreter is the same write.
+
+IF THE READING IS WRONG (the call never runs, or the path is not what is written): run the IDENTICAL
+command again within 10 minutes and it passes. The repeat is logged as an override.
+
+If a HUMAN authorized this path, quote them and try again:
+  \$GAMELOOP_DIR/bin/game_loop authorize --path <prefix> --reason \"<their exact words>\"
+
+WHAT THIS DOES NOT READ: a write made through subprocess or another shell-out, code run by eval or exec,
+a program in a FILE (python3 x.py), code inside bash -c or a substitution, and any node, ruby or
+perl write call missing from its table."
+      fi
+    fi
+    if [ -n "${interp_warn:-}" ]; then
+      interp_warn_note="game_loop: these interpreter writes were NOT judged, so nothing checked where they land:
+$(printf '%s\n' "$interp_warn" | sed 's/^/    /')
+A path built at runtime, or a program that does not parse, cannot be judged from the command
+text. If one can land outside this repo, knowing where is on you."
+      if [ -n "$interp_note" ]; then
+        interp_note="$interp_note
+$interp_warn_note"
+      else
+        interp_note=$interp_warn_note
+      fi
     fi
 
     # LAST, deliberately: these warnings are the only non-blocking output here, so they are emitted
@@ -3415,6 +3528,11 @@ PY
       [ -n "$commit_note" ] && commit_note="$commit_note
 "
       commit_note="$commit_note$shell_note"
+    fi
+    if [ -n "${interp_note:-}" ]; then
+      [ -n "$commit_note" ] && commit_note="$commit_note
+"
+      commit_note="$commit_note$interp_note"
     fi
     [ -n "$commit_note" ] && note "$commit_note"
     ;;

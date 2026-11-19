@@ -873,9 +873,17 @@ def main():
         # quote-aware. What actually trips it is an UNQUOTED redirect token with an out-of-repo
         # path, most often in a comment. Their detector approximated this guard instead of running
         # it, so the count did not transfer — and the message states the trigger I measured.
-        check("#114: a refusal caused by a python heredoc body SAYS that body was scanned as shell",
+        # A PYTHON BODY THAT PARSES IS READ AS PYTHON (interpreter_writes), so the comment that
+        # used to be refused as a redirect is a comment, and this was the false refusal #114 was
+        # about. One that does NOT parse keeps the shell scan, and with it the note below.
+        check("#114: a python heredoc body that PARSES is no longer scanned as shell, so a redirect "
+              "spelled in its comment is not refused",
+              allowed(wgproj, {"tool_name": "Bash", "tool_input": {
+                  "command": "python3 - <<'PY'\nx = 1  # echo q > ~/outside.txt\nPY"}}))
+        check("#114: a refusal caused by a python heredoc body that does NOT parse SAYS that body "
+              "was scanned as shell",
               "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
-                  "tool_input": {"command": "python3 - <<'PY'\nx = 1  # echo q > ~/outside.txt\nPY"}}).stdout)
+                  "tool_input": {"command": "python3 - <<'PY'\nx = (  # echo q > ~/outside.txt\nPY"}}).stdout)
         check("...and the same for node, so the note is about non-shell interpreters, not one name",
               "HERE-DOC BODY, WHICH THIS GUARD SCANNED" in guard(wgproj, {"tool_name": "Bash",
                   "tool_input": {"command": "node <<'JS'\nvar x = 1  // echo q > ~/outside.txt\nJS"}}).stdout)
@@ -898,6 +906,64 @@ def main():
         check("#114: an UNKNOWN consumer's heredoc is still scanned as code (fail-closed default)",
               denied(guard(wgproj, {"tool_name": "Bash", "tool_input": {
                   "command": "notasink <<'EOF'\necho x > ~/outside.txt\nEOF"}})))
+
+        # INTERPRETER WRITES, READ IN THE PROGRAM'S OWN GRAMMAR (shortlist item 2, 2026-11-18
+        # harvest). The guard used to state this blind spot in its SCOPE: to shell grammar a
+        # `python3 -c` program is a quoted string, so a refused Write could be routed through one.
+        print("write guard: inline interpreter programs:")
+        _iw = lambda c: {"tool_name": "Bash", "tool_input": {"command": c}}
+        _iw_out = os.path.expanduser("~/gl-interp-probe.txt")
+        _iw_py = "python3 - <<'PY'\nopen(%r, 'w').write('x')\nPY" % _iw_out
+        _iw_r1 = guard(wgproj, _iw(_iw_py), "sess-iw")
+        check("a python here-doc that opens an out-of-repo path for writing is REFUSED, and the "
+              "refusal names the call and says it came from parsing the program",
+              denied(_iw_r1) and "open(" in _iw_r1.stdout and "PARSING the program" in _iw_r1.stdout)
+        _iw_r2 = guard(wgproj, _iw(_iw_py), "sess-iw")
+        _iw_log = os.path.join(wgproj, ".game_loop", "log.jsonl")
+        with open(_iw_log) as _f:
+            _iw_recs = [json.loads(x) for x in _f if x.strip()]
+        check("...and the IDENTICAL command repeated passes with a notice, logged as an override "
+              "under check interpreter-write, so status counts it on the shell line",
+              not denied(_iw_r2) and "OVERRIDDEN" in _iw_r2.stdout
+              and any(r.get("kind") == "shell_gate_override" and r.get("check") == "interpreter-write"
+                      for r in _iw_recs)
+              and any(r.get("kind") == "shell_gate_block" and r.get("check") == "interpreter-write"
+                      for r in _iw_recs))
+        check("...and the override is spent: a third run is refused again",
+              denied(guard(wgproj, _iw(_iw_py), "sess-iw")))
+        check("...and a repeat from ANOTHER session is that session's own first refusal",
+              denied(guard(wgproj, _iw(_iw_py), "sess-iw-other")))
+        check("a python -c one-liner, node -e, ruby -e and perl -e writing outside are each refused",
+              all(denied(guard(wgproj, _iw(c), "sess-iw-each")) for c in (
+                  "python3 -c 'import os; os.remove(\"%s\")'" % _iw_out,
+                  "node -e \"require('fs').writeFileSync('%s', 'x')\"" % _iw_out,
+                  "ruby -e 'File.write(\"%s\", 1)'" % _iw_out,
+                  "perl -e 'open(my $fh, \">\", \"%s\")'" % _iw_out)))
+        check("a POLICY file written from python is refused on the policy arm, which only authorize "
+              "clears — repeating it does not get through",
+              all("PROJECT'S POLICY" in guard(wgproj, _iw(
+                  "python3 -c 'open(\".game_loop/config.json\", \"w\")'"), "sess-iw-pol").stdout
+                  for _ in range(2)))
+        check("positive controls: a python write INSIDE the repo, a read of an outside file, "
+              "str.replace, and a script FILE all pass untouched",
+              all(allowed(wgproj, _iw(c)) for c in (
+                  "python3 - <<'PY'\nopen('out.txt', 'w').write('x')\nPY",
+                  "python3 -c 'print(open(\"/etc/hosts\").read())'",
+                  "python3 - <<'PY'\nx = '/etc/a'.replace('a', 'b')\nPY",
+                  "python3 script.py")))
+        check("#114 by its own measured shape: comparisons in a python here-doc body pass",
+              allowed(wgproj, _iw("python3 - <<'PY'\nfor i in range(3):\n    if i < len('ab') and i > 0:"
+                                  " print(i)\nPY")))
+        _iw_warn = guard(wgproj, _iw("python3 - <<'PY'\nopen(f'/etc/{x}', 'w')\nPY"), "sess-iw-w")
+        check("a write whose path is built at runtime is WARNED about, not refused — it cannot be "
+              "judged from text, and refusing on a guess would stop ordinary scripts",
+              not denied(_iw_warn) and "NOT judged" in _iw_warn.stdout)
+        _iw_bad = guard(wgproj, _iw("python3 - <<'PY'\ndef f(:\nPY"), "sess-iw-w")
+        check("...and a body that does not parse says so, rather than passing in silence",
+              not denied(_iw_bad) and "does not parse" in _iw_bad.stdout)
+        check("a plain shell write outside is still the shell arm's refusal, untouched by this",
+              "mutating command targets a path outside" in guard(wgproj, _iw(
+                  "echo x > %s" % _iw_out), "sess-iw-sh").stdout)
 
         # AN UNKNOWN READER'S REFUSAL SAYS IT IS ONE (showrunner, 2026-11-16). A Crawler's
         # `showrunner close --reason-file -` carried a report naming <tree>/.game_loop/config.local.json;
@@ -1625,8 +1691,15 @@ def main():
               and _gm.VERB_GUIDE["kinds"][0][:30] in " ".join(_gh.stdout.split()))
         _g1 = gl(arproj, "guide", "--json", "stopcheck")
         _g0 = gl(arproj, "guide", "no-such-verb")
+        # Decoded under a guard like _gj above: when guide_entries is neutered the narrowed call is
+        # REFUSED in plain text, and an unguarded json.loads crashed the suite instead of failing
+        # this check, so the mutation sweep could not read guide_entries at all (NOT MEASURED).
+        try:
+            _g1j = json.loads(_g1.stdout or "{}")
+        except ValueError:
+            _g1j = {}
         check("...one verb narrows to one entry; an unknown verb is REFUSED, not an empty list",
-              [v.get("verb") for v in (json.loads(_g1.stdout or "{}").get("verbs") or [])]
+              [v.get("verb") for v in (_g1j.get("verbs") or [])]
               == ["stopcheck"] and _g0.returncode != 0 and "no verb named" in _g0.stdout)
         print("a second grant for the same thing in one session is refused until decided:")
         _ag = lambda *x, sid="sess-again": gl(arproj, "authorize", *x, sid=sid)
@@ -10034,6 +10107,96 @@ def main():
     _pv_fresh = make_sandbox()
     check("...and a log with none says so in one line, rather than the line going missing",
           "no shell-gate refusal recorded" in gl(_pv_fresh, "status").stdout)
+
+    print("inline interpreter programs are read for the files they write (interpreter_writes):")
+    _ivw = _um.interpreter_writes
+    _ivp = lambda c, cwd="/r": [t["path"] for t in _ivw(c, cwd)["targets"]]
+    check("python: open with each write mode, the os/shutil mutators, and Path methods are found; "
+          "a plain open() is a read and is not",
+          _ivp("python3 -c 'open(\"/a\", \"w\"); open(\"/b\", \"a\"); open(\"/c\", \"r+\"); "
+               "open(\"/d\")'") == ["/a", "/b", "/c"]
+          and _ivp("python3 - <<'PY'\nimport os, shutil\nos.remove('/e')\nshutil.rmtree('/f')\n"
+                   "shutil.copy('/src', '/g')\nos.rename('/h', '/i')\nPY") == ["/e", "/f", "/g", "/h", "/i"])
+    check("python: a copy's SOURCE is only read, so it is not a target",
+          "/src" not in _ivp("python3 -c 'import shutil; shutil.copy(\"/src\", \"/g\")'"))
+    check("python: imports are followed, so an alias and a from-import read as the real call",
+          _ivp("python3 - <<'PY'\nimport shutil as s\nfrom os import remove as rm\n"
+               "s.rmtree('/x')\nrm('/y')\nPY") == ["/x", "/y"])
+    check("python: a Path built from literals is joined, through /, .parent, home() and a name "
+          "bound once; an unrelated str.replace is not a write",
+          _ivp("python3 - <<'PY'\nfrom pathlib import Path\nP = Path('/base') / 'sub' / 'f.json'\n"
+               "P.write_text('x')\nP.parent.mkdir()\n'a'.replace('a', 'b')\nPY")
+          == ["/base/sub/f.json", "/base/sub"]
+          and _ivp("python3 -c 'from pathlib import Path; (Path.home() / \"z\").touch()'")
+          == [os.path.join(os.path.expanduser("~"), "z")])
+    check("python: a name bound TWICE is not trusted — its value at the call is not knowable",
+          _ivw("python3 - <<'PY'\np = '/a'\np = '/b'\nopen(p, 'w')\nPY", "/r")["targets"] == []
+          and len(_ivw("python3 - <<'PY'\np = '/a'\np = '/b'\nopen(p, 'w')\nPY", "/r")["unresolved"]) == 1)
+    _ivr = _ivw("python3 - <<'PY'\nopen(f'/x/{y}', 'w')\nopen('/z', mode)\nPY", "/r")
+    check("python: an f-string path and a non-literal mode are UNRESOLVED, never silently fine",
+          _ivr["targets"] == [] and len(_ivr["unresolved"]) == 2)
+    check("python: a relative path is placed against cwd, and a literal `cd` moves it",
+          _ivp("python3 -c 'open(\"o\", \"w\")'", "/r") == ["/r/o"]
+          and _ivp("cd /elsewhere && python3 -c 'open(\"o\", \"w\")'", "/r") == ["/elsewhere/o"]
+          and _ivp("cd /elsewhere\npython3 -c 'open(\"o\", \"w\")'", "/r") == ["/elsewhere/o"])
+    _ivc = _ivw("cd $D && python3 -c 'open(\"o\", \"w\")'", "/r")
+    check("...and a cd through a variable makes the directory unknown: the write is unresolved",
+          _ivc["targets"] == [] and len(_ivc["unresolved"]) == 1)
+    check("only programs handed as TEXT are read: a script file, -m, and a here-doc fed to a "
+          "script are the script's business; a quoted mention in echo is not a program",
+          all(_ivw(c, "/r")["targets"] == [] for c in (
+              "python3 x.py", "python3 -m mod", "python3 x.py <<'PY'\nopen('/a', 'w')\nPY",
+              "echo \"python3 -c open('/a','w')\"")))
+    check("the program is found past env assignments, env/timeout wrappers, a flag cluster (-Ic) "
+          "and a path to the interpreter",
+          _ivp("FOO=1 env timeout 5 /usr/bin/python3 -Ic 'open(\"/a\", \"w\")'") == ["/a"])
+    check("node, ruby and perl write calls are matched from their table, with a copy's or move's "
+          "destination taken by index",
+          _ivp("node -e \"const fs=require('fs'); fs.copyFileSync('/s', '/d'); fs.rmSync('/e')\"")
+          == ["/d", "/e"]
+          and _ivp("ruby -e 'File.write(\"/a\", 1); FileUtils.mv(\"/b\", \"/c\")'") == ["/a", "/b", "/c"]
+          and sorted(_ivp("perl -e 'open(my $fh, \">\", \"/p\"); unlink \"/q\"'")) == ["/p", "/q"])
+    _ivt = _ivw("node -e \"require('fs').writeFileSync(`/a/${x}`, 1)\"\n"
+                "ruby -e 'File.write(\"/b/#{y}\", 1)'", "/r")
+    check("...and an INTERPOLATED literal (a JS template, ruby #{}) is unresolved, not taken as "
+          "the path it spells",
+          _ivt["targets"] == [] and len(_ivt["unresolved"]) == 2)
+    _ivs = _ivw("python3 - <<'PY'\nif i < len(x): pass\nPY\necho done", "/r")["shell_text"]
+    check("a python body that PARSES is blanked from the shell text, keeping its opener, its "
+          "delimiter and the line count (#114)",
+          "len(x)" not in _ivs and "<<'PY'" in _ivs and _ivs.count("\n") == 3 and "echo done" in _ivs)
+    _ivu = _ivw("python3 - <<'PY'\ndef f(:\n  if i < 3\nPY", "/r")
+    check("...and one that does NOT parse is left for the shell scan and reported unparsed",
+          "i < 3" in _ivu["shell_text"] and len(_ivu["unparsed"]) == 1)
+    check("unbalanced quotes are reported unparsed, not a crash and not a silent pass",
+          _ivw("python3 -c 'open(", "/r")["unparsed"][0]["lang"] == "shell")
+    check("a line opening two here-docs is left whole rather than guessed at",
+          _ivw("python3 - <<'A' <<'B'\nopen('/a','w')\nA\nB", "/r")["targets"] == [])
+
+    _rs = _um.retry_spent
+    _rs1, _rsm = _rs({}, "cmd", 1000.0)
+    _rs2, _rsm2 = _rs(_rsm, "cmd", 1100.0)
+    _rs3, _ = _rs(_rsm2, "cmd", 1200.0)
+    check("retry_spent: a first refusal is remembered, the repeat inside the window is spent, and "
+          "the spend clears it so the next is a refusal again",
+          (_rs1, _rs2, _rs3) == (False, True, False))
+    check("...and an entry older than the window is dropped, so a late repeat is a fresh refusal",
+          _rs(_rs({}, "c", 0.0)[1], "c", float(_um.SHELL_RETRY_SEC) + 1)[0] is False
+          and _rs({"junk": "x"}, "c", 5.0)[1].get("junk") is None)
+    _gr_d = make_sandbox()
+    _gr_s = os.path.join(_gr_d, "sess")
+    _gr_l = os.path.join(_gr_d, "log.jsonl")
+    _gr = [_um.guard_retry(_gr_s, _gr_l, "interpreter-write", "c1", 10.0 + i, "abcdefghij")
+           for i in range(3)]
+    with open(_gr_l) as _f:
+        _gr_recs = [json.loads(x) for x in _f if x.strip()]
+    check("guard_retry: block, override, block — kept in its OWN file beside the session state, "
+          "and each outcome logged under the shell gate's kinds",
+          _gr == ["block", "override", "block"]
+          and os.path.exists(os.path.join(_gr_s, "guard_retry.json"))
+          and [r["kind"] for r in _gr_recs] == ["shell_gate_block", "shell_gate_override",
+                                                 "shell_gate_block"]
+          and all(r["check"] == "interpreter-write" and r["sid"] == "abcdefgh" for r in _gr_recs))
 
     print("a WORK verb after a signpost is a stall too (wcs, measured in their own repo):")
     # REPORTED BY A CONSUMER WHO RAN OUR PATTERN AGAINST THEIR OWN STALL, not against an idea.

@@ -276,9 +276,16 @@ reduces the damage, it does not remove the class.
   It sees the Write/Edit/NotebookEdit tools by name, every redirect form in the shell grammar that
   creates or truncates a file, and a NAMED set of write-capable verbs (`rm`, `mv`, `cp`, `tee`, `dd`,
   `curl -o`, `wget -O`, `tar -C`, `unzip -d`, `rsync`, `install`, `patch -o`, `split`, `sed -i`,
-  `perl -i`, `git` writes). **What it does NOT see it says so in its own SCOPE block**: a `python3 -c`
-  that writes, a path built from a shell variable, a script that mutates once you run it, or any
-  program not on that list. Those are not permission to write outside the repo — they are places the
+  `perl -i`, `git` writes). It also reads the program an inline interpreter is handed (`python3 -c`,
+  `python3 -` fed a here-doc, `node -e`, `ruby -e`, `perl -e`) in that program's own grammar — Python
+  by `ast`, the others against a table of write calls — and judges the literal paths its write calls
+  name. Such a write outside the repo is refused once; the identical command repeated within 10
+  minutes passes and is logged (`shell` line in `status`, check `interpreter-write`). A path built at
+  runtime, or a program that does not parse, gets a warning instead. A Python here-doc body that
+  parses is no longer scanned as shell, so `i < len(x)` in one stops being refused (#114).
+  **What it does NOT see it says so in its own SCOPE block**: a write an interpreter makes through
+  `subprocess`/other shell-outs/`eval`, a program read from a file (`python3 x.py`), a path built from a
+  shell variable, a script that mutates once you run it, or any program not on that list. Those are not permission to write outside the repo — they are places the
   rule holds and the enforcement does not, which is INV3 asking you to keep it rather than the gate
   making you. Until 2026-08-26 that list quietly omitted `>|`, `>!`, `>>!`, `>&`, `>>&`, `curl -o`,
   `tar -C` and six other ordinary forms, all of which wrote outside the repo for weeks.
@@ -311,8 +318,10 @@ reduces the damage, it does not remove the class.
   is refused whether or not it does — through **Write/Edit and through the shell alike**: a redirect,
   a heredoc append, `tee`, `sed -i`, or a `cp`/`mv` onto the path. (This paragraph used to say
   "Write/Edit", which was accurate and read as "the file cannot be written" — and a consumer widened
-  `verify.yaml` with `cat >>`, exit 0, nothing logged. What it CANNOT see is still real: a
-  `python3 -c` that writes the file, a path built from a shell variable, or any MCP tool.) — its keys merge with UNION semantics, so anything written there
+  `verify.yaml` with `cat >>`, exit 0, nothing logged. A `python3 -c` or `node -e` that writes the
+  file by a literal path is now read and refused the same way. What it CANNOT see is still real: a
+  write through `subprocess` or another shell-out inside such a program, a script file, a path built from a
+  shell variable, or any MCP tool.) — its keys merge with UNION semantics, so anything written there
   is additive and cannot be narrowed by the project's own config. This is the file that decides what
   you are allowed to do; a session that can widen it has a suggestion rather than a guardrail. It
   closed a real case: a blocked agent added ten MCP verbs and a whole-server prefix to unblock

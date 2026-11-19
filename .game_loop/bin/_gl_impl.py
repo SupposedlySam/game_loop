@@ -2919,25 +2919,574 @@ def shell_gate(s, payload, t_now):
     if not name:
         return None
     command = (payload.get("tool_input") or {}).get("command") or ""
-    key = hashlib.sha256(command.encode()).hexdigest()[:16]
-    seen = {k: v for k, v in (s.get("shell_gate_refused") or {}).items()
-            if isinstance(v, (int, float)) and t_now - v < SHELL_RETRY_SEC}
-    if key in seen:
-        seen.pop(key)
-        s["shell_gate_refused"] = seen
-        save(s)
+    repeat, s["shell_gate_refused"] = retry_spent(s.get("shell_gate_refused"), command, t_now)
+    save(s)
+    if repeat:
         logline({"kind": "shell_gate_override", "check": name, "command": command[:200]})
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "additionalContext":
                 "game_loop: %s was OVERRIDDEN by repeating the command, and that is logged. "
                 "Read the exit status some other way before reporting a result." % name}}
-    seen[key] = t_now
-    s["shell_gate_refused"] = seen
-    save(s)
     logline({"kind": "shell_gate_block", "check": name, "command": command[:200]})
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
         "permissionDecisionReason": reason}}
+
+
+def retry_spent(seen, command, t_now, window=SHELL_RETRY_SEC):
+    """(is_repeat, seen'): the repeat-to-override memory shared by the shell gate and the write
+    guard. Pure. A command refused within `window` seconds is spent by running it again, once;
+    entries older than the window are dropped so the memory never grows without bound."""
+    key = hashlib.sha256((command or "").encode()).hexdigest()[:16]
+    live = {k: v for k, v in (seen or {}).items()
+            if isinstance(v, (int, float)) and t_now - v < window}
+    if key in live:
+        live.pop(key)
+        return True, live
+    live[key] = t_now
+    return False, live
+
+
+def guard_retry(state_dir, log_f, check, command, t_now, sid=""):
+    """The shell gate's opt-out for the WRITE GUARD, which keeps no state code of its own: "override"
+    when this identical command was refused within SHELL_RETRY_SEC, else "block". Logs either way,
+    under the shell gate's kinds, so `status` counts both gates on one `shell` line.
+
+    Its own file, not state.json: the guard and limitgate both run on every Bash call, and two
+    hooks rewriting one file at once lose whichever wrote first."""
+    path = os.path.join(state_dir, "guard_retry.json")
+    try:
+        with open(path) as f:
+            seen = json.load(f)
+    except (OSError, ValueError):
+        seen = {}
+    repeat, seen = retry_spent(seen if isinstance(seen, dict) else {}, command, t_now)
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=state_dir, prefix=".guard_retry.", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(seen, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass    # an unwritable memory means the next repeat is refused again: the safe direction
+    rec = {"t": now(), "kind": "shell_gate_override" if repeat else "shell_gate_block",
+           "check": check, "command": (command or "")[:200]}
+    if sid:
+        rec["sid"] = sid[:8]
+    try:
+        with open(log_f, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+    return "override" if repeat else "block"
+
+
+# ── interpreter writes: the files inline code writes, read in that code's own grammar ────────────
+#
+# THE BLIND SPOT THE WRITE GUARD STATED, CLOSED FOR THE SHAPES AGENTS ACTUALLY TYPE. guard-writes'
+# SCOPE said it could not see `python3 -c 'open("/x", "w")'`, or a `python3 - <<'PY'` body that
+# writes: it reads shell grammar, and to shell an interpreter's program is a quoted string or a
+# heredoc body. llm_chat's write-through-interpreter trigger (shortlist item 2 of the 2026-11-18
+# harvest) caught agents routing around a refused Write in exactly that way.
+#
+# READ IN ITS OWN GRAMMAR. Python is parsed with ast, so a call is a call and a string that merely
+# says open() is a string. That also retires a false-refusal class: a Python heredoc body used to
+# be scanned as SHELL, and auditor measured 10 of 100 such bodies refused for text like
+# `i < len(x)` (#114). A body that parses is now read only as Python; one that does not is
+# reported UNPARSED and keeps the old shell scan. node, ruby and perl have no parser here, so a
+# table of their write calls is matched instead, and that table is the limit of what is seen.
+#
+# THIS ONLY REPORTS; the guard decides. A literal path goes through the guard's own rules, the same
+# ones a Write gets. A write call whose path is not a literal is UNRESOLVED, a warning: a path built
+# at runtime cannot be judged from text, and refusing on a guess would stop ordinary scripts.
+#
+# WHY HERE AND NOT IN THE GUARD'S OWN PYTHON: that Python is embedded in a bash $(...), may hold no
+# backtick, dollar-paren or here-doc operator, and none of it is reachable by the unit tests or the
+# mutation sweep. The guard imports this module only when the command names an interpreter.
+#
+# NOT SEEN, each a miss rather than a false refusal: a write made through a shelled-out command
+# (subprocess, os.popen) or eval/exec of built text; a program read from a FILE (`python3 x.py`),
+# which is the script's business and not the command's; code inside `bash -c` or a substitution;
+# a heredoc on a line that opens more than one; and every node/ruby/perl write call not in the table.
+
+_INTERP_WORD = re.compile(r"(?:^|/)(python(?:[23](?:\.\d+)?)?|node(?:js)?|ruby|perl)$")
+# Words that run the command after them, skipped to find the program a segment really runs.
+_RUNS_NEXT = {"env", "time", "nice", "nohup", "command", "exec", "sudo", "builtin"}
+# Per language: the short letter that takes the program text, its long spellings, and the flags
+# that take some OTHER value (so that value is never read as a script operand).
+_CODE_FLAG = {"python": ("c", ()), "node": ("e", ("--eval", "--print")), "ruby": ("e", ()),
+              "perl": ("eE", ())}
+_VALUE_FLAGS = {"python": ("-W", "-X", "-Q"), "node": ("-r", "--require", "--import", "--loader"),
+                "ruby": ("-r", "-I", "-C", "-E"), "perl": ("-M", "-m", "-I")}
+_HD_OP = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_HD_MARK = "__GL_HEREDOC_%d__"
+_HD_MARK_RE = re.compile(r"^__GL_HEREDOC_(\d+)__$")
+_ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _interp_lang(word):
+    """"python", "node", "ruby" or "perl" for a command word that runs that interpreter, else None."""
+    m = _INTERP_WORD.search(word or "")
+    if not m:
+        return None
+    w = m.group(1)
+    return "python" if w.startswith("python") else "node" if w.startswith("node") else w
+
+
+def _lift_heredocs(command):
+    """(text, bodies): COMMAND with every here-doc body taken out and its operator replaced by a
+    marker word, and the bodies as (first line, last line, text) in the order they open, with line
+    numbers counted in the ORIGINAL command. A line opening more than one here-doc is left whole:
+    which body feeds which command is not knowable from a line split, and a guess here is a miss."""
+    lines = (command or "").split("\n")
+    out, bodies, i = [], [], 0
+    while i < len(lines):
+        line = lines[i]
+        found = _HD_OP.findall(line)
+        if len(found) != 1:
+            out.append(line)
+            i += 1
+            continue
+        delim = found[0][1]
+        out.append(_HD_OP.sub(" " + _HD_MARK % len(bodies) + " ", line, count=1))
+        first = i + 1
+        j = first
+        while j < len(lines) and lines[j].strip() != delim:
+            j += 1
+        bodies.append((first, j - 1, "\n".join(lines[first:j])))
+        out.extend([""] * (j - first))          # keep the line count, so numbers stay comparable
+        if j < len(lines):
+            out.append(lines[j])                # the delimiter line
+        i = j + 1
+    return "\n".join(out), bodies
+
+
+def _unquoted_newlines_to_semis(text):
+    """Every newline OUTSIDE quotes becomes `;`, so shlex (which reads newline as a space) still
+    sees one command end where the next begins. A quoted newline is program text and stays."""
+    out, q, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if q:
+            if c == "\\" and q == '"' and i + 1 < len(text):
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == q:
+                q = None
+        elif c == "\\" and i + 1 < len(text):
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c in "'\"":
+            q = c
+        elif c == "\n":
+            c = ";"
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _command_segments(text):
+    """The simple commands in TEXT as (words, stdin markers), quote-aware, with redirections and
+    their targets dropped. Raises ValueError on unbalanced quotes."""
+    lx = shlex.shlex(_unquoted_newlines_to_semis(text), posix=True, punctuation_chars=True)
+    lx.whitespace_split = True
+    lx.commenters = ""
+    segs, words, marks, skip = [], [], [], False
+    for tok in lx:
+        if skip:
+            skip = False
+            if _HD_MARK_RE.match(tok):
+                marks.append(int(_HD_MARK_RE.match(tok).group(1)))
+            continue
+        if tok and set(tok) <= set("<>&|;()"):
+            if "<" in tok or ">" in tok:
+                if words and words[-1].isdigit():
+                    words.pop()                 # the fd number of 2>&1
+                skip = True                     # the redirect's target is not an operand
+                continue
+            if words or marks:
+                segs.append((words, marks))
+            words, marks = [], []
+            continue
+        m = _HD_MARK_RE.match(tok)
+        if m:
+            marks.append(int(m.group(1)))
+        else:
+            words.append(tok)
+    if words or marks:
+        segs.append((words, marks))
+    return segs
+
+
+def _program_head(words):
+    """Index of the word a simple command RUNS, past env assignments and wrappers, else None."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if _ASSIGN_WORD.match(w):
+            i += 1
+        elif os.path.basename(w) in _RUNS_NEXT:
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                i += 1
+        elif os.path.basename(w) == "timeout":
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                i += 1
+            i += 1                              # the duration
+        else:
+            return i
+    return None
+
+
+def _interp_code(lang, args):
+    """("arg", code) when ARGS carry the program as a flag's value, ("stdin", None) when the program
+    is read from standard input, or (None, None) when it runs a script or module from a file."""
+    letters, longs = _CODE_FLAG[lang]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return (None, None) if i + 1 < len(args) else ("stdin", None)
+        if a in longs or (a.startswith("-") and not a.startswith("--") and len(a) > 1
+                          and a[-1] in letters and a[1:].isalpha()):
+            return ("arg", args[i + 1]) if i + 1 < len(args) else (None, None)
+        if lang == "python" and a == "-m":
+            return None, None
+        if a in _VALUE_FLAGS[lang]:
+            i += 2
+            continue
+        if a == "-":
+            return "stdin", None
+        if a.startswith("-"):
+            i += 1
+            continue
+        return None, None                       # an operand: the program is that file
+    return "stdin", None
+
+
+def interpreter_programs(command, cwd):
+    """The programs COMMAND hands an interpreter as text, as dicts {lang, code, cwd, via, body}.
+    Pure. `via` is "arg" (a -c/-e value) or "heredoc"; `body` is the index into the here-doc list
+    for a heredoc, so a caller can find its lines. cwd follows a literal `cd`; one through a
+    variable makes it None, and relative paths after it cannot be placed. Raises ValueError when
+    the command's quotes do not balance."""
+    text, bodies = _lift_heredocs(command)
+    progs, here = [], cwd
+    for words, marks in _command_segments(text):
+        h = _program_head(words)
+        if h is None:
+            continue
+        head, args = words[h], words[h + 1:]
+        if head == "cd":
+            dest = args[0] if args else "~"
+            if "$" in dest or "`" in dest:
+                here = None
+            elif here is not None or os.path.isabs(os.path.expanduser(dest)):
+                here = os.path.normpath(os.path.join(here or "/", os.path.expanduser(dest)))
+            continue
+        lang = _interp_lang(head)
+        if not lang:
+            continue
+        via, code = _interp_code(lang, args)
+        if via == "arg":
+            progs.append({"lang": lang, "code": code, "cwd": here, "via": "arg", "body": None})
+        elif via == "stdin" and marks:
+            progs.append({"lang": lang, "code": bodies[marks[0]][2], "cwd": here,
+                          "via": "heredoc", "body": marks[0]})
+    return progs, bodies
+
+
+# ── Python, by ast ──
+_PY_OPENERS = {"open", "io.open", "codecs.open"}
+# Module functions that mutate a path, and which positional arguments are the paths they mutate
+# (a copy's source is only read). The keyword spellings are matched too.
+_PY_FILE_ARGS = {
+    "os.remove": (0,), "os.unlink": (0,), "os.rmdir": (0,), "os.removedirs": (0,),
+    "os.mkdir": (0,), "os.makedirs": (0,), "os.mkfifo": (0,), "os.truncate": (0,),
+    "os.chmod": (0,), "os.chown": (0,), "os.lchown": (0,), "os.utime": (0,),
+    "os.rename": (0, 1), "os.renames": (0, 1), "os.replace": (0, 1),
+    "os.symlink": (1,), "os.link": (1,),
+    "shutil.rmtree": (0,), "shutil.move": (0, 1), "shutil.copy": (1,), "shutil.copy2": (1,),
+    "shutil.copyfile": (1,), "shutil.copytree": (1,), "shutil.copymode": (1,),
+    "shutil.copystat": (1,), "shutil.chown": (0,),
+}
+_PY_ARG_KW = {0: ("path", "src", "name", "file"), 1: ("dst",)}
+# Path methods that mutate their receiver. The distinctive names are judged on any receiver; the
+# common ones only on a receiver KNOWN to be a Path, because str.replace is not a write.
+_PY_PATH_WRITES = {"write_text", "write_bytes", "symlink_to", "hardlink_to"}
+_PY_PATH_WRITES_IF_PATH = {"touch", "mkdir", "unlink", "rmdir", "chmod", "lchmod", "rename",
+                           "replace"}
+_PY_PATH_CTORS = {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.PurePosixPath"}
+_PY_SAME_TEXT = {"os.path.abspath", "os.path.realpath", "os.path.normpath", "os.path.expanduser",
+                 "os.fspath", "str"}
+_UNKNOWN = (None, False)
+
+
+def _py_aliases(tree):
+    """{bound name: dotted origin} from the imports, so `from shutil import rmtree as r` makes
+    `r(...)` read as shutil.rmtree."""
+    al = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                al[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            for a in n.names:
+                al[a.asname or a.name] = n.module + "." + a.name
+    return al
+
+
+def _py_dotted(node, al):
+    """The dotted name a call target spells, with its first part resolved through the imports."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([al.get(node.id, node.id)] + parts[::-1])
+
+
+def _py_value(node, al, env, depth=0):
+    """(text, is_path) for an expression whose value is knowable WITHOUT running anything, else
+    (None, is_path): a Path built from a runtime value is still known to be a Path."""
+    if depth > 30 or node is None:
+        return _UNKNOWN
+    d = depth + 1
+    if isinstance(node, ast.Constant):
+        return (node.value, False) if isinstance(node.value, str) else _UNKNOWN
+    if isinstance(node, ast.Name):
+        return env.get(node.id, _UNKNOWN)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        lv, lp = _py_value(node.left, al, env, d)
+        rv, _ = _py_value(node.right, al, env, d)
+        if not lp:
+            return _UNKNOWN
+        return (os.path.join(lv, rv) if lv is not None and rv is not None else None), True
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        v, p = _py_value(node.value, al, env, d)
+        return ((os.path.dirname(v.rstrip("/")) or ".") if v is not None and p else None), p
+    if not isinstance(node, ast.Call):
+        return _UNKNOWN
+    name = _py_dotted(node.func, al)
+    args = [_py_value(a, al, env, d)[0] for a in node.args]
+    known = all(a is not None for a in args)
+    if name in _PY_PATH_CTORS:
+        if not args:
+            return ".", True
+        return (os.path.join(*args) if known else None), True
+    if name == "pathlib.Path.home":
+        return "~", True
+    if name in ("pathlib.Path.cwd", "os.getcwd"):
+        return ".", name.startswith("pathlib")
+    if name == "os.path.join":
+        return (os.path.join(*args) if args and known else None), False
+    if name in _PY_SAME_TEXT and len(args) == 1:
+        inner_p = _py_value(node.args[0], al, env, d)[1]
+        return args[0], (inner_p and name != "str")
+    if isinstance(node.func, ast.Attribute):
+        v, p = _py_value(node.func.value, al, env, d)
+        if p and node.func.attr in ("expanduser", "resolve", "absolute"):
+            return v, True
+        if p and node.func.attr == "joinpath":
+            return (os.path.join(v, *args) if v is not None and known else None), True
+    return _UNKNOWN
+
+
+def _py_env(tree, al):
+    """{name: (text, is_path)} for names bound exactly once, by a plain `name = <expr>`. A name
+    bound any other way, or twice, is left out: its value at the call is not knowable."""
+    stores = collections.Counter(n.id for n in ast.walk(tree)
+                                 if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
+    simple = sorted((n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                     and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)),
+                    key=lambda n: (n.lineno, n.col_offset))
+    env = {}
+    for n in simple:
+        if stores[n.targets[0].id] == 1:
+            env[n.targets[0].id] = _py_value(n.value, al, env)
+    return env
+
+
+def _py_arg(call, i):
+    """Positional argument I of CALL, or its keyword spelling, else None."""
+    if i < len(call.args):
+        return call.args[i]
+    for kw in call.keywords:
+        if kw.arg in _PY_ARG_KW.get(i, ()):
+            return kw.value
+    return None
+
+
+def _py_mode(call, pos):
+    """The mode text an open-like call passes at position POS or as mode=, "" when it passes none
+    (which reads), or None when the mode is not a literal."""
+    node = call.args[pos] if pos < len(call.args) else next(
+        (k.value for k in call.keywords if k.arg == "mode"), None)
+    if node is None:
+        return ""
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def python_writes(code):
+    """(writes, unresolved) for a Python program, each a list of (path text or None, call, line).
+    Pure; never runs the code. Raises SyntaxError when it does not parse."""
+    tree = ast.parse(code)
+    al = _py_aliases(tree)
+    env = _py_env(tree, al)
+    writes, unresolved = [], []
+
+    def put(node, call, line):
+        v = _py_value(node, al, env)[0] if node is not None else None
+        (writes if v is not None else unresolved).append((v, call, line))
+
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        name = _py_dotted(n.func, al)
+        if name in _PY_OPENERS:
+            mode = _py_mode(n, 1)
+            if mode is None:
+                unresolved.append((None, "%s(…, <mode not a literal>)" % name, n.lineno))
+            elif set(mode) & set("wax+"):
+                put(_py_arg(n, 0), "%s(…, %r)" % (name, mode), n.lineno)
+            continue
+        if name in _PY_FILE_ARGS:
+            for i in _PY_FILE_ARGS[name]:
+                put(_py_arg(n, i), name + "()", n.lineno)
+            continue
+        if not isinstance(n.func, ast.Attribute):
+            continue
+        attr = n.func.attr
+        rv, rp = _py_value(n.func.value, al, env)
+        if attr in _PY_PATH_WRITES or (rp and attr in _PY_PATH_WRITES_IF_PATH):
+            put(n.func.value, "." + attr + "()", n.lineno)
+            if rp and attr in ("rename", "replace") and n.args:
+                put(n.args[0], "." + attr + "() destination", n.lineno)
+        elif rp and attr == "open":
+            mode = _py_mode(n, 0)
+            if mode is None:
+                unresolved.append((None, ".open(<mode not a literal>)", n.lineno))
+            elif set(mode) & set("wax+"):
+                put(n.func.value, ".open(%r)" % mode, n.lineno)
+    return writes, unresolved
+
+
+# ── node, ruby, perl, by table ──
+_LIT = r"""(?P<q%d>['"`])(?P<v%d>(?:\\.|(?!(?P=q%d)).)*)(?P=q%d)"""
+# (language, call pattern ending where the arguments begin, {function: path argument indices},
+# default indices). A function absent from its map writes argument 0.
+_TABLE_WRITES = (
+    ("node", re.compile(r"(?:\bfs\w*|\bfs\.promises|require\(\s*['\"](?:node:)?fs(?:/promises)?['\"]\s*\))"
+                        r"\s*\.\s*(?P<f>writeFileSync|writeFile|appendFileSync|appendFile|mkdirSync|"
+                        r"mkdir|rmSync|rm|rmdirSync|rmdir|unlinkSync|unlink|truncateSync|truncate|"
+                        r"createWriteStream|renameSync|rename|copyFileSync|copyFile|cpSync|cp|"
+                        r"symlinkSync|symlink|chmodSync|chmod)\s*\("),
+     {"renameSync": (0, 1), "rename": (0, 1), "copyFileSync": (1,), "copyFile": (1,),
+      "cpSync": (1,), "cp": (1,), "symlinkSync": (1,), "symlink": (1,)}),
+    ("ruby", re.compile(r"\b(?:File|IO)\s*\.\s*(?P<f>write|binwrite|delete|unlink|rename|truncate|"
+                        r"symlink|chmod)\b\s*\(?"),
+     {"rename": (0, 1), "symlink": (1,), "chmod": (1,)}),
+    ("ruby", re.compile(r"\bFileUtils\s*\.\s*(?P<f>rm_rf|rm_r|rm_f|rm|mkdir_p|makedirs|mkdir|mv|move|"
+                        r"cp_r|cp|copy|touch|ln_sf|ln_s|ln|rmdir|remove_dir|remove_file|"
+                        r"remove_entry|install)\b\s*\(?"),
+     {"mv": (0, 1), "move": (0, 1), "cp_r": (1,), "cp": (1,), "copy": (1,), "ln_sf": (1,),
+      "ln_s": (1,), "ln": (1,), "install": (1,)}),
+    ("ruby", re.compile(r"\bDir\s*\.\s*(?P<f>mkdir|rmdir|delete|unlink)\b\s*\(?"), {}),
+    ("perl", re.compile(r"\b(?P<f>unlink|mkdir|rmdir|rename)\b\s*\(?"), {"rename": (0, 1)}),
+)
+_TABLE_ARGS = re.compile(r"\s*" + _LIT % (0, 0, 0, 0) + r"(?:\s*,\s*" + _LIT % (1, 1, 1, 1) + r")?")
+# Opens that write, which need their MODE read: ruby File.open/new with a w/a/+ mode, and perl's
+# three-argument open with a > mode or its two-argument form with the mode glued to the path.
+_RUBY_OPEN = re.compile(r"\b(?:File|IO)\s*\.\s*(?:open|new)\b\s*\(?")
+_PERL_OPEN = re.compile(r"\bopen\s*\(?\s*(?:my\s+)?[\$\w]+\s*,\s*")
+
+
+def _table_literal(text):
+    """The literal's value, or None when it is interpolated (a template `${}`, or perl/ruby `$`/`#{}`)."""
+    return None if ("${" in text or "#{" in text or "$" in text) else text
+
+
+def table_writes(lang, code):
+    """(writes, unresolved) for a node/ruby/perl program, matched against _TABLE_WRITES. Pure."""
+    writes, unresolved = [], []
+
+    def put(lit, call, at):
+        line = code.count("\n", 0, at) + 1
+        v = _table_literal(lit) if lit is not None else None
+        (writes if v is not None else unresolved).append((v, call, line))
+
+    for tlang, pat, idx in _TABLE_WRITES:
+        if tlang != lang:
+            continue
+        for m in pat.finditer(code):
+            a = _TABLE_ARGS.match(code, m.end())
+            vals = (a.group("v0"), a.group("v1")) if a else (None, None)
+            for i in idx.get(m.group("f"), (0,)):
+                put(vals[i], m.group("f") + "()", m.start())
+    if lang == "ruby":
+        for m in _RUBY_OPEN.finditer(code):
+            a = _TABLE_ARGS.match(code, m.end())
+            if a and a.group("v1") is not None and set(a.group("v1")) & set("wa+"):
+                put(a.group("v0"), "File.open(…, %r)" % a.group("v1"), m.start())
+    if lang == "perl":
+        for m in _PERL_OPEN.finditer(code):
+            a = _TABLE_ARGS.match(code, m.end())
+            if not a:
+                continue
+            first, second = a.group("v0"), a.group("v1")
+            if second is not None and first.strip() in (">", ">>", "+<", "+>", "+>>"):
+                put(second, "open(…, %r)" % first.strip(), m.start())
+            elif second is None and re.match(r"\s*(?:\+?>>?|\+<)", first):
+                put(re.sub(r"^\s*(?:\+?>>?|\+<)\s*", "", first), "open(…, '>')", m.start())
+    return writes, unresolved
+
+
+def interpreter_writes(command, cwd):
+    """What the inline interpreter programs in a Bash command write, for the write guard. Pure.
+
+    Returns {targets: [{path, lang, call, line}], unresolved: [{lang, call, line}],
+    unparsed: [{lang, why}], shell_text}. `path` is absolute where a literal resolves; shell_text
+    is COMMAND with each Python heredoc body that PARSED blanked, so the guard's shell scan stops
+    reading Python as shell (#114) while every other line stays where it was."""
+    res = {"targets": [], "unresolved": [], "unparsed": [], "shell_text": command or ""}
+    try:
+        progs, bodies = interpreter_programs(command, cwd)
+    except ValueError as e:
+        res["unparsed"].append({"lang": "shell", "why": "the command's quotes do not balance (%s)" % e})
+        return res
+    lines = (command or "").split("\n")
+    for p in progs:
+        if p["lang"] == "python":
+            try:
+                writes, unresolved = python_writes(p["code"])
+            except (SyntaxError, ValueError) as e:
+                res["unparsed"].append({"lang": "python", "why": "it does not parse (%s)" %
+                                        (getattr(e, "msg", None) or e)})
+                continue
+            if p["via"] == "heredoc":
+                first, last, _ = bodies[p["body"]]
+                for k in range(first, last + 1):
+                    lines[k] = ""
+        else:
+            writes, unresolved = table_writes(p["lang"], p["code"])
+        for v, call, line in writes:
+            path = os.path.expanduser(v)
+            if not os.path.isabs(path):
+                if p["cwd"] is None:
+                    res["unresolved"].append({"lang": p["lang"], "call": call + " on " + repr(v) +
+                                              ", relative to a directory a variable chose",
+                                              "line": line})
+                    continue
+                path = os.path.normpath(os.path.join(p["cwd"], path))
+            res["targets"].append({"path": path, "lang": p["lang"], "call": call, "line": line})
+        for _v, call, line in unresolved:
+            res["unresolved"].append({"lang": p["lang"], "call": call, "line": line})
+    res["shell_text"] = "\n".join(lines)
+    return res
 
 
 # ── shipped stop attachments ────────────────────────────────────────────────────────────────────

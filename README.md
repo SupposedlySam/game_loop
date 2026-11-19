@@ -82,7 +82,9 @@ Stated plainly, because a tool that oversells its guarantees is worse than one t
   genuinely untrusted work in a VM.
 - **It cannot see everything.** The write guard reads your command TEXT. It knows the Write/Edit
   tools by name, every redirect form in the shell grammar, and a NAMED set of write-capable verbs —
-  and **anything outside those three is invisible to it**: an interpreter one-liner, a path built
+  plus the write calls in an inline interpreter program (`python3 -c`, a `python3 -` here-doc,
+  `node -e`, `ruby -e`, `perl -e`), read in that language's grammar — and **anything outside those
+  is invisible to it**: a program in a script file, a write an interpreter shells out for, a path built
   from a shell variable, a script that mutates once you run it, a program not on the list, a tool
   name it has never heard of. It names the covered set in its own SCOPE block rather than eliding it
   behind an ellipsis, which it did until 2026-08-26 — and that ellipsis is exactly how `curl -o` and

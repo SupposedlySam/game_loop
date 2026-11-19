@@ -947,6 +947,15 @@
       "change": "The Stop gate's check for a turn-end that clears the mandate and then announces more work crashed instead of refusing: it returned its explanation and its log record in swapped positions, the hook raised a TypeError and exited 1, and Claude Code treats exit 1 as non-blocking. It now refuses (exit 2) with the explanation, and logs stop_cleared_then_announced.",
       "consequence": "Clearing a mandate and ending on \"I'll start on that now\" is now refused, where before it silently passed with a traceback in the hook log. Do the announced work or hand the turn back. A session that relied on the pass was relying on a crash.",
       "why_it_qualifies": "a turn-end that went through before is now refused. Found while testing the reflexive-ask stop check, 2026-11-18."
+    },
+    {
+      "seq": 102,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "write guard: inline interpreter programs",
+      "change": "The write guard now reads the program an inline interpreter is handed (python3 -c, python3 - fed a here-doc, node -e, ruby -e, perl -e) in that program's own grammar: Python with ast, the other three against a table of their write calls. A literal path its write calls name is judged by the same rules as any shell target. Such a write outside the allow roots is refused once; the identical command repeated within 10 minutes passes and is logged (shell_gate_override, check interpreter-write). A policy file written this way takes the policy refusal, which only authorize clears. A Python here-doc body that parses is no longer scanned as shell.",
+      "consequence": "Two directions. NEWLY REFUSED: a python3 -c or here-doc program that writes a literal path outside the repo, which used to pass unseen; repeat the identical command to go through if the reading is wrong. NEWLY ALLOWED: a parseable Python here-doc whose text merely looks like a redirect (a comment such as `# echo q > ~/x`, a comparison), which used to be refused as shell (#114). A write whose path is built at runtime, or a body that does not parse, now gets a warning naming it instead of silence.",
+      "why_it_qualifies": "commands that passed are now refused, and commands that were refused now pass. Shortlist item 2 of the 2026-11-18 harvest (llm_chat's write-through-interpreter trigger) and #114's measured false refusals."
     }
   ],
   "schema": 1

@@ -447,7 +447,9 @@ never silent — a hook whose verdict came back truncated has judged, and only t
 
 Forgot a verb's name or its flags? `game_loop guide` lists every verb with what it is for, when to
 reach for it and an example; `game_loop guide <verb>` narrows to one, and `--json` is the form a tool
-reads.
+reads. `game_loop guide --index [--role worker|lead]` is one line per verb, and the SessionStart hook
+prints it on every start and after every compaction: the worker list in a linked worktree, the lead
+list anywhere else. Hook verbs are never in it.
 
 ```
 ./.game_loop/bin/game_loop trans --tier T0|T1|T2|T3 --milestone ".." --doing ".."   # record a phase transition

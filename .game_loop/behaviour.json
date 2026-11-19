@@ -956,6 +956,15 @@
       "change": "The write guard now reads the program an inline interpreter is handed (python3 -c, python3 - fed a here-doc, node -e, ruby -e, perl -e) in that program's own grammar: Python with ast, the other three against a table of their write calls. A literal path its write calls name is judged by the same rules as any shell target. Such a write outside the allow roots is refused once; the identical command repeated within 10 minutes passes and is logged (shell_gate_override, check interpreter-write). A policy file written this way takes the policy refusal, which only authorize clears. A Python here-doc body that parses is no longer scanned as shell.",
       "consequence": "Two directions. NEWLY REFUSED: a python3 -c or here-doc program that writes a literal path outside the repo, which used to pass unseen; repeat the identical command to go through if the reading is wrong. NEWLY ALLOWED: a parseable Python here-doc whose text merely looks like a redirect (a comment such as `# echo q > ~/x`, a comparison), which used to be refused as shell (#114). A write whose path is built at runtime, or a body that does not parse, now gets a warning naming it instead of silence.",
       "why_it_qualifies": "commands that passed are now refused, and commands that were refused now pass. Shortlist item 2 of the 2026-11-18 harvest (llm_chat's write-through-interpreter trigger) and #114's measured false refusals."
+    },
+    {
+      "seq": 103,
+      "sha": "(this commit)",
+      "notice": true,
+      "verb": "sessionstart: a tools index on every source",
+      "change": "The SessionStart context now ends with a tools index: one line per verb (`verb — purpose`), without hook verbs. A session in a linked worktree gets the worker index (17 verbs, about 1.6k characters); any other session gets the lead index (32 verbs, about 2.8k characters). It is printed on every source, compact included. The same list is `game_loop guide --index [--role worker|lead]`; `guide --json` gains a top-level \"index\": true and per-verb \"hook\" and \"roles\" fields.",
+      "consequence": "Every session start and every compaction costs about 400 to 700 more tokens of context. In exchange, an agent that lost its habits in a compaction is shown the verbs it has. The opt-out is the existing one, \"session_start\": false in .game_loop/config.json, which turns off the whole entry point.",
+      "why_it_qualifies": "an existing hook now costs more on every session. Jonah via wbot, 2026-11-19 (SupposedlySam/showrunner_code#138): agents drift back to default habits after a compaction instead of using the tools."
     }
   ],
   "schema": 1

@@ -920,8 +920,14 @@ def main():
               denied(_iw_r1) and "open(" in _iw_r1.stdout and "PARSING the program" in _iw_r1.stdout)
         _iw_r2 = guard(wgproj, _iw(_iw_py), "sess-iw")
         _iw_log = os.path.join(wgproj, ".game_loop", "log.jsonl")
-        with open(_iw_log) as _f:
-            _iw_recs = [json.loads(x) for x in _f if x.strip()]
+        # GUARDED, like the guide test's decode: under a mutant that stops the guard logging, the
+        # file is absent, and an unguarded open crashed the suite instead of failing the check
+        # below, so 13 producers of this feature came back NOT MEASURED from the floor sweep.
+        try:
+            with open(_iw_log) as _f:
+                _iw_recs = [json.loads(x) for x in _f if x.strip()]
+        except (OSError, ValueError):
+            _iw_recs = []
         check("...and the IDENTICAL command repeated passes with a notice, logged as an override "
               "under check interpreter-write, so status counts it on the shell line",
               not denied(_iw_r2) and "OVERRIDDEN" in _iw_r2.stdout
@@ -1701,6 +1707,44 @@ def main():
         check("...one verb narrows to one entry; an unknown verb is REFUSED, not an empty list",
               [v.get("verb") for v in (_g1j.get("verbs") or [])]
               == ["stopcheck"] and _g0.returncode != 0 and "no verb named" in _g0.stdout)
+        # THE INDEX (Jonah via wbot, 2026-11-19, showrunner_code#138): one line per verb, by role,
+        # printed at every session start. showrunner's flag and field names, so SRCode has one
+        # reader. Each half is paired with its opposite, so a filter that returns everything or
+        # nothing fails one of them.
+        print("guide --index lists one line per verb, filtered by who is reading:")
+        check("every verb has an audience in VERB_AUDIENCE, and only those — a verb added without "
+              "one would be shown to a lead by default rather than placed on purpose",
+              set(_gm.VERB_AUDIENCE) == set(_gsub.choices)
+              and set(_gm.VERB_AUDIENCE.values()) == {"worker", "lead", "hook"})
+        _iw = gl(arproj, "guide", "--index", "--role", "worker")
+        _il = gl(arproj, "guide", "--index", "--role", "lead")
+        _wv = [ln.split(" — ")[0].strip() for ln in _iw.stdout.splitlines()[1:]]
+        _lv = [ln.split(" — ")[0].strip() for ln in _il.stdout.splitlines()[1:]]
+        _hooks = {k for k, v in _gm.VERB_AUDIENCE.items() if v == "hook"}
+        check("a worker's index lists the verbs a Crawler uses (claim, harden, fix) and not the "
+              "lead's (mandate, confidence, successor)",
+              _iw.returncode == 0 and {"claim", "harden", "fix", "status"} <= set(_wv)
+              and not {"mandate", "confidence", "successor"} & set(_wv))
+        check("...and a lead's lists both, so the worker list is a subset and not a different "
+              "world (%d worker, %d lead)" % (len(_wv), len(_lv)),
+              _il.returncode == 0 and set(_wv) < set(_lv) and "confidence" in _lv)
+        check("...and NO index lists a hook verb (%s), since those are never run by hand"
+              % ", ".join(sorted(_hooks)),
+              _hooks and not _hooks & (set(_wv) | set(_lv)))
+        check("...and each line is `verb — purpose`, read from the same VERB_GUIDE as the full "
+              "guide, so the index cannot drift from it",
+              "  claim — " + _gm.VERB_GUIDE["claim"][0] in _iw.stdout.splitlines())
+        check("...and it stays short enough to inject after every compaction: the lead index is "
+              "under 3500 characters (%d now), about 900 tokens" % len(_il.stdout),
+              0 < len(_il.stdout) < 3500)
+        _ir = gl(arproj, "guide", "--index", "--role", "nobody")
+        check("...and an unknown role is REFUSED, naming the roles, rather than an empty index",
+              _ir.returncode != 0 and "worker, lead" in _ir.stdout)
+        check("--json says it has the index form (\"index\": true) and marks each hook verb with "
+              "hook: true — fields a reader keys on, not wording",
+              _gj.get("index") is True and _gverbs.get("stopgate", {}).get("hook") is True
+              and _gverbs.get("claim", {}).get("hook") is False
+              and _gverbs.get("claim", {}).get("roles") == ["worker", "lead"])
         print("a second grant for the same thing in one session is refused until decided:")
         _ag = lambda *x, sid="sess-again": gl(arproj, "authorize", *x, sid=sid)
         _a1 = _ag("--path", "mcp__github__addIssueComment", "--reason", "Jonah: comment")
@@ -10156,11 +10200,14 @@ def main():
           == ["/d", "/e"]
           and _ivp("ruby -e 'File.write(\"/a\", 1); FileUtils.mv(\"/b\", \"/c\")'") == ["/a", "/b", "/c"]
           and sorted(_ivp("perl -e 'open(my $fh, \">\", \"/p\"); unlink \"/q\"'")) == ["/p", "/q"])
-    _ivt = _ivw("node -e \"require('fs').writeFileSync(`/a/${x}`, 1)\"\n"
-                "ruby -e 'File.write(\"/b/#{y}\", 1)'", "/r")
-    check("...and an INTERPOLATED literal (a JS template, ruby #{}) is unresolved, not taken as "
-          "the path it spells",
-          _ivt["targets"] == [] and len(_ivt["unresolved"]) == 2)
+    # ONE CHECK PER LANGUAGE: the sweep found this THIN at 2 kills when it was a single check, and
+    # perl's bare $var had no case at all.
+    for _lang, _cmd in (("a JS template ${}", "node -e \"require('fs').writeFileSync(`/a/${x}`, 1)\""),
+                        ("ruby #{}", "ruby -e 'File.write(\"/b/#{y}\", 1)'"),
+                        ("a perl $var", "perl -e 'open(my $fh, \">\", \"/p/$x\")'")):
+        _ivt = _ivw(_cmd, "/r")
+        check("...and an INTERPOLATED literal (%s) is unresolved, not taken as the path it spells"
+              % _lang, _ivt["targets"] == [] and len(_ivt["unresolved"]) == 1)
     _ivs = _ivw("python3 - <<'PY'\nif i < len(x): pass\nPY\necho done", "/r")["shell_text"]
     check("a python body that PARSES is blanked from the shell text, keeping its opener, its "
           "delimiter and the line count (#114)",
@@ -10746,6 +10793,42 @@ def main():
               dig(_out, "hookEventName") == "SessionStart"
               and has(dig(_out, "additionalContext"), "INV:")
               and has(dig(_out, "additionalContext"), "COST LADDER"))
+        _ctx = dig(_out, "additionalContext") or ""
+        check("the session start carries the TOOLS INDEX too (showrunner_code#138), on the "
+              "startup source", "game_loop verbs for a " in _ctx and "  claim — " in _ctx)
+        _rc = _start(source="compact")
+        _cctx = dig(dig(json_text(_rc.stdout), "hookSpecificOutput"), "additionalContext") or ""
+        check("...and on the COMPACT source, which is the moment an agent forgets its tools",
+              "game_loop verbs for a " in _cctx and "  claim — " in _cctx)
+        # WHICH index is decided by where the session stands, so both places are driven for real:
+        # a main checkout and a linked worktree of it, with nothing else different.
+        _wr = tempfile.mkdtemp(prefix="gl-role-")
+        try:
+            _main, _wt = os.path.join(_wr, "main"), os.path.join(_wr, "wt")
+            _gq = lambda *x, cwd=None: subprocess.run(["git", *x], cwd=cwd or _main,
+                                                       capture_output=True, text=True)
+            os.makedirs(_main)
+            _gq("init", "-q")
+            _gq("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+                "-m", "root")
+            _gq("worktree", "add", "-q", _wt)
+
+            def _role_ctx(cwd):
+                r = subprocess.run([os.path.join(ss, ".game_loop", "bin", "game_loop"),
+                                    "sessionstart"], cwd=cwd,
+                                   input=json.dumps({"session_id": "sess-role",
+                                                     "hook_event_name": "SessionStart",
+                                                     "source": "startup"}),
+                                   capture_output=True, text=True, env=_env(ss, sid="sess-role"))
+                return dig(dig(json_text(r.stdout), "hookSpecificOutput"), "additionalContext") or ""
+            _cm, _cw = _role_ctx(_main), _role_ctx(_wt)
+            check("a session in a LINKED WORKTREE gets the worker index, and says why",
+                  os.path.isdir(_wt) and "verbs for a worker (this is a linked worktree)" in _cw
+                  and "  confidence — " not in _cw)
+            check("...while the MAIN checkout of the same repo gets the lead index",
+                  "verbs for a lead (this is the main checkout)" in _cm and "  confidence — " in _cm)
+        finally:
+            shutil.rmtree(_wr, ignore_errors=True)
         check("...and it never blocks: a first impression that bricks a session gets no second "
               "one — and it produced the context while not blocking, since exit 0 is also what a "
               "binary that does nothing returns",
@@ -12516,7 +12599,7 @@ def main():
             # booleans — no text at all can reach them
             "--clear", "--dry-run", "--force", "--interval-only", "--json", "--list", "--merge",
             "--nothing-to-harden", "--park", "--porcelain", "--probe", "--resume", "--reviewed",
-            "--show", "--test", "--woke",
+            "--show", "--test", "--woke", "--index",
             # real paths. Checked for EXISTENCE, which a mangled value fails loudly rather than
             # silently — the opposite of prose, where the corruption is indistinguishable
             "--artifact", "--cwd", "--dest", "--diagnosis", "--evidence", "--file",
@@ -12537,6 +12620,8 @@ def main():
             # value fails loudly here, which is the defining property of the not-prose half.
             "--expires",
             "--wake-every",
+            # guide's --role is worker or lead, and anything else is refused by name.
+            "--role",
             "--exclude", "--exit-code", "--filed", "--instrument", "--mark", "--metric",
             "--milestone", "--null", "--outcome", "--pin", "--positive", "--prove", "--ref",
             "--register", "--release", "--release-deferred", "--rung", "--scale", "--scope",

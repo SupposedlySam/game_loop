@@ -10474,6 +10474,14 @@ def cmd_sessionstart(s, a, payload):
     except Exception:  # noqa: BLE001 — mid-install, half-written state, anything: say nothing
         pass           # ...about STATUS. A trigger that has already ACTED still gets to report it:
         #                dropping its output would leave a session that was acted upon and not told.
+    # THE TOOLS INDEX, on every source, compact included (showrunner_code#138): after a compaction
+    # an agent keeps the habits it came with and forgets the verbs. Its own try, like the triggers:
+    # an index that cannot be built must not cost the session its status.
+    try:
+        role, why = session_role()
+        parts.append("\n".join(guide_index_lines(build_parser(), role, why)))
+    except Exception:  # noqa: BLE001 — the index is an addition to the moment, never a precondition
+        pass
     if fired:
         parts.append("\n".join(fired))
     if not parts:
@@ -15650,6 +15658,44 @@ VERB_GUIDE = {
               "game_loop guide --json"),
 }
 
+# WHO EACH VERB IS FOR: the index printed at every session start (Jonah via wbot, 2026-11-19,
+# SupposedlySam/showrunner_code#138). Agents drifted back to their default habits after a
+# compaction instead of using the tools, and the whole guide (about 2.5k tokens here, 4k for
+# showrunner) is too long to inject every time. So the index is one line per verb, filtered by who
+# is reading it.
+#
+#   "worker" — a Crawler doing a task: assert, prove, record, ask. Shown to a lead as well.
+#   "lead"   — whoever runs the project: mandates, releases, handoffs, the harness's own wiring.
+#   "hook"   — run by a hook, never by hand. Listed in the full guide (an agent who meets one in a
+#              hook line needs to look it up) and never in an index.
+#
+# The role names and the JSON fields are showrunner's (`guide --index --role worker|lead`,
+# top-level "index": true, per-entry "hook"), so SRCode keys on one shape for both tools. A verb
+# missing from this table fails the suite; at runtime it is shown to a lead rather than hidden,
+# because a verb nobody can find is the failure this table exists to prevent.
+GUIDE_ROLES = ("worker", "lead")
+VERB_AUDIENCE = {
+    "status": "worker", "guide": "worker", "claim": "worker", "note": "worker",
+    "harden": "worker", "mutate": "worker", "fix": "worker", "effector": "worker",
+    "instrument": "worker", "measure": "worker", "trans": "worker", "pin": "worker",
+    "authorize": "worker", "arm": "worker", "checkpoint": "worker", "stepback": "worker",
+    "worktree": "worker",
+    "mandate": "lead", "confidence": "lead", "successor": "lead", "threads": "lead",
+    "attribute": "lead", "contribute": "lead", "doorbell": "lead", "notify": "lead",
+    "watchdog": "lead", "model": "lead", "self": "lead", "guardtest": "lead", "kinds": "lead",
+    "owned": "lead", "limitprobe": "lead",
+    "stopgate": "hook", "limitgate": "hook", "crongate": "hook", "statusline": "hook",
+    "sessionstart": "hook", "readcheck": "hook", "stopcheck": "hook",
+}
+
+
+def verb_roles(verb):
+    """The roles whose index lists `verb`: [] for a hook verb, ["lead"] for one not in the table."""
+    aud = VERB_AUDIENCE.get(verb, "lead")
+    if aud == "hook":
+        return []
+    return list(GUIDE_ROLES) if aud == "worker" else ["lead"]
+
 
 def _verb_flags(vp):
     """A sub-parser's own arguments as guide entries. Read from argparse, so they cannot drift."""
@@ -15669,7 +15715,7 @@ def _verb_flags(vp):
 
 
 def guide_entries(p, only=None):
-    """[{verb, purpose, when, example, flags}] for every verb of parser `p`, in parser order."""
+    """[{verb, purpose, when, example, flags, hook, roles}] for every verb of `p`, in parser order."""
     sp = next(x for x in p._actions if isinstance(x, argparse._SubParsersAction))
     rows = []
     for verb, vp in sp.choices.items():
@@ -15677,18 +15723,64 @@ def guide_entries(p, only=None):
             continue
         purpose, when, example = VERB_GUIDE.get(verb, (vp.description or "", "", ""))
         rows.append({"verb": verb, "purpose": purpose, "when": when, "example": example,
-                     "flags": _verb_flags(vp)})
+                     "flags": _verb_flags(vp), "hook": VERB_AUDIENCE.get(verb) == "hook",
+                     "roles": verb_roles(verb)})
     return rows
+
+
+def guide_index_lines(p, role=None, why=""):
+    """The index: a header naming the role, then `verb — purpose` for each verb that role uses.
+
+    No role means every verb a person runs. Hook verbs are never listed. The header says how to get
+    the rest, since an index is only worth injecting if it leads somewhere.
+    """
+    rows = [r for r in guide_entries(p) if not r["hook"] and (role is None or role in r["roles"])]
+    who = (" for a %s" % role) if role else ""
+    head = "game_loop verbs%s%s — `game_loop guide <verb>` gives when to use it, an example and " \
+           "its flags:" % (who, (" (%s)" % why) if why else "")
+    return [head] + ["  %s — %s" % (r["verb"], r["purpose"]) for r in rows]
+
+
+def session_role():
+    """(role, why) for the session-start index: "worker" in a linked worktree, else "lead".
+
+    A linked worktree is where a Crawler works (showrunner's seats resolve the same way: the main
+    checkout is the orchestrator's), and git says so structurally: --git-dir differs from
+    --git-common-dir. When git cannot answer, the lead index is shown. That is the safe direction:
+    the larger list costs a few lines, and the smaller one would hide verbs from a lead.
+    """
+    try:
+        r = subprocess.run(["git", "rev-parse", "--git-dir", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=GIT_TIMEOUT)
+        gd, cd = [os.path.realpath(x.strip()) for x in r.stdout.strip().splitlines()[:2]]
+    except Exception:  # noqa: BLE001 — no git, no repo, a hung index, a short answer
+        return "lead", "git could not say whether this is a worktree"
+    if r.returncode != 0:
+        return "lead", "git could not say whether this is a worktree"
+    if gd != cd:
+        return "worker", "this is a linked worktree"
+    return "lead", "this is the main checkout"
 
 
 def cmd_guide(p, a):
     """`game_loop guide [--json] [verb]`. Pure: reads no state and writes none."""
+    if a.role and a.role not in GUIDE_ROLES:
+        die("guide: no role named %r. The roles are: %s." % (a.role, ", ".join(GUIDE_ROLES)))
+    if a.index:
+        if a.verb or a.json:
+            die("guide: --index is the one-line-per-verb form; it takes no verb and no --json.")
+        out(*guide_index_lines(p, a.role))
+        return
     rows = guide_entries(p, a.verb)
     if a.verb and not rows:
         die("guide: no verb named %r. `game_loop guide` lists them all." % a.verb)
+    if a.role:
+        rows = [r for r in rows if a.role in r["roles"]]
     if a.json:
-        print(json.dumps({"schema": GUIDE_SCHEMA, "version": running_version(), "verbs": rows},
-                         indent=2, ensure_ascii=False))
+        # "index": true says this install has the index form, so a reader (SRCode) can tell from
+        # the installed version whether this tool's own SessionStart hook prints one.
+        print(json.dumps({"schema": GUIDE_SCHEMA, "version": running_version(), "index": True,
+                          "verbs": rows}, indent=2, ensure_ascii=False))
         return
     for r in rows:
         out("%s — %s" % (r["verb"], r["purpose"]), "    when: " + r["when"],
@@ -15718,7 +15810,11 @@ def build_parser():
     gd = sub.add_parser("guide")
     gd.add_argument("verb", nargs="?", help="one verb only")
     gd.add_argument("--json", action="store_true",
-                    help="emit {schema, version, verbs: [{verb, purpose, when, example, flags}]}")
+                    help="emit {schema, version, index, verbs: [{verb, purpose, when, example, "
+                         "flags, hook, roles}]}")
+    gd.add_argument("--index", action="store_true",
+                    help="one line per verb, `verb — purpose`, without hook verbs")
+    gd.add_argument("--role", help="only the verbs this role uses: worker or lead")
 
     cl = sub.add_parser("claim")  # THE gate: assert external reality only with sourced evidence
     cl.add_argument("--assert", dest="assert_", help="what you're about to tell the human")

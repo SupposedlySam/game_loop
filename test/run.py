@@ -10216,7 +10216,9 @@ def main():
     check("...and one that does NOT parse is left for the shell scan and reported unparsed",
           "i < 3" in _ivu["shell_text"] and len(_ivu["unparsed"]) == 1)
     check("unbalanced quotes are reported unparsed, not a crash and not a silent pass",
-          _ivw("python3 -c 'open(", "/r")["unparsed"][0]["lang"] == "shell")
+          # `or [{}]`: a neutered scanner returns no unparsed entry, and indexing [0] crashed the
+          # suite instead of failing this check, so the sweep could not measure four producers.
+          (_ivw("python3 -c 'open(", "/r")["unparsed"] or [{}])[0].get("lang") == "shell")
     check("a line opening two here-docs is left whole rather than guessed at",
           _ivw("python3 - <<'A' <<'B'\nopen('/a','w')\nA\nB", "/r")["targets"] == [])
 
@@ -10235,8 +10237,13 @@ def main():
     _gr_l = os.path.join(_gr_d, "log.jsonl")
     _gr = [_um.guard_retry(_gr_s, _gr_l, "interpreter-write", "c1", 10.0 + i, "abcdefghij")
            for i in range(3)]
-    with open(_gr_l) as _f:
-        _gr_recs = [json.loads(x) for x in _f if x.strip()]
+    # GUARDED: a neutered guard_retry writes no log, and an unguarded open crashed the suite
+    # instead of failing this check (the sweep reported it NOT MEASURED).
+    try:
+        with open(_gr_l) as _f:
+            _gr_recs = [json.loads(x) for x in _f if x.strip()]
+    except (OSError, ValueError):
+        _gr_recs = []
     check("guard_retry: block, override, block — kept in its OWN file beside the session state, "
           "and each outcome logged under the shell gate's kinds",
           _gr == ["block", "override", "block"]
@@ -10813,20 +10820,33 @@ def main():
                 "-m", "root")
             _gq("worktree", "add", "-q", _wt)
 
+            _plain = os.path.join(_wr, "plain")
+            os.makedirs(_plain)
+
             def _role_ctx(cwd):
+                # GIT_CEILING_DIRECTORIES keeps git from walking up out of the temp tree, so the
+                # plain directory really is outside every repo whatever the temp dir sits in.
+                _e = dict(_env(ss, sid="sess-role"), GIT_CEILING_DIRECTORIES=_wr)
                 r = subprocess.run([os.path.join(ss, ".game_loop", "bin", "game_loop"),
                                     "sessionstart"], cwd=cwd,
                                    input=json.dumps({"session_id": "sess-role",
                                                      "hook_event_name": "SessionStart",
                                                      "source": "startup"}),
-                                   capture_output=True, text=True, env=_env(ss, sid="sess-role"))
+                                   capture_output=True, text=True, env=_e)
                 return dig(dig(json_text(r.stdout), "hookSpecificOutput"), "additionalContext") or ""
-            _cm, _cw = _role_ctx(_main), _role_ctx(_wt)
+            _cm, _cw, _cp = _role_ctx(_main), _role_ctx(_wt), _role_ctx(_plain)
             check("a session in a LINKED WORKTREE gets the worker index, and says why",
                   os.path.isdir(_wt) and "verbs for a worker (this is a linked worktree)" in _cw
                   and "  confidence — " not in _cw)
             check("...while the MAIN checkout of the same repo gets the lead index",
                   "verbs for a lead (this is the main checkout)" in _cm and "  confidence — " in _cm)
+            # THE THIRD ANSWER, and the one the sweep found unchecked (session_role THIN at 2): a
+            # directory git cannot place gets the lead index and SAYS it could not tell, rather
+            # than claiming to be a main checkout it never confirmed.
+            check("...and where git cannot say, the lead index, saying git could not tell — not a "
+                  "main checkout nobody confirmed",
+                  "verbs for a lead (git could not say whether this is a worktree)" in _cp
+                  and "  confidence — " in _cp)
         finally:
             shutil.rmtree(_wr, ignore_errors=True)
         check("...and it never blocks: a first impression that bricks a session gets no second "
@@ -12955,10 +12975,13 @@ def main():
         _gl52 = os.path.join(hp52, ".game_loop", "bin", "game_loop")
 
         def _reason(res):
+            # ALWAYS A STRING: a guard that allows prints no reason, and a None here crashed the
+            # suite at `in r` instead of failing the checks below (judge was NOT MEASURED).
             try:
-                return dig(json_text(res.stdout), "hookSpecificOutput", "permissionDecisionReason")
+                r = dig(json_text(res.stdout), "hookSpecificOutput", "permissionDecisionReason")
             except Exception:  # noqa: BLE001
-                return res.stdout
+                r = res.stdout
+            return r if isinstance(r, str) else ""
 
         _w = _reason(guard(hp52, {"tool_name": "Write",
                                   "tool_input": {"file_path": os.path.expanduser("~/evil52.txt")}}))

@@ -17758,6 +17758,31 @@ def main():
           "discrimination rather than a line printed on every local install",
           "TWICE" not in _local_out)
 
+    # A STATUSLINE IS NOT A HOOK, reported by showrunner at #224. The check grepped the whole file
+    # for `.game_loop/`, so a tracked statusLine running game_loop's statusline verb read as a
+    # doubled registration, and the warning told them to delete entries from a file holding none.
+    # The positive control above (a real shared install) must still fire; these are its negatives.
+    def _dbl_probe(name, settings_text):
+        d = os.path.join(_li_root, name)
+        os.makedirs(os.path.join(d, ".claude"))
+        subprocess.run(["git", "init", "-q", "."], cwd=d, capture_output=True)
+        with open(os.path.join(d, ".claude", "settings.json"), "w") as f:
+            f.write(settings_text)
+        return subprocess.run(
+            ["bash", os.path.join(REPO, "install.sh"), "--local", d],
+            capture_output=True, text=True, env=_env(), stdin=subprocess.DEVNULL).stdout
+    _sl_out = _dbl_probe("dbl_statusline", json.dumps({
+        "statusLine": {"type": "command", "command": ".game_loop/bin/game_loop statusline"},
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo someone-elses"}]}]}}))
+    check("#224: a tracked settings.json whose ONLY game_loop mention is the statusLine is not "
+          "called a doubled install — a statusLine is not a gate, and the old warning told the "
+          "user to delete a working one",
+          "TWICE" not in _sl_out and "ALSO has" not in _sl_out)
+    _bad_out = _dbl_probe("dbl_unparseable", '{"hooks": {"Stop": [ .game_loop/ ')
+    check("#224: ...and a settings.json that cannot be parsed is SAID to be unknown, not read as "
+          "clean — could-not-look is not looked-and-found-nothing",
+          "UNKNOWN" in _bad_out and "could not be parsed" in _bad_out)
+
     # ONLY OUR OWN MARKED BLOCK. An untagged `.game_loop/` a person put there themselves is THEIR
     # line; an installer that edits a tracked file gets exactly one liberty — undoing its own writes.
     _own_d = os.path.join(_li_root, "own")

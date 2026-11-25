@@ -1566,9 +1566,40 @@ PYGI
   # rather than override, so every gate is registered twice, Stop gate included. Reported by
   # showrunner with a two-line reproduction; reproduced here before believing it.
   # NOT REPAIRED: settings.json is source-controlled and those entries may be a team's.
-  if [ -f "$TARGET/.claude/settings.json" ] \
-     && grep -qF ".game_loop/" "$TARGET/.claude/settings.json" 2>/dev/null; then
-    echo "  ⚠ .claude/settings.json ALSO has game_loop hooks, from an earlier shared install. The"
+  #
+  # HOOK COMMANDS ONLY, read as JSON. This was `grep -qF ".game_loop/"` over the whole file, which
+  # also matched a tracked statusLine running `.game_loop/bin/game_loop statusline`. showrunner hit
+  # it at #224: the warning said every gate fired twice and told them to delete entries from a
+  # tracked file that held no hooks at all, so following it would have removed a working statusLine
+  # to fix duplicates that did not exist. A statusLine is not a gate and cannot double one.
+  # An unparseable file is SAID, not read as "no hooks": could-not-look is not looked-and-clean.
+  _gl_dbl=""
+  if [ -f "$TARGET/.claude/settings.json" ]; then
+    _gl_dbl="$(python3 - "$TARGET/.claude/settings.json" <<'PYDBL' 2>/dev/null || echo unreadable
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except (OSError, ValueError):
+    print("unreadable")
+    sys.exit(0)
+n = 0
+events = d.get("hooks") if isinstance(d, dict) else None
+for groups in (events.values() if isinstance(events, dict) else []):
+    for g in (groups if isinstance(groups, list) else []):
+        for h in ((g.get("hooks") or []) if isinstance(g, dict) else []):
+            if isinstance(h, dict) and ".game_loop/" in str(h.get("command") or ""):
+                n += 1
+print(n)
+PYDBL
+)"
+  fi
+  if [ "$_gl_dbl" = "unreadable" ]; then
+    echo "  ⚠ .claude/settings.json could not be parsed as JSON, so whether it ALSO registers"
+    echo "    game_loop's hooks is UNKNOWN. If it does, the two files merge and every gate fires"
+    echo "    twice. Read it yourself before trusting this install."
+  elif [ -n "$_gl_dbl" ] && [ "$_gl_dbl" != "0" ]; then
+    echo "  ⚠ .claude/settings.json ALSO has $_gl_dbl game_loop hook(s), from an earlier shared install. The"
     echo "    two settings files MERGE rather than override, so every gate is now registered TWICE"
     echo "    and fires twice — the Stop gate included. Left alone because that file is source-"
     echo "    controlled and those entries may be your team's: remove them there if this repo is"
